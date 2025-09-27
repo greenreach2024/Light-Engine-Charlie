@@ -1,0 +1,38 @@
+name: CI
+
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+    branches: [ main ]
+
+jobs:
+  lint-and-smoke:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Use Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '18'
+      - name: Install dependencies
+        run: |
+          cd public
+          npm ci
+      - name: Lint
+        run: |
+          cd public
+          npm run lint
+      - name: Start server (background) and run smoke
+        run: |
+          cd public
+          npm run start &
+          SERVER_PID=$!
+          # wait for server to be ready
+          n=0
+          until curl -sS "http://localhost:8091/healthz" || [ $n -ge 15 ]; do
+            n=$((n+1))
+            sleep 1
+          done
+          npm run smoke
+          kill $SERVER_PID || true

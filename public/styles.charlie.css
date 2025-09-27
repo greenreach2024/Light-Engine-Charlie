@@ -1,0 +1,6 @@
+body { font-family: system-ui; margin:20px; }
+h1 { margin-bottom: 10px; }
+#status { margin: 8px 0 16px; font-size: 14px; }
+.btns { margin-bottom: 12px; display:flex; gap:8px; }
+button { padding:6px 10px; }
+.card { border:1px solid #ccc; border-radius:8px; padding:10px; margin-bottom:8px; }

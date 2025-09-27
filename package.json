@@ -1,0 +1,18 @@
+{
+  "name": "light-engine-charlie",
+  "version": "1.0.0",
+  "description": "Light Engine Charlie - Comprehensive lighting control system",
+  "main": "server-charlie.js",
+  "type": "module",
+  "scripts": {
+    "start": "node server-charlie.js",
+    "dev": "node server-charlie.js"
+  },
+  "dependencies": {
+    "express": "^4.18.2",
+    "http-proxy-middleware": "^2.0.6"
+  },
+  "keywords": ["lighting", "control", "plant-growth", "automation"],
+  "author": "Peter Gilbert",
+  "license": "MIT"
+}
