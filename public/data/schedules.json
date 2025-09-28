@@ -1,0 +1,38 @@
+{
+  "schedules": [
+    {
+      "id": "schedule-16h",
+      "name": "16 Hour Photoperiod",
+      "mode": "one",
+      "timezone": "America/Toronto",
+      "cycles": [
+        { "on": "06:00", "off": "22:00" }
+      ],
+      "lights": ["light-001", "light-002", "light-003"],
+      "active": true
+    },
+    {
+      "id": "schedule-14h",
+      "name": "14 Hour Photoperiod",
+      "mode": "one",
+      "timezone": "America/Toronto",
+      "cycles": [
+        { "on": "07:00", "off": "21:00" }
+      ],
+      "lights": ["light-004", "light-005"],
+      "active": true
+    },
+    {
+      "id": "schedule-split-flower",
+      "name": "Split Cycle Flowering",
+      "mode": "two",
+      "timezone": "America/Toronto",
+      "cycles": [
+        { "on": "06:00", "off": "12:00" },
+        { "on": "18:00", "off": "22:00" }
+      ],
+      "lights": [],
+      "active": false
+    }
+  ]
+}
