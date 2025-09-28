@@ -6,7 +6,14 @@
   "type": "module",
   "scripts": {
     "start": "node server-charlie.js",
-    "dev": "node server-charlie.js"
+    "dev": "node server-charlie.js",
+    "start:local": "PORT=8091 node server-charlie.js",
+    "start:vpn": "PORT=8089 CTRL=\"http://100.65.187.59:8089\" node server-charlie.js",
+    "smoke": "node scripts/smoke.js",
+    "smoke:8089": "PORT=8089 node scripts/smoke.js",
+    "smoke:8091": "PORT=8091 node scripts/smoke.js",
+    "switchbot:once": "node scripts/switchbot/poll-switchbot.js",
+    "switchbot:watch": "INTERVAL_MS=10000 node scripts/switchbot/poll-switchbot.js"
   },
   "dependencies": {
     "express": "^4.18.2",

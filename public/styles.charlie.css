@@ -164,6 +164,14 @@ button:disabled {
   color: var(--medium);
   font-size: 0.75rem;
 }
+/* Tiny sparkline inline */
+.sparkline {
+  width: 80px;
+  height: 22px;
+  display: inline-block;
+  vertical-align: middle;
+  margin-left: 6px;
+}
 
 .device-head {
   display: flex;
@@ -238,6 +246,25 @@ button:disabled {
 .device-controls button {
   flex: 1;
   padding: 8px 12px;
+}
+
+/* Device Spectrum (SPD) */
+.device-spectrum {
+  background: #FFFFFF;
+  border: 1px solid #E2E8F0;
+  border-radius: 6px;
+  padding: 8px;
+  margin: 8px 0;
+}
+.device-spectrum__title {
+  margin-bottom: 6px;
+}
+.device-spectrum__canvas {
+  display: block;
+  width: 100%;
+  max-width: 100%;
+  height: 36px;
+  border-radius: 4px;
 }
 
 /* Tooltip System */
@@ -922,3 +949,20 @@ input[type="range"] {
     margin: 16px;
   }
 }
+
+/* Toast notifications */
+.toast-container{position:fixed;top:16px;right:16px;display:flex;flex-direction:column;gap:8px;z-index:9999}
+.toast{min-width:240px;max-width:420px;background:#fff;border:1px solid #e5e7eb;box-shadow:0 10px 15px -3px rgba(0,0,0,.1),0 4px 6px -2px rgba(0,0,0,.05);border-radius:8px;padding:10px 12px;color:#0f172a;display:flex;align-items:flex-start;gap:8px}
+.toast .toast-icon{font-size:16px;line-height:1.1}
+.toast .toast-body{flex:1}
+.toast .toast-title{font-weight:600;font-size:13px;margin:0 0 2px}
+.toast .toast-msg{font-size:12px;color:#475569;margin:0}
+.toast .toast-close{background:transparent;border:0;color:#64748b;cursor:pointer;font-size:16px;line-height:1}
+.toast--success{border-color:#bbf7d0}
+.toast--success .toast-title{color:#166534}
+.toast--info{border-color:#bae6fd}
+.toast--info .toast-title{color:#075985}
+.toast--warn{border-color:#fde68a}
+.toast--warn .toast-title{color:#92400e}
+.toast--error{border-color:#fecaca}
+.toast--error .toast-title{color:#991b1b}
