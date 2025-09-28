@@ -1,19 +1,22 @@
 {
-  "farmName": "Bright Leaf Gardens",
+  "farmName": "bob",
   "contact": {
-    "name": "Jordan Lee",
-    "email": "jordan@brightleaf.farm",
-    "phone": "+1 (555) 123-4567"
+    "name": "bob",
+    "email": "info@greenreachfarms.com",
+    "phone": "6138881031"
   },
   "locations": [
     "North Greenhouse",
     "South Greenhouse",
     "Seed Starting Room",
-    "Processing Area"
+    "Processing Area",
+    "Indoor"
   ],
-  "crops": ["Greens", "Herbs", "Strawberries"],
+  "crops": [
+    "Herbs"
+  ],
   "timezone": "America/Toronto",
   "pricePerKWh": 0.18,
   "currency": "CAD",
-  "registered": "2025-09-15T10:00:00Z"
+  "registered": "2025-09-28T12:37:45.018Z"
 }

@@ -21,6 +21,7 @@ const STATE = {
   groups: [],
   schedules: [],
   plans: [],
+  rooms: [],
   farm: null,
   environment: [],
   calibrations: [],
@@ -29,7 +30,10 @@ const STATE = {
   researchMode: false,
   editingGroupId: null,
   deviceMeta: {},
-  config: { singleServer: true, controller: '' }
+  deviceKB: { fixtures: [] },
+  config: { singleServer: true, controller: '' },
+  branding: null,
+  pendingBrand: null
 };
 
 // --- Research Mode Feature Flag ---
@@ -82,6 +86,45 @@ async function api(path, opts = {}) {
     headers: { 'Content-Type': 'application/json', ...opts.headers }
   });
   return response.json();
+}
+
+// --- Theming ---
+function applyTheme(palette) {
+  if (!palette) return;
+  const root = document.documentElement;
+  const map = {
+    '--gr-bg': palette.background,
+    '--gr-surface': palette.surface || '#FFFFFF',
+    '--gr-border': palette.border || '#DCE5E5',
+    '--gr-text': palette.text || '#0B1220',
+    '--gr-primary': palette.primary,
+    '--gr-accent': palette.accent
+  };
+  Object.entries(map).forEach(([k,v]) => { if (v) root.style.setProperty(k, v); });
+  // Basic contrast check for text vs surfaces
+  try {
+    const cText = getComputedStyle(root).getPropertyValue('--gr-text').trim() || '#0B1220';
+    const cSurface = getComputedStyle(root).getPropertyValue('--gr-surface').trim() || '#FFFFFF';
+    const cBg = getComputedStyle(root).getPropertyValue('--gr-bg').trim() || '#F7FAFA';
+    const ratio = (a, b) => {
+      const hex = (x) => x.startsWith('#') ? x : (()=>{const ctx=document.createElement('canvas').getContext('2d');ctx.fillStyle=x;return ctx.fillStyle;})();
+      const h = hex(a);
+      const hh = h.length===4?`#${h[1]}${h[1]}${h[2]}${h[2]}${h[3]}${h[3]}`:h;
+      const r = parseInt(hh.slice(1,3),16)/255, g=parseInt(hh.slice(3,5),16)/255, b2=parseInt(hh.slice(5,7),16)/255;
+      const l = (v)=> v<=0.03928? v/12.92 : Math.pow((v+0.055)/1.055, 2.4);
+      const L = 0.2126*l(r)+0.7152*l(g)+0.0722*l(b2);
+      return L;
+    };
+    const contrast = (L1, L2) => {
+      const [a,b] = L1>L2?[L1,L2]:[L2,L1];
+      return (a+0.05)/(b+0.05);
+    };
+    const tVsSurface = contrast(ratio(cText), ratio(cSurface));
+    const tVsBg = contrast(ratio(cText), ratio(cBg));
+    if (tVsSurface < 4.5 || tVsBg < 4.5) {
+      showToast({ title:'Low contrast warning', msg:'Some text may be hard to read with the current theme. Consider adjusting Text/Background colors.', kind:'warn', icon:'\u26a0\ufe0f' }, 6000);
+    }
+  } catch {}
 }
 
 async function patch(id, body) {
@@ -209,8 +252,10 @@ function renderScheduleBar(el, cycles) {
     .map(seg => `color-stop(${seg.startPct}%, transparent), color-stop(${seg.startPct}%, var(--primary-green)), color-stop(${seg.endPct}%, var(--primary-green)), color-stop(${seg.endPct}%, transparent)`)
     .join(',');
   // Fallback: simpler gradient using repeating-linear-gradient
-  const gradient = blocks.map(seg => `#10B981 ${seg.startPct}%, #10B981 ${seg.endPct}%`).join(', ');
-  el.style.background = `linear-gradient(to right, #F3F4F6 0%, #F3F4F6 100%), linear-gradient(to right, ${gradient})`;
+  const primary = getComputedStyle(document.documentElement).getPropertyValue('--gr-primary').trim() || '#10B981';
+  const bg = getComputedStyle(document.documentElement).getPropertyValue('--gr-bg').trim() || '#F3F4F6';
+  const gradient = blocks.map(seg => `${primary} ${seg.startPct}%, ${primary} ${seg.endPct}%`).join(', ');
+  el.style.background = `linear-gradient(to right, ${bg} 0%, ${bg} 100%), linear-gradient(to right, ${gradient})`;
 }
 
 // --- DLI and Energy Calculation Utilities ---
@@ -811,175 +856,66 @@ function deviceCard(device) {
   return card;
 }
 
-// --- Farm Registration System ---
+// --- Farm Registration System (admin-only) ---
 class FarmWizard {
   constructor() {
     this.modal = $('#farmModal');
     this.form = $('#farmWizardForm');
-  this.steps = ['farm-name', 'locations', 'contact-name', 'contact-email', 'contact-phone', 'crops', 'device-catalog', 'env-equipment', 'sensor-pick', 'connectivity', 'review'];
+    // Simplified admin-only steps
+    this.steps = ['farm-name', 'locations', 'contact-name', 'contact-email', 'contact-phone', 'address', 'review'];
     this.currentStep = 0;
     this.data = {
       farmName: '',
       locations: [],
       contact: { name: '', email: '', phone: '' },
-      crops: [],
-      devices: [],
-      env: { hvac: { count: 0, control: '', energy: '' }, dehu: { count: 0, control: '', energy: '' }, fans: { count: 0, control: '' } },
-      sensors: { categories: [], defaultLocation: '' },
-      connectivity: { hub: { present: 'unknown', host: '', nodeRed: 'unknown' }, cloudTenant: '', roles: [] }
+      address: ''
     };
     this.init();
   }
 
   init() {
-    // Wire up modal controls
+    // Modal wiring
     $('#btnLaunchFarm')?.addEventListener('click', () => this.open());
     $('#farmModalClose')?.addEventListener('click', () => this.close());
     $('#farmModalBackdrop')?.addEventListener('click', () => this.close());
-    
+
     // Navigation
     $('#farmPrev')?.addEventListener('click', () => this.prevStep());
     $('#farmNext')?.addEventListener('click', () => this.nextStep());
     $('#btnSaveFarm')?.addEventListener('click', (e) => this.saveFarm(e));
 
-    // Step-specific handlers
-  this.wireStepHandlers();
-    
-    // Load existing farm data
-    this.loadExistingFarm();
-  }
-
-  wireStepHandlers() {
-    // Location management
+    // Locations
     $('#addFarmLocation')?.addEventListener('click', () => this.addLocation());
     $('#farmLocation')?.addEventListener('keydown', (e) => {
-      if (e.key === 'Enter') {
-        e.preventDefault();
-        this.addLocation();
-      }
+      if (e.key === 'Enter') { e.preventDefault(); this.addLocation(); }
     });
 
-    // Crop selection
-    document.querySelectorAll('.farmCropOption').forEach(checkbox => {
-      checkbox.addEventListener('change', () => this.updateCrops());
-    });
-
-    $('#farmCropOtherToggle')?.addEventListener('change', (e) => {
-      const textInput = $('#farmCropOtherText');
-      if (textInput) {
-        textInput.style.display = e.target.checked ? 'block' : 'none';
-        if (e.target.checked) textInput.focus();
-      }
-    });
-    // Knowledge base typeahead (simple local filter from plans/groups for now)
-    const kbSearch = $('#kbSearch');
-    const kbResults = $('#kbResults');
-    const kbSelected = $('#kbSelected');
-    if (kbSearch && kbResults && kbSelected) {
-      kbSearch.addEventListener('input', () => this.updateKbResults(kbSearch.value.trim()));
-      kbResults.addEventListener('click', (e) => {
-        const li = e.target.closest('li[data-model]');
-        if (!li) return;
-        const item = JSON.parse(li.dataset.payload || '{}');
-        this.data.devices.push(item);
-        this.renderKbSelected();
-      });
-    }
-
-    // Micro-forms
-    const chipGroup = (id, target, field) => {
-      const el = $(id);
-      if (!el) return;
-      el.addEventListener('click', (e) => {
-        const btn = e.target.closest('.chip-option');
-        if (!btn) return;
-        el.querySelectorAll('.chip-option').forEach(b => b.removeAttribute('data-active'));
-        btn.setAttribute('data-active','');
-        target[field] = btn.dataset.value;
-      });
-    };
-    // HVAC
-    $('#mf-hvac-count')?.addEventListener('input', (e)=> this.data.env.hvac.count = Number(e.target.value||0));
-    chipGroup('#mf-hvac-control', this.data.env.hvac, 'control');
-    chipGroup('#mf-hvac-energy', this.data.env.hvac, 'energy');
-    // Dehu
-    $('#mf-dehu-count')?.addEventListener('input', (e)=> this.data.env.dehu.count = Number(e.target.value||0));
-    chipGroup('#mf-dehu-control', this.data.env.dehu, 'control');
-    chipGroup('#mf-dehu-energy', this.data.env.dehu, 'energy');
-    // Fans
-    $('#mf-fans-count')?.addEventListener('input', (e)=> this.data.env.fans.count = Number(e.target.value||0));
-    chipGroup('#mf-fans-control', this.data.env.fans, 'control');
-
-    // Sensors
-    $('#sensorCats')?.addEventListener('change', () => {
-      const cats = Array.from(document.querySelectorAll('#sensorCats input[type="checkbox"]:checked')).map(i=>i.value);
-      this.data.sensors.categories = cats;
-    });
-    chipGroup('#sensorLocs', this.data.sensors, 'defaultLocation');
-
-    // Connectivity
-    chipGroup('#hubPresent', this.data.connectivity.hub, 'present');
-    $('#hubHost')?.addEventListener('input', (e)=> this.data.connectivity.hub.host = e.target.value.trim());
-    $('#hubNodeRed')?.addEventListener('change', (e)=> this.data.connectivity.hub.nodeRed = e.target.value);
-    $('#cloudTenant')?.addEventListener('input', (e)=> this.data.connectivity.cloudTenant = e.target.value.trim());
-    $('#addRole')?.addEventListener('click', () => {
-      const name = $('#roleName').value.trim();
-      const email = $('#roleEmail').value.trim();
-      const type = $('#roleType').value;
-      if (!name || !email) return alert('Enter name and email');
-      this.data.connectivity.roles.push({ name, email, role: type });
-      this.renderRoles();
-      $('#roleName').value = '';
-      $('#roleEmail').value = '';
-    });
-  }
-
-  updateKbResults(q) {
-    const kbResults = $('#kbResults');
-    if (!kbResults) return;
-    kbResults.innerHTML = '';
-    if (!q) return;
-    // Simple mock results from known plans/schedules names and sample fixtures
-    const catalog = [
-      { vendor: 'Gavita', model: 'Pro 1700e', watts: 645, control: '0-10V', spectrum: { cw: 45, ww: 45, bl: 5, rd: 5 } },
-      { vendor: 'Fluence', model: 'Spyder X Plus', watts: 655, control: '0-10V', spectrum: { cw: 50, ww: 40, bl: 5, rd: 5 } },
-      { vendor: 'GreenReach', model: 'Hex12 Controller', watts: 12, control: 'LAN API', spectrum: { cw: 45, ww: 45, bl: 0, rd: 0 } }
-    ];
-    const res = catalog.filter(it => `${it.vendor} ${it.model}`.toLowerCase().includes(q.toLowerCase()));
-    kbResults.innerHTML = res.map(it => `<li data-model="${it.model}" data-payload='${JSON.stringify(it)}'>${it.vendor} ${it.model} • ${it.watts} W • ${it.control}</li>`).join('');
-  }
-
-  renderKbSelected() {
-    const ul = $('#kbSelected');
-    if (!ul) return;
-    ul.innerHTML = this.data.devices.map((it, idx) => `<li>${it.vendor} ${it.model} • ${it.watts} W <button type="button" class="ghost" onclick="farmWizard.removeDevice(${idx})">×</button></li>`).join('');
-  }
-
-  removeDevice(idx) {
-    this.data.devices.splice(idx, 1);
-    this.renderKbSelected();
+    // Load existing farm if present
+    this.loadExistingFarm();
   }
 
   async loadExistingFarm() {
     const farmData = await loadJSON('./data/farm.json');
     if (farmData) {
       STATE.farm = farmData;
+      // copy known fields into local data for editing
+      this.data.farmName = farmData.farmName || '';
+      this.data.locations = farmData.locations || [];
+      this.data.contact = farmData.contact || { name: '', email: '', phone: '' };
+      this.data.address = farmData.address || '';
       this.updateFarmDisplay();
     }
   }
 
   updateFarmDisplay() {
     if (!STATE.farm) return;
-    
     const badge = $('#farmBadge');
     const panel = $('#farmPanel');
     const launchBtn = $('#btnLaunchFarm');
     const editBtn = $('#btnEditFarm');
-    
     if (badge && panel) {
       badge.style.display = 'block';
-      badge.innerHTML = `<strong>${STATE.farm.farmName}</strong> • ${STATE.farm.locations[0]} • ${STATE.farm.contact.name}`;
-      
+      badge.innerHTML = `<strong>${STATE.farm.farmName}</strong> • ${STATE.farm.locations?.[0] || ''} • ${STATE.farm.contact?.name || ''}`;
       launchBtn.style.display = 'none';
       editBtn.style.display = 'inline-block';
       editBtn.addEventListener('click', () => this.edit());
@@ -990,195 +926,479 @@ class FarmWizard {
     this.currentStep = 0;
     this.showStep(0);
     this.modal.setAttribute('aria-hidden', 'false');
-  }
-
-  close() {
-    this.modal.setAttribute('aria-hidden', 'true');
+    this.renderLocations();
   }
 
   edit() {
-    this.data = { ...STATE.farm };
+    // populate editor from STATE.farm
+    this.data = {
+      farmName: STATE.farm?.farmName || '',
+      locations: STATE.farm?.locations || [],
+      contact: STATE.farm?.contact || { name: '', email: '', phone: '' },
+      address: STATE.farm?.address || ''
+    };
     this.open();
   }
 
+  close() { this.modal.setAttribute('aria-hidden', 'true'); }
+
   showStep(index) {
-    // Hide all steps
-    document.querySelectorAll('.farm-step').forEach(step => {
-      step.removeAttribute('data-active');
-    });
-
-    // Show current step
-    const currentStepEl = document.querySelector(`[data-step="${this.steps[index]}"]`);
-    if (currentStepEl) {
-      currentStepEl.setAttribute('data-active', '');
-    }
-
-    // Update progress
-    $('#farmModalProgress').textContent = `Step ${index + 1} of ${this.steps.length}`;
-
-    // Update navigation buttons
-    const prevBtn = $('#farmPrev');
-    const nextBtn = $('#farmNext');
-    const saveBtn = $('#btnSaveFarm');
-
+    document.querySelectorAll('.farm-step').forEach(step => step.removeAttribute('data-active'));
+    const el = document.querySelector(`[data-step="${this.steps[index]}"]`);
+    if (el) el.setAttribute('data-active', '');
+    $('#farmModalProgress').textContent = `Step ${index+1} of ${this.steps.length}`;
+    const prevBtn = $('#farmPrev'); const nextBtn = $('#farmNext'); const saveBtn = $('#btnSaveFarm');
     prevBtn.style.display = index === 0 ? 'none' : 'inline-block';
-    
-    if (index === this.steps.length - 1) {
-      nextBtn.style.display = 'none';
-      saveBtn.style.display = 'inline-block';
-    } else {
-      nextBtn.style.display = 'inline-block';
-      saveBtn.style.display = 'none';
-    }
-
-    // Step-specific updates
-    if (index === this.steps.length - 1) {
-      this.updateReview();
-    }
+    if (index === this.steps.length - 1) { nextBtn.style.display = 'none'; saveBtn.style.display = 'inline-block'; this.updateReview(); }
+    else { nextBtn.style.display = 'inline-block'; saveBtn.style.display = 'none'; }
+    // populate inputs for the current step
+    if (this.steps[index] === 'farm-name') { const elName = $('#farmName'); if (elName) elName.value = this.data.farmName || ''; }
+    if (this.steps[index] === 'contact-name') { const el = $('#farmContact'); if (el) el.value = this.data.contact?.name || ''; }
+    if (this.steps[index] === 'contact-email') { const el = $('#farmContactEmail'); if (el) el.value = this.data.contact?.email || ''; }
+    if (this.steps[index] === 'contact-phone') { const el = $('#farmContactPhone'); if (el) el.value = this.data.contact?.phone || ''; }
+    if (this.steps[index] === 'address') { const el = $('#farmAddress'); if (el) el.value = this.data.address || ''; }
   }
 
-  nextStep() {
-    if (this.validateCurrentStep()) {
-      this.currentStep++;
-      this.showStep(this.currentStep);
-    }
-  }
-
-  prevStep() {
-    this.currentStep--;
-    this.showStep(this.currentStep);
-  }
+  nextStep() { if (this.validateCurrentStep()) { this.currentStep++; this.showStep(this.currentStep); } }
+  prevStep() { this.currentStep = Math.max(0, this.currentStep - 1); this.showStep(this.currentStep); }
 
   validateCurrentStep() {
-    const stepName = this.steps[this.currentStep];
-    
-    switch (stepName) {
-      case 'farm-name':
-        const farmName = $('#farmName').value.trim();
-        if (!farmName) {
-          alert('Please enter a farm name');
-          return false;
-        }
-        this.data.farmName = farmName;
-        break;
-      
-      case 'locations':
-        if (this.data.locations.length === 0) {
-          alert('Please add at least one location');
-          return false;
-        }
-        break;
-      
-      case 'contact-name':
-        const contactName = $('#farmContact').value.trim();
-        if (!contactName) {
-          alert('Please enter a contact name');
-          return false;
-        }
-        this.data.contact.name = contactName;
-        break;
-      
-      case 'contact-email':
-        const email = $('#farmContactEmail').value.trim();
-        if (!email || !email.includes('@')) {
-          alert('Please enter a valid email address');
-          return false;
-        }
-        this.data.contact.email = email;
-        break;
-      
-      case 'contact-phone':
-        this.data.contact.phone = $('#farmContactPhone').value.trim();
-        break;
-      
-      case 'crops':
-        // Crops are updated via checkbox handlers
-        break;
+    const step = this.steps[this.currentStep];
+    switch (step) {
+      case 'farm-name': {
+        const v = ($('#farmName')?.value || '').trim(); if (!v) { alert('Please enter a farm name'); return false; } this.data.farmName = v; break;
+      }
+      case 'locations': {
+        if (!this.data.locations || this.data.locations.length === 0) { alert('Please add at least one location'); return false; } break;
+      }
+      case 'contact-name': {
+        const v = ($('#farmContact')?.value || '').trim(); if (!v) { alert('Please enter a contact name'); return false; } this.data.contact.name = v; break;
+      }
+      case 'contact-email': {
+        const v = ($('#farmContactEmail')?.value || '').trim(); if (!v || !v.includes('@')) { alert('Please enter a valid email'); return false; } this.data.contact.email = v; break;
+      }
+      case 'contact-phone': {
+        const v = ($('#farmContactPhone')?.value || '').trim(); if (!v) { alert('Please enter a phone number'); return false; } this.data.contact.phone = v; break;
+      }
+      case 'address': {
+        const v = ($('#farmAddress')?.value || '').trim(); if (!v) { alert('Please enter an address'); return false; } this.data.address = v; break;
+      }
     }
-    
     return true;
   }
 
   addLocation() {
-    const input = $('#farmLocation');
-    const location = input.value.trim();
-    
-    if (location && !this.data.locations.includes(location)) {
-      this.data.locations.push(location);
-      this.renderLocations();
-      input.value = '';
-    }
+    const input = $('#farmLocation'); if (!input) return; const location = input.value.trim();
+    if (location && !this.data.locations.includes(location)) { this.data.locations.push(location); this.renderLocations(); input.value = ''; }
   }
 
   renderLocations() {
-    const list = $('#farmLocationList');
-    if (!list) return;
-    
-    list.innerHTML = this.data.locations.map(location => 
-      `<li>${location} <button type="button" onclick="farmWizard.removeLocation('${location}')">×</button></li>`
-    ).join('');
+    const list = $('#farmLocationList'); if (!list) return;
+    list.innerHTML = this.data.locations.map(location => `<li>${location} <button type="button" onclick="farmWizard.removeLocation('${location}')">×</button></li>`).join('');
   }
 
-  removeLocation(location) {
-    this.data.locations = this.data.locations.filter(l => l !== location);
-    this.renderLocations();
-  }
-
-  updateCrops() {
-    this.data.crops = [];
-    document.querySelectorAll('.farmCropOption:checked').forEach(checkbox => {
-      if (checkbox.value === 'Other') {
-        const otherText = $('#farmCropOtherText').value.trim();
-        if (otherText) this.data.crops.push(otherText);
-      } else {
-        this.data.crops.push(checkbox.value);
-      }
-    });
-  }
+  removeLocation(location) { this.data.locations = this.data.locations.filter(l => l !== location); this.renderLocations(); }
 
   updateReview() {
-    const review = $('#farmReview');
-    if (!review) return;
-    
+    const review = $('#farmReview'); if (!review) return;
     review.innerHTML = `
       <div><strong>Farm Name:</strong> ${this.data.farmName}</div>
       <div><strong>Locations:</strong> ${this.data.locations.join(', ')}</div>
       <div><strong>Contact:</strong> ${this.data.contact.name}</div>
       <div><strong>Email:</strong> ${this.data.contact.email}</div>
-      ${this.data.contact.phone ? `<div><strong>Phone:</strong> ${this.data.contact.phone}</div>` : ''}
-      <div><strong>Crops:</strong> ${this.data.crops.join(', ')}</div>
-      <div><strong>Devices:</strong> ${this.data.devices.map(d=>`${d.vendor} ${d.model}`).join(', ') || '—'}</div>
-      <div><strong>Env:</strong> HVAC ${this.data.env.hvac.count} (${this.data.env.hvac.control||'—'}/${this.data.env.hvac.energy||'—'}), Dehu ${this.data.env.dehu.count} (${this.data.env.dehu.control||'—'}/${this.data.env.dehu.energy||'—'}), Fans ${this.data.env.fans.count} (${this.data.env.fans.control||'—'})</div>
-      <div><strong>Sensors:</strong> ${this.data.sensors.categories.join(', ') || '—'} @ ${this.data.sensors.defaultLocation || '—'}</div>
-      <div><strong>Connectivity:</strong> Hub ${this.data.connectivity.hub.present} ${this.data.connectivity.hub.host ? '• '+this.data.connectivity.hub.host : ''} (Node-RED: ${this.data.connectivity.hub.nodeRed}) • Cloud ${this.data.connectivity.cloudTenant || '—'}</div>
-      <div><strong>Roles:</strong> ${this.data.connectivity.roles.map(r=>`${r.name} (${r.role})`).join(', ') || '—'}</div>
+      <div><strong>Phone:</strong> ${this.data.contact.phone}</div>
+      <div><strong>Address:</strong> ${this.data.address || '—'}</div>
     `;
   }
 
   async saveFarm(e) {
     e.preventDefault();
-    
     const farmData = {
-      ...this.data,
-      timezone: 'America/Toronto',
-      pricePerKWh: 0.18,
-      currency: 'CAD',
+      farmName: this.data.farmName,
+      locations: this.data.locations,
+      contact: this.data.contact,
+      address: this.data.address,
+      timezone: Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC',
       registered: new Date().toISOString()
     };
-
-    // Save to state and local storage
     STATE.farm = farmData;
     localStorage.setItem('gr.farm', JSON.stringify(farmData));
-    
-    // Save to server
     const saved = await saveJSON('./data/farm.json', farmData);
-    
     if (saved) {
       setStatus('Farm registration saved successfully');
       this.updateFarmDisplay();
       this.close();
     } else {
       alert('Failed to save farm registration. Please try again.');
+    }
+  }
+}
+
+// --- Grow Room Wizard ---
+class RoomWizard {
+  constructor() {
+    this.modal = $('#roomModal');
+    this.form = $('#roomWizardForm');
+    // equipment-first: capture control method before sensors
+  this.steps = ['room-name','location','layout','fixtures','control','devices','sensors','energy','review'];
+    this.currentStep = 0;
+    this.data = {
+      id: '',
+      name: '',
+      layout: { type: '', rows: 0, racks: 0, levels: 0 },
+      fixtures: [],
+      controlMethod: null,
+      sensors: { categories: [] },
+      energy: ''
+    };
+    this.init();
+  }
+
+  init() {
+    $('#btnLaunchRoom')?.addEventListener('click', () => this.open());
+    $('#roomModalClose')?.addEventListener('click', () => this.close());
+    $('#roomModalBackdrop')?.addEventListener('click', () => this.close());
+    $('#roomPrev')?.addEventListener('click', () => this.prevStep());
+    $('#roomNext')?.addEventListener('click', () => this.nextStep());
+    this.form?.addEventListener('submit', (e)=> this.saveRoom(e));
+
+    // Chip groups
+    const chipGroup = (sel, target, field) => {
+      const host = $(sel); if (!host) return;
+      host.addEventListener('click', (e) => {
+        const btn = e.target.closest('.chip-option'); if (!btn) return;
+        host.querySelectorAll('.chip-option').forEach(b=>b.removeAttribute('data-active'));
+        btn.setAttribute('data-active','');
+        target[field] = btn.dataset.value;
+        if (field === 'type') this.data.layout.type = btn.dataset.value;
+      });
+    };
+    chipGroup('#roomLayoutType', this.data.layout, 'type');
+    chipGroup('#roomEnergy', this.data, 'energy');
+    $('#roomRows')?.addEventListener('input', (e)=> this.data.layout.rows = Number(e.target.value||0));
+    $('#roomRacks')?.addEventListener('input', (e)=> this.data.layout.racks = Number(e.target.value||0));
+    $('#roomLevels')?.addEventListener('input', (e)=> this.data.layout.levels = Number(e.target.value||0));
+
+    // Fixtures KB reuse
+    const fSearch = $('#roomKbSearch');
+    const fResults = $('#roomKbResults');
+    const fSelected = $('#roomKbSelected');
+    fSearch?.addEventListener('input', ()=> this.updateKbResults(fSearch.value.trim()));
+    fResults?.addEventListener('click', (e)=>{
+      const btn = e.target.closest('button[data-action="add-kb"]'); if (!btn) return;
+      const idx = Number(btn.dataset.idx||-1);
+      const item = STATE.deviceKB.fixtures?.[idx]; if (!item) return;
+      this.data.fixtures.push({ ...item, count: 1 });
+      this.renderKbSelected();
+      fResults.innerHTML = ''; fSearch.value='';
+      // After adding fixtures, re-run inference
+      this.inferSensors();
+    });
+
+    // Sensors
+    $('#roomSensorCats')?.addEventListener('change', () => {
+      const cats = Array.from(document.querySelectorAll('#roomSensorCats input[type="checkbox"]:checked')).map(i=>i.value);
+      this.data.sensors.categories = cats;
+    });
+
+    // Devices management (for smart devices / hubs)
+    $('#roomAddDeviceBtn')?.addEventListener('click', () => {
+      const name = ($('#roomDeviceName')?.value || '').trim();
+      const vendor = ($('#roomDeviceVendor')?.value || '').trim();
+      const model = ($('#roomDeviceModel')?.value || '').trim();
+      const host = ($('#roomDeviceHost')?.value || '').trim();
+      if (!name) return alert('Enter a device name');
+      // Collect setup subform values if present
+      const setup = {};
+      // WiFi
+      if (document.getElementById('deviceSetup-wifi')?.style.display !== 'none') {
+        const ssid = ($('#deviceWifiSsid')?.value || '').trim();
+        const psk = ($('#deviceWifiPsk')?.value || '').trim();
+        const useStatic = !!($('#deviceWifiStatic')?.checked);
+        const staticIp = ($('#deviceWifiStaticIp')?.value || '').trim();
+        if (ssid) setup.wifi = { ssid, psk: psk || null, useStatic, staticIp: staticIp || null };
+      }
+      // Bluetooth
+      if (document.getElementById('deviceSetup-bluetooth')?.style.display !== 'none') {
+        const btName = ($('#deviceBtName')?.value || '').trim();
+        const btPin = ($('#deviceBtPin')?.value || '').trim();
+        if (btName || btPin) setup.bluetooth = { name: btName || null, pin: btPin || null };
+      }
+      // RS-485
+      if (document.getElementById('deviceSetup-rs485')?.style.display !== 'none') {
+        const rsHost = ($('#deviceRs485Host')?.value || '').trim();
+        const rsUnit = Number($('#deviceRs485UnitId')?.value || 0) || null;
+        const rsBaud = ($('#deviceRs485Baud')?.value || '').trim() || null;
+        if (rsHost || rsUnit) setup.rs485 = { host: rsHost || null, unitId: rsUnit, baud: rsBaud };
+      }
+      // 0-10V
+      if (document.getElementById('deviceSetup-0-10v')?.style.display !== 'none') {
+        const ch = ($('#device0v10Channel')?.value || '').trim();
+        const scale = ($('#device0v10Scale')?.value || '').trim();
+        if (ch || scale) setup['0-10v'] = { channel: ch || null, scale: scale || null };
+      }
+
+      this.data.devices = this.data.devices || [];
+      this.data.devices.push({ name, vendor, model, host, setup });
+      ($('#roomDeviceName')?.value) && ($('#roomDeviceName').value = '');
+      ($('#roomDeviceVendor')?.value) && ($('#roomDeviceVendor').value = '');
+      ($('#roomDeviceModel')?.value) && ($('#roomDeviceModel').value = '');
+      ($('#roomDeviceHost')?.value) && ($('#roomDeviceHost').value = '');
+      // Clear subforms
+      ['deviceWifiSsid','deviceWifiPsk','deviceWifiStatic','deviceWifiStaticIp','deviceBtName','deviceBtPin','deviceRs485Host','deviceRs485UnitId','deviceRs485Baud','device0v10Channel','device0v10Scale'].forEach(id=>{ const el = document.getElementById(id); if(el) { if(el.type==='checkbox') el.checked=false; else el.value=''; } });
+      this.renderDevicesList();
+    });
+
+    // Device list remove handler (delegated)
+    const devList = $('#roomDevicesList');
+    devList?.addEventListener('click', (e) => {
+      const btn = e.target.closest('button[data-action="remove-device"]');
+      if (!btn) return;
+      const idx = Number(btn.dataset.idx);
+      if (!Number.isNaN(idx) && this.data.devices && this.data.devices[idx]) {
+        this.data.devices.splice(idx,1);
+        this.renderDevicesList();
+      }
+    });
+
+    // Toggle static IP input
+    const wifiStatic = $('#deviceWifiStatic');
+    wifiStatic?.addEventListener('change', (e)=>{
+      const ip = $('#deviceWifiStaticIp'); if (!ip) return;
+      ip.style.display = wifiStatic.checked ? 'inline-block' : 'none';
+    });
+
+    // When model select changes we also toggle relevant setup forms (safety: also do this on vendor change when model list is built)
+    const modelSelect = $('#roomDeviceModel');
+    modelSelect?.addEventListener('change', (e)=>{
+      const modelName = e.target.value;
+      const vendor = ($('#roomDeviceVendor')?.value||'');
+      const man = DEVICE_MANUFACTURERS && DEVICE_MANUFACTURERS.find(x=>x.name===vendor);
+      const md = man?.models?.find(m=>m.model===modelName);
+      toggleSetupFormsForModel(md);
+    });
+
+    // Control method chips (buttons wired dynamically when showing control step)
+  }
+
+  open(room = null) {
+    this.currentStep = 0;
+    this.data = room ? JSON.parse(JSON.stringify(room)) : {
+      id: '', name: '', location: '', layout: { type:'', rows:0, racks:0, levels:0 }, fixtures: [], controlMethod: null, devices: [], sensors:{ categories:[] }, energy:''
+    };
+    this.showStep(0);
+    this.modal.setAttribute('aria-hidden','false');
+    // Prefill lists
+    this.renderKbSelected();
+    this.populateLocationSelect();
+    this.renderDevicesList();
+  }
+
+  close(){ this.modal.setAttribute('aria-hidden','true'); }
+
+  showStep(index){
+    document.querySelectorAll('.room-step').forEach(step => step.removeAttribute('data-active'));
+    const el = document.querySelector(`.room-step[data-step="${this.steps[index]}"]`);
+    if (el) el.setAttribute('data-active','');
+    $('#roomModalProgress').textContent = `Step ${index+1} of ${this.steps.length}`;
+    const prev = $('#roomPrev'); const next=$('#roomNext'); const save=$('#btnSaveRoom');
+    prev.style.display = index===0 ? 'none':'inline-block';
+    if (index === this.steps.length - 1) { next.style.display='none'; save.style.display='inline-block'; this.updateReview(); }
+    else { next.style.display='inline-block'; save.style.display='none'; }
+
+    // Step-specific behaviors
+    const stepKey = this.steps[index];
+    if (stepKey === 'control') {
+      const container = document.getElementById('roomControlMethod');
+      if (!container) return;
+      container.querySelectorAll('.chip-option').forEach(b=>{
+        b.classList.remove('active');
+        if (this.data.controlMethod && b.dataset.value === this.data.controlMethod) b.classList.add('active');
+        b.onclick = () => {
+          const v = b.dataset.value;
+          this.data.controlMethod = v;
+          container.querySelectorAll('.chip-option').forEach(x=>x.classList.remove('active'));
+          b.classList.add('active');
+          document.getElementById('roomControlDetails').textContent = this.controlHintFor(v);
+          // Re-run inference when control changes
+            this.inferSensors();
+            // If control method likely implies smart devices, ensure devices step available
+            const smart = ['wifi','smart-plug','rs485','other'].includes(v);
+            const devicesStepEl = document.querySelector('.room-step[data-step="devices"]');
+            if (devicesStepEl) devicesStepEl.style.display = smart ? 'block' : 'none';
+        };
+      });
+      // ensure hint shown for preselected
+      if (this.data.controlMethod) document.getElementById('roomControlDetails').textContent = this.controlHintFor(this.data.controlMethod);
+    }
+
+    if (stepKey === 'sensors') {
+      // pre-check any inferred sensors
+      const container = document.getElementById('roomSensorCats');
+      if (!container) return;
+      container.querySelectorAll('input[type=checkbox]').forEach(cb=>{
+        cb.checked = (this.data.sensors.categories||[]).includes(cb.value);
+        cb.onchange = ()=>{
+          this.data.sensors.categories = Array.from(container.querySelectorAll('input:checked')).map(i=>i.value);
+        };
+      });
+    }
+    // Show or hide devices step based on current controlMethod
+    if (stepKey === 'devices') {
+      const cm = this.data.controlMethod;
+      const smart = ['wifi','smart-plug','rs485','other'].includes(cm);
+      const devicesStepEl = document.querySelector('.room-step[data-step="devices"]');
+      if (devicesStepEl) devicesStepEl.style.display = smart ? 'block' : 'none';
+      this.renderDevicesList();
+    }
+  }
+
+  nextStep(){ if (this.validateCurrentStep()) { this.currentStep++; this.showStep(this.currentStep); } }
+  prevStep(){ this.currentStep = Math.max(0, this.currentStep-1); this.showStep(this.currentStep); }
+
+  validateCurrentStep(){
+    const step = this.steps[this.currentStep];
+    switch(step){
+      case 'room-name': {
+        const v = ($('#roomName')?.value||'').trim(); if (!v) { alert('Enter a room name'); return false; }
+        this.data.name = v; break; }
+      case 'location': {
+        const v = ($('#roomLocationSelect')?.value || '').trim(); if (!v) { alert('Select a location'); return false; }
+        this.data.location = v; break;
+      }
+      case 'layout': {
+        // no strict validation
+        break; }
+      case 'fixtures': {
+        // optional
+        break; }
+      case 'control': {
+        // require at least a choice of control method so we can infer sensors
+        if (!this.data.controlMethod) { const ok = confirm('No control method selected. Continue without control info?'); if (!ok) return false; }
+        break; }
+      case 'devices': {
+        // no strict validation; device list optional but preferred when smart control used
+        break; }
+    }
+    return true;
+  }
+
+  updateKbResults(q){
+    const host = $('#roomKbResults'); if (!host) return;
+    host.innerHTML = '';
+    if (!q) return;
+    const fixtures = STATE.deviceKB.fixtures || [];
+    const res = fixtures.map((it, idx)=>({it, idx}))
+      .filter(({it})=>`${it.vendor} ${it.model}`.toLowerCase().includes(q.toLowerCase()));
+    if (!res.length) { host.innerHTML = '<li class="tiny" style="color:#64748b">No matches in knowledge base.</li>'; return; }
+    host.innerHTML = res.map(({it, idx})=>`<li><div class="row" style="justify-content:space-between;align-items:center;gap:8px"><div>${it.vendor} <strong>${it.model}</strong> • ${it.watts} W • ${it.control || ''}</div><button type="button" class="ghost" data-action="add-kb" data-idx="${idx}">Add</button></div></li>`).join('');
+  }
+
+  renderKbSelected(){
+    const ul = $('#roomKbSelected'); if (!ul) return;
+    ul.innerHTML = (this.data.fixtures||[]).map((it, idx)=>`
+      <li>
+        <div class="row" style="align-items:center;gap:6px">
+          <span>${it.vendor} <strong>${it.model}</strong> • ${it.watts} W</span>
+          <label class="tiny">x <input type="number" min="1" value="${it.count||1}" style="width:64px" onchange="roomWizard.updateFixtureCount(${idx}, this.value)"></label>
+          <button type="button" class="ghost" title="Remove" onclick="roomWizard.removeFixture(${idx})">×</button>
+        </div>
+      </li>
+    `).join('');
+  }
+
+  renderDevicesList() {
+    const ul = $('#roomDevicesList'); if (!ul) return;
+    ul.innerHTML = (this.data.devices||[]).map((d, i) => `
+      <li>
+        <div class="row" style="align-items:center;gap:6px">
+          <span>${d.name} ${d.vendor||''} ${d.model||''} ${d.host?`• ${d.host}`:''}</span>
+          <button type="button" class="ghost" data-action="remove-device" data-idx="${i}">×</button>
+        </div>
+      </li>
+    `).join('');
+  }
+
+  removeFixture(idx){ this.data.fixtures.splice(idx,1); this.renderKbSelected(); this.inferSensors(); }
+  updateFixtureCount(idx, value){ const n=Math.max(1, Number(value||1)); if (this.data.fixtures[idx]) this.data.fixtures[idx].count=n; this.inferSensors(); }
+
+  controlHintFor(v) {
+    const map = {
+      'wifi': 'Wi‑Fi/Cloud-controlled fixtures often expose energy and runtime telemetry; they may also report PPFD if integrated.',
+      'smart-plug': 'Smart plugs give power/energy telemetry but typically do not provide PPFD or temperature readings.',
+      '0-10v': '0‑10V wired control usually implies no integrated sensors; external PPFD or temp sensors are commonly used.',
+      'rs485': 'RS‑485/Modbus fixtures or drivers may expose metering and diagnostics depending on vendor.',
+      'other': 'Other control method — sensor availability depends on the specific device.'
+    };
+    return map[v] || '';
+  }
+
+  inferSensors(){
+    // Simple heuristic: combine fixture-declared sensors and control-method hints
+    const inferred = new Set();
+    (this.data.fixtures||[]).forEach(f => {
+      if (Array.isArray(f.sensors)) f.sensors.forEach(s=>inferred.add(s));
+      // some KB entries may list capabilities in f.capabilities or f.control
+      if (f.capabilities && Array.isArray(f.capabilities)) f.capabilities.forEach(s=>inferred.add(s));
+      if (typeof f.control === 'string' && /meter|power|energy/i.test(f.control)) inferred.add('energy');
+      if (typeof f.control === 'string' && /ppfd|light|par/i.test(f.control)) inferred.add('ppfd');
+    });
+    // control method mapping
+    const cm = this.data.controlMethod;
+    if (cm === 'smart-plug') inferred.add('energy');
+    if (cm === 'wifi') inferred.add('energy');
+    if (cm === 'rs485') inferred.add('energy');
+    // 0-10v tends not to expose sensors directly
+
+    // Normalize known category keys to match checkboxes: tempRh, co2, vpd, ppfd, energy
+    // If fixture mentions temp or rh words, map to tempRh
+    // already handled by sensors strings if present
+
+    this.data.sensors.categories = Array.from(inferred);
+
+    // Update UI checkboxes if sensors step present
+    const container = document.getElementById('roomSensorCats');
+    if (container) {
+      container.querySelectorAll('input[type=checkbox]').forEach(cb=>{
+        cb.checked = this.data.sensors.categories.includes(cb.value);
+      });
+    }
+  }
+
+  populateLocationSelect() {
+    const sel = $('#roomLocationSelect'); if (!sel) return;
+    sel.innerHTML = '<option value="">Select location...</option>' + (STATE.farm?.locations || []).map(l => `<option value="${l}">${l}</option>`).join('');
+    // If editing an existing room with location, preselect
+    if (this.data.location) sel.value = this.data.location;
+  }
+
+  updateReview(){
+    const host = $('#roomReview'); if (!host) return;
+    host.innerHTML = `
+      <div><strong>Name:</strong> ${this.data.name}</div>
+      <div><strong>Layout:</strong> ${this.data.layout.type || '—'} • rows ${this.data.layout.rows||0}, racks ${this.data.layout.racks||0}, levels ${this.data.layout.levels||0}</div>
+      <div><strong>Fixtures:</strong> ${(this.data.fixtures||[]).map(f=>`${f.vendor} ${f.model} x${f.count||1}`).join(', ') || '—'}</div>
+      <div><strong>Control method:</strong> ${this.data.controlMethod || '—'}</div>
+      <div><strong>Sensors:</strong> ${(this.data.sensors.categories||[]).join(', ') || '—'}</div>
+      <div><strong>Energy:</strong> ${this.data.energy || '—'}</div>
+    `;
+  }
+
+  async saveRoom(e){
+    e.preventDefault();
+    // Assign id if new
+    if (!this.data.id) this.data.id = `room-${Math.random().toString(36).slice(2,8)}`;
+    // Upsert into STATE.rooms and persist
+    const idx = STATE.rooms.findIndex(r => r.id === this.data.id);
+    if (idx >= 0) STATE.rooms[idx] = { ...STATE.rooms[idx], ...this.data };
+    else STATE.rooms.push({ ...this.data });
+    const ok = await saveJSON('./data/rooms.json', { rooms: STATE.rooms });
+    if (ok) {
+      renderRooms();
+      showToast({ title:'Room saved', msg:`${this.data.name} saved`, kind:'success', icon:'✅' });
+      this.close();
+    } else {
+      alert('Failed to save room');
     }
   }
 }
@@ -1191,13 +1411,15 @@ async function loadAllData() {
     STATE.devices = deviceResponse?.data || [];
     
     // Load static data files
-    const [groups, schedules, plans, environment, calibrations, deviceMeta] = await Promise.all([
+    const [groups, schedules, plans, environment, calibrations, deviceMeta, deviceKB, rooms] = await Promise.all([
       loadJSON('./data/groups.json'),
       loadJSON('./data/schedules.json'), 
       loadJSON('./data/plans.json'),
       api('/env'),
       loadJSON('./data/calibration.json'),
-      loadJSON('./data/device-meta.json')
+      loadJSON('./data/device-meta.json'),
+      loadJSON('./data/device-kb.json'),
+      loadJSON('./data/rooms.json')
     ]);
     
     STATE.groups = groups?.groups || [];
@@ -1205,7 +1427,9 @@ async function loadAllData() {
     STATE.plans = plans?.plans || [];
   STATE.environment = environment?.zones || [];
     STATE.calibrations = calibrations?.calibrations || [];
-    STATE.deviceMeta = deviceMeta?.devices || {};
+  STATE.deviceMeta = deviceMeta?.devices || {};
+  STATE.rooms = rooms?.rooms || [];
+  if (deviceKB && Array.isArray(deviceKB.fixtures)) STATE.deviceKB = deviceKB;
     
     setStatus(`Loaded ${STATE.devices.length} devices, ${STATE.groups.length} groups, ${STATE.schedules.length} schedules`);
     
@@ -1214,7 +1438,8 @@ async function loadAllData() {
     renderGroups();
     renderSchedules();
   renderEnvironment();
-    renderPlans();
+  renderPlans();
+  renderRooms();
   // Start background polling for environment telemetry
   startEnvPolling();
     
@@ -1241,6 +1466,29 @@ function renderGroups() {
   
   select.innerHTML = '<option value="">Select group...</option>' +
     STATE.groups.map(group => `<option value="${group.id}">${group.name}</option>`).join('');
+}
+
+function renderRooms() {
+  const host = $('#roomsList'); if (!host) return;
+  if (!STATE.rooms.length) {
+    host.innerHTML = '<p class="tiny" style="color:#64748b">No rooms yet. Create one to get started.</p>';
+    return;
+  }
+  host.innerHTML = STATE.rooms.map(r => {
+    const fixtures = (r.fixtures||[]).reduce((sum,f)=> sum + (Number(f.count)||0), 0);
+    const sensors = (r.sensors?.categories||[]).join(', ') || '—';
+    return `<div class="card" style="margin-top:8px">
+      <div class="row" style="justify-content:space-between;align-items:center">
+        <div>
+          <h3 style="margin:0">${r.name}</h3>
+          <div class="tiny" style="color:#475569">Layout: ${r.layout?.type || '—'} • Fixtures: ${fixtures} • Control: ${r.controlMethod || '—'} • Sensors: ${sensors}</div>
+        </div>
+        <div class="row" style="gap:6px">
+          <button type="button" class="ghost" onclick="roomWizard.open(${JSON.stringify(r).replace(/"/g,'&quot;')})">Edit</button>
+        </div>
+      </div>
+    </div>`;
+  }).join('');
 }
 
 function renderSchedules() {
@@ -1341,11 +1589,15 @@ function refreshDeviceCards() {
 async function loadConfig() {
   try {
     const cfg = await api('/config');
-    STATE.config = { singleServer: !!cfg?.singleServer, controller: cfg?.controller || '' };
+    STATE.config = { singleServer: !!cfg?.singleServer, controller: cfg?.controller || '', envSource: cfg?.envSource || 'local', azureLatestUrl: cfg?.azureLatestUrl || null };
     const chip = document.getElementById('configChip');
     if (chip) {
-      chip.textContent = STATE.config.singleServer ? 'Local mode' : 'Controller mode';
-      chip.title = `Controller: ${STATE.config.controller || 'n/a'}`;
+      const mode = STATE.config.singleServer ? 'Local' : 'Controller';
+      const envTag = STATE.config.envSource === 'azure' ? 'ENV: Azure' : 'ENV: Local';
+      chip.textContent = `${mode} • ${envTag}`;
+      const parts = [`Controller: ${STATE.config.controller || 'n/a'}`];
+      if (STATE.config.envSource === 'azure' && STATE.config.azureLatestUrl) parts.push(`Azure: ${STATE.config.azureLatestUrl}`);
+      chip.title = parts.join(' | ');
     }
   } catch (e) {
     console.warn('Failed to load /config', e);
@@ -1813,6 +2065,175 @@ function wireGlobalEvents() {
 
 // --- Application Initialization ---
 let farmWizard;
+let roomWizard;
+
+// Device manufacturers KB (loaded at startup)
+let DEVICE_MANUFACTURERS = null;
+async function loadDeviceManufacturers(){
+  try {
+    const j = await loadJSON('./data/device-manufacturers.json');
+    DEVICE_MANUFACTURERS = (j && j.manufacturers) ? j.manufacturers : [];
+    populateVendorSelect();
+  } catch (err) {
+    console.warn('Failed to load device manufacturers KB', err);
+    DEVICE_MANUFACTURERS = [];
+  }
+}
+
+function populateVendorSelect(){
+  const sel = $('#roomDeviceVendor'); if (!sel) return;
+  sel.innerHTML = '<option value="">Vendor</option>' + DEVICE_MANUFACTURERS.map(m=>`<option value="${escapeHtml(m.name)}">${escapeHtml(m.name)}</option>`).join('');
+  sel.addEventListener('change', (e)=>{
+    const name = e.target.value;
+    const man = DEVICE_MANUFACTURERS.find(x=>x.name===name);
+    const modelSel = $('#roomDeviceModel'); if (!modelSel) return;
+    modelSel.innerHTML = '<option value="">Model</option>' + ((man?.models||[]).map(md=>`<option value="${escapeHtml(md.model)}" data-connectivity='${JSON.stringify(md.connectivity)}'>${escapeHtml(md.model)}</option>`).join(''));
+  });
+  const modelSel = $('#roomDeviceModel');
+  modelSel?.addEventListener('change', (e)=>{
+    const modelName = e.target.value;
+    const vendor = ($('#roomDeviceVendor')?.value||'');
+    const man = DEVICE_MANUFACTURERS.find(x=>x.name===vendor);
+    const md = man?.models?.find(m=>m.model===modelName);
+    if (md) {
+      const nameInput = $('#roomDeviceName');
+      if (nameInput && !nameInput.value) nameInput.value = `${md.model}`;
+      const hostInput = $('#roomDeviceHost');
+      if (hostInput) {
+        const hint = (md.connectivity || []).includes('wifi') ? 'IP or MAC (if known)' : ((md.connectivity||[]).includes('zigbee') ? 'Zigbee hub / Bridge' : 'Host / IP / MAC (optional)');
+        hostInput.placeholder = hint;
+      }
+    }
+  });
+}
+
+function escapeHtml(s){ return (s+'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;'); }
+
+function toggleSetupFormsForModel(md){
+  // md.connectivity is an array like ['wifi','zigbee']
+  const has = (k)=> Array.isArray(md?.connectivity) && md.connectivity.includes(k);
+  const wifiEl = document.getElementById('deviceSetup-wifi'); if (wifiEl) wifiEl.style.display = has('wifi') ? 'block' : 'none';
+  const btEl = document.getElementById('deviceSetup-bluetooth'); if (btEl) btEl.style.display = has('bluetooth') ? 'block' : 'none';
+  const rsEl = document.getElementById('deviceSetup-rs485'); if (rsEl) rsEl.style.display = has('rs485') ? 'block' : 'none';
+  const v10El = document.getElementById('deviceSetup-0-10v'); if (v10El) v10El.style.display = has('0-10v') ? 'block' : 'none';
+}
+
+// --- Device Pairing Wizard (lightweight) ---
+class DevicePairWizard {
+  constructor() {
+    this.modal = document.getElementById('devicePairModal');
+    if (!this.modal) return;
+    this.form = document.getElementById('devicePairForm');
+    this.progress = document.getElementById('devicePairProgress');
+    this.steps = Array.from(this.modal.querySelectorAll('.pair-step'));
+    this.current = 0;
+    this.onSave = null;
+
+    this.nextBtn = document.getElementById('pairNext');
+    this.prevBtn = document.getElementById('pairPrev');
+    this.saveBtn = document.getElementById('pairSave');
+    this.closeBtn = document.getElementById('devicePairClose');
+
+    this.nextBtn?.addEventListener('click', () => this.next());
+    this.prevBtn?.addEventListener('click', () => this.prev());
+    this.closeBtn?.addEventListener('click', () => this.close());
+    this.form?.addEventListener('submit', (ev) => { ev.preventDefault(); this.finish(); });
+
+    const wifiStatic = document.getElementById('pairWifiStatic');
+    wifiStatic?.addEventListener('change', (e) => {
+      const ip = document.getElementById('pairWifiStaticIp'); if (ip) ip.style.display = e.target.checked ? 'block' : 'none';
+    });
+  }
+
+  open(opts = {}) {
+    if (!this.modal) return;
+    this.current = 0; this.onSave = opts.onSave || null;
+    if (opts.suggestedTransport) {
+      const r = this.modal.querySelector(`input[name=pairTransport][value=${opts.suggestedTransport}]`);
+      if (r) r.checked = true;
+    }
+    this.showStep(0);
+    this.modal.style.display = 'block';
+    this.modal.setAttribute('aria-hidden','false');
+  }
+
+  close() { if (!this.modal) return; this.modal.style.display = 'none'; this.modal.setAttribute('aria-hidden','true'); }
+
+  showStep(i) {
+    if (!this.steps) return;
+    this.steps.forEach((s, idx) => s.style.display = idx === i ? 'block' : 'none');
+    this.current = i;
+    this.progress.textContent = `Step ${Math.min(i+1, this.steps.length)} of ${this.steps.length}`;
+    this.prevBtn.style.display = i === 0 ? 'none' : 'inline-block';
+    this.nextBtn.style.display = i === (this.steps.length - 1) ? 'none' : 'inline-block';
+    this.saveBtn.style.display = i === (this.steps.length - 1) ? 'inline-block' : 'none';
+    if (this.steps[i]?.dataset.step === 'review') this.updateReview();
+  }
+
+  next() { if (this.current < this.steps.length - 1) this.showStep(this.current + 1); }
+  prev() { if (this.current > 0) this.showStep(this.current - 1); }
+
+  collect() {
+    const transport = this.modal.querySelector('input[name=pairTransport]:checked')?.value || 'wifi';
+    if (transport === 'wifi') {
+      const ssid = document.getElementById('pairWifiSsid')?.value.trim() || '';
+      const psk = document.getElementById('pairWifiPsk')?.value || '';
+      const isStatic = !!document.getElementById('pairWifiStatic')?.checked;
+      const staticIp = document.getElementById('pairWifiStaticIp')?.value.trim() || '';
+      const wifi = { ssid, psk, static: !!isStatic };
+      if (isStatic && staticIp) wifi.staticIp = staticIp;
+      return { wifi };
+    }
+    if (transport === 'bluetooth') {
+      const name = document.getElementById('pairBtName')?.value.trim() || null;
+      const pin = document.getElementById('pairBtPin')?.value.trim() || null;
+      return { bluetooth: { name, pin } };
+    }
+    return {};
+  }
+
+  updateReview() {
+    const cfg = this.collect();
+    const el = document.getElementById('pairReview'); if (!el) return; el.innerHTML = '';
+    Object.keys(cfg).forEach(k => { const pre = document.createElement('pre'); pre.style.margin='0'; pre.textContent = `${k}: ` + JSON.stringify(cfg[k], null, 2); el.appendChild(pre); });
+  }
+
+  finish() { const cfg = this.collect(); if (this.onSave) this.onSave(cfg); this.close(); }
+}
+
+const DEVICE_PAIR_WIZARD = new DevicePairWizard();
+
+function findModelByValue(value) {
+  if (!DEVICE_MANUFACTURERS) return null;
+  for (const m of DEVICE_MANUFACTURERS) {
+    const md = (m.models || []).find(x => x.id === value || x.model === value);
+    if (md) return md;
+  }
+  return null;
+}
+
+function hookRoomDevicePairing(roomWizardInstance) {
+  const addBtn = document.getElementById('roomAddDeviceBtn'); if (!addBtn) return;
+  addBtn.addEventListener('click', (ev) => {
+    ev.preventDefault();
+    let suggested = 'wifi';
+    const modelSel = document.getElementById('roomDeviceModel');
+    if (modelSel && modelSel.value) {
+      const md = findModelByValue(modelSel.value);
+      if (md && md.connectivity && md.connectivity.includes('bluetooth')) suggested = 'bluetooth';
+    }
+    DEVICE_PAIR_WIZARD.open({ suggestedTransport: suggested, onSave: (setup) => {
+      const name = document.getElementById('roomDeviceName')?.value.trim() || '';
+      const vendor = document.getElementById('roomDeviceVendor')?.value || '';
+      const model = document.getElementById('roomDeviceModel')?.value || '';
+      const host = document.getElementById('roomDeviceHost')?.value.trim() || '';
+      roomWizardInstance.data.devices = roomWizardInstance.data.devices || [];
+      const device = { name: name || `${vendor} ${model}`, vendor, model, host, setup };
+      roomWizardInstance.data.devices.push(device);
+      roomWizardInstance.renderDevicesList();
+    }});
+  });
+}
 
 document.addEventListener('DOMContentLoaded', async () => {
   wireHints();
@@ -1822,9 +2243,23 @@ document.addEventListener('DOMContentLoaded', async () => {
   
   // Initialize farm wizard
   farmWizard = new FarmWizard();
+  // Initialize room wizard
+  roomWizard = new RoomWizard();
+  // Wire pairing hook so Add Device opens the DevicePairWizard
+  try { hookRoomDevicePairing(roomWizard); } catch (e) { console.warn('Failed to hook device pairing', e); }
   
   // Load all data
   await loadAllData();
+  // Load device KB for vendor/model selects
+  await loadDeviceManufacturers();
+  // Apply saved branding if present
+  try {
+    const farmLocal = JSON.parse(localStorage.getItem('gr.farm') || 'null') || STATE.farm;
+    const branding = farmLocal?.branding || STATE.farm?.branding;
+    if (branding?.palette) applyTheme(branding.palette);
+    const headerLogo = document.querySelector('.header.logo img');
+    if (headerLogo && branding?.logo) { headerLogo.src = branding.logo; headerLogo.style.display = 'inline-block'; }
+  } catch {}
   
   setStatus("Dashboard loaded");
 });

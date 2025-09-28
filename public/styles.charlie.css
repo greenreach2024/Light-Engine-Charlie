@@ -1,22 +1,30 @@
 /* Light Engine Charlie - Comprehensive UI Styles */
 :root {
-  /* Brand Colors */
-  --primary-green: #16A34A;
+  /* Branding tokens (applied dynamically) */
+  --gr-bg: #F7FAFA;
+  --gr-surface: #FFFFFF;
+  --gr-border: #DCE5E5;
+  --gr-text: #0B1220;
+  --gr-primary: #0D7D7D;
+  --gr-accent: #64C7C7;
+
+  /* Brand Colors (mapped to gr- tokens) */
+  --primary-green: var(--gr-primary, #16A34A);
   --secondary-green: #22C55E;
   --dark-green: #15803D;
   --light-green: #86EFAC;
   
   /* Accent Colors */
-  --accent-blue: #3B82F6;
+  --accent-blue: var(--gr-accent, #3B82F6);
   --accent-orange: #F97316;
   --accent-red: #EF4444;
   --accent-yellow: #EAB308;
   
   /* Neutral Colors */
-  --dark: #0F172A;
+  --dark: var(--gr-text, #0F172A);
   --medium: #475569;
   --light: #CBD5E1;
-  --background: #F8FAFC;
+  --background: var(--gr-bg, #F8FAFC);
   
   /* Channel Colors */
   --channel-cw: #E0F2FE;
@@ -64,10 +72,10 @@ h3 { font-size: 1.125rem; }
 
 /* Card System */
 .card {
-  background: white;
+  background: var(--gr-surface, white);
   border-radius: var(--radius);
   box-shadow: var(--shadow);
-  border: 1px solid #E2E8F0;
+  border: 1px solid var(--gr-border, #E2E8F0);
   padding: 1rem;
   margin-bottom: var(--gap);
 }
@@ -82,7 +90,7 @@ input, select, textarea, button {
   font-family: inherit;
   font-size: 0.875rem;
   border-radius: 6px;
-  border: 1px solid #D1D5DB;
+  border: 1px solid var(--gr-border, #D1D5DB);
   padding: 6px 12px;
 }
 
@@ -93,34 +101,35 @@ input:focus, select:focus, textarea:focus {
 }
 
 button {
-  background: white;
+  background: var(--gr-surface, white);
   cursor: pointer;
   font-weight: 500;
   transition: all 0.2s ease;
 }
 
 button:hover {
-  background: #F9FAFB;
+  background: var(--gr-bg, #F9FAFB);
 }
 
 button.primary {
-  background: var(--primary-green);
+  background: var(--gr-primary, var(--primary-green));
   color: white;
-  border-color: var(--primary-green);
+  border-color: var(--gr-primary, var(--primary-green));
 }
 
 button.primary:hover {
-  background: var(--dark-green);
+  background: var(--gr-primary, var(--primary-green));
+  filter: brightness(0.95);
 }
 
 button.ghost {
   background: transparent;
-  border-color: #E5E7EB;
+  border-color: var(--gr-border, #E5E7EB);
   color: var(--medium);
 }
 
 button.ghost:hover {
-  background: #F3F4F6;
+  background: var(--gr-bg, #F3F4F6);
 }
 
 button:disabled {
@@ -139,11 +148,11 @@ button:disabled {
 }
 
 .device-metrics {
-  background: #F8FAFC;
+  background: var(--gr-bg, #F8FAFC);
   border-radius: 6px;
   padding: 12px;
   margin-bottom: 12px;
-  border: 1px solid #E2E8F0;
+  border: 1px solid var(--gr-border, #E2E8F0);
 }
 
 .device-metric-row {
@@ -250,8 +259,8 @@ button:disabled {
 
 /* Device Spectrum (SPD) */
 .device-spectrum {
-  background: #FFFFFF;
-  border: 1px solid #E2E8F0;
+  background: var(--gr-surface, #FFFFFF);
+  border: 1px solid var(--gr-border, #E2E8F0);
   border-radius: 6px;
   padding: 8px;
   margin: 8px 0;
@@ -319,8 +328,8 @@ button:disabled {
 
 /* Status and Header */
 header {
-  background: white;
-  border-bottom: 1px solid #E5E7EB;
+  background: var(--gr-surface, white);
+  border-bottom: 1px solid var(--gr-border, #E5E7EB);
   padding: 12px 20px;
   display: flex;
   align-items: center;
@@ -333,17 +342,19 @@ header {
   font-size: 0.75rem;
   color: var(--medium);
   padding: 4px 8px;
-  background: #F3F4F6;
+  background: var(--gr-bg, #F3F4F6);
+  border: 1px solid var(--gr-border, #E5E7EB);
   border-radius: 4px;
 }
 
 .chip {
-  background: #E5E7EB;
+  background: var(--gr-bg, #E5E7EB);
   color: var(--medium);
   padding: 4px 8px;
   border-radius: 12px;
   font-size: 0.75rem;
   font-weight: 500;
+  border: 1px solid var(--gr-border, #E5E7EB);
 }
 
 .chip--icon {
@@ -361,11 +372,19 @@ input[type="checkbox"] {
 
 /* Farm Registration */
 .farm-summary {
-  background: var(--light-green);
-  color: var(--dark-green);
+  background: var(--gr-surface, var(--light-green));
+  color: var(--dark);
   padding: 8px 12px;
   border-radius: 6px;
   font-size: 0.875rem;
+}
+
+/* Branding preview chips */
+.color-chip {
+  width: 20px;
+  height: 20px;
+  border-radius: 6px;
+  border: 1px solid rgba(0,0,0,0.08);
 }
 
 /* Modals */
@@ -380,6 +399,26 @@ input[type="checkbox"] {
   pointer-events: none;
   transition: opacity 0.3s ease;
 }
+
+/* Room Modal (shares look with farm/cal) */
+.room-modal { position: fixed; inset:0; z-index:50; display:flex; align-items:center; justify-content:center; opacity:0; pointer-events:none; transition: opacity .3s ease; }
+.room-modal[aria-hidden="false"] { opacity:1; pointer-events:all; }
+.room-modal__backdrop { position:absolute; inset:0; background: rgb(0 0 0 / .5); }
+.room-modal__dialog { position:relative; background:white; border-radius: var(--radius); box-shadow: var(--shadow-lg); max-width:600px; width:90vw; max-height:90vh; overflow-y:auto; padding:24px; }
+.room-modal__close { position:absolute; top:16px; right:16px; background:none; border:none; font-size:24px; color: var(--medium); cursor:pointer; padding:4px; border-radius:4px; }
+.room-modal__close:hover { background:#F3F4F6; }
+.room-modal__footer { border-top:1px solid #E5E7EB; padding-top:16px; margin-top:24px; }
+.room-question { font-size:1.125rem; font-weight:600; margin-bottom:12px; color: var(--dark); }
+.room-step { display:none; }
+.room-step[data-active] { display:block; }
+
+/* Shared: chip-row for option buttons */
+.chip-row { display:flex; flex-wrap:wrap; gap:6px; }
+.chip-row .chip-option[data-active] { border-color: var(--gr-primary); background: rgba(16,185,129,0.06); }
+
+/* Shared: KB lists reused by room wizard */
+.farm-kb-results, .farm-kb-selected { list-style:none; padding:0; margin:0; display:flex; flex-direction:column; gap:6px; }
+.farm-kb-results li, .farm-kb-selected li { background:#F8FAFC; border:1px solid #E5E7EB; border-radius:6px; padding:8px; }
 
 .farm-modal[aria-hidden="false"], 
 .cal-modal[aria-hidden="false"], 
@@ -684,7 +723,7 @@ input[type="checkbox"] {
 
 .schedule-preview__bar {
   height: 24px;
-  background: linear-gradient(to right, #F3F4F6 0%, var(--primary-green) 25%, var(--primary-green) 75%, #F3F4F6 100%);
+  background: linear-gradient(to right, var(--gr-bg, #F3F4F6) 0%, var(--gr-primary, var(--primary-green)) 25%, var(--gr-primary, var(--primary-green)) 75%, var(--gr-bg, #F3F4F6) 100%);
   border-radius: 4px;
   margin-bottom: 8px;
 }

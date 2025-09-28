@@ -39,22 +39,10 @@ app.get("/healthz", async (req, res) => {
   res.json({ ok: true, controller: CTRL, controllerReachable, controllerStatus, envSource: ENV_SOURCE, azureLatestUrl: AZURE_LATEST_URL || null, ts: new Date(), dtMs: Date.now() - started });
 });
 
-// STRICT pass-through: client calls /api/* → controller receives /api/*
-// Express strips the mount "/api", so add it back via pathRewrite.
+// Proxy API
 app.use("/api", createProxyMiddleware({
   target: CTRL,
-  changeOrigin: true,
-  xfwd: true,
-  logLevel: 'debug',
-  // Ensure controller receives exactly one /api prefix
-  pathRewrite: (path /* e.g., "/devicedatas" or "/api/devicedatas" */) => {
-    return path.startsWith('/api/') ? path : `/api${path}`;
-  },
-  onProxyReq(proxyReq, req) {
-    // For visibility in logs
-    const outgoingPath = req.url.startsWith('/api/') ? req.url : `/api${req.url}`;
-    console.log(`[→] ${req.method} ${req.originalUrl} -> ${CTRL}${outgoingPath}`);
-  }
+  changeOrigin: true
 }));
 
 // Static files
