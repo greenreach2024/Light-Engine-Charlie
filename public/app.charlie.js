@@ -25,6 +25,7 @@ const STATE = {
   farm: null,
   environment: [],
   calibrations: [],
+  switchbotDevices: [],
   currentGroup: null,
   currentSchedule: null,
   researchMode: false,
@@ -2139,6 +2140,11 @@ class RoomWizard {
     };
     ['deviceRs485UnitId','device0v10Channel','device0v10Scale','deviceRs485Host','deviceWifiSsid','deviceWifiPsk','deviceBtName','deviceBtPin'].forEach(clearOnInput);
 
+    // Demo SwitchBot devices button
+    $('#roomDemoSwitchBot')?.addEventListener('click', () => {
+      this.addDemoSwitchBotDevices();
+    });
+
     // When model select changes we also toggle relevant setup forms (safety: also do this on vendor change when model list is built)
     const modelSelect = $('#roomDeviceModel');
     modelSelect?.addEventListener('change', (e)=>{
@@ -3622,6 +3628,202 @@ class RoomWizard {
     `;
   }
 
+  async addDemoSwitchBotDevices() {
+    try {
+      // Fetch real SwitchBot devices from the API
+      const response = await fetch('/api/switchbot/devices');
+      const data = await response.json();
+      
+      if (data.statusCode === 100 && data.body && data.body.deviceList) {
+        const realDevices = data.body.deviceList;
+        
+        // Clear existing devices and add real ones
+        this.data.devices = [];
+        
+        realDevices.forEach((device, index) => {
+          const demoDevice = {
+            name: device.deviceName || `Farm Device ${index + 1}`,
+            vendor: 'SwitchBot',
+            model: device.deviceType,
+            host: '4e6fc805b4a0dd7ed693af1dcf89d9731113d4706b2d796759aafe09cf8f07aed370d35bab4fb4799e1bda57d03c0aed',
+            switchBotId: device.deviceId,
+            hubId: device.hubDeviceId,
+            setup: this.getSetupForDeviceType(device.deviceType),
+            isReal: true,
+            realDeviceData: device
+          };
+          this.data.devices.push(demoDevice);
+        });
+        
+        console.log(`✅ Loaded ${realDevices.length} real SwitchBot devices for demo`);
+        
+      } else {
+        throw new Error('Failed to load real devices');
+      }
+    } catch (error) {
+      console.error('Failed to load real SwitchBot devices, using fallback:', error);
+      // Fallback to mock data if real API fails
+      this.addFallbackDemoDevices();
+    }
+
+    // Set shared SwitchBot configuration regardless of real vs fallback
+    this.setupSwitchBotConfiguration();
+  }
+
+  getSetupForDeviceType(deviceType) {
+    const type = deviceType.toLowerCase();
+    if (type.includes('meter') || type.includes('sensor')) {
+      return {
+        bluetooth: { name: `WoSensorTH_${Math.random().toString(36).substr(2, 6)}`, pin: null }
+      };
+    } else if (type.includes('plug') || type.includes('switch')) {
+      return {
+        wifi: { ssid: 'GrowFarm_IoT', psk: '********', useStatic: false, staticIp: null }
+      };
+    } else if (type.includes('bot')) {
+      return {
+        bluetooth: { name: `WoHand_${Math.random().toString(36).substr(2, 6)}`, pin: null }
+      };
+    } else {
+      return {
+        wifi: { ssid: 'GrowFarm_IoT', psk: '********', useStatic: true, staticIp: `192.168.1.${40 + Math.floor(Math.random() * 10)}` }
+      };
+    }
+  }
+
+  addFallbackDemoDevices() {
+    // Original mock devices as fallback
+    const demoDevices = [
+      {
+        name: 'Grow Room Temp/Humidity Sensor',
+        vendor: 'SwitchBot',
+        model: 'Meter Plus',
+        host: '4e6fc805b4a0dd7ed693af1dcf89d9731113d4706b2d796759aafe09cf8f07aed370d35bab4fb4799e1bda57d03c0aed',
+        setup: {
+          bluetooth: { name: 'WoSensorTH_A1B2C3', pin: null }
+        },
+        mockData: { temperature: 24.3, humidity: 52, battery: 87 }
+      },
+      {
+        name: 'Dehumidifier Smart Plug',
+        vendor: 'SwitchBot',
+        model: 'Plug Mini',
+        host: '4e6fc805b4a0dd7ed693af1dcf89d9731113d4706b2d796759aafe09cf8f07aed370d35bab4fb4799e1bda57d03c0aed',
+        setup: {
+          wifi: { ssid: 'GrowFarm_IoT', psk: '********', useStatic: false, staticIp: null }
+        },
+        mockData: { power: 450, voltage: 120.1, current: 3.75, state: 'on' }
+      },
+      {
+        name: 'Exhaust Fan Controller',
+        vendor: 'SwitchBot',
+        model: 'Bot',
+        host: '4e6fc805b4a0dd7ed693af1dcf89d9731113d4706b2d796759aafe09cf8f07aed370d35bab4fb4799e1bda57d03c0aed',
+        setup: {
+          bluetooth: { name: 'WoHand_D4E5F6', pin: null }
+        },
+        mockData: { position: 75, battery: 92, state: 'auto' }
+      },
+      {
+        name: 'CO2 Monitor',
+        vendor: 'SwitchBot',
+        model: 'Indoor Air Quality Monitor',
+        host: '4e6fc805b4a0dd7ed693af1dcf89d9731113d4706b2d796759aafe09cf8f07aed370d35bab4fb4799e1bda57d03c0aed',
+        setup: {
+          wifi: { ssid: 'GrowFarm_IoT', psk: '********', useStatic: true, staticIp: '192.168.1.45' }
+        },
+        mockData: { co2: 820, temperature: 23.8, humidity: 48, battery: 78 }
+      },
+      {
+        name: 'Water Pump Controller',
+        vendor: 'SwitchBot',
+        model: 'Plug',
+        host: '4e6fc805b4a0dd7ed693af1dcf89d9731113d4706b2d796759aafe09cf8f07aed370d35bab4fb4799e1bda57d03c0aed',
+        setup: {
+          wifi: { ssid: 'GrowFarm_IoT', psk: '********', useStatic: true, staticIp: '192.168.1.47' }
+        },
+        mockData: { power: 125, voltage: 120.3, current: 1.04, state: 'off', schedule: 'irrigation-cycle-1' }
+      }
+    ];
+
+    this.data.devices = this.data.devices || [];
+    demoDevices.forEach(device => {
+      this.data.devices.push(device);
+    });
+  }
+
+  setupSwitchBotConfiguration() {
+    // Also set some related wizard data to simulate a complete setup
+    this.data.hardwareCats = this.data.hardwareCats || [];
+    const newCategories = ['grow-lights', 'hvac', 'dehumidifier', 'fans', 'irrigation', 'controllers'];
+    newCategories.forEach(cat => {
+      if (!this.data.hardwareCats.includes(cat)) {
+        this.data.hardwareCats.push(cat);
+      }
+    });
+
+    // Set connectivity info for SwitchBot integration
+    this.data.connectivity = {
+      hasHub: 'yes',
+      hubType: 'Raspberry Pi 4 + SwitchBot Hub',
+      hubIp: '192.168.1.100',
+      cloudTenant: 'Azure',
+      switchbotToken: '4e6fc805b4a0dd7ed693af1dcf89d9731113d4706b2d796759aafe09cf8f07aed370d35bab4fb4799e1bda57d03c0aed',
+      switchbotSecret: '141c0bc9906ab1f4f73dd9f0c298046b'
+    };
+
+    // Update sensor categories to include what SwitchBot provides
+    this.data.sensors = this.data.sensors || { categories: [], placements: {} };
+    const sensorCats = ['temperature', 'humidity', 'co2', 'power'];
+    sensorCats.forEach(cat => {
+      if (!this.data.sensors.categories.includes(cat)) {
+        this.data.sensors.categories.push(cat);
+      }
+    });
+
+    // Set default placements
+    this.data.sensors.placements = {
+      temperature: 'canopy-level',
+      humidity: 'canopy-level', 
+      co2: 'mid-level',
+      power: 'electrical-panel'
+    };
+
+    // Re-render the devices list and update setup queue
+    this.renderDevicesList();
+    this.updateSetupQueue();
+
+    // Show success message
+    showToast({ 
+      title: 'SwitchBot Demo Added', 
+      msg: `Added ${demoDevices.length} SwitchBot devices with realistic sensor data and controls`, 
+      kind: 'success', 
+      icon: '🎮' 
+    });
+
+    // Auto-advance to next step if we're on devices step
+    if (this.steps[this.currentStep] === 'devices') {
+      setTimeout(() => {
+        if (this.validateCurrentStep()) {
+          this.currentStep++;
+          this.showStep(this.currentStep);
+        }
+      }, 1500);
+    }
+  }
+
+  nextStep() {
+    if (this.validateCurrentStep()) {
+      this.currentStep++;
+      this.showStep(this.currentStep);
+    }
+  }
+
+  prevStep() {
+    this.currentStep = Math.max(0, this.currentStep - 1);
+    this.showStep(this.currentStep);
+  }
+
   async saveRoom(e){
     e.preventDefault();
     // Assign id if new
@@ -3677,7 +3879,7 @@ async function loadAllData() {
     }
     
     // Load static data files
-    const [groups, schedules, plans, environment, calibrations, deviceMeta, deviceKB, deviceManufacturers, farm, rooms] = await Promise.all([
+    const [groups, schedules, plans, environment, calibrations, deviceMeta, deviceKB, deviceManufacturers, farm, rooms, switchbotDevices] = await Promise.all([
       loadJSON('./data/groups.json'),
       loadJSON('./data/schedules.json'),
       loadJSON('./data/plans.json'),
@@ -3687,7 +3889,8 @@ async function loadAllData() {
         loadJSON('./data/device-kb.json'),
         loadJSON('./data/device-manufacturers.json'),
       loadJSON('./data/farm.json'),
-      loadJSON('./data/rooms.json')
+      loadJSON('./data/rooms.json'),
+      loadJSON('./data/switchbot-devices.json')
     ]);
 
   STATE.groups = groups?.groups || [];
@@ -3696,6 +3899,7 @@ async function loadAllData() {
   STATE.environment = environment?.zones || [];
     STATE.calibrations = calibrations?.calibrations || [];
   STATE.deviceMeta = deviceMeta?.devices || {};
+  STATE.switchbotDevices = switchbotDevices?.devices || [];
   STATE.farm = farm || (() => { try { return JSON.parse(localStorage.getItem('gr.farm') || 'null'); } catch { return null; } })() || {};
   if (!Array.isArray(STATE.farm?.locations)) STATE.farm.locations = STATE.farm.locations ? [].concat(STATE.farm.locations) : [];
   try { if (STATE.farm && Object.keys(STATE.farm).length) localStorage.setItem('gr.farm', JSON.stringify(STATE.farm)); } catch {}
@@ -3731,6 +3935,7 @@ async function loadAllData() {
     renderPlansPanel();
   renderEnvironment();
   renderRooms();
+  renderSwitchBotDevices();
   // Start background polling for environment telemetry
   startEnvPolling();
 
@@ -4061,6 +4266,92 @@ function startEnvPolling(intervalMs = 10000) {
   clearInterval(ENV_POLL_TIMER);
   ENV_POLL_TIMER = setInterval(reloadEnvironment, intervalMs);
 }
+
+// --- SwitchBot Devices Management ---
+function renderSwitchBotDevices() {
+  const container = document.getElementById('switchbotDevicesList');
+  if (!container) return;
+
+  // Show a summary view with a link to the full manager
+  container.innerHTML = `
+    <div class="row" style="justify-content:space-between;align-items:center;padding:12px;background:#f8fafc;border-radius:8px;border:1px solid #e2e8f0">
+      <div>
+        <div class="row" style="align-items:center;gap:8px;margin-bottom:4px">
+          <div style="width:8px;height:8px;border-radius:50%;background:#10b981"></div>
+          <strong>Live SwitchBot Integration Active</strong>
+        </div>
+        <p class="tiny" style="margin:0;color:#64748b">Real-time monitoring of environmental sensors and smart devices</p>
+      </div>
+      <button onclick="openSwitchBotManager()" class="primary">🏠 Open Manager</button>
+    </div>
+    <div class="tiny" style="margin-top:8px;color:#64748b;text-align:center">
+      Click "Open Device Manager" above for full device control and live status monitoring
+    </div>
+  `;
+}
+
+function openSwitchBotManager() {
+  const width = Math.min(1400, window.screen.width * 0.9);
+  const height = Math.min(900, window.screen.height * 0.9);
+  const left = (window.screen.width - width) / 2;
+  const top = (window.screen.height - height) / 2;
+  
+  window.open(
+    '/switchbot.html',
+    'switchbot-manager',
+    `width=${width},height=${height},left=${left},top=${top},scrollbars=yes,resizable=yes`
+  );
+}
+
+async function refreshSwitchBotDevices() {
+  try {
+    // Try to fetch live data from SwitchBot API
+    const response = await fetch('/switchbot/devices');
+    const data = await response.json();
+    
+    if (data.statusCode === 100 && data.body?.deviceList) {
+      // Update the local data file with live data
+      const devices = data.body.deviceList.map(device => ({
+        id: device.deviceId,
+        name: device.deviceName,
+        type: device.deviceType,
+        location: '', // This would need to be set by user
+        equipment_controlled: '', // This would need to be set by user
+        status: 'active',
+        battery: null, // Would be fetched from individual device status
+        lastSeen: new Date().toISOString(),
+        readings: {} // Would be populated from device status
+      }));
+      
+      // Save to local data file
+      const ok = await saveJSON('./data/switchbot-devices.json', { devices });
+      
+      if (ok) {
+        STATE.switchbotDevices = devices;
+        renderSwitchBotDevices();
+        showToast({
+          title: 'SwitchBot Sync Complete',
+          msg: `Found ${devices.length} devices from SwitchBot API`,
+          kind: 'success',
+          icon: '🏠'
+        }, 3000);
+      }
+    } else {
+      throw new Error(data.message || 'Failed to fetch devices');
+    }
+  } catch (error) {
+    console.error('Failed to refresh SwitchBot devices:', error);
+    showToast({
+      title: 'SwitchBot Sync Failed',
+      msg: 'Could not connect to SwitchBot API. Check connection.',
+      kind: 'error',
+      icon: '❌'
+    }, 4000);
+  }
+}
+
+// Make functions globally available
+window.openSwitchBotManager = openSwitchBotManager;
 
 function renderPlans() {
   // Populate the Group Plan select with current plans
@@ -5548,6 +5839,13 @@ document.addEventListener('DOMContentLoaded', async () => {
       e.target.value = '';
     });
   } catch (e) { console.warn('Plans panel wiring failed', e); }
+  
+  // Wire SwitchBot panel buttons
+  try {
+    document.getElementById('btnOpenSwitchBotManager')?.addEventListener('click', openSwitchBotManager);
+    document.getElementById('btnRefreshSwitchBot')?.addEventListener('click', refreshSwitchBotDevices);
+  } catch (e) { console.warn('SwitchBot panel wiring failed', e); }
+  
   // Load device KB for vendor/model selects
   await loadDeviceManufacturers();
   // Apply saved branding if present

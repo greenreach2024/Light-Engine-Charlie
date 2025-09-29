@@ -1,0 +1,66 @@
+{
+  "devices": [
+    {
+      "id": "switchbot_001",
+      "name": "Temperature Sensor 1",
+      "type": "SwitchBot Meter",
+      "location": "Grow Room A",
+      "equipment_controlled": "HVAC System",
+      "status": "active",
+      "battery": 85,
+      "lastSeen": "2024-09-29T10:30:00Z",
+      "readings": {
+        "temperature": 24.5,
+        "humidity": 65,
+        "timestamp": "2024-09-29T10:30:00Z"
+      }
+    },
+    {
+      "id": "switchbot_002", 
+      "name": "CO2 Monitor",
+      "type": "SwitchBot CO2 Detector",
+      "location": "Grow Room B",
+      "equipment_controlled": "CO2 Injection System",
+      "status": "active",
+      "battery": 92,
+      "lastSeen": "2024-09-29T10:28:00Z",
+      "readings": {
+        "co2": 1200,
+        "temperature": 23.8,
+        "humidity": 70,
+        "timestamp": "2024-09-29T10:28:00Z"
+      }
+    },
+    {
+      "id": "switchbot_003",
+      "name": "Motion Detector",
+      "type": "SwitchBot Motion Sensor",
+      "location": "Main Corridor",
+      "equipment_controlled": "Security Lighting",
+      "status": "active",
+      "battery": 78,
+      "lastSeen": "2024-09-29T10:25:00Z",
+      "readings": {
+        "motion": false,
+        "illuminance": 450,
+        "timestamp": "2024-09-29T10:25:00Z"
+      }
+    },
+    {
+      "id": "switchbot_004",
+      "name": "Smart Plug A",
+      "type": "SwitchBot Plug Mini",
+      "location": "Propagation Area", 
+      "equipment_controlled": "Heat Mat",
+      "status": "active",
+      "battery": null,
+      "lastSeen": "2024-09-29T10:32:00Z",
+      "readings": {
+        "power": 15.2,
+        "voltage": 120,
+        "current": 0.13,
+        "timestamp": "2024-09-29T10:32:00Z"
+      }
+    }
+  ]
+}

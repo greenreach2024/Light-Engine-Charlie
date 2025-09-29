@@ -4,6 +4,8 @@ import fs from "fs";
 import path from "path";
 import { fileURLToPath } from 'url';
 import Datastore from 'nedb-promises';
+import crypto from 'crypto';
+import https from 'https';
 
 const app = express();
 const PORT = process.env.PORT || 8091;
@@ -207,6 +209,170 @@ app.get("/healthz", async (req, res) => {
     }
   } catch (_) {}
   res.json({ ok: true, controller: getController(), controllerReachable, controllerStatus, envSource: ENV_SOURCE, azureLatestUrl: AZURE_LATEST_URL || null, ts: new Date(), dtMs: Date.now() - started });
+});
+
+// SwitchBot Real API Endpoints - MUST be before proxy middleware
+const SWITCHBOT_TOKEN = "4e6fc805b4a0dd7ed693af1dcf89d9731113d4706b2d796759aafe09cf8f07aed370d35bab4fb4799e1bda57d03c0aed";
+const SWITCHBOT_SECRET = "141c0bc9906ab1f4f73dd9f0c298046b";
+
+function getSwitchBotHeaders() {
+  const t = Date.now().toString();
+  const nonce = crypto.randomBytes(8).toString('hex');
+  const strToSign = SWITCHBOT_TOKEN + t + nonce;
+  const sign = crypto.createHmac('sha256', SWITCHBOT_SECRET).update(strToSign).digest('base64');
+  return {
+    'Authorization': SWITCHBOT_TOKEN,
+    't': t,
+    'sign': sign,
+    'nonce': nonce,
+    'Content-Type': 'application/json; charset=utf8'
+  };
+}
+
+function switchBotApiRequest(path, method = 'GET', data = null) {
+  return new Promise((resolve, reject) => {
+    const options = {
+      hostname: 'api.switch-bot.com',
+      path: '/v1.1' + path,
+      method: method,
+      headers: getSwitchBotHeaders()
+    };
+    
+    const req = https.request(options, (res) => {
+      const chunks = [];
+      res.on('data', chunk => chunks.push(chunk));
+      res.on('end', () => {
+        try {
+          const body = JSON.parse(Buffer.concat(chunks).toString('utf8'));
+          resolve({ status: res.statusCode, body });
+        } catch (e) {
+          reject(e);
+        }
+      });
+    });
+    
+    req.on('error', reject);
+    
+    if (data && method === 'POST') {
+      req.write(JSON.stringify(data));
+    }
+    
+    req.end();
+  });
+}
+
+app.get("/api/switchbot/devices", async (req, res) => {
+  try {
+    const response = await switchBotApiRequest('/devices');
+    res.json(response.body);
+  } catch (error) {
+    console.error('SwitchBot API error:', error);
+    res.status(500).json({
+      statusCode: 500,
+      message: "Failed to fetch devices from SwitchBot API",
+      error: error.message
+    });
+  }
+});
+
+app.get("/api/switchbot/status", async (req, res) => {
+  try {
+    const response = await switchBotApiRequest('/devices');
+    // Return device status with live data
+    const devices = response.body.body.deviceList.map(device => ({
+      deviceId: device.deviceId,
+      deviceName: device.deviceName,
+      deviceType: device.deviceType,
+      status: "online",
+      lastUpdate: new Date().toISOString(),
+      ...device
+    }));
+    
+    res.json({
+      statusCode: 100,
+      message: "success",
+      devices: devices,
+      timestamp: new Date().toISOString()
+    });
+  } catch (error) {
+    console.error('SwitchBot status API error:', error);
+    res.status(500).json({
+      statusCode: 500,
+      message: "Failed to fetch device status from SwitchBot API",
+      error: error.message
+    });
+  }
+});
+
+// Individual device status endpoint
+app.get("/api/switchbot/devices/:deviceId/status", async (req, res) => {
+  try {
+    const { deviceId } = req.params;
+    console.log(`[charlie] Fetching status for device: ${deviceId}`);
+    
+    const response = await switchBotApiRequest(`/devices/${deviceId}/status`);
+    
+    if (response.body.statusCode === 100) {
+      res.json({
+        statusCode: 100,
+        message: "success",
+        body: {
+          ...response.body.body,
+          deviceId: deviceId,
+          lastUpdate: new Date().toISOString()
+        }
+      });
+    } else {
+      res.status(400).json({
+        statusCode: response.body.statusCode || 400,
+        message: response.body.message || "Failed to get device status"
+      });
+    }
+  } catch (error) {
+    console.error(`SwitchBot device status API error for ${req.params.deviceId}:`, error);
+    res.status(500).json({
+      statusCode: 500,
+      message: "Failed to fetch device status from SwitchBot API",
+      error: error.message
+    });
+  }
+});
+
+// Device control endpoints for plugs
+app.post("/api/switchbot/devices/:deviceId/commands", async (req, res) => {
+  try {
+    const { deviceId } = req.params;
+    const { command, parameter } = req.body;
+    
+    console.log(`[charlie] Sending command to device ${deviceId}: ${command} ${parameter || ''}`);
+    
+    const commandData = {
+      command: command,
+      parameter: parameter || "default"
+    };
+    
+    const response = await switchBotApiRequest(`/devices/${deviceId}/commands`, 'POST', commandData);
+    
+    if (response.body.statusCode === 100) {
+      res.json({
+        statusCode: 100,
+        message: "Command sent successfully",
+        body: response.body.body
+      });
+    } else {
+      res.status(400).json({
+        statusCode: response.body.statusCode || 400,
+        message: response.body.message || "Failed to send command"
+      });
+    }
+  } catch (error) {
+    console.error(`SwitchBot command API error for ${req.params.deviceId}:`, error);
+    res.status(500).json({
+      statusCode: 500,
+      message: "Failed to send command to SwitchBot API",
+      error: error.message
+    });
+  }
 });
 
 // STRICT pass-through: client calls /api/* → controller receives /api/*
@@ -704,6 +870,8 @@ app.post("/data/:name", (req, res) => {
     return res.status(500).json({ ok: false, error: e.message });
   }
 });
+
+// Data persistence endpoints
 
 app.listen(PORT, () => {
   console.log(`[charlie] running http://127.0.0.1:${PORT} → ${getController()}`);

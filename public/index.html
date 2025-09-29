@@ -339,7 +339,24 @@
       </div>
     </section>
 
-    
+    <!-- SwitchBot Devices Panel -->
+    <section id="switchbotPanel" class="card">
+      <div class="row" style="justify-content:space-between;align-items:center">
+        <h2 style="margin:0">
+          SwitchBot Devices
+          <span class="hint" tabindex="0" data-tip="Manage connected SwitchBot devices. View status, set names and locations, and identify controlled equipment.">?</span>
+        </h2>
+        <div class="row" style="gap:6px">
+          <button id="btnOpenSwitchBotManager" type="button" class="primary">🏠 Open Device Manager</button>
+          <button id="btnRefreshSwitchBot" type="button" class="ghost">Refresh</button>
+        </div>
+      </div>
+      <p class="tiny" style="margin:8px 0 0;color:#475569">Configure and monitor your SwitchBot environmental sensors and smart devices. Click "Open Device Manager" to access the full management interface with live data.</p>
+      
+      <div id="switchbotDevicesList" style="margin-top:12px">
+        <!-- SwitchBot devices will be loaded here -->
+      </div>
+    </section>
 
     <section class="card env-card">
       <div class="env-card__header">
@@ -540,6 +557,7 @@
                 <input id="roomDeviceHost" type="text" placeholder="Token or IP" style="min-width:160px">
                 <button id="roomAddDeviceBtn" type="button" class="primary">Add device</button>
                 <button id="roomDeviceScan" type="button" class="ghost">Scan network</button>
+                <button id="roomDemoSwitchBot" type="button" class="ghost" style="background:#0ea5e9;color:white">� Demo: Load Real SwitchBot Devices</button>
               </div>
               <div class="tiny" style="color:#475569;margin-top:8px">
                 <strong>SwitchBot:</strong> App → Profile → Preferences → tap App Version 5–15× to unlock Developer Options, then copy the token + secret.<br>
