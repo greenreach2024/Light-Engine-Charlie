@@ -1,0 +1,21 @@
+{
+  "generated": "2025-09-28",
+  "items": [
+    {
+      "id": "rq-mg3xfxhx",
+      "vendor": "Gavita",
+      "model": "Pro 1700e",
+      "watts": 645,
+      "control": "0-10V",
+      "tags": [
+        "LED",
+        "bar",
+        "research"
+      ],
+      "confidence": 0.92,
+      "source": "kb",
+      "created_at": "2025-09-28T16:41:36.597Z",
+      "note": "Added to research queue from KB results"
+    }
+  ]
+}

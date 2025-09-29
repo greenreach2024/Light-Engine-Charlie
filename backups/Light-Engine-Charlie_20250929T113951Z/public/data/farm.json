@@ -1,0 +1,31 @@
+{
+  "farmName": "Test Farm",
+  "branding": {
+    "name": "Test Farm Theme",
+    "logo": "",
+    "palette": {
+      "primary": "#0d7d7d",
+      "accent": "#64c7c7",
+      "text": "#0b1220",
+      "surface": "#ffffff",
+      "background": "#f7fafa",
+      "border": "#DCE5E5",
+      "primarySoft": "#DDEDED",
+      "accentSoft": "#ECF8F8"
+    },
+    "sourceUrl": "http://127.0.0.1:8091",
+    "fontFamily": "",
+    "fontCss": [],
+    "logoHeight": 28
+  },
+  "locations": [
+    "North Greenhouse"
+  ],
+  "contact": {
+    "name": "Anne",
+    "email": "info@greenreachfarms.com",
+    "phone": "6138881031"
+  },
+  "timezone": "America/Toronto",
+  "registered": "2025-09-28T23:03:16.243Z"
+}
