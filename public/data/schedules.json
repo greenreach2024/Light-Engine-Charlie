@@ -6,9 +6,18 @@
       "mode": "one",
       "timezone": "America/Toronto",
       "cycles": [
-        { "on": "06:00", "off": "22:00" }
+        {
+          "on": "06:00",
+          "off": "22:00"
+        }
       ],
-      "lights": ["light-001", "light-002", "light-003"],
+      "lights": [
+        "light-001",
+        "light-002",
+        "light-003",
+        "light-004",
+        "light-005"
+      ],
       "active": true
     },
     {
@@ -17,9 +26,15 @@
       "mode": "one",
       "timezone": "America/Toronto",
       "cycles": [
-        { "on": "07:00", "off": "21:00" }
+        {
+          "on": "07:00",
+          "off": "21:00"
+        }
       ],
-      "lights": ["light-004", "light-005"],
+      "lights": [
+        "light-004",
+        "light-005"
+      ],
       "active": true
     },
     {
@@ -28,11 +43,76 @@
       "mode": "two",
       "timezone": "America/Toronto",
       "cycles": [
-        { "on": "06:00", "off": "12:00" },
-        { "on": "18:00", "off": "22:00" }
+        {
+          "on": "06:00",
+          "off": "12:00"
+        },
+        {
+          "on": "18:00",
+          "off": "22:00"
+        }
       ],
       "lights": [],
       "active": false
+    },
+    {
+      "id": "schedule-gn01jt",
+      "name": "Custom Schedule",
+      "mode": "one",
+      "timezone": "America/Toronto",
+      "cycles": [
+        {
+          "on": "08:00",
+          "off": "20:00"
+        }
+      ],
+      "active": true
+    },
+    {
+      "id": "schedule-pdpf3g",
+      "name": "Custom Schedule",
+      "mode": "one",
+      "timezone": "America/Toronto",
+      "cycles": [
+        {
+          "on": "00:00",
+          "off": "20:00"
+        }
+      ],
+      "active": true
+    },
+    {
+      "id": "schedule-oizhxh",
+      "name": "Custom Schedule",
+      "mode": "one",
+      "timezone": "America/Toronto",
+      "cycles": [
+        {
+          "on": "00:00",
+          "off": "20:00"
+        }
+      ],
+      "active": true
+    },
+    {
+      "id": "schedule-veg-18-6",
+      "name": "Veg 18/6",
+      "mode": "one",
+      "timezone": "America/Toronto",
+      "cycles": [
+        { "on": "06:00", "off": "00:00" }
+      ],
+      "active": true
+    },
+    {
+      "id": "schedule-flower-12-12",
+      "name": "Flower 12/12",
+      "mode": "one",
+      "timezone": "America/Toronto",
+      "cycles": [
+        { "on": "08:00", "off": "20:00" }
+      ],
+      "active": true
     }
   ]
 }

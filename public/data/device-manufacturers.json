@@ -7,7 +7,7 @@
       "country": "JP",
       "models": [
         { "model": "SwitchBot Bulb A19", "connectivity": ["wifi"], "features": ["rgb","dimmable","schedule","scenes"] },
-        { "model": "SwitchBot Bot", "connectivity": ["bluetooth","infrared"], "features": ["push-button-actuation","automation","ir-bridge-required"] },
+  { "model": "SwitchBot Bot", "connectivity": ["bluetooth","infrared"], "features": ["push-button-actuation","automation","ir-bridge-required"], "requiresHub": true },
         { "model": "SwitchBot Hub Mini", "connectivity": ["wifi"], "features": ["bluetooth-bridge","ir-bridge","cloud-api"] }
       ],
       "protocols": ["Wi‑Fi","Bluetooth LE"],
@@ -48,7 +48,7 @@
       "country": "CN",
       "models": [
         { "model": "Generic Tuya Smart Plug", "connectivity": ["wifi"], "features": ["on-off","energy-monitoring","cloud-first"] },
-        { "model": "Tuya Zigbee Bulb", "connectivity": ["zigbee"], "features": ["rgb","dimming"] }
+  { "model": "Tuya Zigbee Bulb", "connectivity": ["zigbee"], "features": ["rgb","dimming"], "requiresHub": true }
       ],
       "protocols": ["Wi‑Fi","Zigbee","Cloud API"],
       "notes": "Huge ecosystem of rebranded devices; local control varies. Many support Tuya cloud or can be integrated via Tuya local/virtual APIs or Tuya-convert alternatives."
@@ -57,7 +57,7 @@
       "name": "Philips Hue (Signify)",
       "country": "NL",
       "models": [
-        { "model": "Hue Bulb (White & Color)", "connectivity": ["zigbee"], "features": ["rgb","dimming","hue-ecosystem"] },
+  { "model": "Hue Bulb (White & Color)", "connectivity": ["zigbee"], "features": ["rgb","dimming","hue-ecosystem"], "requiresHub": true },
         { "model": "Hue Bridge", "connectivity": ["ethernet","zigbee"], "features": ["local-api","scenes","schedules"] }
       ],
       "protocols": ["Zigbee","REST (Bridge)"],
@@ -95,7 +95,7 @@
       "country": "CN",
       "models": [
         { "model": "Aqara Hub", "connectivity": ["zigbee","wifi"], "features": ["zoning","sensors","local-bridge"] },
-        { "model": "Aqara Temperature Sensor", "connectivity": ["zigbee"], "features": ["temp","humidity"] }
+  { "model": "Aqara Temperature Sensor", "connectivity": ["zigbee"], "features": ["temp","humidity"], "requiresHub": true }
       ],
       "protocols": ["Zigbee","HomeKit (bridge)"]
     },
@@ -113,7 +113,7 @@
       "name": "Bluetooth LE sensor makers (generic)",
       "country": "various",
       "models": [
-        { "model": "BLE Temperature/Humidity sensor", "connectivity": ["bluetooth"], "features": ["temp","humidity","battery"] }
+  { "model": "BLE Temperature/Humidity sensor", "connectivity": ["bluetooth"], "features": ["temp","humidity","battery"], "requiresHub": true }
       ],
       "protocols": ["Bluetooth LE"],
       "notes": "Used for low-power sensors (temp/RH/soil) and often require a hub or a BLE gateway for cloud/local bridging."

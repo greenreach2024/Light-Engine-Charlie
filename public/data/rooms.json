@@ -1,32 +1,3 @@
 {
-  "rooms": [
-    {
-      "id": "smoke-room-1",
-      "name": "Smoke Test Room",
-      "location": "Bench A",
-      "layout": "Single rack",
-      "fixtures": [],
-      "controlMethod": "local",
-      "devices": [
-        {
-          "id": "dev-smoke-1",
-          "name": "TP-Link HS100",
-          "vendor": "TP-Link (Kasa)",
-          "model": "HS100",
-          "host": "192.168.1.100",
-          "setup": {
-            "wifi": {
-              "ssid": "TestNet",
-              "psk": "testing123",
-              "static": false
-            }
-          }
-        }
-      ],
-      "sensors": {
-        "categories": []
-      },
-      "energy": {}
-    }
-  ]
+  "rooms": []
 }

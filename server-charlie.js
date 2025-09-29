@@ -3,10 +3,13 @@ import { createProxyMiddleware } from "http-proxy-middleware";
 import fs from "fs";
 import path from "path";
 import { fileURLToPath } from 'url';
+import Datastore from 'nedb-promises';
 
 const app = express();
 const PORT = process.env.PORT || 8091;
-const CTRL = process.env.CTRL || "http://192.168.2.80:3000";
+// Default controller target. Can be overridden with the CTRL env var.
+// Use the Pi forwarder when available for remote device reachability during development.
+let CURRENT_CONTROLLER = process.env.CTRL || "http://100.65.187.59:8089";
 // Environment source: "local" (default) reads public/data/env.json
 // or "azure" pulls from an Azure Functions endpoint that returns latest readings
 const AZURE_LATEST_URL = process.env.AZURE_LATEST_URL || "";
@@ -14,8 +17,161 @@ const ENV_SOURCE = process.env.ENV_SOURCE || (AZURE_LATEST_URL ? "azure" : "loca
 const ENV_PATH = path.resolve("./public/data/env.json");
 const DATA_DIR = path.resolve("./public/data");
 const FARM_PATH = path.join(DATA_DIR, 'farm.json');
+const CONTROLLER_PATH = path.join(DATA_DIR, 'controller.json');
+// Device DB (outside public): ./data/devices.nedb
+const DB_DIR = path.resolve('./data');
+const DB_PATH = path.join(DB_DIR, 'devices.nedb');
+
+// Controller helpers: load persisted value if present; allow runtime updates
+function ensureDataDir() {
+  try { fs.mkdirSync(DATA_DIR, { recursive: true }); } catch {}
+}
+function ensureDbDir(){ try { fs.mkdirSync(DB_DIR, { recursive: true }); } catch {} }
+function isHttpUrl(u){ try { const x=new URL(u); return x.protocol==='http:'||x.protocol==='https:'; } catch { return false; } }
+function loadControllerFromDisk(){
+  try {
+    if (fs.existsSync(CONTROLLER_PATH)) {
+      const obj = JSON.parse(fs.readFileSync(CONTROLLER_PATH, 'utf8'));
+      if (obj && typeof obj.url === 'string' && isHttpUrl(obj.url)) {
+        CURRENT_CONTROLLER = obj.url.trim();
+      }
+    }
+  } catch {}
+}
+function persistControllerToDisk(url){
+  ensureDataDir();
+  try { fs.writeFileSync(CONTROLLER_PATH, JSON.stringify({ url }, null, 2)); } catch {}
+}
+function getController(){ return CURRENT_CONTROLLER; }
+function setController(url){ CURRENT_CONTROLLER = url; persistControllerToDisk(url); console.log(`[charlie] controller set → ${url}`); }
+
+// Initialize controller from disk if available
+loadControllerFromDisk();
 
 app.use(express.json({ limit: "1mb" }));
+
+// --- Device Database (NeDB) ---
+function deviceDocToJson(d){
+  if (!d) return null;
+  const { _id, ...rest } = d; return rest;
+}
+
+function createDeviceStore(){
+  ensureDbDir();
+  const store = Datastore.create({ filename: DB_PATH, autoload: true, timestampData: true });
+  return store;
+}
+
+async function seedDevicesFromMetaNedb(store){
+  try {
+    const count = await store.count({});
+    if (count > 0) return;
+    const metaPath = path.join(DATA_DIR, 'device-meta.json');
+    if (!fs.existsSync(metaPath)) return;
+    const meta = JSON.parse(fs.readFileSync(metaPath, 'utf8'));
+    const devices = meta?.devices || {};
+    const rows = Object.entries(devices).map(([id, m])=>({
+      id,
+      deviceName: m.deviceName || (/^light-/i.test(id) ? id.replace('light-','Light ').toUpperCase() : id),
+      manufacturer: m.manufacturer || '',
+      model: m.model || '',
+      serial: m.serial || '',
+      watts: m.watts || m.nominalW || null,
+      spectrumMode: m.spectrumMode || '',
+      transport: m.transport || m.conn || m.connectivity || '',
+      farm: m.farm || '', room: m.room || '', zone: m.zone || '', module: m.module || '', level: m.level || '', side: m.side || '',
+      extra: m
+    }));
+    await store.insert(rows);
+    console.log(`[charlie] seeded ${rows.length} device(s) from device-meta.json`);
+  } catch (e) {
+    console.warn('[charlie] seedDevicesFromMeta (NeDB) failed:', e.message);
+  }
+}
+
+const devicesStore = createDeviceStore();
+await seedDevicesFromMetaNedb(devicesStore);
+
+// Devices API (NeDB)
+function setApiCors(res){
+  res.setHeader('Access-Control-Allow-Origin', '*');
+  res.setHeader('Access-Control-Allow-Methods', 'GET,POST,PATCH,DELETE,OPTIONS');
+  res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
+}
+
+app.options('/devices', (req,res)=>{ setApiCors(res); res.status(204).end(); });
+app.options('/devices/:id', (req,res)=>{ setApiCors(res); res.status(204).end(); });
+
+// GET /devices → list
+app.get('/devices', async (req, res) => {
+  try {
+    setApiCors(res);
+    const rows = await devicesStore.find({});
+    rows.sort((a,b)=> String(a.id||'').localeCompare(String(b.id||'')));
+    return res.json({ devices: rows.map(deviceDocToJson) });
+  } catch (e) {
+    return res.status(500).json({ ok:false, error: e.message });
+  }
+});
+
+// GET /devices/:id → one
+app.get('/devices/:id', async (req, res) => {
+  try {
+    setApiCors(res);
+    const row = await devicesStore.findOne({ id: req.params.id });
+    if (!row) return res.status(404).json({ ok:false, error:'not found' });
+    return res.json(deviceDocToJson(row));
+  } catch (e) {
+    return res.status(500).json({ ok:false, error: e.message });
+  }
+});
+
+// POST /devices → upsert (requires id)
+app.post('/devices', async (req, res) => {
+  try {
+    setApiCors(res);
+    const d = req.body || {};
+    if (!d.id || typeof d.id !== 'string') return res.status(400).json({ ok:false, error:'id required' });
+    const existing = await devicesStore.findOne({ id: d.id });
+    if (existing) {
+      await devicesStore.update({ id: d.id }, { $set: { ...existing, ...d, updatedAt: new Date().toISOString() } }, {});
+    } else {
+      await devicesStore.insert({ ...d, createdAt: new Date().toISOString(), updatedAt: new Date().toISOString() });
+    }
+    const row = await devicesStore.findOne({ id: d.id });
+    return res.json({ ok:true, device: deviceDocToJson(row) });
+  } catch (e) {
+    return res.status(500).json({ ok:false, error: e.message });
+  }
+});
+
+// PATCH /devices/:id → partial update
+app.patch('/devices/:id', async (req, res) => {
+  try {
+    setApiCors(res);
+    const id = req.params.id;
+    const existing = await devicesStore.findOne({ id });
+    if (!existing) return res.status(404).json({ ok:false, error:'not found' });
+    const now = { ...existing, ...req.body, updatedAt: new Date().toISOString() };
+    await devicesStore.update({ id }, { $set: now }, {});
+    const row = await devicesStore.findOne({ id });
+    return res.json({ ok:true, device: deviceDocToJson(row) });
+  } catch (e) {
+    return res.status(500).json({ ok:false, error: e.message });
+  }
+});
+
+// DELETE /devices/:id
+app.delete('/devices/:id', async (req, res) => {
+  try {
+    setApiCors(res);
+    const id = req.params.id;
+    const num = await devicesStore.remove({ id }, {});
+    return res.json({ ok:true, deleted: num });
+  } catch (e) {
+    return res.status(500).json({ ok:false, error: e.message });
+  }
+});
 
 // Health (includes quick controller reachability check)
 app.get("/healthz", async (req, res) => {
@@ -26,9 +182,23 @@ app.get("/healthz", async (req, res) => {
     const ac = new AbortController();
     const t = setTimeout(() => ac.abort(), 1200);
     try {
-      const r = await fetch(CTRL, { method: 'HEAD', signal: ac.signal });
+      const base = getController().replace(/\/$/, '');
+      // 1) HEAD / (fast)
+      let r = await fetch(base, { method: 'HEAD', signal: ac.signal });
       controllerReachable = r.ok;
       controllerStatus = r.status;
+      // 2) If not OK, try GET /healthz (common on forwarders)
+      if (!controllerReachable || (typeof controllerStatus === 'number' && controllerStatus >= 400)) {
+        r = await fetch(`${base}/healthz`, { method: 'GET', headers: { 'accept': '*/*' }, signal: ac.signal });
+        controllerReachable = r.ok;
+        controllerStatus = r.status;
+      }
+      // 3) If still not OK, try GET /api/healthz (some controllers mount under /api)
+      if (!controllerReachable || (typeof controllerStatus === 'number' && controllerStatus >= 400)) {
+        r = await fetch(`${base}/api/healthz`, { method: 'GET', headers: { 'accept': '*/*' }, signal: ac.signal });
+        controllerReachable = r.ok;
+        controllerStatus = r.status;
+      }
     } catch (e) {
       controllerReachable = false;
       controllerStatus = e.name === 'AbortError' ? 'timeout' : (e.message || 'error');
@@ -36,13 +206,15 @@ app.get("/healthz", async (req, res) => {
       clearTimeout(t);
     }
   } catch (_) {}
-  res.json({ ok: true, controller: CTRL, controllerReachable, controllerStatus, envSource: ENV_SOURCE, azureLatestUrl: AZURE_LATEST_URL || null, ts: new Date(), dtMs: Date.now() - started });
+  res.json({ ok: true, controller: getController(), controllerReachable, controllerStatus, envSource: ENV_SOURCE, azureLatestUrl: AZURE_LATEST_URL || null, ts: new Date(), dtMs: Date.now() - started });
 });
 
 // STRICT pass-through: client calls /api/* → controller receives /api/*
 // Express strips the mount "/api", so add it back via pathRewrite.
 app.use("/api", createProxyMiddleware({
-  target: CTRL,
+  // Initial target is required; router() will be consulted per-request
+  target: getController(),
+  router: () => getController(),
   changeOrigin: true,
   xfwd: true,
   logLevel: 'debug',
@@ -53,7 +225,7 @@ app.use("/api", createProxyMiddleware({
   onProxyReq(proxyReq, req) {
     // For visibility in logs
     const outgoingPath = req.url.startsWith('/api/') ? req.url : `/api${req.url}`;
-    console.log(`[→] ${req.method} ${req.originalUrl} -> ${CTRL}${outgoingPath}`);
+    console.log(`[→] ${req.method} ${req.originalUrl} -> ${getController()}${outgoingPath}`);
   }
 }));
 
@@ -62,7 +234,93 @@ app.use(express.static("./public"));
 
 // Config endpoint to surface runtime flags
 app.get('/config', (req, res) => {
-  res.json({ singleServer: true, controller: CTRL, envSource: ENV_SOURCE, azureLatestUrl: AZURE_LATEST_URL || null });
+  res.json({ singleServer: true, controller: getController(), envSource: ENV_SOURCE, azureLatestUrl: AZURE_LATEST_URL || null });
+});
+
+// Allow runtime GET/POST of controller target. CORS-enabled for convenience.
+app.options('/controller', (req, res) => { setCors(res); res.status(204).end(); });
+app.get('/controller', (req, res) => {
+  setCors(res);
+  res.json({ url: getController() });
+});
+app.post('/controller', (req, res) => {
+  try {
+    setCors(res);
+    const { url } = req.body || {};
+    if (!url || typeof url !== 'string' || !isHttpUrl(url)) {
+      return res.status(400).json({ ok: false, error: 'Valid http(s) url required' });
+    }
+    setController(url.trim());
+    res.json({ ok: true, url: getController() });
+  } catch (e) {
+    res.status(500).json({ ok: false, error: e.message });
+  }
+});
+
+// Convenience endpoints to query the configured controller/forwarder for non-/api paths
+app.get('/forwarder/healthz', async (req, res) => {
+  try {
+    const url = `${getController().replace(/\/$/, '')}/healthz`;
+    const r = await fetch(url, { method: 'GET' });
+    const body = await r.text();
+    res.status(r.status).set('content-type', r.headers.get('content-type') || 'application/json').send(body);
+  } catch (e) {
+    res.status(502).json({ ok: false, error: e.message });
+  }
+});
+
+app.get('/forwarder/devicedatas', async (req, res) => {
+  try {
+    const url = `${getController().replace(/\/$/, '')}/api/devicedatas`;
+    const r = await fetch(url, { method: 'GET' });
+    const body = await r.text();
+    res.status(r.status).set('content-type', r.headers.get('content-type') || 'application/json').send(body);
+  } catch (e) {
+    res.status(502).json({ ok: false, error: e.message });
+  }
+});
+
+// POST proxy to forward Wi‑Fi provisioning requests to the configured controller/forwarder.
+// Expects JSON body with Wi‑Fi configuration (e.g., { ssid, psk, static, staticIp })
+app.post('/forwarder/provision/wifi', async (req, res) => {
+  try {
+    const url = `${getController().replace(/\/$/, '')}/api/provision/wifi`;
+    const r = await fetch(url, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(req.body) });
+    const contentType = (r.headers.get('content-type') || '').toLowerCase();
+    const text = await r.text();
+    // If controller returned JSON, forward it; otherwise translate HTML/errors into JSON for client
+    if (r.ok && contentType.includes('application/json')) {
+      res.status(r.status).set('content-type', 'application/json').send(text);
+    } else if (!r.ok) {
+      const bodySnippet = text.length > 400 ? text.slice(0,400) + '...' : text;
+      return res.status(502).json({ ok: false, error: 'Controller provisioning endpoint returned error', status: r.status, body: bodySnippet });
+    } else {
+      // Non-JSON 2xx response: wrap
+      return res.status(200).json({ ok: true, message: text });
+    }
+  } catch (e) {
+    res.status(502).json({ ok: false, error: e.message });
+  }
+});
+
+// POST proxy for Bluetooth provisioning
+app.post('/forwarder/provision/bluetooth', async (req, res) => {
+  try {
+    const url = `${getController().replace(/\/$/, '')}/api/provision/bluetooth`;
+    const r = await fetch(url, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(req.body) });
+    const contentType = (r.headers.get('content-type') || '').toLowerCase();
+    const text = await r.text();
+    if (r.ok && contentType.includes('application/json')) {
+      res.status(r.status).set('content-type', 'application/json').send(text);
+    } else if (!r.ok) {
+      const bodySnippet = text.length > 400 ? text.slice(0,400) + '...' : text;
+      return res.status(502).json({ ok: false, error: 'Controller provisioning endpoint returned error', status: r.status, body: bodySnippet });
+    } else {
+      return res.status(200).json({ ok: true, message: text });
+    }
+  } catch (e) {
+    res.status(502).json({ ok: false, error: e.message });
+  }
 });
 
 // --- Branding and Farm Profile Endpoints ---
@@ -199,6 +457,8 @@ app.get('/brand/extract', async (req, res) => {
     // find stylesheets
     const cssLinks = links.filter(l=>/rel=["']stylesheet["']/i.test(l)).map(l=>{
       const m = l.match(/href=["']([^"']+)["']/i); return m? resolveUrl(origin, m[1]) : null; }).filter(Boolean).slice(0,2);
+    // capture any Google Fonts links as candidates to include client-side for brand font
+    const fontCssLinks = cssLinks.filter(u => /fonts\.googleapis\.com|fonts\.gstatic\.com/i.test(u));
     let cssText = '';
     for (const cssUrl of cssLinks) {
       try { cssText += '\n' + await fetchText(cssUrl); } catch {}
@@ -213,12 +473,30 @@ app.get('/brand/extract', async (req, res) => {
     const lightCandidates = foundColors.filter(c=>luminance(c) > 0.8);
     const background = lightCandidates[0] || '#F7FAFA';
     const palette = normalizePalette({ primary, accent, background });
-    return res.json({ ok:true, name: siteName, logo, palette });
+    // Try to detect a brand font family from CSS
+    let fontFamily = '';
+    try {
+      // prefer explicitly named, non-generic families
+      const fams = Array.from(cssText.matchAll(/font-family\s*:\s*([^;}{]+);/gi)).map(m => m[1]);
+      const pick = (arr) => {
+        const GENERICS = ['sans-serif','serif','monospace','system-ui','ui-sans-serif','ui-serif','ui-monospace','cursive','fantasy','emoji','math','fangsong'];
+        for (const f of arr) {
+          // split on commas and trim quotes
+          const parts = f.split(',').map(s=>s.trim().replace(/^['"]|['"]$/g,''));
+          for (const p of parts) {
+            if (!GENERICS.includes(p.toLowerCase())) return p;
+          }
+        }
+        return '';
+      };
+      fontFamily = pick(fams) || '';
+    } catch {}
+    return res.json({ ok:true, name: siteName, logo, palette, fontFamily, fontCss: fontCssLinks });
   } catch (e) {
     setCors(res);
     // neutral fallback
     const fallback = { background:'#F7FAFA', surface:'#FFFFFF', border:'#DCE5E5', text:'#0B1220', primary:'#0D7D7D', accent:'#64C7C7' };
-    return res.status(200).json({ ok:false, error: e.message, name: '', logo: '', palette: fallback });
+    return res.status(200).json({ ok:false, error: e.message, name: '', logo: '', palette: fallback, fontFamily: '', fontCss: [] });
   }
 });
 
@@ -428,5 +706,5 @@ app.post("/data/:name", (req, res) => {
 });
 
 app.listen(PORT, () => {
-  console.log(`[charlie] running http://127.0.0.1:${PORT} → ${CTRL}`);
+  console.log(`[charlie] running http://127.0.0.1:${PORT} → ${getController()}`);
 });

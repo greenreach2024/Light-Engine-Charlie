@@ -8,10 +8,10 @@
   <script src="./app.charlie.js?v=charlie-0.5" defer></script>
 </head>
 <body>
-  <header style="padding:10px;border-bottom:1px solid #eee;display:flex;gap:8px;align-items:center">
+  <header>
     <div class="header logo" style="display:flex;align-items:center;gap:8px">
-      <img src="" alt="Brand logo" style="height:22px;display:none" onerror="this.style.display='none'">
-      <h1 style="margin:0;font-size:18px">Light Engine Charlie</h1>
+      <img src="" alt="Brand logo" style="display:none" onerror="this.style.display='none'">
+      <h1>Light Engine Charlie</h1>
     </div>
     <button id="btnDiscover" type="button" title="Mock device discovery">Discover new GreenReach Devices</button>
     <span id="farmSummaryChip" class="chip" style="display:none"></span>
@@ -22,7 +22,7 @@
       <span class="tiny">Research Mode</span>
     </label>
     <span id="hqIcon" title="Centralized Automation (future)" style="margin-left:auto;opacity:.35">🏢</span>
-    <span id="status" style="margin-left:8px;font-size:12px;color:#666" aria-live="polite"></span>
+    <span id="status" aria-live="polite"></span>
   </header>
 
   <div id="tooltip" role="tooltip" aria-hidden="true"><div class="tip-arrow"></div><div id="tooltip-content"></div></div>
@@ -33,6 +33,22 @@
         JavaScript is disabled. Enable it to load the dashboard UI.
       </div>
     </noscript>
+
+    <!-- Farm Registration Panel (moved above Grow Rooms) -->
+    <section id="farmPanel" class="card" style="border:1px solid #eee;border-radius:10px;padding:12px;margin-bottom:12px">
+      <div class="row" style="justify-content:space-between;align-items:center">
+        <h2 style="margin:0">
+          Farm Registration
+          <span class="hint" tabindex="0" data-tip="Create a saved Farm profile. The flow opens as a conversational modal and collapses back to this summary once saved.">?</span>
+        </h2>
+        <div class="row" style="gap:6px">
+          <button id="btnLaunchFarm" type="button" class="primary">Register Farm</button>
+          <button id="btnEditFarm" type="button" class="ghost" style="display:none">Edit Farm</button>
+        </div>
+      </div>
+      <p class="tiny" style="margin:8px 0 0;color:#475569">We'll ask one question at a time and sync to the controller when you finish.</p>
+      <div id="farmBadge" class="farm-summary" style="margin-top:12px; display:none;"></div>
+    </section>
 
     <!-- Grow Rooms Panel -->
     <section id="roomsPanel" class="card" style="border:1px solid #eee;border-radius:10px;padding:12px;margin-bottom:12px">
@@ -49,35 +65,125 @@
       <div id="roomsList" style="margin-top:12px"></div>
     </section>
 
-    <!-- Farm Registration Panel -->
-    <section id="farmPanel" class="card" style="border:1px solid #eee;border-radius:10px;padding:12px;margin-bottom:12px">
-      <div class="row" style="justify-content:space-between;align-items:center">
+    <section id="devicesPanel" class="card">
+      <div class="row" style="justify-content:space-between;align-items:center;margin:0 0 8px">
         <h2 style="margin:0">
-          Farm Registration
-          <span class="hint" tabindex="0" data-tip="Create a saved Farm profile. The flow opens as a conversational modal and collapses back to this summary once saved.">?</span>
+          Devices
+          <span class="hint" tabindex="0" data-tip="Research-only telemetry. When Research Mode is on, view up to 10 devices or 5 groups with PPFD/DLI, energy (kWh 1/7/30), spectrum, and Now/ON/OFF controls. Plans and schedules are managed below.">?</span>
         </h2>
-        <div class="row" style="gap:6px">
-          <button id="btnLaunchFarm" type="button" class="primary">Register Farm</button>
-          <button id="btnEditFarm" type="button" class="ghost" style="display:none">Edit Farm</button>
-        </div>
+        <label class="row" style="align-items:center;gap:6px">
+          <input id="devicesResearchToggle" type="checkbox" style="width:18px;height:18px" />
+          <span class="tiny">Research Mode</span>
+        </label>
       </div>
-      <p class="tiny" style="margin:8px 0 0;color:#475569">We'll ask one question at a time and sync to the controller when you finish.</p>
-      <div id="farmBadge" class="farm-summary" style="margin-top:12px; display:none;"></div>
-    </section>
-
-    <section class="card">
-      <h2 style="margin:0 0 8px">Devices</h2>
       <div class="row" style="gap:8px;flex-wrap:wrap;margin-bottom:8px;align-items:center">
         <label class="row" style="gap:6px">
-          <span>Growth plan</span>
-          <select id="planSelect" style="min-width:220px"></select>
+          <span class="tiny">Scope</span>
+          <select id="deviceScope" style="min-width:160px">
+            <option value="devices">Devices</option>
+            <option value="groups">Groups</option>
+          </select>
         </label>
-        <span class="tiny" id="planNote"></span>
+        <label class="row" style="gap:6px;align-items:center">
+          <span class="tiny">Select</span>
+          <select id="deviceSelect" multiple size="4" style="min-width:260px"></select>
+        </label>
+        <span class="tiny" id="devicesNote" aria-live="polite"></span>
       </div>
+      <p id="devicesEmpty" class="tiny" style="display:none;color:#64748b;margin:6px 0">No devices selected — enable Research Mode to view details. Plans and schedules are managed from the Groups section.</p>
       <div id="devices" class="grid cols-3"></div>
     </section>
 
-    <section class="card">
+    <!-- Plans (Grow recipes) Panel -->
+    <section id="plansPanel" class="card">
+      <div class="row" style="justify-content:space-between;align-items:center">
+        <h2 style="margin:0">
+          Plans (Grow recipes)
+          <span class="hint" tabindex="0" data-tip="Create and manage grow recipes. Each plan defines a spectrum mix and a target DLI. Preview spectrum, see where used, and assign later to Groups. DLI = PPFD × 3600 × photoperiod ÷ 1e6.">?</span>
+        </h2>
+        <span id="plansStatus" class="tiny" aria-live="polite"></span>
+      </div>
+      <div class="row" style="gap:8px;flex-wrap:wrap;margin:8px 0">
+        <button id="btnAddPlan" type="button" class="ghost">Add Plan</button>
+        <button id="btnSavePlans" type="button" class="primary">Save Plans</button>
+        <button id="btnDownloadPlans" type="button" class="ghost">Download</button>
+        <button id="btnUploadPlans" type="button" class="ghost">Upload</button>
+        <input id="plansUpload" type="file" accept="application/json" style="display:none" />
+      </div>
+      <div id="plansList" class="grid cols-2" aria-live="polite"></div>
+    </section>
+
+  <!-- Schedules Panel moved above Groups per new order -->
+  <section id="schedulesPanel" class="card">
+      <div class="row" style="justify-content:space-between;align-items:center">
+        <h2 style="margin:0">
+          Schedules
+          <span class="hint" tabindex="0" data-tip="Define single or split light cycles (ON/OFF). We track wall-clock times in America/Toronto and sync to sched.json.">?</span>
+        </h2>
+        <span id="schedStatus" class="tiny" aria-live="polite"></span>
+      </div>
+
+      <div class="schedule-editor">
+        <div class="schedule-editor__col">
+          <div class="row" style="gap:8px;flex-wrap:wrap;margin:8px 0">
+            <input id="schedName" type="text" placeholder="Schedule name (e.g., Flower A)">
+            <label class="row" style="gap:6px"><span>Timezone</span>
+              <select id="schedTz">
+                <option value="America/Toronto">America/Toronto</option>
+              </select>
+            </label>
+          </div>
+
+          <div class="schedule-mode" role="radiogroup" aria-label="Schedule mode">
+            <span class="tiny">Mode</span>
+            <label class="chip-option"><input type="radio" name="schedMode" value="one" checked><span>One cycle</span></label>
+            <label class="chip-option"><input type="radio" name="schedMode" value="two"><span>Two cycles</span></label>
+          </div>
+
+          <div class="schedule-cycle" data-cycle="1">
+            <div class="tiny">Cycle 1</div>
+            <label><span>Start</span><input id="schedCycle1On" type="time" value="08:00"></label>
+            <label><span>Photoperiod (h)</span><input id="schedC1Hours" type="number" min="0" max="24" step="0.5" value="12"></label>
+            <div class="tiny" id="schedC1End">End: 20:00</div>
+            <div class="tiny" style="color:#475569">Repeated daily</div>
+          </div>
+          <div class="schedule-cycle" data-cycle="2">
+            <div class="tiny">Cycle 2</div>
+            <label><span>Start</span><input id="schedCycle2On" type="time" value="00:00"></label>
+            <label><span>Photoperiod (h)</span><input id="schedC2Hours" type="number" min="0" max="24" step="0.5" value="12"></label>
+            <div class="tiny" id="schedC2End">End: 12:00</div>
+            <div class="tiny" style="color:#475569">Repeated daily</div>
+          </div>
+        </div>
+
+        <div class="schedule-editor__col schedule-editor__col--preview">
+          <div class="schedule-math" aria-live="polite">
+            <div><strong>ON total</strong><span id="schedOnTotal">--</span></div>
+            <div><strong>OFF total</strong><span id="schedOffTotal">--</span></div>
+            <div><strong>Δ vs 24h</strong><span id="schedDelta">--</span></div>
+          </div>
+          <div id="schedMathWarning" class="schedule-warning" role="alert" aria-live="polite" style="display:none"></div>
+          <div class="schedule-preview schedule-preview--editor">
+            <div class="schedule-preview__bar" id="schedEditorBar"></div>
+            <div class="schedule-preview__legend">
+              <span class="tiny">24h preview</span>
+              <span class="schedule-preview__dst" id="schedEditorDst" style="display:none">DST</span>
+            </div>
+            <div class="schedule-preview__transitions" id="schedEditorTransitions"></div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Group-only scope: removed Room/Zone selectors per redesign -->
+
+      <div class="row" style="gap:8px;flex-wrap:wrap;margin:8px 0">
+        <button id="btnSaveSched" type="button" class="primary">Save Schedule</button>
+        <button id="btnDeleteSched" type="button" class="ghost">Delete Schedule</button>
+        <button id="btnReloadSched" type="button" class="ghost">Reload Schedules</button>
+      </div>
+    </section>
+
+  <section id="groupsPanel" class="card">
       <div class="row" style="justify-content:space-between;align-items:center">
         <h2 style="margin:0">
           Groups
@@ -92,6 +198,7 @@
         <select id="groupSelect" title="Active group" style="min-width:180px"></select>
         <input id="groupName" type="text" placeholder="New or existing group name" style="min-width:220px">
         <button id="btnSaveGroup" type="button" class="primary">Save Group</button>
+        <button id="btnDeleteGroup" type="button" class="ghost" title="Delete this group">Delete Group</button>
         <button id="btnReloadGroups" type="button" class="ghost">Reload Groups</button>
       </div>
 
@@ -114,13 +221,63 @@
         </div>
         <span id="groupMetaStatus" class="tiny" aria-live="polite"></span>
       </div>
+      <div id="groupSpectrumPreview" class="group-spectrum" aria-live="polite" style="margin:6px 0 8px"></div>
       <div id="groupSchedulePreview" class="schedule-preview schedule-preview--group" aria-live="polite"></div>
+      
+      <!-- Inline Group Schedule Editor (appears when editing a group's schedule) -->
+      <div id="groupScheduleEditor" class="group-schedule-editor" style="display:none;margin-top:8px">
+        <div class="row" style="gap:8px;align-items:center;flex-wrap:wrap">
+          <span class="tiny">Mode</span>
+          <label class="chip-option"><input type="radio" name="groupSchedMode" value="one" checked><span>One cycle</span></label>
+          <label class="chip-option"><input type="radio" name="groupSchedMode" value="two"><span>Two cycles</span></label>
+          <button id="groupSchedSplit" class="ghost" type="button">Split 24 h evenly</button>
+          <button id="groupSchedFix" class="ghost" type="button">Fix to 24 h</button>
+          <span id="groupSchedWarn" class="tiny" style="color:#b45309;display:none"></span>
+        </div>
+        <div class="grid cols-2" style="align-items:end;gap:12px">
+          <div>
+            <div class="tiny">Cycle A</div>
+            <label class="row" style="gap:6px"><span>Start</span><input id="gSchedC1Start" type="time" value="08:00"></label>
+            <label class="row" style="gap:6px"><span>Photoperiod (h)</span><input id="gSchedC1Hours" type="number" min="0" max="24" step="0.5" value="12"></label>
+            <div class="tiny" id="gSchedC1End">End: 20:00</div>
+            <div class="tiny" style="color:#475569">Repeated daily</div>
+          </div>
+          <div id="gSchedC2" style="display:none">
+            <div class="tiny">Cycle B</div>
+            <label class="row" style="gap:6px"><span>Start</span><input id="gSchedC2Start" type="time" value="00:00"></label>
+            <label class="row" style="gap:6px"><span>Photoperiod (h)</span><input id="gSchedC2Hours" type="number" min="0" max="24" step="0.5" value="12"></label>
+            <div class="tiny" id="gSchedC2End">End: 12:00</div>
+            <div class="tiny" style="color:#475569">Repeated daily</div>
+          </div>
+        </div>
+        <div class="row" style="gap:8px;align-items:center;flex-wrap:wrap;margin-top:8px">
+          <div class="schedule-preview schedule-preview--editor" style="flex:1 1 280px">
+            <div class="schedule-preview__bar" id="gSchedBar"></div>
+            <div class="schedule-preview__legend"><span class="tiny">24h preview</span></div>
+          </div>
+          <div class="row" style="gap:12px">
+            <button id="groupSchedSave" class="primary" type="button">Save</button>
+            <button id="groupSchedDone" class="ghost" type="button">Done</button>
+            <button id="groupSchedCancel" class="ghost" type="button">Cancel</button>
+          </div>
+        </div>
+      </div>
 
       <!-- Quick selectors -->
       <div id="groupQuick" class="row" style="gap:6px;flex-wrap:wrap;margin-bottom:8px"></div>
 
       <!-- Light checklist -->
       <div id="groupLightList" class="grid cols-3" style="margin-bottom:8px"></div>
+
+      <!-- Ungrouped lights (available to add) -->
+      <div class="group-roster-card" id="ungroupedLightsCard">
+        <div class="row" style="justify-content:space-between;align-items:center;margin-bottom:6px">
+          <h3 style="margin:0;font-size:15px;color:#0f172a">Ungrouped Lights</h3>
+          <span id="ungroupedStatus" class="tiny" aria-live="polite"></span>
+        </div>
+        <div id="ungroupedList" class="grid cols-3" aria-live="polite"></div>
+        <p id="ungroupedEmpty" class="tiny" style="display:none">All lights are assigned to groups.</p>
+      </div>
 
       <!-- Group roster -->
       <div class="group-roster-card">
@@ -167,78 +324,22 @@
           </div>
           <p id="groupLastHex" class="tiny" style="margin-top:6px;color:#475569"></p>
         </div>
-      </div>
-    </section>
 
-    <section class="card">
-      <div class="row" style="justify-content:space-between;align-items:center">
-        <h2 style="margin:0">
-          Schedules
-          <span class="hint" tabindex="0" data-tip="Define single or split light cycles (ON/OFF). We track wall-clock times in America/Toronto and sync to sched.json.">?</span>
-        </h2>
-        <span id="schedStatus" class="tiny" aria-live="polite"></span>
-      </div>
-
-      <div class="schedule-editor">
-        <div class="schedule-editor__col">
-          <div class="row" style="gap:8px;flex-wrap:wrap;margin:8px 0">
-            <input id="schedName" type="text" placeholder="Schedule name (e.g., Flower A)">
-            <label class="row" style="gap:6px"><span>Timezone</span>
-              <select id="schedTz">
-                <option value="America/Toronto">America/Toronto</option>
-              </select>
-            </label>
+        <!-- Twin spectrum preview beside sliders: HUD mix and Plan mix -->
+        <div id="groupTwinSpectra" style="display:flex;flex-direction:column;gap:8px">
+          <div class="device-spectrum">
+            <div class="device-spectrum__title tiny">Current mix</div>
+            <canvas id="groupHudCanvas" class="device-spectrum__canvas"></canvas>
           </div>
-
-          <div class="schedule-mode" role="radiogroup" aria-label="Schedule mode">
-            <span class="tiny">Mode</span>
-            <label class="chip-option"><input type="radio" name="schedMode" value="one" checked><span>One cycle</span></label>
-            <label class="chip-option"><input type="radio" name="schedMode" value="two"><span>Two cycles</span></label>
-          </div>
-
-          <div class="schedule-cycle" data-cycle="1">
-            <div class="tiny">Cycle 1</div>
-            <label><span>ON</span><input id="schedCycle1On" type="time" value="08:00"></label>
-            <label><span>OFF</span><input id="schedCycle1Off" type="time" value="20:00"></label>
-          </div>
-          <div class="schedule-cycle" data-cycle="2">
-            <div class="tiny">Cycle 2</div>
-            <label><span>ON</span><input id="schedCycle2On" type="time" value="00:00"></label>
-            <label><span>OFF</span><input id="schedCycle2Off" type="time" value="00:00"></label>
-          </div>
-        </div>
-
-        <div class="schedule-editor__col schedule-editor__col--preview">
-          <div class="schedule-math" aria-live="polite">
-            <div><strong>ON total</strong><span id="schedOnTotal">--</span></div>
-            <div><strong>OFF total</strong><span id="schedOffTotal">--</span></div>
-            <div><strong>Δ vs 24h</strong><span id="schedDelta">--</span></div>
-          </div>
-          <div id="schedMathWarning" class="schedule-warning" role="alert" aria-live="polite" style="display:none"></div>
-          <div class="schedule-preview schedule-preview--editor">
-            <div class="schedule-preview__bar" id="schedEditorBar"></div>
-            <div class="schedule-preview__legend">
-              <span class="tiny">24h preview</span>
-              <span class="schedule-preview__dst" id="schedEditorDst" style="display:none">DST</span>
-            </div>
-            <div class="schedule-preview__transitions" id="schedEditorTransitions"></div>
+          <div class="device-spectrum">
+            <div class="device-spectrum__title tiny">Plan spectrum</div>
+            <canvas id="groupPlanCanvas" class="device-spectrum__canvas"></canvas>
           </div>
         </div>
       </div>
-
-      <!-- Auto-selection by Room / Zone -->
-      <div class="row" style="gap:8px;flex-wrap:wrap;margin:8px 0">
-        <label class="row" style="gap:6px"><span>Room</span><select id="schedRoom"></select></label>
-        <label class="row" style="gap:6px"><span>Zone</span><select id="schedZone"></select></label>
-        <button id="btnSchedSelect" type="button" class="ghost">Select Devices</button>
-      </div>
-
-      <div class="row" style="gap:8px;flex-wrap:wrap;margin:8px 0">
-        <button id="btnSaveSched" type="button" class="primary">Save Schedule</button>
-        <button id="btnDeleteSched" type="button" class="ghost">Delete Schedule</button>
-        <button id="btnReloadSched" type="button" class="ghost">Reload Schedules</button>
-      </div>
     </section>
+
+    
 
     <section class="card env-card">
       <div class="env-card__header">
@@ -414,10 +515,51 @@
             </div>
           </section>
 
-          <section class="room-step" data-step="fixtures">
-            <p class="room-question">Add the fixtures used here.</p>
+          <section class="room-step" data-step="hardware">
+            <p class="room-question">Which types of hardware are present in this room?</p>
             <div class="farm-step__stack">
+              <div class="tiny">Select all that apply</div>
+              <div id="roomHardwareCats" class="chip-row" role="group" aria-label="Hardware categories">
+                <button type="button" class="chip-option" data-value="grow-lights">Grow lights</button>
+                <button type="button" class="chip-option" data-value="hvac">HVAC / climate</button>
+                <button type="button" class="chip-option" data-value="dehumidifier">Dehumidifier</button>
+                <button type="button" class="chip-option" data-value="vents">Vents</button>
+                <button type="button" class="chip-option" data-value="sensors">Environmental sensors</button>
+                <button type="button" class="chip-option" data-value="irrigation">Irrigation / pumps</button>
+                <button type="button" class="chip-option" data-value="controllers">Controllers / hubs</button>
+                <button type="button" class="chip-option" data-value="other">Other</button>
+              </div>
+              <p class="tiny" style="color:#64748b;margin-top:6px">We'll use this to surface likely equipment from the knowledge base and to prioritize hub setup when required.</p>
+            </div>
+          </section>
+
+          <!-- Dynamic per-category setup host (used for HVAC, dehumidifier, fans, irrigation, controllers, other) -->
+          <section class="room-step" data-step="category-setup">
+            <p class="room-question" id="catSetupTitle">Category setup</p>
+            <div class="farm-step__stack" id="catSetupBody"></div>
+            <div class="row" style="gap:8px;align-items:center;margin-top:8px">
+              <span id="catSetupStatus" class="tiny" aria-live="polite" style="min-width:180px;color:#475569"></span>
+              <button type="button" class="ghost" id="catTestControl">Test Control</button>
+              <button type="button" class="primary" id="catSaveContinue">Save & Continue</button>
+              <button type="button" class="ghost" id="catSaveDone">Save, Done for Now</button>
+              <button type="button" class="ghost" id="catSkip">Skip Device</button>
+              <span class="tiny" id="catAddNewWrap" style="margin-left:auto"><button type="button" class="ghost" id="catAddNew">+ Add New Device</button></span>
+            </div>
+          </section>
+
+          <section class="room-step" data-step="fixtures">
+            <p class="room-question">Add the grow lights used here.</p>
+            <div class="farm-step__stack">
+              <div class="row" style="gap:8px;align-items:center;flex-wrap:wrap;margin-bottom:6px">
+                <label class="tiny">How many lights operate in series?
+                  <input id="roomSeriesCount" type="number" min="0" value="0" style="width:120px;margin-left:6px">
+                </label>
+              </div>
               <input id="roomKbSearch" type="text" placeholder="Search models (e.g., Gavita 1700e)" autocomplete="off">
+              <div style="margin-top:6px">
+                <button id="roomKbUploadBtn" type="button" class="ghost">Upload nameplate / datasheet</button>
+                <input id="roomKbUpload" type="file" accept="image/*,application/pdf" style="display:none">
+              </div>
               <div class="tiny" style="color:#64748b">Results</div>
               <ul id="roomKbResults" class="farm-kb-results" aria-live="polite"></ul>
               <div class="tiny" style="color:#64748b">Selected</div>
@@ -454,7 +596,10 @@
                 </select>
                 <input id="roomDeviceHost" type="text" placeholder="Host / IP / MAC (optional)" style="min-width:160px">
                 <button id="roomAddDeviceBtn" type="button" class="ghost">Add Device</button>
+                <button id="roomResearchDevices" type="button" class="ghost" title="Research live devices and record factory spectra">Research & record factory spectra</button>
               </div>
+              <span id="roomResearchStatus" class="tiny" aria-live="polite" style="color:#475569"></span>
+              <div id="roomDeviceInlineError" class="tiny" style="color:#EF4444;margin-top:6px" aria-live="polite"></div>
               <div class="tiny" style="color:#64748b;margin-top:8px">Add each smart device or hub that will be used to control or monitor fixtures in this room.</div>
               <div id="roomDeviceSetupForms" style="margin-top:8px">
                 <div id="deviceSetup-wifi" style="display:none;margin-top:8px">
@@ -480,6 +625,7 @@
                     <input id="deviceRs485UnitId" type="number" placeholder="Modbus Unit ID" style="min-width:120px">
                     <select id="deviceRs485Baud" style="min-width:120px"><option>9600</option><option>19200</option><option>38400</option><option>115200</option></select>
                   </div>
+                  <div id="err-deviceRs485UnitId" class="field-error" style="display:none"></div>
                 </div>
                 <div id="deviceSetup-0-10v" style="display:none;margin-top:8px">
                   <div class="tiny">0‑10V / Analog mapping</div>
@@ -487,6 +633,8 @@
                     <input id="device0v10Channel" type="text" placeholder="Channel name / port" style="min-width:160px">
                     <input id="device0v10Scale" type="text" placeholder="Scale/calibration (e.g., 0-10V -> 0-100%)" style="min-width:220px">
                   </div>
+                  <div id="err-device0v10Channel" class="field-error" style="display:none"></div>
+                  <div id="err-device0v10Scale" class="field-error" style="display:none"></div>
                 </div>
               </div>
               <ul id="roomDevicesList" class="farm-kb-selected" aria-live="polite" style="margin-top:8px"></ul>
@@ -630,6 +778,11 @@
                 <label class="tiny">Text <input id="brand-text" type="color" value="#0B1220"></label>
                 <label class="tiny">Surface <input id="brand-surface" type="color" value="#FFFFFF"></label>
                 <label class="tiny">Background <input id="brand-bg" type="color" value="#F7FAFA"></label>
+                <label class="tiny" style="display:flex;align-items:center;gap:6px">
+                  Logo height
+                  <input id="brand-logo-height" type="range" min="18" max="64" value="28" style="width:160px">
+                  <span id="brand-logo-height-val" class="tiny" aria-live="polite">28 px</span>
+                </label>
                 <button id="brand-reset" type="button" class="ghost" title="Reset to default theme">Reset</button>
               </div>
               <p class="tiny" style="color:#64748b">We extract a palette and logo from your website, apply it live, and save it to your Farm profile.</p>

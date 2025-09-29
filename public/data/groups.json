@@ -1,27 +1,24 @@
 {
   "groups": [
     {
-      "id": "group-lettuce-a",
-      "name": "Lettuce Block A",
-      "location": "North Greenhouse",
-      "plan": "lettuce-veg",
-      "schedule": "schedule-16h",
+      "id": "group-test",
+      "name": "Test",
       "lights": [
-        { "id": "light-001", "rack": "R1", "level": "L2", "position": "A" },
-        { "id": "light-002", "rack": "R1", "level": "L2", "position": "B" },
-        { "id": "light-003", "rack": "R1", "level": "L3", "position": "A" }
-      ]
-    },
-    {
-      "id": "group-herbs-main",
-      "name": "Herbs Main Section",
-      "location": "South Greenhouse",
+        {
+          "id": "light-002",
+          "name": "LIGHT 002"
+        },
+        {
+          "id": "light-003",
+          "name": "LIGHT 003"
+        },
+        {
+          "id": "light-004",
+          "name": "LIGHT 004"
+        }
+      ],
       "plan": "herbs-general",
-      "schedule": "schedule-14h",
-      "lights": [
-        { "id": "light-004", "rack": "R2", "level": "L1", "position": "A" },
-        { "id": "light-005", "rack": "R2", "level": "L1", "position": "B" }
-      ]
+      "schedule": "schedule-gn01jt"
     }
   ]
 }

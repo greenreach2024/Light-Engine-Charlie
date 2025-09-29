@@ -1,25 +1,21 @@
 {
   "name": "light-engine-charlie",
   "version": "1.0.0",
-  "description": "Light Engine Charlie - Comprehensive lighting control system",
-  "main": "server-charlie.js",
+  "private": true,
   "type": "module",
+  "description": "Light Engine Charlie single-server app",
+  "main": "server-charlie.js",
   "scripts": {
     "start": "node server-charlie.js",
-    "dev": "node server-charlie.js",
     "start:local": "PORT=8091 node server-charlie.js",
-    "start:vpn": "PORT=8089 CTRL=\"http://100.65.187.59:8089\" node server-charlie.js",
-    "smoke": "node scripts/smoke.js",
-    "smoke:8089": "PORT=8089 node scripts/smoke.js",
-    "smoke:8091": "PORT=8091 node scripts/smoke.js",
-    "switchbot:once": "node scripts/switchbot/poll-switchbot.js",
-    "switchbot:watch": "INTERVAL_MS=10000 node scripts/switchbot/poll-switchbot.js"
+    "smoke": "curl -sS http://localhost:8091/healthz"
   },
   "dependencies": {
-    "express": "^4.18.2",
-    "http-proxy-middleware": "^2.0.6"
+    "express": "^4.19.2",
+    "http-proxy-middleware": "^2.0.6",
+    "nedb-promises": "^6.2.3"
   },
-  "keywords": ["lighting", "control", "plant-growth", "automation"],
+  "keywords": ["lighting", "control", "automation"],
   "author": "Peter Gilbert",
   "license": "MIT"
 }
