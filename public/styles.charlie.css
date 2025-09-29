@@ -483,6 +483,23 @@ input[type="checkbox"] {
 .chip-row { display:flex; flex-wrap:wrap; gap:6px; }
 .chip-row .chip-option[data-active] { background: var(--gr-primary-soft); border-color: var(--gr-primary); }
 
+.sensor-placement { display:grid; gap:8px; }
+.sensor-placement__row { display:flex; justify-content:space-between; align-items:center; gap:8px; }
+.sensor-placement__row select { min-width:160px; }
+
+.vendor-help {
+  border: 1px dashed var(--gr-border, #E2E8F0);
+  border-radius: 8px;
+  padding: 8px 12px;
+  background: var(--gr-bg, #F8FAFC);
+}
+.vendor-help summary {
+  cursor: pointer;
+  font-weight: 600;
+  color: var(--dark);
+}
+.vendor-help[open] summary { margin-bottom: 6px; }
+
 /* Shared: KB lists reused by room wizard */
 .farm-kb-results, .farm-kb-selected { list-style:none; padding:0; margin:0; display:flex; flex-direction:column; gap:6px; }
 .farm-kb-results li, .farm-kb-selected li { background: var(--gr-bg, #F8FAFC); border:1px solid var(--gr-border, #E5E7EB); border-radius:6px; padding:8px; }
