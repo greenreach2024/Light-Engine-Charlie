@@ -487,6 +487,61 @@ input[type="checkbox"] {
 .farm-kb-results, .farm-kb-selected { list-style:none; padding:0; margin:0; display:flex; flex-direction:column; gap:6px; }
 .farm-kb-results li, .farm-kb-selected li { background: var(--gr-bg, #F8FAFC); border:1px solid var(--gr-border, #E5E7EB); border-radius:6px; padding:8px; }
 
+.room-setup-queue {
+  background: var(--gr-bg, #F8FAFC);
+  border: 1px solid var(--gr-border, #E5E7EB);
+  border-radius: 8px;
+  padding: 12px;
+  margin-bottom: 16px;
+}
+
+.room-setup-queue .chip-row {
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.room-setup-queue .chip {
+  margin: 2px 0;
+}
+
+.sensor-grid {
+  display: grid;
+  gap: 12px;
+}
+
+.sensor-config {
+  background: var(--gr-bg, #F8FAFC);
+  border: 1px solid var(--gr-border, #E5E7EB);
+  border-radius: 8px;
+  padding: 12px;
+  display: grid;
+  gap: 8px;
+  align-items: start;
+}
+
+.sensor-config .chip-option {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  width: fit-content;
+}
+
+.sensor-config select {
+  max-width: 180px;
+}
+
+.role-grid {
+  display: flex;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+.role-grid label {
+  flex: 1 1 160px;
+  display: grid;
+  gap: 6px;
+}
+
 .farm-modal[aria-hidden="false"], 
 .cal-modal[aria-hidden="false"], 
 .env-modal[aria-hidden="false"] {

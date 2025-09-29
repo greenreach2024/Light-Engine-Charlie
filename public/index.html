@@ -482,12 +482,18 @@
     <div class="room-modal__dialog" role="dialog" aria-modal="true" aria-labelledby="roomModalTitle">
       <button type="button" class="room-modal__close" id="roomModalClose" aria-label="Close">×</button>
       <form id="roomWizardForm" novalidate>
-        <p class="tiny" id="roomModalProgress" aria-live="polite">Step 1 of 7</p>
+        <p class="tiny" id="roomModalProgress" aria-live="polite">Step 1 of 9</p>
         <h2 id="roomModalTitle" style="margin:0 0 12px">Set up a Grow Room</h2>
+        <div class="room-setup-queue" id="roomSetupQueueWrap">
+          <p class="tiny" style="margin-bottom:4px;color:#475569">Setup queue</p>
+          <div id="roomSetupQueue" class="chip-row" role="list"></div>
+          <p class="tiny" style="color:#64748b;margin-top:4px">Each chip is a todo. Tap one to jump to that part of the wizard so nothing is left half-configured.</p>
+        </div>
         <div id="roomSteps">
           <section class="room-step" data-step="room-name">
-            <p class="room-question">What's this room called?</p>
+            <p class="room-question">What should we call this grow room?</p>
             <input id="roomName" type="text" placeholder="e.g., Flower A" required>
+            <p class="tiny" style="color:#64748b;margin-top:6px">Friendly names from Farm Registration appear here so everyone speaks the same language.</p>
           </section>
 
           <section class="room-step" data-step="location">
@@ -515,6 +521,18 @@
             </div>
           </section>
 
+          <section class="room-step" data-step="zones">
+            <p class="room-question">Any zones or canopy levels we should track?</p>
+            <div class="farm-step__stack">
+              <p class="tiny" style="color:#64748b">Name the zones, tiers or aisles you reference day to day. We'll use them on dashboards and sensor placement.</p>
+              <div class="row" style="gap:8px;flex-wrap:wrap">
+                <input id="roomZoneInput" type="text" placeholder="e.g., South Canopy" style="flex:1;min-width:200px">
+                <button type="button" class="ghost" id="roomZoneAdd">Add zone</button>
+              </div>
+              <ul id="roomZoneList" class="farm-kb-selected" aria-live="polite" style="margin-top:8px"></ul>
+            </div>
+          </section>
+
           <section class="room-step" data-step="hardware">
             <p class="room-question">Which types of hardware are present in this room?</p>
             <div class="farm-step__stack">
@@ -529,21 +547,31 @@
                 <button type="button" class="chip-option" data-value="controllers">Controllers / hubs</button>
                 <button type="button" class="chip-option" data-value="other">Other</button>
               </div>
-              <p class="tiny" style="color:#64748b;margin-top:6px">We'll use this to surface likely equipment from the knowledge base and to prioritize hub setup when required.</p>
+              <p class="tiny" style="color:#64748b;margin-top:6px">Start typing a model name to pull details from the equipment library.</p>
+              <input id="roomDeviceSearch" type="text" placeholder="Search gear (e.g., Gavita 1700e, SwitchBot Plug, Kasa Strip)" autocomplete="off">
+              <ul id="roomDeviceSearchResults" class="farm-kb-results" aria-live="polite"></ul>
+              <p class="tiny" style="color:#64748b">Selecting a match pre-fills wattage, control method and energy metering so setup flows quickly, even for third-party smart plugs and switches.</p>
             </div>
           </section>
 
           <!-- Dynamic per-category setup host (used for HVAC, dehumidifier, fans, irrigation, controllers, other) -->
           <section class="room-step" data-step="category-setup">
             <p class="room-question" id="catSetupTitle">Category setup</p>
+            <p class="tiny" id="catSetupIntro" style="color:#475569">We’ll capture a quick count, control method, and energy metering for each device type.</p>
+            <p class="tiny" id="catSetupStatusLine" aria-live="polite" style="color:#0f172a"></p>
             <div class="farm-step__stack" id="catSetupBody"></div>
-            <div class="row" style="gap:8px;align-items:center;margin-top:8px">
-              <span id="catSetupStatus" class="tiny" aria-live="polite" style="min-width:180px;color:#475569"></span>
-              <button type="button" class="ghost" id="catTestControl">Test Control</button>
-              <button type="button" class="primary" id="catSaveContinue">Save & Continue</button>
-              <button type="button" class="ghost" id="catSaveDone">Save, Done for Now</button>
-              <button type="button" class="ghost" id="catSkip">Skip Device</button>
-              <span class="tiny" id="catAddNewWrap" style="margin-left:auto"><button type="button" class="ghost" id="catAddNew">+ Add New Device</button></span>
+            <div class="row" id="catSetupActions" style="gap:8px;flex-wrap:wrap;margin-top:12px">
+              <button type="button" class="ghost" id="catTestControl">Test control</button>
+              <button type="button" class="primary" id="catSaveContinue">Mark complete &amp; next</button>
+              <button type="button" class="ghost" id="catSaveDone">Mark follow-up</button>
+              <button type="button" class="ghost" id="catSkip">Skip for now</button>
+              <button type="button" class="ghost" id="catAddNew">Add device</button>
+            </div>
+            <p class="tiny" id="catSetupStatus" aria-live="polite" style="color:#0f172a"></p>
+            <div class="row" id="catSetupNav" style="gap:8px;align-items:center;margin-top:8px;justify-content:space-between">
+              <button type="button" class="ghost" id="catPrevType">Previous type</button>
+              <span class="tiny" id="catSetupProgress" style="color:#475569"></span>
+              <button type="button" class="ghost" id="catNextType">Next type</button>
             </div>
           </section>
 
@@ -553,6 +581,12 @@
               <div class="row" style="gap:8px;align-items:center;flex-wrap:wrap;margin-bottom:6px">
                 <label class="tiny">How many lights operate in series?
                   <input id="roomSeriesCount" type="number" min="0" value="0" style="width:120px;margin-left:6px">
+                </label>
+                <label class="tiny">Target PPFD at canopy
+                  <input id="roomTargetPpfd" type="number" min="0" value="0" style="width:120px;margin-left:6px">
+                </label>
+                <label class="tiny">Photoperiod (hrs/day)
+                  <input id="roomPhotoperiod" type="number" min="0" max="24" value="18" style="width:120px;margin-left:6px">
                 </label>
               </div>
               <input id="roomKbSearch" type="text" placeholder="Search models (e.g., Gavita 1700e)" autocomplete="off">
@@ -564,6 +598,7 @@
               <ul id="roomKbResults" class="farm-kb-results" aria-live="polite"></ul>
               <div class="tiny" style="color:#64748b">Selected</div>
               <ul id="roomKbSelected" class="farm-kb-selected" aria-live="polite"></ul>
+              <p class="tiny" style="color:#64748b;margin-top:6px">We use target PPFD and photoperiod to calculate Daily Light Integral (DLI = PPFD × (3600 × hours) ÷ 1,000,000) for downstream analytics.</p>
             </div>
           </section>
 
@@ -644,24 +679,121 @@
           <section class="room-step" data-step="sensors">
             <p class="room-question">Which sensors will monitor this room?</p>
             <div class="farm-step__stack">
-              <div class="tiny">Categories</div>
-              <div id="roomSensorCats" class="chip-row" role="group" aria-label="Room sensor categories">
-                <label class="chip-option"><input type="checkbox" value="tempRh"><span>Temp/RH</span></label>
-                <label class="chip-option"><input type="checkbox" value="co2"><span>CO₂</span></label>
-                <label class="chip-option"><input type="checkbox" value="vpd"><span>Dewpoint/VPD</span></label>
-                <label class="chip-option"><input type="checkbox" value="ppfd"><span>Light/PPFD</span></label>
-                <label class="chip-option"><input type="checkbox" value="energy"><span>Energy/Power</span></label>
+              <div class="tiny">Categories and placement</div>
+              <div id="roomSensorCats" class="sensor-grid" role="group" aria-label="Room sensor categories">
+                <div class="sensor-config" data-sensor="tempRh">
+                  <label class="chip-option"><input type="checkbox" value="tempRh"><span>Temp/RH</span></label>
+                  <select class="sensor-location" data-sensor="tempRh">
+                    <option value="">Location…</option>
+                    <option value="room">Room</option>
+                    <option value="zone">Zone</option>
+                    <option value="canopy">Canopy</option>
+                    <option value="intake">Intake</option>
+                    <option value="exhaust">Exhaust</option>
+                    <option value="outdoors">Outdoors</option>
+                  </select>
+                  <p class="tiny" style="color:#475569">NTC thermistors give low-cost, high-sensitivity temperature data while capacitive humidity sensors stay accurate over time (<a href="https://blog.amphenol-sensors.com/industrial-blog/temperature-and-humidity-sensors-in-agriculture" target="_blank" rel="noopener">Amphenol Sensors</a>).</p>
+                </div>
+                <div class="sensor-config" data-sensor="co2">
+                  <label class="chip-option"><input type="checkbox" value="co2"><span>CO₂</span></label>
+                  <select class="sensor-location" data-sensor="co2">
+                    <option value="">Location…</option>
+                    <option value="room">Room</option>
+                    <option value="zone">Zone</option>
+                    <option value="canopy">Canopy</option>
+                    <option value="intake">Intake</option>
+                    <option value="exhaust">Exhaust</option>
+                    <option value="outdoors">Outdoors</option>
+                  </select>
+                  <p class="tiny" style="color:#475569">NDIR CO₂ sensors deliver reliable readings with strong stability and quick response for enrichment control (<a href="https://solution.seeedstudio.com/product/sensecap-solo-co2-5000-ndir-co2-sensor-supporting-modbus-rtu-rs485-and-sdi-12/" target="_blank" rel="noopener">Seeed Studio</a>).</p>
+                </div>
+                <div class="sensor-config" data-sensor="vpd">
+                  <label class="chip-option"><input type="checkbox" value="vpd"><span>Dewpoint/VPD</span></label>
+                  <select class="sensor-location" data-sensor="vpd">
+                    <option value="">Location…</option>
+                    <option value="room">Room</option>
+                    <option value="zone">Zone</option>
+                    <option value="canopy">Canopy</option>
+                    <option value="intake">Intake</option>
+                    <option value="exhaust">Exhaust</option>
+                    <option value="outdoors">Outdoors</option>
+                  </select>
+                  <p class="tiny" style="color:#475569">Pair dewpoint/VPD monitoring with canopy or intake placement to keep plants within their comfort band.</p>
+                </div>
+                <div class="sensor-config" data-sensor="ppfd">
+                  <label class="chip-option"><input type="checkbox" value="ppfd"><span>Light/PPFD</span></label>
+                  <select class="sensor-location" data-sensor="ppfd">
+                    <option value="">Location…</option>
+                    <option value="room">Room</option>
+                    <option value="zone">Zone</option>
+                    <option value="canopy">Canopy</option>
+                    <option value="intake">Intake</option>
+                    <option value="exhaust">Exhaust</option>
+                    <option value="outdoors">Outdoors</option>
+                  </select>
+                  <p class="tiny" style="color:#475569">Use canopy-mounted quantum sensors to validate PPFD and calculate DLI for each zone.</p>
+                </div>
+                <div class="sensor-config" data-sensor="energy">
+                  <label class="chip-option"><input type="checkbox" value="energy"><span>Energy/Power</span></label>
+                  <select class="sensor-location" data-sensor="energy">
+                    <option value="">Location…</option>
+                    <option value="room">Room</option>
+                    <option value="zone">Zone</option>
+                    <option value="canopy">Canopy</option>
+                    <option value="intake">Intake</option>
+                    <option value="exhaust">Exhaust</option>
+                    <option value="outdoors">Outdoors</option>
+                  </select>
+                  <p class="tiny" style="color:#475569">Tie branch CTs or smart plugs to the same zones as your loads for clean energy per-cycle insights.</p>
+                </div>
               </div>
-              <p class="tiny" style="color:#64748b">We can auto-select sensors based on the fixtures and control method you provided; you can adjust these choices.</p>
+              <p class="tiny" style="color:#64748b">We pre-select sensors based on fixtures and control methods; adjust placements to match your canopy map.</p>
+            </div>
+          </section>
+
+          <section class="room-step" data-step="connectivity">
+            <p class="room-question">How will this room stay connected?</p>
+            <div class="farm-step__stack">
+              <div class="tiny">Local hub</div>
+              <div class="row" style="gap:8px;flex-wrap:wrap">
+                <label class="tiny" style="display:flex;align-items:center;gap:6px"><input type="radio" name="roomHubPresence" value="yes"> Hub on-site</label>
+                <label class="tiny" style="display:flex;align-items:center;gap:6px"><input type="radio" name="roomHubPresence" value="no"> No hub yet</label>
+              </div>
+              <div class="row" style="gap:8px;flex-wrap:wrap;margin-top:6px">
+                <input id="roomHubType" type="text" placeholder="Hub model (e.g., reTerminal, Jetson Nano)" style="flex:1;min-width:200px">
+                <input id="roomHubIp" type="text" placeholder="Local IP address" style="flex:1;min-width:180px">
+              </div>
+              <div class="tiny" style="color:#475569;margin-top:6px">Edge computing keeps automations running even if the cloud link blips, reducing latency and boosting resilience.</div>
+              <div class="tiny" style="color:#64748b;margin-top:12px">Cloud tenant</div>
+              <input id="roomCloudTenant" type="text" value="Azure" style="min-width:200px">
+              <div class="tiny" style="color:#64748b;margin-top:12px">Assign farm management roles</div>
+              <div class="role-grid">
+                <label class="tiny">Admins
+                  <input id="roomRoleAdmin" type="text" placeholder="Emails or names" style="min-width:220px">
+                </label>
+                <label class="tiny">Operators
+                  <input id="roomRoleOperator" type="text" placeholder="Emails or names" style="min-width:220px">
+                </label>
+                <label class="tiny">Viewers
+                  <input id="roomRoleViewer" type="text" placeholder="Emails or names" style="min-width:220px">
+                </label>
+              </div>
             </div>
           </section>
 
           <section class="room-step" data-step="energy">
             <p class="room-question">How will you monitor energy?</p>
-            <div class="chip-row" id="roomEnergy" role="group" aria-label="Energy monitoring">
-              <button type="button" class="chip-option" data-value="ct-branch">CT/branch meters</button>
-              <button type="button" class="chip-option" data-value="smart-plugs">Smart plugs</button>
-              <button type="button" class="chip-option" data-value="none">None</button>
+            <div class="farm-step__stack">
+              <div class="chip-row" id="roomEnergy" role="group" aria-label="Energy monitoring">
+                <button type="button" class="chip-option" data-value="ct-branch">CT/branch meters</button>
+                <button type="button" class="chip-option" data-value="smart-plugs">Smart plugs</button>
+                <button type="button" class="chip-option" data-value="built-in">Built-in meter</button>
+                <button type="button" class="chip-option" data-value="none">None</button>
+              </div>
+              <label class="tiny" style="margin-top:8px">Daily runtime (hrs)
+                <input id="roomEnergyHours" type="number" min="0" max="24" value="18" style="width:120px;margin-left:6px">
+              </label>
+              <p class="tiny" style="color:#64748b">Energy consumption is estimated as wattage ÷ 1000 × runtime hours. Adjust runtime to line up with your lighting schedule.</p>
             </div>
           </section>
 
