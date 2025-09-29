@@ -446,6 +446,50 @@ input[type="checkbox"] {
   font-size: 0.875rem;
 }
 
+.farm-spaces {
+  display: grid;
+  gap: 12px;
+}
+
+.farm-room-card {
+  border: 1px solid var(--gr-border, #E5E7EB);
+  border-radius: 8px;
+  padding: 10px 12px;
+  background: var(--gr-bg, #F8FAFC);
+  box-shadow: var(--shadow, var(--gr-shadow));
+}
+
+.farm-room-card__header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 6px;
+}
+
+.farm-room-card__zones {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.farm-room-card__zones .chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.farm-room-card__zones button {
+  background: none;
+  border: none;
+  color: var(--medium);
+  cursor: pointer;
+  font-size: 0.7rem;
+}
+
+.farm-zone-input {
+  min-width: 160px;
+}
+
 /* Branding preview chips */
 .color-chip {
   width: 20px;
@@ -790,6 +834,31 @@ input[type="checkbox"] {
 
 .chip-option:hover {
   background: var(--gr-bg, #F9FAFB);
+}
+
+.chip-option.is-active,
+.chip-row .chip-option.is-active,
+.chip-row .chip-option[data-active] {
+  background: var(--gr-primary-soft, rgba(13,125,125,0.12));
+  border-color: var(--gr-primary, #0D7D7D);
+  color: var(--gr-primary, #0D7D7D);
+}
+
+.chip-grid {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 8px;
+}
+
+.inline-chip {
+  display: inline-flex;
+  align-items: center;
+  padding: 2px 8px;
+  background: var(--gr-primary-soft, rgba(13,125,125,0.12));
+  border-radius: 999px;
+  font-size: 0.85em;
+  color: var(--gr-primary, #0D7D7D);
 }
 
 .chip-option input[type="radio"]:checked + span {
@@ -1165,3 +1234,167 @@ input[type="range"]#grd {
 .toast--warn .toast-title{color:#92400e}
 .toast--error{border-color:#fecaca}
 .toast--error .toast-title{color:#991b1b}
+
+.badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 2px 8px;
+  font-size: 0.75rem;
+  border-radius: 999px;
+  border: 1px solid var(--gr-border, #E5E7EB);
+  background: var(--gr-surface, #fff);
+  color: var(--medium);
+}
+
+.badge--success {
+  background: #dcfce7;
+  border-color: #4ade80;
+  color: #166534;
+}
+
+.badge--warn {
+  background: #fef3c7;
+  border-color: #facc15;
+  color: #92400e;
+}
+
+.badge--muted {
+  background: #e2e8f0;
+  border-color: #cbd5f5;
+  color: #475569;
+}
+
+.badge--protocol {
+  background: #e0f2fe;
+  border-color: #38bdf8;
+  color: #075985;
+}
+
+.device-manager {
+  position: fixed;
+  inset: 0;
+  display: none;
+  z-index: 1000;
+}
+
+.device-manager[aria-hidden="false"] {
+  display: flex;
+}
+
+.device-manager__backdrop {
+  position: absolute;
+  inset: 0;
+  background: rgba(15, 23, 42, 0.55);
+}
+
+.device-manager__window {
+  position: relative;
+  margin: auto;
+  width: min(960px, 92vw);
+  max-height: 90vh;
+  background: var(--gr-surface, #fff);
+  border-radius: 16px;
+  box-shadow: var(--gr-shadow-lg, var(--shadow-lg));
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.device-manager__header {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  padding: 16px 20px;
+  border-bottom: 1px solid var(--gr-border, #E5E7EB);
+  gap: 12px;
+}
+
+.device-manager__toolbar {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+  padding: 12px 20px;
+  border-bottom: 1px solid var(--gr-border, #E5E7EB);
+}
+
+.device-manager__results {
+  padding: 16px 20px;
+  overflow-y: auto;
+  flex: 1;
+  display: grid;
+  gap: 12px;
+}
+
+.device-manager__card {
+  border: 1px solid var(--gr-border, #E5E7EB);
+  border-radius: 12px;
+  padding: 12px;
+  background: var(--gr-surface, #fff);
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  box-shadow: var(--shadow, var(--gr-shadow));
+}
+
+.device-manager__card-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 12px;
+}
+
+.device-manager__name {
+  font-weight: 600;
+}
+
+.device-manager__badges {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  justify-content: flex-end;
+}
+
+.device-manager__card-body {
+  display: grid;
+  gap: 4px;
+}
+
+.device-manager__actions {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.device-manager__assignment {
+  margin-top: 4px;
+}
+
+.device-manager__assign-form {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: flex-end;
+  background: var(--gr-bg, #f8fafc);
+  padding: 10px;
+  border-radius: 8px;
+  border: 1px solid var(--gr-border, #E5E7EB);
+}
+
+.device-manager__assign-form label {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  font-size: 0.75rem;
+  color: var(--medium);
+}
+
+.device-manager__footer {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 12px 20px;
+  border-top: 1px solid var(--gr-border, #E5E7EB);
+  background: var(--gr-bg, #F7FAFA);
+}

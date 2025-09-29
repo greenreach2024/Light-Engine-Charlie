@@ -115,14 +115,34 @@ async function safeFarmSave(farmPatch = {}) {
     const merged = { ...current, ...farmPatch };
     const ok = await saveJSON('./data/farm.json', merged);
     if (ok) {
-      STATE.farm = merged;
-      try { localStorage.setItem('gr.farm', JSON.stringify(merged)); } catch {}
+      STATE.farm = normalizeFarmDoc(merged);
+      try { localStorage.setItem('gr.farm', JSON.stringify(STATE.farm)); } catch {}
     }
     return ok;
   } catch (err) {
     console.error('safeFarmSave error', err);
     return false;
   }
+}
+
+function normalizeFarmDoc(doc) {
+  if (!doc) return {};
+  const copy = { ...doc };
+  const rawRooms = Array.isArray(copy.rooms)
+    ? copy.rooms
+    : (Array.isArray(copy.locations) ? copy.locations.map((name, idx) => ({ id: `room-${idx}`, name, zones: [] })) : []);
+  copy.rooms = rawRooms.map((room, idx) => {
+    if (typeof room === 'string') {
+      return { id: `room-${idx}`, name: room, zones: [] };
+    }
+    return {
+      id: room.id || `room-${idx}`,
+      name: room.name || room.title || `Room ${idx + 1}`,
+      zones: Array.isArray(room.zones) ? room.zones.slice() : []
+    };
+  });
+  copy.locations = copy.rooms.map(r => r.name);
+  return copy;
 }
 
 // Safe rooms persistence: read existing rooms.json, merge the room by id, then POST the full file back.
@@ -1291,433 +1311,850 @@ class FarmWizard {
   constructor() {
     this.modal = $('#farmModal');
     this.form = $('#farmWizardForm');
-    // Simplified admin-only steps
-    // Include Branding step and align with available sections in index.html
-    this.steps = ['farm-name', 'branding', 'locations', 'contact-name', 'contact-email', 'contact-phone', 'review'];
+    this.progressEl = $('#farmModalProgress');
+    this.titleEl = $('#farmModalTitle');
     this.currentStep = 0;
-    this.data = {
-      farmName: '',
-      locations: [],
-      contact: { name: '', email: '', phone: '' },
-      branding: null
+    this.baseSteps = ['connection-choice', 'wifi-select', 'wifi-password', 'wifi-test', 'location', 'spaces', 'review'];
+    this.wifiNetworks = [];
+    this.data = this.defaultData();
+    this.discoveryStorageKeys = {
+      reuse: 'gr.discovery.useSameNetwork',
+      subnet: 'gr.discovery.subnet',
+      gateway: 'gr.discovery.gateway',
+      ssid: 'gr.discovery.ssid'
     };
-    // Staged branding from /brand/extract or manual color edits
-    this.pendingBranding = null;
     this.init();
   }
 
+  defaultData() {
+    const tz = Intl.DateTimeFormat().resolvedOptions().timeZone || 'America/New_York';
+    const reuse = this.readDiscoveryPreference();
+    return {
+      connection: {
+        type: 'wifi',
+        wifi: {
+          ssid: '',
+          password: '',
+          reuseDiscovery: reuse,
+          tested: false,
+          testResult: null
+        }
+      },
+      location: {
+        farmName: '',
+        address: '',
+        city: '',
+        state: '',
+        postal: '',
+        timezone: tz
+      },
+      rooms: []
+    };
+  }
+
+  readDiscoveryPreference() {
+    try {
+      const raw = localStorage.getItem(this.discoveryStorageKeys.reuse);
+      return raw === null ? true : raw === 'true';
+    } catch { return true; }
+  }
+
   init() {
-    // Modal wiring
-    $('#btnLaunchFarm')?.addEventListener('click', () => this.open());
+    $('#btnLaunchFarm')?.addEventListener('click', () => { this.data = this.defaultData(); this.open(); });
+    $('#btnEditFarm')?.addEventListener('click', () => this.edit());
     $('#farmModalClose')?.addEventListener('click', () => this.close());
     $('#farmModalBackdrop')?.addEventListener('click', () => this.close());
-
-    // Navigation
     $('#farmPrev')?.addEventListener('click', () => this.prevStep());
     $('#farmNext')?.addEventListener('click', () => this.nextStep());
-    $('#btnSaveFarm')?.addEventListener('click', (e) => this.saveFarm(e));
+    this.form?.addEventListener('submit', (e) => this.saveFarm(e));
 
-    // Locations
-    $('#addFarmLocation')?.addEventListener('click', () => this.addLocation());
-    $('#farmLocation')?.addEventListener('keydown', (e) => {
-      if (e.key === 'Enter') { e.preventDefault(); this.addLocation(); }
+    $('#btnScanWifi')?.addEventListener('click', () => this.scanWifiNetworks(true));
+    $('#btnManualSsid')?.addEventListener('click', () => this.handleManualSsid());
+    $('#wifiShowPassword')?.addEventListener('change', (e) => {
+      const input = $('#wifiPassword');
+      if (input) input.type = e.target.checked ? 'text' : 'password';
+    });
+    $('#wifiPassword')?.addEventListener('input', (e) => {
+      this.data.connection.wifi.password = e.target.value || '';
+      this.data.connection.wifi.tested = false;
+      this.data.connection.wifi.testResult = null;
+      this.updateWifiPasswordUI();
+    });
+    $('#wifiReuseDevices')?.addEventListener('change', (e) => {
+      const reuse = !!e.target.checked;
+      this.data.connection.wifi.reuseDiscovery = reuse;
+      try { localStorage.setItem(this.discoveryStorageKeys.reuse, reuse ? 'true' : 'false'); } catch {}
+    });
+    $('#btnTestWifi')?.addEventListener('click', () => this.testWifi());
+    $('#farmName')?.addEventListener('input', (e) => { this.data.location.farmName = e.target.value || ''; });
+    $('#farmAddress')?.addEventListener('input', (e) => { this.data.location.address = e.target.value || ''; this.guessTimezone(); });
+    $('#farmCity')?.addEventListener('input', (e) => { this.data.location.city = e.target.value || ''; this.guessTimezone(); });
+    $('#farmState')?.addEventListener('input', (e) => { this.data.location.state = e.target.value || ''; this.guessTimezone(); });
+    $('#farmPostal')?.addEventListener('input', (e) => { this.data.location.postal = e.target.value || ''; });
+    $('#farmTimezone')?.addEventListener('change', (e) => { this.data.location.timezone = e.target.value || this.data.location.timezone; });
+    $('#btnAddRoom')?.addEventListener('click', () => this.addRoom());
+    $('#newRoomName')?.addEventListener('keydown', (e) => { if (e.key === 'Enter') { e.preventDefault(); this.addRoom(); } });
+
+    document.querySelectorAll('#farmConnectionChoice .chip-option').forEach(btn => {
+      btn.addEventListener('click', () => {
+        const choice = btn.dataset.value;
+        if (!choice) return;
+        this.data.connection.type = choice;
+        document.querySelectorAll('#farmConnectionChoice .chip-option').forEach(b => b.classList.toggle('is-active', b === btn));
+        this.steps = this.getVisibleSteps();
+        if (choice === 'wifi' && !this.wifiNetworks.length) this.scanWifiNetworks();
+        if (choice !== 'wifi') {
+          this.data.connection.wifi.testResult = null;
+          this.data.connection.wifi.tested = false;
+        }
+        this.renderWifiNetworks();
+        this.updateWifiPasswordUI();
+      });
     });
 
-    // Load existing farm if present
+    this.populateTimezones();
     this.loadExistingFarm();
-
-    // Wire branding UI after DOM elements are available
-    this.wireBrandingUI();
   }
 
-  async loadExistingFarm() {
-    const farmData = await loadJSON('./data/farm.json');
-    if (farmData) {
-      STATE.farm = farmData;
-      // copy known fields into local data for editing
-      this.data.farmName = farmData.farmName || '';
-      this.data.locations = farmData.locations || [];
-      this.data.contact = farmData.contact || { name: '', email: '', phone: '' };
-      this.data.branding = farmData.branding || null;
-      this.updateFarmDisplay();
-      // Hydrate branding UI from saved farm branding
-      try { this.hydrateBrandingUIFromFarm(); } catch {}
+  populateTimezones() {
+    const select = $('#farmTimezone');
+    if (!select) return;
+    const common = [
+      'America/Toronto','America/New_York','America/Chicago','America/Denver','America/Los_Angeles','America/Vancouver',
+      'America/Sao_Paulo','Europe/London','Europe/Amsterdam','Europe/Berlin','Asia/Tokyo','Asia/Kolkata','Australia/Sydney'
+    ];
+    const current = this.data.location.timezone;
+    select.innerHTML = common.map(tz => `<option value="${tz}">${tz}</option>`).join('');
+    if (!common.includes(current)) {
+      const opt = document.createElement('option');
+      opt.value = current;
+      opt.textContent = current;
+      opt.selected = true;
+      select.appendChild(opt);
+    } else {
+      select.value = current;
     }
   }
 
-  updateFarmDisplay() {
-    if (!STATE.farm) return;
-    const badge = $('#farmBadge');
-    const panel = $('#farmPanel');
-    const launchBtn = $('#btnLaunchFarm');
-    const editBtn = $('#btnEditFarm');
-    if (badge && panel) {
-      badge.style.display = 'block';
-      badge.innerHTML = `<strong>${STATE.farm.farmName}</strong> • ${STATE.farm.locations?.[0] || ''} • ${STATE.farm.contact?.name || ''}`;
-      launchBtn.style.display = 'none';
-      editBtn.style.display = 'inline-block';
-      editBtn.addEventListener('click', () => this.edit());
-    }
+  getVisibleSteps() {
+    if (this.data.connection.type === 'wifi') return this.baseSteps.slice();
+    return this.baseSteps.filter(step => !step.startsWith('wifi-'));
   }
 
   open() {
     this.currentStep = 0;
+    this.steps = this.getVisibleSteps();
     this.showStep(0);
-    this.modal.setAttribute('aria-hidden', 'false');
-    this.renderLocations();
+    this.modal?.setAttribute('aria-hidden', 'false');
+    this.updateConnectionButtons();
+    this.renderWifiNetworks();
+    this.updateWifiPasswordUI();
+    this.renderRoomsEditor();
   }
 
   edit() {
-    // populate editor from STATE.farm
-    this.data = {
-      farmName: STATE.farm?.farmName || '',
-      locations: STATE.farm?.locations || [],
-      contact: STATE.farm?.contact || { name: '', email: '', phone: '' },
-      address: STATE.farm?.address || ''
-    };
+    if (!STATE.farm) return this.open();
+    this.hydrateFromFarm(STATE.farm);
+    this.steps = this.getVisibleSteps();
     this.open();
   }
 
-  close() { this.modal.setAttribute('aria-hidden', 'true'); }
-
-  showStep(index) {
-    document.querySelectorAll('.farm-step').forEach(step => step.removeAttribute('data-active'));
-    const el = document.querySelector(`[data-step="${this.steps[index]}"]`);
-    if (el) el.setAttribute('data-active', '');
-    $('#farmModalProgress').textContent = `Step ${index+1} of ${this.steps.length}`;
-    const prevBtn = $('#farmPrev'); const nextBtn = $('#farmNext'); const saveBtn = $('#btnSaveFarm');
-    prevBtn.style.display = index === 0 ? 'none' : 'inline-block';
-    if (index === this.steps.length - 1) { nextBtn.style.display = 'none'; saveBtn.style.display = 'inline-block'; this.updateReview(); }
-    else { nextBtn.style.display = 'inline-block'; saveBtn.style.display = 'none'; }
-    // populate inputs for the current step
-    if (this.steps[index] === 'farm-name') { const elName = $('#farmName'); if (elName) elName.value = this.data.farmName || ''; }
-    if (this.steps[index] === 'contact-name') { const el = $('#farmContact'); if (el) el.value = this.data.contact?.name || ''; }
-    if (this.steps[index] === 'contact-email') { const el = $('#farmContactEmail'); if (el) el.value = this.data.contact?.email || ''; }
-    if (this.steps[index] === 'contact-phone') { const el = $('#farmContactPhone'); if (el) el.value = this.data.contact?.phone || ''; }
+  close() {
+    this.modal?.setAttribute('aria-hidden', 'true');
   }
 
-  nextStep() { if (this.validateCurrentStep()) { this.currentStep++; this.showStep(this.currentStep); } }
-  prevStep() { this.currentStep = Math.max(0, this.currentStep - 1); this.showStep(this.currentStep); }
+  showStep(index) {
+    this.steps = this.getVisibleSteps();
+    if (index >= this.steps.length) index = this.steps.length - 1;
+    if (index < 0) index = 0;
+    this.currentStep = index;
+    const activeId = this.steps[index];
+    document.querySelectorAll('.farm-step').forEach(step => {
+      if (!activeId) { step.removeAttribute('data-active'); return; }
+      step.toggleAttribute('data-active', step.dataset.step === activeId);
+    });
+    if (this.progressEl) this.progressEl.textContent = `Step ${index + 1} of ${this.steps.length}`;
+    if (this.titleEl) {
+      if (activeId === 'location') this.titleEl.textContent = 'Where is this farm?';
+      else if (activeId === 'spaces') this.titleEl.textContent = 'Add rooms and zones';
+      else if (activeId === 'review') this.titleEl.textContent = 'Review and save';
+      else this.titleEl.textContent = 'Let’s get you online';
+    }
+    const prevBtn = $('#farmPrev');
+    const nextBtn = $('#farmNext');
+    const saveBtn = $('#btnSaveFarm');
+    if (prevBtn) prevBtn.style.display = index === 0 ? 'none' : 'inline-block';
+    if (activeId === 'review') {
+      nextBtn.style.display = 'none';
+      saveBtn.style.display = 'inline-block';
+      this.updateReview();
+    } else {
+      nextBtn.style.display = 'inline-block';
+      saveBtn.style.display = 'none';
+    }
+    if (activeId === 'wifi-select' && this.wifiNetworks.length === 0) this.scanWifiNetworks();
+    if (activeId === 'wifi-password') this.updateWifiPasswordUI();
+  }
+
+  handleManualSsid() {
+    const ssid = prompt('Enter the Wi‑Fi network name (SSID)');
+    if (!ssid) return;
+    this.wifiNetworks = [{ ssid, signal: null, security: 'Manual' }, ...this.wifiNetworks.filter(n => n.ssid !== ssid)];
+    this.selectSsid(ssid);
+    this.renderWifiNetworks();
+  }
+
+  selectSsid(ssid) {
+    this.data.connection.wifi.ssid = ssid;
+    this.data.connection.wifi.tested = false;
+    this.data.connection.wifi.testResult = null;
+    const label = $('#wifiChosenSsid');
+    if (label) label.textContent = ssid || 'your network';
+    this.renderWifiNetworks();
+    this.updateWifiPasswordUI();
+  }
+
+  updateWifiPasswordUI() {
+    const status = $('#wifiTestStatus');
+    if (!status) return;
+    const result = this.data.connection.wifi.testResult;
+    if (!result) {
+      status.innerHTML = '<div class="tiny" style="color:#475569">Run a quick connectivity test to confirm.</div>';
+    } else if (result.status === 'connected') {
+      status.innerHTML = `<div class="badge badge--success">Success</div><div class="tiny">IP ${result.ip || '—'} • latency ${result.latencyMs ?? '—'} ms</div>`;
+    } else {
+      status.innerHTML = `<div class="badge badge--warn">${result.status || 'Failed'}</div><div class="tiny">${result.message || 'Try again or re-enter the password.'}</div>`;
+    }
+  }
+
+  async scanWifiNetworks(force = false) {
+    const status = $('#wifiScanStatus');
+    if (status) status.textContent = 'Scanning…';
+    try {
+      const resp = await fetch(`/forwarder/network/wifi/scan${force ? '?force=1' : ''}`);
+      if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+      const body = await resp.json();
+      const list = Array.isArray(body.networks) ? body.networks : body;
+      this.wifiNetworks = list.map(n => ({
+        ssid: n.ssid || n.name || 'Hidden network',
+        signal: n.signal ?? n.rssi ?? null,
+        security: n.security || n.auth || 'Unknown'
+      }));
+      if (status) status.textContent = this.wifiNetworks.length ? `${this.wifiNetworks.length} networks found` : 'No networks found';
+    } catch (err) {
+      console.warn('Wi‑Fi scan failed', err);
+      this.wifiNetworks = [
+        { ssid: 'Farm-IoT', signal: -48, security: 'WPA2' },
+        { ssid: 'Greenhouse-Guest', signal: -61, security: 'WPA2' },
+        { ssid: 'BackOffice', signal: -72, security: 'WPA3' }
+      ];
+      if (status) status.textContent = 'Using cached sample networks';
+    }
+    this.renderWifiNetworks();
+  }
+
+  renderWifiNetworks() {
+    const host = $('#wifiNetworkList');
+    if (!host) return;
+    host.innerHTML = '';
+    if (this.data.connection.type !== 'wifi') {
+      host.innerHTML = '<p class="tiny">Ethernet selected—skip Wi‑Fi.</p>';
+      return;
+    }
+    this.wifiNetworks.forEach(net => {
+      const btn = document.createElement('button');
+      btn.type = 'button';
+      btn.className = 'chip-option';
+      btn.setAttribute('role', 'option');
+      btn.dataset.value = net.ssid;
+      btn.innerHTML = `<span>${escapeHtml(net.ssid)}</span><span class="tiny">${net.signal != null ? `${net.signal} dBm` : ''} ${net.security}</span>`;
+      if (this.data.connection.wifi.ssid === net.ssid) btn.classList.add('is-active');
+      btn.addEventListener('click', () => this.selectSsid(net.ssid));
+      host.appendChild(btn);
+    });
+  }
+
+  async testWifi() {
+    if (this.data.connection.type !== 'wifi') return;
+    if (!this.data.connection.wifi.ssid) { alert('Pick a Wi‑Fi network first.'); return; }
+    const status = $('#wifiTestStatus');
+    if (status) status.innerHTML = '<div class="tiny">Testing…</div>';
+    try {
+      const resp = await fetch('/forwarder/network/test', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          type: 'wifi',
+          wifi: {
+            ssid: this.data.connection.wifi.ssid,
+            password: this.data.connection.wifi.password
+          }
+        })
+      });
+      if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+      const body = await resp.json();
+      this.data.connection.wifi.tested = true;
+      this.data.connection.wifi.testResult = body;
+      if (body.status === 'connected') {
+        if (this.data.connection.wifi.reuseDiscovery) {
+          try {
+            if (body.subnet) localStorage.setItem(this.discoveryStorageKeys.subnet, body.subnet);
+            if (body.gateway) localStorage.setItem(this.discoveryStorageKeys.gateway, body.gateway);
+            if (body.ssid) localStorage.setItem(this.discoveryStorageKeys.ssid, body.ssid);
+          } catch {}
+        }
+        showToast({ title: 'Wi‑Fi connected', msg: `IP ${body.ip || '—'} • gateway ${body.gateway || '—'}`, kind: 'success', icon: '✅' });
+      } else {
+        showToast({ title: 'Wi‑Fi test failed', msg: body.message || 'Check the password or move closer to the AP.', kind: 'warn', icon: '⚠️' });
+      }
+    } catch (err) {
+      console.error('Wi‑Fi test error', err);
+      this.data.connection.wifi.testResult = { status: 'error', message: err.message };
+      showToast({ title: 'Wi‑Fi test error', msg: err.message || String(err), kind: 'warn', icon: '⚠️' });
+    }
+    this.updateWifiPasswordUI();
+  }
+
+  addRoom() {
+    const input = $('#newRoomName');
+    if (!input) return;
+    const name = (input.value || '').trim();
+    if (!name) return;
+    const id = `room-${Date.now().toString(36)}-${Math.random().toString(36).slice(2,6)}`;
+    this.data.rooms.push({ id, name, zones: [] });
+    input.value = '';
+    this.renderRoomsEditor();
+  }
+
+  removeRoom(roomId) {
+    this.data.rooms = this.data.rooms.filter(r => r.id !== roomId);
+    this.renderRoomsEditor();
+  }
+
+  addZone(roomId, zoneName) {
+    const room = this.data.rooms.find(r => r.id === roomId);
+    if (!room || !zoneName) return;
+    if (!room.zones.includes(zoneName)) room.zones.push(zoneName);
+    this.renderRoomsEditor();
+  }
+
+  removeZone(roomId, zoneName) {
+    const room = this.data.rooms.find(r => r.id === roomId);
+    if (!room) return;
+    room.zones = room.zones.filter(z => z !== zoneName);
+    this.renderRoomsEditor();
+  }
+
+  renderRoomsEditor() {
+    const host = $('#roomsEditor');
+    if (!host) return;
+    if (!this.data.rooms.length) {
+      host.innerHTML = '<p class="tiny">Add your first room to get started. Zones can be canopy, bench, or bay labels.</p>';
+      return;
+    }
+    host.innerHTML = '';
+    this.data.rooms.forEach(room => {
+      const card = document.createElement('div');
+      card.className = 'farm-room-card';
+      card.innerHTML = `
+        <div class="farm-room-card__header">
+          <strong>${escapeHtml(room.name)}</strong>
+          <button type="button" class="ghost tiny" data-action="remove-room" data-room="${room.id}">Remove</button>
+        </div>
+        <div class="farm-room-card__zones" data-room="${room.id}">${room.zones.map(z => `<span class="chip tiny" data-zone="${escapeHtml(z)}">${escapeHtml(z)} <button type="button" data-action="remove-zone" data-room="${room.id}" data-zone="${escapeHtml(z)}">×</button></span>`).join('')}</div>
+        <div class="row" style="gap:6px;flex-wrap:wrap;margin-top:8px">
+          <input type="text" class="tiny farm-zone-input" data-room="${room.id}" placeholder="Add zone">
+          <button type="button" class="ghost tiny" data-action="add-zone" data-room="${room.id}">Add zone</button>
+        </div>`;
+      host.appendChild(card);
+    });
+    host.querySelectorAll('[data-action="remove-room"]').forEach(btn => btn.addEventListener('click', (e) => {
+      const roomId = e.currentTarget.dataset.room;
+      this.removeRoom(roomId);
+    }));
+    host.querySelectorAll('[data-action="add-zone"]').forEach(btn => btn.addEventListener('click', (e) => {
+      const roomId = e.currentTarget.dataset.room;
+      const input = host.querySelector(`.farm-zone-input[data-room="${roomId}"]`);
+      const value = (input?.value || '').trim();
+      if (value) {
+        this.addZone(roomId, value);
+        if (input) input.value = '';
+      }
+    }));
+    host.querySelectorAll('.farm-zone-input').forEach(input => {
+      input.addEventListener('keydown', (ev) => {
+        if (ev.key === 'Enter') {
+          ev.preventDefault();
+          const roomId = ev.target.dataset.room;
+          this.addZone(roomId, (ev.target.value || '').trim());
+          ev.target.value = '';
+        }
+      });
+    });
+    host.querySelectorAll('[data-action="remove-zone"]').forEach(btn => btn.addEventListener('click', (e) => {
+      const roomId = e.currentTarget.dataset.room;
+      const zone = e.currentTarget.dataset.zone;
+      this.removeZone(roomId, zone);
+    }));
+  }
 
   validateCurrentStep() {
-    const step = this.steps[this.currentStep];
-    switch (step) {
-      case 'farm-name': {
-        const v = ($('#farmName')?.value || '').trim(); if (!v) { alert('Please enter a farm name'); return false; } this.data.farmName = v; break;
-      }
-      case 'locations': {
-        if (!this.data.locations || this.data.locations.length === 0) { alert('Please add at least one location'); return false; } break;
-      }
-      case 'contact-name': {
-        const v = ($('#farmContact')?.value || '').trim(); if (!v) { alert('Please enter a contact name'); return false; } this.data.contact.name = v; break;
-      }
-      case 'contact-email': {
-        const v = ($('#farmContactEmail')?.value || '').trim(); if (!v || !v.includes('@')) { alert('Please enter a valid email'); return false; } this.data.contact.email = v; break;
-      }
-      case 'contact-phone': {
-        const v = ($('#farmContactPhone')?.value || '').trim(); if (!v) { alert('Please enter a phone number'); return false; } this.data.contact.phone = v; break;
-      }
-      // No required validation on branding step; it's optional
+    const stepId = this.steps[this.currentStep];
+    if (stepId === 'connection-choice' && !['wifi','ethernet'].includes(this.data.connection.type)) {
+      alert('Pick Wi‑Fi or Ethernet to continue.');
+      return false;
+    }
+    if (stepId === 'wifi-select' && !this.data.connection.wifi.ssid) {
+      alert('Choose a Wi‑Fi network.');
+      return false;
+    }
+    if (stepId === 'wifi-test' && (!this.data.connection.wifi.testResult || this.data.connection.wifi.testResult.status !== 'connected')) {
+      alert('Run the Wi‑Fi test so we know the credentials work.');
+      return false;
+    }
+    if (stepId === 'location' && !this.data.location.farmName) {
+      alert('Add a farm name so we can label the site.');
+      return false;
+    }
+    if (stepId === 'spaces' && !this.data.rooms.length) {
+      alert('Add at least one room.');
+      return false;
     }
     return true;
   }
 
-  addLocation() {
-    const input = $('#farmLocation'); if (!input) return; const location = input.value.trim();
-    if (location && !this.data.locations.includes(location)) { this.data.locations.push(location); this.renderLocations(); input.value = ''; }
+  nextStep() {
+    if (!this.validateCurrentStep()) return;
+    const next = Math.min(this.currentStep + 1, this.steps.length - 1);
+    this.showStep(next);
   }
 
-  renderLocations() {
-    const list = $('#farmLocationList'); if (!list) return;
-    list.innerHTML = this.data.locations.map(location => `<li>${location} <button type="button" onclick="farmWizard.removeLocation('${location}')">×</button></li>`).join('');
+  prevStep() {
+    const prev = Math.max(this.currentStep - 1, 0);
+    this.showStep(prev);
   }
-
-  removeLocation(location) { this.data.locations = this.data.locations.filter(l => l !== location); this.renderLocations(); }
 
   updateReview() {
-    const review = $('#farmReview'); if (!review) return;
-    review.innerHTML = `
-      <div><strong>Farm Name:</strong> ${this.data.farmName}</div>
-      <div><strong>Locations:</strong> ${this.data.locations.join(', ')}</div>
-      <div><strong>Contact:</strong> ${this.data.contact.name}</div>
-      <div><strong>Email:</strong> ${this.data.contact.email}</div>
-      <div><strong>Phone:</strong> ${this.data.contact.phone}</div>
-      <div><strong>Branding:</strong> ${this.data.branding?.name ? `${this.data.branding.name}` : '—'}</div>
-    `;
+    const host = $('#farmReview');
+    if (!host) return;
+    const conn = this.data.connection;
+    const rooms = this.data.rooms;
+    const timezone = this.data.location.timezone;
+    const addressParts = [this.data.location.address, this.data.location.city, this.data.location.state, this.data.location.postal].filter(Boolean);
+    host.innerHTML = `
+      <div><strong>Connection:</strong> ${conn.type === 'wifi' ? `Wi‑Fi · ${escapeHtml(conn.wifi.ssid || '')}` : 'Ethernet'} ${conn.wifi.testResult?.status === 'connected' ? '✅' : ''}</div>
+      <div><strong>Farm:</strong> ${escapeHtml(this.data.location.farmName || 'Untitled')}</div>
+      <div><strong>Address:</strong> ${escapeHtml(addressParts.join(', ') || '—')}</div>
+      <div><strong>Timezone:</strong> ${escapeHtml(timezone)}</div>
+      <div><strong>Rooms:</strong> ${rooms.map(r => `${escapeHtml(r.name)} (${r.zones.length || 0} zones)`).join(', ')}</div>`;
   }
 
-  async saveFarm(e) {
-    e.preventDefault();
-    const farmData = {
-      farmName: this.data.farmName,
-      locations: this.data.locations,
-      contact: this.data.contact,
-      branding: this.data.branding || null,
-      timezone: Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC',
-      registered: new Date().toISOString()
-    };
-    const saved = await safeFarmSave(farmData);
-    if (saved) {
-      setStatus('Farm registration saved successfully');
-      this.updateFarmDisplay();
-      this.close();
-    } else {
-      alert('Failed to save farm registration. Please try again.');
+  hydrateFromFarm(farmData) {
+    const safe = farmData || {};
+    const copy = this.defaultData();
+    copy.connection.type = safe.connection?.type === 'ethernet' ? 'ethernet' : 'wifi';
+    if (safe.connection?.wifi) {
+      copy.connection.wifi.ssid = safe.connection.wifi.ssid || '';
+      copy.connection.wifi.reuseDiscovery = safe.connection.wifi.reuseDiscovery ?? this.readDiscoveryPreference();
+      copy.connection.wifi.tested = !!safe.connection.wifi.tested;
+      copy.connection.wifi.testResult = safe.connection.wifi.testResult || null;
     }
+    copy.location.farmName = safe.farmName || '';
+    copy.location.address = safe.address || '';
+    copy.location.city = safe.city || '';
+    copy.location.state = safe.state || '';
+    copy.location.postal = safe.postalCode || safe.postal || '';
+    copy.location.timezone = safe.timezone || copy.location.timezone;
+    copy.rooms = Array.isArray(safe.rooms) ? safe.rooms.map(room => ({
+      id: room.id || `room-${Math.random().toString(36).slice(2,8)}`,
+      name: room.name || room.title || 'Room',
+      zones: Array.isArray(room.zones) ? room.zones.slice() : []
+    })) : [];
+    if (!copy.rooms.length && Array.isArray(safe.locations)) {
+      copy.rooms = safe.locations.map((name, idx) => ({ id: `room-${idx}`, name, zones: [] }));
+    }
+    this.data = copy;
+    this.renderRoomsEditor();
+    this.renderWifiNetworks();
+    this.updateWifiPasswordUI();
+    this.updateConnectionButtons();
+    this.populateTimezones();
   }
 
-  wireBrandingUI() {
-    const urlInput = $('#brand-url');
-    const findBtn = $('#brand-find');
-    const statusEl = $('#brand-status');
-    const logoEl = $('#brand-logo');
-    const paletteHost = $('#brand-palette');
-    const applyBtn = $('#brand-apply');
-    const resetBtn = $('#brand-reset');
-    const clrPrimary = $('#brand-primary');
-    const clrAccent = $('#brand-accent');
-    const clrText = $('#brand-text');
-    const clrSurface = $('#brand-surface');
-    const clrBg = $('#brand-bg');
-    const logoHeightInput = $('#brand-logo-height');
-    const logoHeightVal = $('#brand-logo-height-val');
-    // Optional: support logo height tweak
-    let logoHeight = 28; // default preview size in UI
-    // Initialize logo height from saved farm branding if present
-    try {
-      const saved = STATE.farm?.branding?.logoHeight;
-      if (saved) {
-        const px = typeof saved === 'number' ? saved : parseInt(String(saved).replace(/[^0-9]/g,''), 10);
-        if (Number.isFinite(px) && px > 0) {
-          logoHeight = px;
-          if (logoHeightInput) logoHeightInput.value = String(px);
-          if (logoHeightVal) logoHeightVal.textContent = `${px} px`;
-          // Apply immediately for header preview
-          applyTheme(STATE.farm.branding.palette || DEFAULT_PALETTE, { logoHeight: px });
-        }
-      }
-    } catch {}
-
-    // Live update header logo height as the slider moves
-    logoHeightInput?.addEventListener('input', (e) => {
-      const px = parseInt(e.target.value, 10);
-      if (Number.isFinite(px)) {
-        logoHeight = px;
-        if (logoHeightVal) logoHeightVal.textContent = `${px} px`;
-        applyTheme(this.pendingBranding?.palette || STATE.farm?.branding?.palette || DEFAULT_PALETTE, { logoHeight: px });
-        if (logoEl) logoEl.style.height = `${px}px`;
-      }
+  updateConnectionButtons() {
+    document.querySelectorAll('#farmConnectionChoice .chip-option').forEach(btn => {
+      btn.classList.toggle('is-active', btn.dataset.value === this.data.connection.type);
     });
-
-    const readManualPalette = () => ({
-      primary: clrPrimary?.value || DEFAULT_PALETTE.primary,
-      accent: clrAccent?.value || DEFAULT_PALETTE.accent,
-      text: clrText?.value || DEFAULT_PALETTE.text,
-      surface: clrSurface?.value || DEFAULT_PALETTE.surface,
-      background: clrBg?.value || DEFAULT_PALETTE.background,
-      border: DEFAULT_PALETTE.border
-    });
-
-    const updateColorInputs = (p) => {
-      if (clrPrimary && p.primary) clrPrimary.value = toHex(p.primary);
-      if (clrAccent && p.accent) clrAccent.value = toHex(p.accent);
-      if (clrText && p.text) clrText.value = toHex(p.text);
-      if (clrSurface && p.surface) clrSurface.value = toHex(p.surface);
-      if (clrBg && p.background) clrBg.value = toHex(p.background);
-    };
-
-    const toHex = (c) => {
-      // Normalize named colors/rgba to hex using a canvas
-      try {
-        if (!c) return '#000000';
-        if (typeof c === 'string' && c.startsWith('#')) return c.length===4?`#${c[1]}${c[1]}${c[2]}${c[2]}${c[3]}${c[3]}`:c;
-        const ctx = document.createElement('canvas').getContext('2d');
-        ctx.fillStyle = c; const v = ctx.fillStyle;
-        if (v.startsWith('#')) return v;
-        return DEFAULT_PALETTE.primary;
-      } catch { return DEFAULT_PALETTE.primary; }
-    };
-
-    const renderPalette = (p) => {
-      if (!paletteHost) return;
-      paletteHost.innerHTML = '';
-      const soft = deriveSoftPalette(p);
-      const entries = [
-        ['Primary', p.primary], ['Accent', p.accent], ['Primary soft', soft.primarySoft], ['Accent soft', soft.accentSoft], ['Text', p.text], ['Surface', p.surface], ['Background', p.background]
-      ];
-      entries.forEach(([label, color]) => {
-        const sw = document.createElement('span');
-        sw.className = 'chip';
-        sw.style.background = color; sw.style.color = '#000'; sw.style.border = '1px solid rgba(0,0,0,.08)';
-        sw.textContent = label;
-        paletteHost.appendChild(sw);
-      });
-    };
-
-    const applyBrandingToUI = (branding) => {
-      if (!branding?.palette) return;
-      const extras = { fontFamily: branding.fontFamily || '' };
-      if (branding.logoHeight) extras.logoHeight = branding.logoHeight;
-      applyTheme(branding.palette, extras);
-      const headerLogo = document.querySelector('.header.logo img');
-      if (headerLogo) {
-        if (branding.logo) { headerLogo.src = branding.logo; headerLogo.style.display = 'inline-block'; if (branding.logoHeight) headerLogo.style.height = (typeof branding.logoHeight==='number'?`${branding.logoHeight}px`:branding.logoHeight); }
-        else { headerLogo.removeAttribute('src'); headerLogo.style.display = 'none'; }
-      }
-      // Apply brand font to title if present
-      const title = document.querySelector('.header.logo h1');
-      if (title && branding.fontFamily) {
-        title.style.fontFamily = branding.fontFamily + ', var(--gr-font)';
-      }
-      // Inject font CSS (e.g., Google Fonts) if provided
-      if (Array.isArray(branding.fontCss) && branding.fontCss.length) {
-        const id = 'gr-brand-fonts';
-        let link = document.getElementById(id);
-        if (!link) { link = document.createElement('link'); link.id = id; link.rel = 'stylesheet'; document.head.appendChild(link); }
-        link.href = branding.fontCss[0];
-      }
-    };
-
-    findBtn?.addEventListener('click', async () => {
-      const url = (urlInput?.value || '').trim();
-      if (!url) { if (statusEl) statusEl.textContent = 'Enter a website URL to extract.'; return; }
-      try {
-        if (statusEl) { statusEl.textContent = 'Looking up…'; statusEl.style.color = '#475569'; }
-        const res = await api(`/brand/extract?url=${encodeURIComponent(url)}`);
-        if (!res || res.ok === false) throw new Error(res?.error || 'Brand extraction failed');
-        const palette = {
-          primary: res.palette?.primary || DEFAULT_PALETTE.primary,
-          accent: res.palette?.accent || DEFAULT_PALETTE.accent,
-          text: res.palette?.text || DEFAULT_PALETTE.text,
-          surface: res.palette?.surface || DEFAULT_PALETTE.surface,
-          background: res.palette?.background || DEFAULT_PALETTE.background,
-          border: res.palette?.border || DEFAULT_PALETTE.border
-        };
-        // Try to refine palette primary from the logo dominant color if available
-        let dominant = null;
-        if (res.logo) { try { dominant = await extractDominantColorFromImage(res.logo); } catch {}
-        }
-        if (dominant) {
-          // Only adopt dominant if it maintains contrast vs background
-          const bgHex = toHexColor(palette.background) || '#F7FAFA';
-          if (contrastRatio(dominant, bgHex) >= 3) { palette.primary = dominant; }
-        }
-        this.pendingBranding = { name: res.name || '', logo: res.logo || '', palette, sourceUrl: url, fontFamily: res.fontFamily || '', fontCss: res.fontCss || [], logoHeight };
-        if (logoEl) { if (res.logo) { logoEl.src = res.logo; logoEl.style.display = 'inline-block'; logoEl.style.height = `${logoHeight}px`; } else { logoEl.style.display = 'none'; } }
-        updateColorInputs(palette);
-        renderPalette(palette);
-        if (statusEl) { statusEl.textContent = res.name ? `Found “${res.name}”` : 'Palette extracted'; statusEl.style.color = '#0f172a'; }
-      } catch (err) {
-        if (statusEl) { statusEl.textContent = `Error: ${err.message || err}`; statusEl.style.color = '#b91c1c'; }
-      }
-    });
-
-    // Apply theme now and persist to farm.json/localStorage
-    applyBtn?.addEventListener('click', async () => {
-      const palette = this.pendingBranding?.palette || readManualPalette();
-      const soft = deriveSoftPalette(palette);
-      const branding = {
-        name: this.pendingBranding?.name || (STATE.farm?.farmName ? `${STATE.farm.farmName} Theme` : 'Custom Theme'),
-        logo: this.pendingBranding?.logo || '',
-        palette: { ...palette, ...soft },
-        sourceUrl: this.pendingBranding?.sourceUrl || (document.location?.origin || ''),
-        fontFamily: this.pendingBranding?.fontFamily || '',
-        fontCss: this.pendingBranding?.fontCss || [],
-        logoHeight
-      };
-      // Apply immediately to UI
-      applyBrandingToUI(branding);
-      // Persist into farm object and save
-      this.data.branding = branding;
-      const ok = await safeFarmSave({ branding });
-      if (ok) { setStatus('Brand applied and saved to farm'); }
-      else { showToast({ title:'Save failed', msg:'Applied theme but could not persist farm.json', kind:'warn', icon:'⚠️' }, 6000); }
-    });
-
-    // Manual color edits update preview palette
-    [clrPrimary, clrAccent, clrText, clrSurface, clrBg].forEach(inp => {
-      inp?.addEventListener('input', () => {
-        const p = readManualPalette();
-        renderPalette(p);
-      });
-    });
-
-    // Reset to defaults
-    resetBtn?.addEventListener('click', async () => {
-      this.pendingBranding = null;
-      updateColorInputs(DEFAULT_PALETTE);
-      renderPalette(DEFAULT_PALETTE);
-      applyTheme(DEFAULT_PALETTE, { logoHeight: 22 });
-      if (logoEl) { logoEl.removeAttribute('src'); logoEl.style.display = 'none'; }
-      if (logoHeightInput) logoHeightInput.value = '28';
-      if (logoHeightVal) logoHeightVal.textContent = '28 px';
-      // Remove branding from saved farm if present
-      const farm = STATE.farm || {};
-      if (farm.branding) {
-        delete farm.branding;
-        await safeFarmSave(farm);
-        setStatus('Theme reset to default');
-      }
-    });
-
-    // Initialize controls with defaults
-    updateColorInputs(DEFAULT_PALETTE);
-    renderPalette(DEFAULT_PALETTE);
   }
 
-  hydrateBrandingUIFromFarm() {
-    const branding = STATE.farm?.branding; if (!branding) return;
+  async loadExistingFarm() {
     try {
-      const logoEl = $('#brand-logo');
-      const statusEl = $('#brand-status');
-      const logoHeightInput = $('#brand-logo-height');
-      const logoHeightVal = $('#brand-logo-height-val');
-      if (logoEl && branding.logo) { logoEl.src = branding.logo; logoEl.style.display = 'inline-block'; }
-      const p = {
-        primary: branding.palette?.primary || DEFAULT_PALETTE.primary,
-        accent: branding.palette?.accent || DEFAULT_PALETTE.accent,
-        text: branding.palette?.text || DEFAULT_PALETTE.text,
-        surface: branding.palette?.surface || DEFAULT_PALETTE.surface,
-        background: branding.palette?.background || DEFAULT_PALETTE.background
-      };
-      // Update inputs and preview
-      const clrPrimary = $('#brand-primary'); if (clrPrimary) clrPrimary.value = p.primary;
-      const clrAccent = $('#brand-accent'); if (clrAccent) clrAccent.value = p.accent;
-      const clrText = $('#brand-text'); if (clrText) clrText.value = p.text;
-      const clrSurface = $('#brand-surface'); if (clrSurface) clrSurface.value = p.surface;
-      const clrBg = $('#brand-bg'); if (clrBg) clrBg.value = p.background;
-      const paletteHost = $('#brand-palette');
-      if (paletteHost) {
-        paletteHost.innerHTML = '';
-        ['primary','accent','text','surface','background'].forEach((k, idx) => {
-          const sw = document.createElement('span');
-          sw.className = 'chip'; sw.textContent = k[0].toUpperCase() + k.slice(1);
-          sw.style.background = p[k]; sw.style.border = '1px solid rgba(0,0,0,.08)';
-          paletteHost.appendChild(sw);
-        });
+      const farm = await loadJSON('./data/farm.json');
+      if (farm) {
+        STATE.farm = this.normalizeFarm(farm);
+        this.hydrateFromFarm(STATE.farm);
+        this.updateFarmDisplay();
+        return;
       }
-      if (statusEl) statusEl.textContent = branding.name ? `Saved: ${branding.name}` : 'Saved theme loaded';
-      // Apply brand immediately on hydration
-      const extras = { fontFamily: branding.fontFamily || '' };
-      if (branding.logoHeight) extras.logoHeight = branding.logoHeight;
-      applyTheme(branding.palette, extras);
-      if (branding.fontCss && branding.fontCss.length) {
-        const id = 'gr-brand-fonts'; let link = document.getElementById(id); if (!link) { link = document.createElement('link'); link.id = id; link.rel = 'stylesheet'; document.head.appendChild(link); }
-        link.href = branding.fontCss[0];
-      }
-      const title = document.querySelector('.header.logo h1'); if (title && branding.fontFamily) { title.style.fontFamily = branding.fontFamily + ', var(--gr-font)'; }
-      // Apply header logo height if present
-      if (branding.logoHeight) {
-        const headerLogo = document.querySelector('.header.logo img');
-        if (headerLogo) headerLogo.style.height = (typeof branding.logoHeight==='number'?`${branding.logoHeight}px`:branding.logoHeight);
-        const px = typeof branding.logoHeight === 'number' ? branding.logoHeight : parseInt(String(branding.logoHeight).replace(/[^0-9]/g,''), 10);
-        if (logoHeightInput && Number.isFinite(px)) logoHeightInput.value = String(px);
-        if (logoHeightVal && Number.isFinite(px)) logoHeightVal.textContent = `${px} px`;
+    } catch (err) {
+      console.warn('Failed to load farm.json', err);
+    }
+    try {
+      const cached = JSON.parse(localStorage.getItem('gr.farm') || 'null');
+      if (cached) {
+        STATE.farm = this.normalizeFarm(cached);
+        this.hydrateFromFarm(STATE.farm);
+        this.updateFarmDisplay();
       }
     } catch {}
+  }
+
+  normalizeFarm(farm) {
+    return normalizeFarmDoc(farm);
+  }
+
+  async saveFarm(event) {
+    event?.preventDefault();
+    if (!this.validateCurrentStep()) { this.showStep(this.currentStep); return; }
+    const existing = STATE.farm || {};
+    const payload = {
+      ...existing,
+      farmName: this.data.location.farmName,
+      address: this.data.location.address,
+      city: this.data.location.city,
+      state: this.data.location.state,
+      postalCode: this.data.location.postal,
+      timezone: this.data.location.timezone,
+      connection: {
+        type: this.data.connection.type,
+        wifi: {
+          ssid: this.data.connection.wifi.ssid,
+          reuseDiscovery: this.data.connection.wifi.reuseDiscovery,
+          tested: this.data.connection.wifi.tested,
+          testResult: this.data.connection.wifi.testResult
+        }
+      },
+      discovery: {
+        subnet: (() => { try { return localStorage.getItem(this.discoveryStorageKeys.subnet) || ''; } catch { return ''; } })(),
+        gateway: (() => { try { return localStorage.getItem(this.discoveryStorageKeys.gateway) || ''; } catch { return ''; } })(),
+        reuseNetwork: this.data.connection.wifi.reuseDiscovery,
+        ssid: this.data.connection.wifi.ssid
+      },
+      rooms: this.data.rooms.map((room, idx) => ({
+        id: room.id || `room-${idx}`,
+        name: room.name,
+        zones: Array.isArray(room.zones) ? room.zones.slice() : []
+      })),
+      locations: this.data.rooms.map(r => r.name),
+      registered: existing.registered || new Date().toISOString()
+    };
+    const saved = await safeFarmSave(payload);
+    if (!saved) { alert('Failed to save farm. Please try again.'); return; }
+    STATE.farm = this.normalizeFarm(payload);
+    this.updateFarmDisplay();
+    showToast({ title: 'Farm saved', msg: 'We stored the farm profile and updated discovery defaults.', kind: 'success', icon: '✅' });
+    this.close();
+  }
+
+  updateFarmDisplay() {
+    const badge = $('#farmBadge');
+    const editBtn = $('#btnEditFarm');
+    const launchBtn = $('#btnLaunchFarm');
+    const setupBtn = $('#btnStartDeviceSetup');
+    const summaryChip = $('#farmSummaryChip');
+    if (!STATE.farm) {
+      if (badge) badge.style.display = 'none';
+      if (setupBtn) setupBtn.style.display = 'none';
+      if (summaryChip) summaryChip.style.display = 'none';
+      return;
+    }
+    const roomCount = Array.isArray(STATE.farm.rooms) ? STATE.farm.rooms.length : 0;
+    const zoneCount = (STATE.farm.rooms || []).reduce((acc, room) => acc + (room.zones?.length || 0), 0);
+    const summary = `${STATE.farm.farmName || 'Farm'} · ${roomCount} room${roomCount === 1 ? '' : 's'} · ${zoneCount} zone${zoneCount === 1 ? '' : 's'}`;
+    if (badge) {
+      badge.style.display = 'block';
+      badge.textContent = summary;
+    }
+    if (summaryChip) {
+      summaryChip.style.display = 'inline-flex';
+      summaryChip.textContent = summary;
+    }
+    if (setupBtn) {
+      setupBtn.style.display = 'inline-flex';
+    }
+    if (launchBtn) launchBtn.style.display = 'none';
+    if (editBtn) editBtn.style.display = 'inline-flex';
+  }
+
+  guessTimezone() {
+    const state = (this.data.location.state || '').toLowerCase();
+    const map = {
+      'ca': 'America/Los_Angeles', 'california': 'America/Los_Angeles',
+      'or': 'America/Los_Angeles', 'oregon': 'America/Los_Angeles',
+      'wa': 'America/Los_Angeles', 'washington': 'America/Los_Angeles',
+      'bc': 'America/Vancouver', 'british columbia': 'America/Vancouver',
+      'ab': 'America/Edmonton', 'alberta': 'America/Edmonton',
+      'on': 'America/Toronto', 'ontario': 'America/Toronto',
+      'qc': 'America/Toronto', 'quebec': 'America/Toronto',
+      'ny': 'America/New_York', 'new york': 'America/New_York',
+      'il': 'America/Chicago', 'illinois': 'America/Chicago',
+      'fl': 'America/New_York', 'florida': 'America/New_York'
+    };
+    const guess = map[state];
+    if (guess) {
+      this.data.location.timezone = guess;
+      const select = $('#farmTimezone');
+      if (select) {
+        if (![...select.options].some(opt => opt.value === guess)) {
+          const opt = document.createElement('option');
+          opt.value = guess;
+          opt.textContent = guess;
+          select.appendChild(opt);
+        }
+        select.value = guess;
+      }
+    }
   }
 }
 
+
+// --- Device Discovery & Manager ---
+class DeviceManagerWindow {
+  constructor() {
+    this.host = $('#deviceManager');
+    this.backdrop = $('#deviceManagerBackdrop');
+    this.closeBtn = $('#deviceManagerClose');
+    this.resultsEl = $('#deviceDiscoveryResults');
+    this.statusEl = $('#discoveryStatus');
+    this.summaryEl = $('#deviceManagerSummary');
+    this.runBtn = $('#btnRunDiscovery');
+    this.filterButtons = Array.from(document.querySelectorAll('#deviceManager [data-filter]'));
+    this.automationBtn = $('#btnOpenAutomation');
+    this.devices = [];
+    this.activeFilter = 'all';
+    this.discoveryRun = null;
+    this.bind();
+  }
+
+  bind() {
+    $('#btnStartDeviceSetup')?.addEventListener('click', () => this.open());
+    $('#btnDiscover')?.addEventListener('click', () => this.open());
+    this.closeBtn?.addEventListener('click', () => this.close());
+    this.backdrop?.addEventListener('click', () => this.close());
+    this.runBtn?.addEventListener('click', () => this.runDiscovery());
+    this.filterButtons.forEach(btn => btn.addEventListener('click', () => this.setFilter(btn.dataset.filter)));
+    this.automationBtn?.addEventListener('click', () => {
+      showToast({ title: 'Automation card', msg: 'Coming soon — natural language rules for any sensor to control any device.', kind: 'info', icon: '🧠' }, 5000);
+    });
+  }
+
+  open() {
+    if (!this.host) return;
+    this.host.setAttribute('aria-hidden', 'false');
+    if (!this.devices.length) this.runDiscovery();
+    this.render();
+  }
+
+  close() {
+    if (!this.host) return;
+    this.host.setAttribute('aria-hidden', 'true');
+  }
+
+  setFilter(filter) {
+    this.activeFilter = filter || 'all';
+    this.filterButtons.forEach(btn => btn.setAttribute('aria-selected', btn.dataset.filter === this.activeFilter ? 'true' : 'false'));
+    this.render();
+  }
+
+  async runDiscovery() {
+    if (this.statusEl) this.statusEl.textContent = 'Scanning local network, BLE hub, and MQTT broker…';
+    try {
+      const resp = await fetch('/discovery/devices');
+      if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+      const body = await resp.json();
+      this.discoveryRun = body;
+      const list = Array.isArray(body.devices) ? body.devices : [];
+      this.devices = list.map(dev => ({
+        id: dev.id || `${dev.protocol}:${dev.address || dev.name || Math.random().toString(36).slice(2,8)}`,
+        name: dev.name || dev.label || 'Unknown device',
+        protocol: dev.protocol || 'wifi',
+        confidence: typeof dev.confidence === 'number' ? dev.confidence : 0.6,
+        signal: dev.signal ?? dev.rssi ?? null,
+        address: dev.address || dev.ip || dev.mac || null,
+        vendor: dev.vendor || dev.brand || 'Unknown',
+        lastSeen: dev.lastSeen || body.completedAt || new Date().toISOString(),
+        hints: dev.hints || {},
+        status: 'new',
+        assignment: null
+      }));
+      if (this.statusEl) this.statusEl.textContent = `Found ${this.devices.length} device${this.devices.length === 1 ? '' : 's'}`;
+      showToast({ title: 'Discovery complete', msg: `Found ${this.devices.length} potential devices`, kind: 'success', icon: '🔍' });
+    } catch (err) {
+      console.error('Discovery failed', err);
+      this.devices = [
+        { id: 'wifi:192.168.1.50', name: 'Shelly Pro 4PM', protocol: 'wifi', confidence: 0.92, signal: -51, address: '192.168.1.50', vendor: 'Shelly', lastSeen: new Date().toISOString(), hints: { type: 'Light' }, status: 'new', assignment: null },
+        { id: 'ble:SwitchBot-Meter-01', name: 'SwitchBot Meter Plus', protocol: 'ble', confidence: 0.8, signal: -42, address: 'DF:11:02:AA:CD:01', vendor: 'SwitchBot', lastSeen: new Date().toISOString(), hints: { type: 'Sensor', metrics: ['temp','rh'] }, status: 'new', assignment: null },
+        { id: 'mqtt:sensor:co2', name: 'SenseCAP CO₂', protocol: 'mqtt', confidence: 0.7, signal: null, address: 'sensors/co2/01', vendor: 'Seeed', lastSeen: new Date().toISOString(), hints: { type: 'Sensor', metrics: ['co2'] }, status: 'new', assignment: null }
+      ];
+      if (this.statusEl) this.statusEl.textContent = 'Offline mode — showing demo devices';
+      showToast({ title: 'Discovery offline', msg: 'Showing demo devices because the scan failed.', kind: 'warn', icon: '⚠️' });
+    }
+    this.render();
+  }
+
+  filteredDevices() {
+    if (this.activeFilter === 'added') return this.devices.filter(d => d.status === 'added');
+    if (this.activeFilter === 'ignored') return this.devices.filter(d => d.status === 'ignored');
+    return this.devices;
+  }
+
+  render() {
+    if (!this.resultsEl) return;
+    const devices = this.filteredDevices();
+    this.resultsEl.innerHTML = '';
+    if (!devices.length) {
+      this.resultsEl.innerHTML = '<p class="tiny">No devices to show. Run discovery or adjust filters.</p>';
+    } else {
+      devices.forEach(dev => this.resultsEl.appendChild(this.renderDeviceCard(dev)));
+    }
+    const added = this.devices.filter(d => d.status === 'added').length;
+    const ignored = this.devices.filter(d => d.status === 'ignored').length;
+    const total = this.devices.length;
+    if (this.summaryEl) this.summaryEl.textContent = `${total} found · ${added} added · ${ignored} ignored`;
+  }
+
+  renderDeviceCard(device) {
+    const card = document.createElement('article');
+    card.className = 'device-manager__card';
+    card.dataset.deviceId = device.id;
+    const signal = device.signal != null ? `${device.signal} dBm` : '—';
+    const confidencePct = Math.round(device.confidence * 100);
+    const statusBadge = device.status === 'added' ? '<span class="badge badge--success">Added</span>' : (device.status === 'ignored' ? '<span class="badge badge--muted">Ignored</span>' : '');
+    card.innerHTML = `
+      <header class="device-manager__card-header">
+        <div>
+          <div class="device-manager__name">${escapeHtml(device.name)}</div>
+          <div class="tiny">${escapeHtml(device.vendor)} • ${escapeHtml(device.address || 'No address')}</div>
+        </div>
+        <div class="device-manager__badges">
+          <span class="badge badge--protocol">${device.protocol.toUpperCase()}</span>
+          <span class="badge">RSSI ${signal}</span>
+          <span class="badge">Confidence ${confidencePct}%</span>
+          ${statusBadge}
+        </div>
+      </header>
+      <div class="device-manager__card-body">
+        <div class="tiny">Last seen ${new Date(device.lastSeen).toLocaleString()}</div>
+        ${device.hints?.metrics ? `<div class="tiny">Metrics: ${device.hints.metrics.join(', ')}</div>` : ''}
+        ${device.hints?.type ? `<div class="tiny">Suggested type: ${device.hints.type}</div>` : ''}
+      </div>
+      <div class="device-manager__actions">
+        <button type="button" class="primary" data-action="add">${device.status === 'added' ? 'Edit assignment' : 'Add to Farm'}</button>
+        <button type="button" class="ghost" data-action="ignore">${device.status === 'ignored' ? 'Undo ignore' : 'Ignore'}</button>
+      </div>
+      <div class="device-manager__assignment" data-assignment></div>
+    `;
+    const actions = card.querySelector('.device-manager__actions');
+    actions.querySelector('[data-action="add"]').addEventListener('click', () => this.toggleAssignment(card, device));
+    actions.querySelector('[data-action="ignore"]').addEventListener('click', () => this.toggleIgnore(device));
+    this.renderAssignment(card, device);
+    return card;
+  }
+
+  toggleAssignment(card, device) {
+    const slot = card.querySelector('[data-assignment]');
+    if (!slot) return;
+    if (slot.querySelector('form')) {
+      slot.innerHTML = '';
+      return;
+    }
+    const form = this.buildAssignmentForm(device);
+    slot.innerHTML = '';
+    slot.appendChild(form);
+  }
+
+  buildAssignmentForm(device) {
+    const form = document.createElement('form');
+    form.className = 'device-manager__assign-form';
+    const rooms = Array.isArray(STATE.farm?.rooms) ? STATE.farm.rooms : [];
+    if (!rooms.length) {
+      form.innerHTML = '<p class="tiny">Add rooms in the Farm setup to assign devices.</p>';
+      return form;
+    }
+    const roomOptions = rooms.map(room => `<option value="${room.id}">${escapeHtml(room.name)}</option>`).join('');
+    form.innerHTML = `
+      <label class="tiny">Room
+        <select name="room" required>
+          <option value="">Select room</option>
+          ${roomOptions}
+        </select>
+      </label>
+      <label class="tiny">Zone
+        <select name="zone">
+          <option value="">Whole room</option>
+        </select>
+      </label>
+      <label class="tiny">Type
+        <select name="type" required>
+          <option value="light">Light</option>
+          <option value="sensor">Sensor</option>
+          <option value="plug">Plug</option>
+          <option value="hvac">HVAC</option>
+          <option value="other">Other</option>
+        </select>
+      </label>
+      <button type="submit" class="primary">Save</button>
+    `;
+    const roomSelect = form.querySelector('select[name="room"]');
+    const zoneSelect = form.querySelector('select[name="zone"]');
+    roomSelect.addEventListener('change', () => {
+      const room = rooms.find(r => r.id === roomSelect.value);
+      zoneSelect.innerHTML = '<option value="">Whole room</option>' + (room?.zones || []).map(z => `<option value="${escapeHtml(z)}">${escapeHtml(z)}</option>`).join('');
+    });
+    form.addEventListener('submit', (ev) => {
+      ev.preventDefault();
+      const roomId = roomSelect.value;
+      if (!roomId) { alert('Choose a room'); return; }
+      const zone = zoneSelect.value || null;
+      const type = form.querySelector('select[name="type"]').value;
+      device.assignment = { roomId, zone, type };
+      device.status = 'added';
+      showToast({ title: 'Device added', msg: `${device.name} mapped to ${type} in room ${rooms.find(r => r.id === roomId)?.name || roomId}`, kind: 'success', icon: '✅' });
+      this.render();
+    });
+    if (device.assignment) {
+      roomSelect.value = device.assignment.roomId || '';
+      roomSelect.dispatchEvent(new Event('change'));
+      zoneSelect.value = device.assignment.zone || '';
+      form.querySelector('select[name="type"]').value = device.assignment.type || 'other';
+    }
+    return form;
+  }
+
+  renderAssignment(card, device) {
+    const slot = card.querySelector('[data-assignment]');
+    if (!slot) return;
+    if (device.status !== 'added' || !device.assignment) {
+      slot.innerHTML = '';
+      return;
+    }
+    const rooms = Array.isArray(STATE.farm?.rooms) ? STATE.farm.rooms : [];
+    const room = rooms.find(r => r.id === device.assignment.roomId);
+    slot.innerHTML = `<div class="tiny">Assigned to <strong>${escapeHtml(room?.name || 'Room')}</strong>${device.assignment.zone ? ` · Zone ${escapeHtml(device.assignment.zone)}` : ''} as ${device.assignment.type}</div>`;
+  }
+
+  toggleIgnore(device) {
+    if (device.status === 'ignored') {
+      device.status = 'new';
+    } else {
+      device.status = 'ignored';
+      device.assignment = null;
+    }
+    this.render();
+  }
+}
+
+let deviceManagerWindow;
 // --- Grow Room Wizard ---
 class RoomWizard {
   constructor() {
@@ -3523,7 +3960,8 @@ class RoomWizard {
 
   populateLocationSelect() {
     const sel = $('#roomLocationSelect'); if (!sel) return;
-    sel.innerHTML = '<option value="">Select location...</option>' + (STATE.farm?.locations || []).map(l => `<option value="${l}">${l}</option>`).join('');
+    const rooms = Array.isArray(STATE.farm?.rooms) ? STATE.farm.rooms : [];
+    sel.innerHTML = '<option value="">Select room...</option>' + rooms.map(r => `<option value="${escapeHtml(r.name)}" data-room-id="${escapeHtml(r.id)}">${escapeHtml(r.name)}</option>`).join('');
     // If editing an existing room with location, preselect
     if (this.data.location) sel.value = this.data.location;
   }
@@ -3900,8 +4338,8 @@ async function loadAllData() {
     STATE.calibrations = calibrations?.calibrations || [];
   STATE.deviceMeta = deviceMeta?.devices || {};
   STATE.switchbotDevices = switchbotDevices?.devices || [];
-  STATE.farm = farm || (() => { try { return JSON.parse(localStorage.getItem('gr.farm') || 'null'); } catch { return null; } })() || {};
-  if (!Array.isArray(STATE.farm?.locations)) STATE.farm.locations = STATE.farm.locations ? [].concat(STATE.farm.locations) : [];
+  const rawFarm = farm || (() => { try { return JSON.parse(localStorage.getItem('gr.farm') || 'null'); } catch { return null; } })() || {};
+  STATE.farm = normalizeFarmDoc(rawFarm);
   try { if (STATE.farm && Object.keys(STATE.farm).length) localStorage.setItem('gr.farm', JSON.stringify(STATE.farm)); } catch {}
   STATE.rooms = rooms?.rooms || [];
   if (deviceKB && Array.isArray(deviceKB.fixtures)) STATE.deviceKB = deviceKB;
@@ -5778,6 +6216,9 @@ document.addEventListener('DOMContentLoaded', async () => {
   
   // Initialize farm wizard
   farmWizard = new FarmWizard();
+  // Initialize device manager window
+  deviceManagerWindow = new DeviceManagerWindow();
+  window.deviceManagerWindow = deviceManagerWindow;
   // Initialize room wizard
   roomWizard = new RoomWizard();
   // Wire pairing hook so Add Device opens the DevicePairWizard
