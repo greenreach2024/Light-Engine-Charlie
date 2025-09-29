@@ -1727,7 +1727,7 @@ class RoomWizard {
     this.autoAdvance = true;
     // equipment-first: begin with hardware categories before fixtures/control
     // Steps can be augmented dynamically based on selected hardware (e.g., hvac, dehumidifier, etc.)
-    this.baseSteps = ['room-name','location','layout','zones','hardware','fixtures','control','devices','sensors','connectivity','energy','review'];
+    this.baseSteps = ['connectivity','devices','hardware','category-setup','sensors','room-name','location','layout','zones','fixtures','control','energy','grouping','review'];
     this.steps = this.baseSteps.slice();
     this.currentStep = 0;
     this.data = {
@@ -1748,14 +1748,15 @@ class RoomWizard {
       photoperiod: 0,
       connectivity: { hasHub: null, hubType: '', hubIp: '', cloudTenant: 'Azure' },
       roles: { admin: [], operator: [], viewer: [] },
+      grouping: { groups: [], planId: '', scheduleId: '', spectraSync: true },
       seriesCount: 0
     };
     this.hardwareSearchResults = [];
     // dynamic category setup state
-  this.categoryQueue = []; // ordered list of categories to visit
-  this.categoryIndex = -1; // index within categoryQueue for current category-setup step
-  // Per-category progress and status map. Keys are category ids, values: { status: 'not-started'|'needs-hub'|'needs-setup'|'needs-energy'|'complete', controlConfirmed: bool, notes: string }
-  this.categoryProgress = {}; 
+    this.categoryQueue = []; // ordered list of categories to visit
+    this.categoryIndex = -1; // index within categoryQueue for current category-setup step
+    // Per-category progress and status map. Keys are category ids, values: { status: 'not-started'|'needs-hub'|'needs-setup'|'needs-energy'|'complete', controlConfirmed: bool, notes: string }
+    this.categoryProgress = {};
     this.init();
   }
 
@@ -2189,6 +2190,10 @@ class RoomWizard {
         });
       });
     }
+    $('#roomHubDetect')?.addEventListener('click', () => this.detectHub());
+    $('#roomHubVerify')?.addEventListener('click', () => this.verifyHub());
+    $('#roomDeviceScan')?.addEventListener('click', () => this.scanLocalDevices());
+
     $('#roomHubType')?.addEventListener('input', (e) => {
       this.data.connectivity = this.data.connectivity || {};
       this.data.connectivity.hubType = (e.target.value || '').trim();
@@ -2216,6 +2221,48 @@ class RoomWizard {
     bindRoleInput('roomRoleAdmin', 'admin');
     bindRoleInput('roomRoleOperator', 'operator');
     bindRoleInput('roomRoleViewer', 'viewer');
+
+    const groupInput = document.getElementById('roomGroupNameInput');
+    if (groupInput) {
+      groupInput.addEventListener('keydown', (ev) => {
+        if (ev.key === 'Enter') { ev.preventDefault(); this.addGroupFromInput(); }
+      });
+    }
+    $('#roomGroupAdd')?.addEventListener('click', () => this.addGroupFromInput());
+    const groupSuggestions = document.getElementById('roomGroupSuggestions');
+    if (groupSuggestions) {
+      groupSuggestions.addEventListener('click', (ev) => {
+        const btn = ev.target.closest('button[data-group]');
+        if (!btn) return;
+        this.addGroup(btn.getAttribute('data-group') || '');
+      });
+    }
+    const groupList = document.getElementById('roomGroupList');
+    if (groupList) {
+      groupList.addEventListener('click', (ev) => {
+        const btn = ev.target.closest('button[data-group-idx]');
+        if (!btn) return;
+        const idx = Number(btn.getAttribute('data-group-idx'));
+        if (!Number.isNaN(idx)) this.removeGroup(idx);
+      });
+    }
+    $('#roomGroupPlan')?.addEventListener('change', (ev) => {
+      this.data.grouping = this.data.grouping || { groups: [], planId: '', scheduleId: '', spectraSync: true };
+      this.data.grouping.planId = ev.target.value || '';
+      this.updateSetupQueue();
+    });
+    $('#roomGroupSchedule')?.addEventListener('change', (ev) => {
+      this.data.grouping = this.data.grouping || { groups: [], planId: '', scheduleId: '', spectraSync: true };
+      this.data.grouping.scheduleId = ev.target.value || '';
+      this.updateSetupQueue();
+    });
+    const spectraChk = document.getElementById('roomGroupSpectraSync');
+    if (spectraChk) {
+      spectraChk.addEventListener('change', (ev) => {
+        this.data.grouping = this.data.grouping || { groups: [], planId: '', scheduleId: '', spectraSync: true };
+        this.data.grouping.spectraSync = !!ev.target.checked;
+      });
+    }
   }
 
   open(room = null) {
@@ -2238,6 +2285,7 @@ class RoomWizard {
       photoperiod: 0,
       connectivity: { hasHub: null, hubType: '', hubIp: '', cloudTenant: 'Azure' },
       roles: { admin: [], operator: [], viewer: [] },
+      grouping: { groups: [], planId: '', scheduleId: '', spectraSync: true },
       seriesCount: 0
     };
     if (room) {
@@ -2248,7 +2296,8 @@ class RoomWizard {
         layout: { ...base.layout, ...(clone.layout || {}) },
         sensors: { ...base.sensors, ...(clone.sensors || {}) },
         connectivity: { ...base.connectivity, ...(clone.connectivity || {}) },
-        roles: { ...base.roles, ...(clone.roles || {}) }
+        roles: { ...base.roles, ...(clone.roles || {}) },
+        grouping: { ...base.grouping, ...(clone.grouping || {}) }
       };
       if (!Array.isArray(this.data.hardwareOrder) || !this.data.hardwareOrder.length) {
         this.data.hardwareOrder = Array.isArray(this.data.hardwareCats) ? this.data.hardwareCats.slice() : [];
@@ -2268,6 +2317,8 @@ class RoomWizard {
     this.populateLocationSelect();
     this.renderDevicesList();
     this.renderZoneList();
+    this.renderGroupList();
+    this.updateGroupSuggestions();
     this.updateHardwareSearch('');
     this.updateSetupQueue();
     // If we have a queue and any incomplete categories, jump to category-setup at first incomplete
@@ -2384,71 +2435,6 @@ class RoomWizard {
       const devicesStepEl = document.querySelector('.room-step[data-step="devices"]');
       if (devicesStepEl) devicesStepEl.style.display = smart ? 'block' : 'none';
       this.renderDevicesList();
-      const researchBtn = document.getElementById('roomResearchDevices');
-      const statusEl = document.getElementById('roomResearchStatus');
-      if (researchBtn && !researchBtn.dataset.wired) {
-        researchBtn.dataset.wired = '1';
-        researchBtn.addEventListener('click', async () => {
-          const list = Array.isArray(this.data.devices) ? this.data.devices : [];
-          if (!list.length) { showToast({ title: 'No devices', msg: 'Add devices first', kind: 'info', icon: 'ℹ️' }); return; }
-          let updated = 0; let consulted = 0; let failures = 0;
-          const origText = researchBtn.textContent; researchBtn.textContent = 'Researching…'; researchBtn.disabled = true;
-          if (statusEl) statusEl.textContent = 'Researching device spectra…';
-          const findKb = (vendor, model) => {
-            const fixtures = (STATE.deviceKB && Array.isArray(STATE.deviceKB.fixtures)) ? STATE.deviceKB.fixtures : [];
-            const vn = String(vendor || '').toLowerCase();
-            const mn = String(model || '').toLowerCase();
-            let hit = fixtures.find(f => String(f.vendor || '').toLowerCase() === vn && String(f.model || '').toLowerCase() === mn);
-            if (!hit) hit = fixtures.find(f => (`${String(f.vendor || '')} ${String(f.model || '')}`).toLowerCase().includes(`${vn}${mn}`.trim()));
-            return hit || null;
-          };
-          for (const d of list) {
-            try {
-              let spectrum = null;
-              if (d.host) {
-                try {
-                  const resp = await fetch('/forwarder/probe/device-spectrum', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ host: d.host }) });
-                  if (resp.ok) {
-                    const body = await resp.json().catch(() => ({}));
-                    if (body && body.spectrum) spectrum = body.spectrum;
-                  }
-                } catch {}
-              }
-              if (!spectrum) {
-                const kb = findKb(d.vendor, d.model);
-                if (kb && kb.spectrum) { spectrum = kb.spectrum; consulted++; }
-              }
-              if (!spectrum) { failures++; continue; }
-              const id = d.id || (d.host ? `light-${d.host}` : `${(d.vendor || 'dev')}-${(d.model || 'unknown')}`.toLowerCase().replace(/[^a-z0-9]+/g, '-'));
-              const metaPrev = getDeviceMeta(id);
-              const specObj = { cw: Number(spectrum.cw || 0), ww: Number(spectrum.ww || 0), bl: Number(spectrum.bl || 0), rd: Number(spectrum.rd || 0), fr: Number(spectrum.fr || 0) || 0, uv: Number(spectrum.uv || 0) || 0 };
-              setDeviceMeta(id, { spectrumMode: 'static', factorySpectrum: specObj, vendor: d.vendor || metaPrev.vendor, model: d.model || metaPrev.model, host: d.host || metaPrev.host });
-              try {
-                const live = (STATE.devices || []).find(x => (d.host && (x.host === d.host || x.ip === d.host)) || (`${String(x.vendor || '')} ${String(x.model || '')}`.toLowerCase().includes(`${String(d.vendor || '')} ${String(d.model || '')}`.toLowerCase().trim())));
-                if (live && live.id) {
-                  const prev2 = getDeviceMeta(live.id);
-                  setDeviceMeta(live.id, { spectrumMode: 'static', factorySpectrum: specObj, vendor: d.vendor || prev2.vendor, model: d.model || prev2.model, host: d.host || prev2.host });
-                }
-              } catch {}
-              updated++;
-              try {
-                const ul = document.getElementById('roomDevicesList');
-                const li = ul?.children?.[list.indexOf(d)];
-                if (li) {
-                  const note = li.querySelector('.tiny');
-                  const pct = `CW ${Math.round(Number(spectrum.cw || 0))} • WW ${Math.round(Number(spectrum.ww || 0))} • B ${Math.round(Number(spectrum.bl || 0))} • R ${Math.round(Number(spectrum.rd || 0))}`;
-                  if (note) note.textContent = (note.textContent ? `${note.textContent} • ` : '') + `Factory: ${pct}`;
-                }
-              } catch {}
-            } catch { failures++; }
-          }
-          await saveDeviceMeta();
-          researchBtn.textContent = origText; researchBtn.disabled = false;
-          if (statusEl) statusEl.textContent = `Recorded spectra for ${updated} device(s)${consulted ? `, via KB: ${consulted}` : ''}${failures ? `, missing: ${failures}` : ''}`;
-          showToast({ title: 'Research complete', msg: `${updated} updated • ${consulted} from KB • ${failures} missing`, kind: updated ? 'success' : 'info', icon: updated ? '✅' : 'ℹ️' });
-          try { this.renderDevicesList(); } catch {}
-        });
-      }
     }
     if (stepKey === 'connectivity') {
       const hub = this.data.connectivity || {};
@@ -2463,6 +2449,11 @@ class RoomWizard {
       const adminInput = document.getElementById('roomRoleAdmin'); if (adminInput) adminInput.value = (roles.admin || []).join(', ');
       const opInput = document.getElementById('roomRoleOperator'); if (opInput) opInput.value = (roles.operator || []).join(', ');
       const viewerInput = document.getElementById('roomRoleViewer'); if (viewerInput) viewerInput.value = (roles.viewer || []).join(', ');
+      const statusEl = document.getElementById('roomHubStatus');
+      if (statusEl) {
+        if (hub.hasHub) statusEl.textContent = hub.hubIp ? `Hub recorded at ${hub.hubIp}. Verify Node-RED when ready.` : 'Hub recorded. Add IP to enable edge control.';
+        else statusEl.textContent = '';
+      }
     }
     if (stepKey === 'energy') {
       document.querySelectorAll('#roomEnergy .chip-option').forEach(btn => {
@@ -2470,6 +2461,9 @@ class RoomWizard {
       });
       const hours = document.getElementById('roomEnergyHours');
       if (hours) hours.value = String(this.data.energyHours ?? 0);
+    }
+    if (stepKey === 'grouping') {
+      this.populateGroupingSelectors();
     }
     if (stepKey === 'review') {
       this.updateReview();
@@ -2497,6 +2491,7 @@ class RoomWizard {
         return conn.hasHub !== null;
       }
       case 'energy': return !!this.data.energy;
+      case 'grouping': return Array.isArray(this.data.grouping?.groups) && this.data.grouping.groups.length > 0;
       case 'review': return false;
     }
     return false;
@@ -2601,6 +2596,23 @@ class RoomWizard {
         this.setRoleList('admin', ($('#roomRoleAdmin')?.value || ''));
         this.setRoleList('operator', ($('#roomRoleOperator')?.value || ''));
         this.setRoleList('viewer', ($('#roomRoleViewer')?.value || ''));
+        break; }
+      case 'grouping': {
+        this.data.grouping = this.data.grouping || { groups: [], planId: '', scheduleId: '', spectraSync: true };
+        const planSel = document.getElementById('roomGroupPlan');
+        const scheduleSel = document.getElementById('roomGroupSchedule');
+        const spectraChk = document.getElementById('roomGroupSpectraSync');
+        if (planSel) this.data.grouping.planId = planSel.value || '';
+        if (scheduleSel) this.data.grouping.scheduleId = scheduleSel.value || '';
+        if (spectraChk) this.data.grouping.spectraSync = !!spectraChk.checked;
+        const groups = Array.isArray(this.data.grouping.groups) ? this.data.grouping.groups : [];
+        if (!groups.length) {
+          const needsGroups = (Array.isArray(this.data.zones) && this.data.zones.length) || (Array.isArray(this.data.devices) && this.data.devices.length);
+          if (needsGroups) {
+            const ok = confirm('No groups defined yet. Groups make it easier to assign plans and schedules. Continue without groups?');
+            if (!ok) return false;
+          }
+        }
         break; }
       case 'energy': {
         const energy = this.data.energy;
@@ -2954,7 +2966,144 @@ class RoomWizard {
         </div>
       </li>
     `).join('');
+    try {
+      const statusEl = document.getElementById('deviceOnboardingStatus');
+      if (statusEl) {
+        const count = Array.isArray(this.data.devices) ? this.data.devices.length : 0;
+        statusEl.textContent = count ? `${count} device${count === 1 ? '' : 's'} ready for mapping.` : 'No devices paired yet.';
+      }
+    } catch {}
     this.updateSetupQueue();
+  }
+
+  addGroupFromInput() {
+    const input = document.getElementById('roomGroupNameInput');
+    if (!input) return;
+    const value = (input.value || '').trim();
+    if (value) this.addGroup(value);
+    input.value = '';
+  }
+
+  addGroup(name) {
+    if (!name) return;
+    this.data.grouping = this.data.grouping || { groups: [], planId: '', scheduleId: '', spectraSync: true };
+    const groups = Array.isArray(this.data.grouping.groups) ? this.data.grouping.groups : (this.data.grouping.groups = []);
+    if (!groups.includes(name)) {
+      groups.push(name);
+      this.renderGroupList();
+      this.updateGroupSuggestions();
+      this.updateSetupQueue();
+    }
+  }
+
+  removeGroup(idx) {
+    this.data.grouping = this.data.grouping || { groups: [], planId: '', scheduleId: '', spectraSync: true };
+    const groups = Array.isArray(this.data.grouping.groups) ? this.data.grouping.groups : [];
+    if (idx >= 0 && idx < groups.length) {
+      groups.splice(idx, 1);
+      this.renderGroupList();
+      this.updateGroupSuggestions();
+      this.updateSetupQueue();
+    }
+  }
+
+  renderGroupList() {
+    const list = document.getElementById('roomGroupList'); if (!list) return;
+    const groups = Array.isArray(this.data.grouping?.groups) ? this.data.grouping.groups : [];
+    if (!groups.length) {
+      list.innerHTML = '<li class="tiny" style="color:#64748b">No groups yet.</li>';
+      return;
+    }
+    list.innerHTML = groups.map((name, idx) => `
+      <li class="row" style="align-items:center;justify-content:space-between">
+        <span>${escapeHtml(name)}</span>
+        <button type="button" class="ghost" data-group-idx="${idx}">Remove</button>
+      </li>
+    `).join('');
+  }
+
+  updateGroupSuggestions() {
+    const host = document.getElementById('roomGroupSuggestions'); if (!host) return;
+    const zones = Array.isArray(this.data.zones) ? this.data.zones : [];
+    const current = new Set(Array.isArray(this.data.grouping?.groups) ? this.data.grouping.groups : []);
+    const suggestions = zones.filter(z => !current.has(z));
+    if (!suggestions.length) {
+      host.innerHTML = '<span class="tiny" style="color:#94a3b8">No zone-based suggestions.</span>';
+      return;
+    }
+    host.innerHTML = suggestions.map(z => `<button type="button" class="chip-option" data-group="${escapeHtml(z)}">${escapeHtml(z)}</button>`).join('');
+  }
+
+  populateGroupingSelectors() {
+    const planSel = document.getElementById('roomGroupPlan');
+    const schedSel = document.getElementById('roomGroupSchedule');
+    if (planSel) {
+      const plans = Array.isArray(STATE.plans) ? STATE.plans : [];
+      const current = this.data.grouping?.planId || '';
+      planSel.innerHTML = ['<option value="">Select plan…</option>', ...plans.map(p => `<option value="${escapeHtml(p.id || '')}">${escapeHtml(p.name || 'Plan')}</option>`)].join('');
+      planSel.value = current || '';
+    }
+    if (schedSel) {
+      const sched = Array.isArray(STATE.schedules) ? STATE.schedules : [];
+      const current = this.data.grouping?.scheduleId || '';
+      schedSel.innerHTML = ['<option value="">Select schedule…</option>', ...sched.map(s => `<option value="${escapeHtml(s.id || '')}">${escapeHtml(s.name || 'Schedule')}</option>`)].join('');
+      schedSel.value = current || '';
+    }
+    const spectraChk = document.getElementById('roomGroupSpectraSync');
+    if (spectraChk) spectraChk.checked = this.data.grouping?.spectraSync !== false;
+    this.renderGroupList();
+    this.updateGroupSuggestions();
+  }
+
+  async detectHub() {
+    const status = document.getElementById('roomHubStatus');
+    if (status) status.textContent = 'Detecting hub…';
+    try {
+      const resp = await fetch('/forwarder/healthz');
+      if (resp.ok) {
+        if (status) status.textContent = 'Controller reachable — hub likely online.';
+        this.data.connectivity = this.data.connectivity || {};
+        if (this.data.connectivity.hasHub !== false) this.data.connectivity.hasHub = true;
+      } else {
+        if (status) status.textContent = 'Hub not detected automatically. Enter IP manually.';
+      }
+    } catch (err) {
+      if (status) status.textContent = 'Could not reach hub automatically. Enter the IP and tenant manually.';
+    }
+    this.updateSetupQueue();
+  }
+
+  async verifyHub() {
+    const status = document.getElementById('roomHubStatus');
+    if (status) status.textContent = 'Verifying Node-RED…';
+    try {
+      const resp = await fetch('/forwarder/healthz');
+      if (resp.ok) {
+        if (status) status.textContent = 'Forwarder healthy — confirm Node-RED flows are running on the hub for edge control.';
+      } else {
+        if (status) status.textContent = 'Forwarder returned an error. Ensure Node-RED is running on the local hub.';
+      }
+    } catch (err) {
+      if (status) status.textContent = 'Unable to reach the hub right now. Check local connectivity and Node-RED status.';
+    }
+  }
+
+  async scanLocalDevices() {
+    const status = document.getElementById('deviceOnboardingStatus');
+    if (status) status.textContent = 'Scanning local network for smart devices…';
+    try {
+      const resp = await fetch('/forwarder/network/scan');
+      if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+      const data = await resp.json().catch(() => null);
+      if (Array.isArray(data?.devices) && data.devices.length) {
+        const summary = data.devices.slice(0, 5).map(d => `${d.vendor || d.brand || 'Device'} ${d.model || ''}`.trim()).join(', ');
+        if (status) status.textContent = `Discovered ${data.devices.length} device(s): ${summary}${data.devices.length > 5 ? '…' : ''}`;
+      } else {
+        if (status) status.textContent = 'No known devices responded. Add them manually after completing vendor onboarding.';
+      }
+    } catch (err) {
+      if (status) status.textContent = 'Scan unavailable in this environment. Enter tokens or IPs from the vendor apps.';
+    }
   }
 
   handleZoneAdd() {
@@ -2985,6 +3134,7 @@ class RoomWizard {
     const zones = Array.isArray(this.data.zones) ? this.data.zones : [];
     if (!zones.length) {
       list.innerHTML = '<li class="tiny" style="color:#64748b">No zones yet.</li>';
+      this.updateGroupSuggestions();
       return;
     }
     list.innerHTML = zones.map((z, idx) => `
@@ -2993,6 +3143,7 @@ class RoomWizard {
         <button type="button" class="ghost" data-zone-idx="${idx}">Remove</button>
       </li>
     `).join('');
+    this.updateGroupSuggestions();
   }
 
   setRoleList(roleKey, raw) {
@@ -3233,42 +3384,50 @@ class RoomWizard {
       chips.push(`<button type="button" class="${cls}" ${attrs.join(' ')}>${emoji} ${escapeHtml(label)}</button>`);
     };
 
-    push('room-name', 'Room name', this.data.name ? 'done' : 'todo');
-    push('location', 'Location', this.data.location ? 'done' : 'todo');
-    const hasLayout = this.data.layout && this.data.layout.type;
-    push('layout', 'Layout', hasLayout ? 'done' : 'todo');
-    push('zones', 'Zones', Array.isArray(this.data.zones) && this.data.zones.length ? 'done' : 'warn');
+    const conn = this.data.connectivity || {};
+    let connectivityStatus = 'todo';
+    if (conn.hasHub === true) connectivityStatus = 'done';
+    else if (conn.hasHub === false) connectivityStatus = (this.data.hardwareCats || []).includes('controllers') ? 'warn' : 'warn';
+    push('connectivity', 'Connectivity', connectivityStatus);
+
+    const smartControl = ['wifi', 'smart-plug', 'rs485', 'other'].includes(this.data.controlMethod);
+    const devicesStatus = (this.data.devices || []).length ? 'done' : (smartControl ? 'warn' : 'todo');
+    push('devices', 'Devices', devicesStatus);
+
     const hardwareStatus = (this.data.hardwareCats || []).length ? 'done' : 'todo';
     push('hardware', 'Hardware', hardwareStatus);
-    const needsLights = (this.data.hardwareCats || []).includes('grow-lights');
-    const fixtures = Array.isArray(this.data.fixtures) ? this.data.fixtures : [];
-    const fixturesStatus = fixtures.length ? 'done' : (needsLights ? 'warn' : 'todo');
-    push('fixtures', 'Fixtures', fixturesStatus);
-    const controlStatus = this.data.controlMethod ? 'done' : (needsLights ? 'warn' : 'todo');
-    push('control', 'Control', controlStatus);
     (this.categoryQueue || []).forEach(catId => {
       const st = this.categoryProgress?.[catId]?.status || 'needs-info';
       const status = st === 'complete' ? 'done' : st && st.startsWith('needs') ? 'warn' : 'todo';
       push('category-setup', this.categoryLabel(catId), status, { cat: catId });
     });
-    const smartControl = ['wifi', 'smart-plug', 'rs485'].includes(this.data.controlMethod);
-    const devicesStatus = (this.data.devices || []).length ? 'done' : (smartControl ? 'warn' : 'todo');
-    push('devices', 'Devices', devicesStatus);
+    const fixtures = Array.isArray(this.data.fixtures) ? this.data.fixtures : [];
+    const needsLights = (this.data.hardwareCats || []).includes('grow-lights');
     const needsSensors = ((this.data.hardwareCats || []).includes('sensors')) || fixtures.length > 0;
     const sensorsStatus = (this.data.sensors?.categories || []).length ? 'done' : (needsSensors ? 'warn' : 'todo');
     push('sensors', 'Sensors', sensorsStatus);
-    const conn = this.data.connectivity || {};
-    let connectivityStatus = 'todo';
-    if (conn.hasHub === true) connectivityStatus = 'done';
-    else if (conn.hasHub === false) connectivityStatus = (this.data.hardwareCats || []).includes('controllers') ? 'warn' : 'warn';
-    else connectivityStatus = 'todo';
-    push('connectivity', 'Connectivity', connectivityStatus);
+
+    push('room-name', 'Room name', this.data.name ? 'done' : 'todo');
+    push('location', 'Location', this.data.location ? 'done' : 'todo');
+    const hasLayout = this.data.layout && this.data.layout.type;
+    push('layout', 'Layout', hasLayout ? 'done' : 'todo');
+    push('zones', 'Zones', Array.isArray(this.data.zones) && this.data.zones.length ? 'done' : 'warn');
+
+    const fixturesStatus = fixtures.length ? 'done' : (needsLights ? 'warn' : 'todo');
+    push('fixtures', 'Fixtures', fixturesStatus);
+    const controlStatus = this.data.controlMethod ? 'done' : (needsLights ? 'warn' : 'todo');
+    push('control', 'Control', controlStatus);
+
     let energyStatus = this.data.energy ? 'done' : 'todo';
     if (this.data.energy && this.data.energy !== 'none') {
       const hrs = Number(this.data.energyHours);
       if (!Number.isFinite(hrs) || hrs <= 0) energyStatus = 'warn';
     }
     push('energy', 'Energy', energyStatus);
+    const grouping = this.data.grouping || {};
+    const groupList = Array.isArray(grouping.groups) ? grouping.groups : [];
+    const groupingStatus = groupList.length ? 'done' : ((Array.isArray(this.data.zones) && this.data.zones.length) ? 'warn' : 'todo');
+    push('grouping', 'Groups', groupingStatus);
     const hasTodo = progressStates.some(st => st === 'todo');
     const hasWarn = progressStates.some(st => st === 'warn');
     const reviewStatus = hasTodo ? 'todo' : hasWarn ? 'warn' : 'done';
@@ -3427,6 +3586,12 @@ class RoomWizard {
       const list = Array.isArray(roles[key]) ? roles[key].filter(Boolean) : [];
       return list.length ? escape(list.join(', ')) : '—';
     };
+    const grouping = this.data.grouping || {};
+    const groupList = Array.isArray(grouping.groups) ? grouping.groups : [];
+    const groupHtml = groupList.length ? `<ul style="margin:6px 0 0 0; padding-left:18px">${groupList.map(g => `<li>${escape(g)}</li>`).join('')}</ul>` : '<span>—</span>';
+    const planName = grouping.planId ? (STATE.plans || []).find(p => p.id === grouping.planId)?.name || grouping.planId : '—';
+    const scheduleName = grouping.scheduleId ? (STATE.schedules || []).find(s => s.id === grouping.scheduleId)?.name || grouping.scheduleId : '—';
+    const spectraSyncLabel = grouping.spectraSync === false ? 'Off' : 'On';
     const energyLabels = { 'ct-branch': 'CT / branch meters', 'smart-plugs': 'Smart plugs', 'built-in': 'Built-in meter', 'none': 'None' };
     const energyLabel = this.data.energy ? escape(energyLabels[this.data.energy] || this.data.energy) : '—';
     const energyHours = Number(this.data.energyHours) || 0;
@@ -3448,6 +3613,8 @@ class RoomWizard {
       <div><strong>Series count:</strong> ${escape(String(this.data.seriesCount || 0))}</div>
       <div><strong>Control method:</strong> ${controlSummary}</div>
       <div><strong>Sensors:</strong> ${sensorHtml}</div>
+      <div><strong>Groups:</strong> ${groupHtml}</div>
+      <div><strong>Plan &amp; Schedule:</strong> Plan ${escape(planName)} • Schedule ${escape(scheduleName)} • SpectraSync ${escape(spectraSyncLabel)}</div>
       <div><strong>Connectivity:</strong> ${hubSummary} • Tenant ${tenant}</div>
       <div><strong>Roles:</strong> Admins ${formatRole('admin')} • Operators ${formatRole('operator')} • Viewers ${formatRole('viewer')}</div>
       <div><strong>Energy monitoring:</strong> ${energyLabel} • Runtime ${runtimeLabel} • Est. ${escape(estimatedKwh)}</div>
@@ -3566,7 +3733,9 @@ async function loadAllData() {
   renderRooms();
   // Start background polling for environment telemetry
   startEnvPolling();
-    
+
+  try { roomWizard.populateGroupingSelectors(); } catch {}
+
   } catch (error) {
     setStatus(`Error loading data: ${error.message}`);
     console.error('Data loading error:', error);
