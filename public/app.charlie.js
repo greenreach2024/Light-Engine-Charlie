@@ -1010,6 +1010,145 @@ function deviceCard(device, options = {}) {
       }
     });
 
+    // Research Mode Controls (similar to group controls)
+    if (STATE.researchMode && STATE.deviceResearchLocal) {
+      // Power controls
+      const powerRow = document.createElement('div');
+      powerRow.className = 'row';
+      powerRow.style.gap = '6px';
+      powerRow.style.marginTop = '8px';
+      
+      const onBtn = document.createElement('button');
+      onBtn.type = 'button';
+      onBtn.className = 'ghost';
+      onBtn.textContent = 'ON';
+      onBtn.style.fontSize = '12px';
+      onBtn.style.padding = '4px 8px';
+      
+      const offBtn = document.createElement('button');
+      offBtn.type = 'button';
+      offBtn.className = 'ghost';
+      offBtn.textContent = 'OFF';
+      offBtn.style.fontSize = '12px';
+      offBtn.style.padding = '4px 8px';
+
+      const applyBtn = document.createElement('button');
+      applyBtn.type = 'button';
+      applyBtn.className = 'primary';
+      applyBtn.textContent = 'Apply';
+      applyBtn.style.fontSize = '12px';
+      applyBtn.style.padding = '4px 8px';
+      
+      powerRow.append(onBtn, offBtn, applyBtn);
+      card.appendChild(powerRow);
+
+      // Spectrum sliders for research mode
+      const spectrumControls = document.createElement('div');
+      spectrumControls.className = 'device-research-controls';
+      spectrumControls.style.display = 'none';
+      spectrumControls.style.marginTop = '8px';
+      spectrumControls.innerHTML = `
+        <div class="tiny" style="margin-bottom:4px">Live Spectrum Control</div>
+        <div style="display:grid;grid-template-columns:auto 1fr auto;gap:4px;align-items:center;font-size:11px">
+          <span>CW</span><input class="dev-cw-live" type="range" min="0" max="100" value="${device.cwPct ?? device.cw ?? 45}" style="margin:0"><span class="dev-cw-val">${Math.round(device.cwPct ?? device.cw ?? 45)}%</span>
+          <span>WW</span><input class="dev-ww-live" type="range" min="0" max="100" value="${device.wwPct ?? device.ww ?? 45}" style="margin:0"><span class="dev-ww-val">${Math.round(device.wwPct ?? device.ww ?? 45)}%</span>
+          <span>Blue</span><input class="dev-bl-live" type="range" min="0" max="100" value="${device.blPct ?? device.bl ?? 0}" style="margin:0"><span class="dev-bl-val">${Math.round(device.blPct ?? device.bl ?? 0)}%</span>
+          <span>Red</span><input class="dev-rd-live" type="range" min="0" max="100" value="${device.rdPct ?? device.rd ?? 0}" style="margin:0"><span class="dev-rd-val">${Math.round(device.rdPct ?? device.rd ?? 0)}%</span>
+        </div>
+      `;
+      card.appendChild(spectrumControls);
+
+      // Toggle spectrum controls with edit button
+      editBtn.addEventListener('click', () => {
+        const isVisible = spectrumControls.style.display !== 'none';
+        spectrumControls.style.display = isVisible ? 'none' : 'block';
+        editor.style.display = 'none'; // Hide the old editor
+      });
+
+      // Live spectrum control event handlers
+      const cwSlider = spectrumControls.querySelector('.dev-cw-live');
+      const wwSlider = spectrumControls.querySelector('.dev-ww-live');
+      const blSlider = spectrumControls.querySelector('.dev-bl-live');
+      const rdSlider = spectrumControls.querySelector('.dev-rd-live');
+      const cwVal = spectrumControls.querySelector('.dev-cw-val');
+      const wwVal = spectrumControls.querySelector('.dev-ww-val');
+      const blVal = spectrumControls.querySelector('.dev-bl-val');
+      const rdVal = spectrumControls.querySelector('.dev-rd-val');
+
+      [cwSlider, wwSlider, blSlider, rdSlider].forEach((slider, idx) => {
+        const valSpan = [cwVal, wwVal, blVal, rdVal][idx];
+        slider?.addEventListener('input', () => {
+          if (valSpan) valSpan.textContent = `${slider.value}%`;
+          // Update spectrum preview
+          const pct = {
+            cw: Number(cwSlider?.value || 45),
+            ww: Number(wwSlider?.value || 45),
+            bl: Number(blSlider?.value || 0),
+            rd: Number(rdSlider?.value || 0)
+          };
+          renderSpectrumCanvas(spectrumCanvas, computeWeightedSPD(pct), { width: 300, height: 36 });
+        });
+      });
+
+      // Power control handlers
+      onBtn.addEventListener('click', async () => {
+        try {
+          const resp = await fetch(`/api/device/${encodeURIComponent(device.id)}/power`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ state: 'on' })
+          });
+          if (resp.ok) {
+            setStatus(`${device.deviceName || device.id} turned ON`);
+          } else {
+            setStatus(`Failed to turn ON ${device.deviceName || device.id}`);
+          }
+        } catch (err) {
+          setStatus(`Error controlling ${device.deviceName || device.id}`);
+        }
+      });
+
+      offBtn.addEventListener('click', async () => {
+        try {
+          const resp = await fetch(`/api/device/${encodeURIComponent(device.id)}/power`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ state: 'off' })
+          });
+          if (resp.ok) {
+            setStatus(`${device.deviceName || device.id} turned OFF`);
+          } else {
+            setStatus(`Failed to turn OFF ${device.deviceName || device.id}`);
+          }
+        } catch (err) {
+          setStatus(`Error controlling ${device.deviceName || device.id}`);
+        }
+      });
+
+      applyBtn.addEventListener('click', async () => {
+        try {
+          const pct = {
+            cw: Number(cwSlider?.value || 45),
+            ww: Number(wwSlider?.value || 45),
+            bl: Number(blSlider?.value || 0),
+            rd: Number(rdSlider?.value || 0)
+          };
+          const resp = await fetch(`/api/device/${encodeURIComponent(device.id)}/spectrum`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(pct)
+          });
+          if (resp.ok) {
+            setStatus(`Spectrum applied to ${device.deviceName || device.id}`);
+          } else {
+            setStatus(`Failed to apply spectrum to ${device.deviceName || device.id}`);
+          }
+        } catch (err) {
+          setStatus(`Error applying spectrum to ${device.deviceName || device.id}`);
+        }
+      });
+    }
+
     return card;
   }
 
@@ -1314,7 +1453,7 @@ class FarmWizard {
     this.progressEl = $('#farmModalProgress');
     this.titleEl = $('#farmModalTitle');
     this.currentStep = 0;
-    this.baseSteps = ['connection-choice', 'wifi-select', 'wifi-password', 'wifi-test', 'location', 'spaces', 'review'];
+    this.baseSteps = ['connection-choice', 'wifi-select', 'wifi-password', 'wifi-test', 'location', 'contact', 'spaces', 'review'];
     this.wifiNetworks = [];
     this.data = this.defaultData();
     this.discoveryStorageKeys = {
@@ -1347,6 +1486,12 @@ class FarmWizard {
         state: '',
         postal: '',
         timezone: tz
+      },
+      contact: {
+        name: '',
+        email: '',
+        phone: '',
+        website: ''
       },
       rooms: []
     };
@@ -1392,6 +1537,10 @@ class FarmWizard {
     $('#farmState')?.addEventListener('input', (e) => { this.data.location.state = e.target.value || ''; this.guessTimezone(); });
     $('#farmPostal')?.addEventListener('input', (e) => { this.data.location.postal = e.target.value || ''; });
     $('#farmTimezone')?.addEventListener('change', (e) => { this.data.location.timezone = e.target.value || this.data.location.timezone; });
+    $('#contactName')?.addEventListener('input', (e) => { this.data.contact.name = e.target.value || ''; });
+    $('#contactEmail')?.addEventListener('input', (e) => { this.data.contact.email = e.target.value || ''; });
+    $('#contactPhone')?.addEventListener('input', (e) => { this.data.contact.phone = e.target.value || ''; });
+    $('#contactWebsite')?.addEventListener('input', (e) => { this.data.contact.website = e.target.value || ''; });
     $('#btnAddRoom')?.addEventListener('click', () => this.addRoom());
     $('#newRoomName')?.addEventListener('keydown', (e) => { if (e.key === 'Enter') { e.preventDefault(); this.addRoom(); } });
 
@@ -1476,6 +1625,7 @@ class FarmWizard {
     if (this.progressEl) this.progressEl.textContent = `Step ${index + 1} of ${this.steps.length}`;
     if (this.titleEl) {
       if (activeId === 'location') this.titleEl.textContent = 'Where is this farm?';
+      else if (activeId === 'contact') this.titleEl.textContent = 'Contact information';
       else if (activeId === 'spaces') this.titleEl.textContent = 'Add rooms and zones';
       else if (activeId === 'review') this.titleEl.textContent = 'Review and save';
       else this.titleEl.textContent = 'Let’s get you online';
@@ -1716,6 +1866,10 @@ class FarmWizard {
       alert('Add a farm name so we can label the site.');
       return false;
     }
+    if (stepId === 'contact' && (!this.data.contact.name || !this.data.contact.email)) {
+      alert('Contact name and email are required.');
+      return false;
+    }
     if (stepId === 'spaces' && !this.data.rooms.length) {
       alert('Add at least one room.');
       return false;
@@ -1746,6 +1900,8 @@ class FarmWizard {
       <div><strong>Farm:</strong> ${escapeHtml(this.data.location.farmName || 'Untitled')}</div>
       <div><strong>Address:</strong> ${escapeHtml(addressParts.join(', ') || '—')}</div>
       <div><strong>Timezone:</strong> ${escapeHtml(timezone)}</div>
+      <div><strong>Contact:</strong> ${escapeHtml(this.data.contact.name || '')} ${this.data.contact.email ? `&lt;${escapeHtml(this.data.contact.email)}&gt;` : ''} ${this.data.contact.phone ? escapeHtml(this.data.contact.phone) : ''}</div>
+      ${this.data.contact.website ? `<div><strong>Website:</strong> <a href="${escapeHtml(this.data.contact.website)}" target="_blank">${escapeHtml(this.data.contact.website)}</a></div>` : ''}
       <div><strong>Rooms:</strong> ${rooms.map(r => `${escapeHtml(r.name)} (${r.zones.length || 0} zones)`).join(', ')}</div>`;
   }
 
@@ -1765,6 +1921,12 @@ class FarmWizard {
     copy.location.state = safe.state || '';
     copy.location.postal = safe.postalCode || safe.postal || '';
     copy.location.timezone = safe.timezone || copy.location.timezone;
+    if (safe.contact) {
+      copy.contact.name = safe.contact.name || '';
+      copy.contact.email = safe.contact.email || '';
+      copy.contact.phone = safe.contact.phone || '';
+      copy.contact.website = safe.contact.website || '';
+    }
     copy.rooms = Array.isArray(safe.rooms) ? safe.rooms.map(room => ({
       id: room.id || `room-${Math.random().toString(36).slice(2,8)}`,
       name: room.name || room.title || 'Room',
@@ -1779,6 +1941,17 @@ class FarmWizard {
     this.updateWifiPasswordUI();
     this.updateConnectionButtons();
     this.populateTimezones();
+    // Populate form fields
+    const farmNameEl = $('#farmName'); if (farmNameEl) farmNameEl.value = this.data.location.farmName;
+    const farmAddressEl = $('#farmAddress'); if (farmAddressEl) farmAddressEl.value = this.data.location.address;
+    const farmCityEl = $('#farmCity'); if (farmCityEl) farmCityEl.value = this.data.location.city;
+    const farmStateEl = $('#farmState'); if (farmStateEl) farmStateEl.value = this.data.location.state;
+    const farmPostalEl = $('#farmPostal'); if (farmPostalEl) farmPostalEl.value = this.data.location.postal;
+    const farmTimezoneEl = $('#farmTimezone'); if (farmTimezoneEl) farmTimezoneEl.value = this.data.location.timezone;
+    const contactNameEl = $('#contactName'); if (contactNameEl) contactNameEl.value = this.data.contact.name;
+    const contactEmailEl = $('#contactEmail'); if (contactEmailEl) contactEmailEl.value = this.data.contact.email;
+    const contactPhoneEl = $('#contactPhone'); if (contactPhoneEl) contactPhoneEl.value = this.data.contact.phone;
+    const contactWebsiteEl = $('#contactWebsite'); if (contactWebsiteEl) contactWebsiteEl.value = this.data.contact.website;
   }
 
   updateConnectionButtons() {
@@ -1825,6 +1998,12 @@ class FarmWizard {
       state: this.data.location.state,
       postalCode: this.data.location.postal,
       timezone: this.data.location.timezone,
+      contact: {
+        name: this.data.contact.name,
+        email: this.data.contact.email,
+        phone: this.data.contact.phone,
+        website: this.data.contact.website
+      },
       connection: {
         type: this.data.connection.type,
         wifi: {
@@ -4326,6 +4505,12 @@ async function loadAllData() {
       STATE.devices = deviceResponse?.data || [];
     }
     
+    // Ensure all devices have proper online status for research mode
+    STATE.devices = STATE.devices.map(device => ({
+      ...device,
+      online: device.online !== false // Default to true unless explicitly false
+    }));
+    
     // Load static data files
     const [groups, schedules, plans, environment, calibrations, deviceMeta, deviceKB, deviceManufacturers, farm, rooms, switchbotDevices] = await Promise.all([
       loadJSON('./data/groups.json'),
@@ -4952,15 +5137,7 @@ async function loadConfig() {
   try {
     const cfg = await api('/config');
     STATE.config = { singleServer: !!cfg?.singleServer, controller: cfg?.controller || '', envSource: cfg?.envSource || 'local', azureLatestUrl: cfg?.azureLatestUrl || null };
-    const chip = document.getElementById('configChip');
-    if (chip) {
-      const mode = STATE.config.singleServer ? 'Local' : 'Controller';
-      const envTag = STATE.config.envSource === 'azure' ? 'ENV: Azure' : 'ENV: Local';
-      chip.textContent = `${mode} • ${envTag}`;
-      const parts = [`Controller: ${STATE.config.controller || 'n/a'}`];
-      if (STATE.config.envSource === 'azure' && STATE.config.azureLatestUrl) parts.push(`Azure: ${STATE.config.azureLatestUrl}`);
-      chip.title = parts.join(' | ');
-    }
+    // Note: configChip UI element has been removed for cleaner interface
   } catch (e) {
     console.warn('Failed to load /config', e);
   }
@@ -4980,9 +5157,9 @@ async function checkForwarderOnce() {
 }
 
 function startForwarderHealthPolling(intervalMs = 10000) {
-  // Create status node near configChip if not present
+  // Create status node in header since configChip was removed
   let host = document.getElementById('forwarderStatus');
-  const parent = document.getElementById('configChip')?.parentElement || document.body;
+  const parent = document.querySelector('.top-header') || document.body;
   if (!host) {
     host = document.createElement('span');
     host.id = 'forwarderStatus';
@@ -5248,19 +5425,21 @@ function wireGlobalEvents() {
     const cv = document.createElement('canvas');
     cv.className = 'group-spectrum__canvas';
     host.appendChild(cv);
-  const w = Math.max(1, cv?.clientWidth || 420);
-  const h = Math.max(1, cv?.clientHeight || 40);
-  renderSpectrumCanvas(cv, spd, { width: w, height: h });
+    
+    // Use consistent fixed dimensions to prevent resizing issues
+    const w = 420;
+    const h = 40;
+    renderSpectrumCanvas(cv, spd, { width: w, height: h });
 
     // Also render twin canvases beside HUD sliders when present
     try {
-  const hudCv = document.getElementById('groupHudCanvas');
-  const planCv = document.getElementById('groupPlanCanvas');
+      const hudCv = document.getElementById('groupHudCanvas');
+      const planCv = document.getElementById('groupPlanCanvas');
       if (hudCv) {
-  // Respect CSS box size to avoid oversized graphs
-  const hW = Math.max(1, hudCv.clientWidth || 260);
-  const hH = Math.max(1, hudCv.clientHeight || 90);
-  renderSpectrumCanvas(hudCv, spd, { width: hW, height: hH });
+        // Use consistent dimensions for HUD canvas
+        const hW = 260;
+        const hH = 90;
+        renderSpectrumCanvas(hudCv, spd, { width: hW, height: hH });
       }
       if (planCv) {
         const plan = STATE.plans.find(p => p.id === group?.plan);
@@ -5268,9 +5447,9 @@ function wireGlobalEvents() {
         const planSpd = computeWeightedSPD({
           cw: Number(planSpec.cw||0), ww: Number(planSpec.ww||0), bl: Number(planSpec.bl||0), rd: Number(planSpec.rd||0)
         });
-  const pW = Math.max(1, planCv.clientWidth || 260);
-  const pH = Math.max(1, planCv.clientHeight || 90);
-  renderSpectrumCanvas(planCv, planSpd, { width: pW, height: pH });
+        const pW = 260;
+        const pH = 90;
+        renderSpectrumCanvas(planCv, planSpd, { width: pW, height: pH });
       }
     } catch (e) { /* non-fatal */ }
   }
@@ -6229,6 +6408,160 @@ function hookRoomDevicePairing(roomWizardInstance) {
   });
 }
 
+// --- Top Card and AI Features Management ---
+function initializeTopCard() {
+  // Update farm name and logo when farm data is available
+  const updateFarmDisplay = () => {
+    const farmNameEl = document.getElementById('farmName');
+    const defaultTitleEl = document.getElementById('defaultTitle');
+    const farmLogoEl = document.getElementById('farmLogo');
+    
+    if (STATE.farm && STATE.farm.name) {
+      if (farmNameEl) {
+        farmNameEl.textContent = STATE.farm.name;
+        farmNameEl.style.display = 'inline';
+      }
+      if (defaultTitleEl) {
+        defaultTitleEl.style.display = 'none';
+      }
+      if (farmLogoEl && STATE.farm.logo) {
+        farmLogoEl.src = STATE.farm.logo;
+        farmLogoEl.style.display = 'block';
+      }
+    }
+  };
+  
+  // Call immediately and set up periodic updates
+  updateFarmDisplay();
+  setInterval(updateFarmDisplay, 5000);
+}
+
+function initializeAIFeatures() {
+  const aiFeatures = {
+    spectrasync: { 
+      name: 'SpectraSync®', 
+      status: 'on',
+      description: 'SpectraSync dynamically adjusts light spectrum and intensity in response to farm environmental data, supporting temperature, humidity, and crop-specific management.'
+    },
+    evie: { 
+      name: 'E.V.I.E', 
+      status: 'off',
+      description: 'E.V.I.E autonomously manages the growing environment, crop forecasting, and placement. Explores sales trends, updates planting schedules, and applies incremental micro-changes.'
+    },
+    'ia-training': { 
+      name: 'IA In Training', 
+      status: 'always-on',
+      description: 'Uses farm and external environmental data to continuously learn and adapt to local growing conditions, preparing for autonomous optimization.'
+    },
+    'ia-assist': { 
+      name: 'IA Assist', 
+      status: 'always-on',
+      description: 'Provides recommendations to growers, highlighting correlations and causal factors within the growing environment to support informed decisions.'
+    },
+    eii: { 
+      name: 'E.I² Environmental Impact Index', 
+      status: 'dev',
+      description: 'Measures and reports environmental impact, providing transparency and shared knowledge on sustainability performance for both farm operators and the public.'
+    }
+  };
+
+  // Add click handlers for AI feature cards
+  document.querySelectorAll('.ai-feature-card').forEach(card => {
+    const feature = card.dataset.feature;
+    const featureData = aiFeatures[feature];
+    
+    if (!featureData) return;
+
+    card.addEventListener('click', () => {
+      // Toggle active state for toggleable features
+      if (featureData.status === 'on' || featureData.status === 'off') {
+        const isActive = card.classList.contains('active');
+        if (isActive) {
+          card.classList.remove('active');
+          featureData.status = 'off';
+          updateFeatureStatus(card, 'off');
+        } else {
+          card.classList.add('active');
+          featureData.status = 'on';
+          updateFeatureStatus(card, 'on');
+        }
+        
+        // Show toast notification
+        showToast({
+          title: featureData.name,
+          msg: `${featureData.name} is now ${featureData.status.toUpperCase()}`,
+          kind: featureData.status === 'on' ? 'success' : 'info',
+          icon: featureData.status === 'on' ? '✅' : '⏸️'
+        });
+      }
+    });
+
+    // Add hover tooltip functionality
+    card.addEventListener('mouseenter', () => {
+      showTooltipFor(card, featureData.description);
+    });
+
+    card.addEventListener('mouseleave', () => {
+      hideTooltip();
+    });
+  });
+
+  // Connect SpectraSync to Research Mode
+  const researchToggle = document.getElementById('researchModeToggle');
+  if (researchToggle) {
+    researchToggle.addEventListener('change', () => {
+      const spectraSyncCard = document.getElementById('spectraSyncFeature');
+      if (spectraSyncCard) {
+        if (researchToggle.checked) {
+          spectraSyncCard.classList.add('active');
+          updateFeatureStatus(spectraSyncCard, 'on');
+        } else {
+          spectraSyncCard.classList.remove('active');
+          updateFeatureStatus(spectraSyncCard, 'off');
+        }
+      }
+    });
+  }
+}
+
+function updateFeatureStatus(card, status) {
+  const statusEl = card.querySelector('.ai-feature-status');
+  if (!statusEl) return;
+  
+  statusEl.className = `ai-feature-status ${status}`;
+  statusEl.textContent = status === 'on' ? 'ON' : 
+                        status === 'off' ? 'OFF' : 
+                        status === 'always-on' ? 'ALWAYS ON' : 
+                        status === 'dev' ? 'IN DEVELOPMENT' : status.toUpperCase();
+}
+
+function showTooltipFor(element, text) {
+  const tooltip = document.getElementById('tooltip');
+  const content = document.getElementById('tooltip-content');
+  if (!tooltip || !content) return;
+  
+  content.textContent = text;
+  tooltip.style.display = 'block';
+  tooltip.setAttribute('aria-hidden', 'false');
+  
+  const rect = element.getBoundingClientRect();
+  const tooltipRect = tooltip.getBoundingClientRect();
+  
+  const top = rect.top - tooltipRect.height - 10;
+  const left = Math.max(10, Math.min(rect.left, window.innerWidth - tooltipRect.width - 10));
+  
+  tooltip.style.top = `${top}px`;
+  tooltip.style.left = `${left}px`;
+}
+
+function hideTooltip() {
+  const tooltip = document.getElementById('tooltip');
+  if (tooltip) {
+    tooltip.style.display = 'none';
+    tooltip.setAttribute('aria-hidden', 'true');
+  }
+}
+
 document.addEventListener('DOMContentLoaded', async () => {
   wireHints();
   wireGlobalEvents();
@@ -6236,6 +6569,10 @@ document.addEventListener('DOMContentLoaded', async () => {
   await loadConfig();
   // Start forwarder health polling (shows status near the config chip)
   try { startForwarderHealthPolling(10000); } catch (e) { console.warn('Failed to start forwarder polling', e); }
+  
+  // Initialize AI features and top card
+  initializeTopCard();
+  initializeAIFeatures();
   
   // Initialize farm wizard
   farmWizard = new FarmWizard();

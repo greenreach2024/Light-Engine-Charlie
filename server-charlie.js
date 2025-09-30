@@ -550,6 +550,80 @@ app.post("/api/switchbot/devices/:deviceId/commands", async (req, res) => {
   }
 });
 
+// Device power control endpoint
+app.post("/api/device/:deviceId/power", async (req, res) => {
+  try {
+    const { deviceId } = req.params;
+    const { state } = req.body; // 'on' or 'off'
+    
+    console.log(`Power control request for device ${deviceId}: ${state}`);
+    
+    // For research lights, attempt to send commands via controller
+    try {
+      const controllerUrl = `${getController().replace(/\/$/, '')}/api/device/${encodeURIComponent(deviceId)}/power`;
+      const response = await fetch(controllerUrl, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ state })
+      });
+      
+      if (response.ok) {
+        const result = await response.json();
+        return res.json({ success: true, message: `Device ${state} command sent`, data: result });
+      } else {
+        console.warn(`Controller power control failed for ${deviceId}:`, response.status);
+      }
+    } catch (controllerError) {
+      console.warn(`Controller unavailable for power control of ${deviceId}:`, controllerError.message);
+    }
+    
+    // Fallback: log the command (for research purposes)
+    console.log(`Research light ${deviceId} power ${state} (logged only)`);
+    res.json({ success: true, message: `Power ${state} command logged for research light ${deviceId}` });
+    
+  } catch (error) {
+    console.error(`Device power control error for ${req.params.deviceId}:`, error);
+    res.status(500).json({ success: false, message: error.message });
+  }
+});
+
+// Device spectrum control endpoint
+app.post("/api/device/:deviceId/spectrum", async (req, res) => {
+  try {
+    const { deviceId } = req.params;
+    const { cw, ww, bl, rd } = req.body;
+    
+    console.log(`Spectrum control request for device ${deviceId}:`, { cw, ww, bl, rd });
+    
+    // For research lights, attempt to send commands via controller
+    try {
+      const controllerUrl = `${getController().replace(/\/$/, '')}/api/device/${encodeURIComponent(deviceId)}/spectrum`;
+      const response = await fetch(controllerUrl, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ cw, ww, bl, rd })
+      });
+      
+      if (response.ok) {
+        const result = await response.json();
+        return res.json({ success: true, message: "Spectrum applied", data: result });
+      } else {
+        console.warn(`Controller spectrum control failed for ${deviceId}:`, response.status);
+      }
+    } catch (controllerError) {
+      console.warn(`Controller unavailable for spectrum control of ${deviceId}:`, controllerError.message);
+    }
+    
+    // Fallback: log the command (for research purposes)
+    console.log(`Research light ${deviceId} spectrum CW:${cw}% WW:${ww}% Blue:${bl}% Red:${rd}% (logged only)`);
+    res.json({ success: true, message: `Spectrum command logged for research light ${deviceId}` });
+    
+  } catch (error) {
+    console.error(`Device spectrum control error for ${req.params.deviceId}:`, error);
+    res.status(500).json({ success: false, message: error.message });
+  }
+});
+
 // STRICT pass-through: client calls /api/* → controller receives /api/*
 // Express strips the mount "/api", so add it back via pathRewrite.
 app.use("/api", createProxyMiddleware({

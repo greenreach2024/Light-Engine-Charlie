@@ -8,22 +8,134 @@
   <script src="./app.charlie.js?v=charlie-0.5" defer></script>
 </head>
 <body>
-  <header>
-    <div class="header logo" style="display:flex;align-items:center;gap:8px">
-      <img src="" alt="Brand logo" style="display:none" onerror="this.style.display='none'">
-      <h1>Light Engine Charlie</h1>
+  <!-- Top Card with Farm Info and Status -->
+  <section id="topCard" class="card" style="margin:12px;padding:16px;border-radius:12px;background:var(--gr-surface);box-shadow:var(--gr-shadow)">
+    <div class="row" style="justify-content:space-between;align-items:center">
+      <div class="row" style="align-items:center;gap:12px">
+        <img id="farmLogo" src="" alt="Farm logo" style="width:32px;height:32px;border-radius:6px;display:none" onerror="this.style.display='none'">
+        <div>
+          <h1 style="margin:0;font-size:18px;font-weight:600;color:var(--gr-text)">
+            <span id="farmName" style="display:none"></span>
+            <span id="defaultTitle">Light Engine Charlie</span>
+          </h1>
+          <div id="communicationStatus" class="tiny" style="color:var(--medium);margin-top:2px">System Online</div>
+        </div>
+      </div>
+      <label class="row" style="align-items:center;gap:8px">
+        <input id="researchModeToggle" type="checkbox" style="width:20px;height:20px" />
+        <span class="tiny" style="font-weight:500">Research Mode</span>
+      </label>
     </div>
-    <button id="btnDiscover" type="button" title="Mock device discovery">Discover new GreenReach Devices</button>
-    <span id="farmSummaryChip" class="chip" style="display:none"></span>
-    <span id="spectraSyncIcon" class="chip chip--icon" title="SpectraSync is off" aria-live="polite">🌡️💧</span>
-    <span id="configChip" class="chip" title="Runtime mode" aria-live="polite">Loading…</span>
-    <label class="row" style="align-items:center;gap:6px;margin-left:16px">
-      <input id="researchModeToggle" type="checkbox" style="width:22px;height:22px" />
-      <span class="tiny">Research Mode</span>
-    </label>
-    <span id="hqIcon" title="Centralized Automation (future)" style="margin-left:auto;opacity:.35">🏢</span>
-    <span id="status" aria-live="polite"></span>
-  </header>
+  </section>
+
+  <!-- Environmental / AI Feature Card -->
+  <section id="environmentalAiCard" class="card" style="margin:0 12px 12px 12px;padding:20px;border-radius:12px;background:var(--gr-surface);box-shadow:var(--gr-shadow);min-height:75vh">
+    <div class="row" style="justify-content:space-between;align-items:center;margin-bottom:20px">
+      <h2 style="margin:0;font-size:16px;font-weight:600;color:var(--gr-text)">Environmental & AI Features</h2>
+      <span class="tiny" style="color:var(--medium)">Autonomous Growing Intelligence</span>
+    </div>
+    
+    <div class="ai-features-grid">
+      <!-- SpectraSync Feature -->
+      <div class="ai-feature-card active" id="spectraSyncFeature" data-feature="spectrasync">
+        <div class="ai-feature-icon spectrasync-icon">
+          <svg width="24" height="24" viewBox="0 0 24 24" fill="none">
+            <path d="M3 12L6 8L9 14L12 6L15 12L18 4L21 12" stroke="url(#spectrumGradient)" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"/>
+            <defs>
+              <linearGradient id="spectrumGradient" x1="0%" y1="0%" x2="100%" y2="0%">
+                <stop offset="0%" style="stop-color:#EF4444"/>
+                <stop offset="33%" style="stop-color:#3B82F6"/>
+                <stop offset="66%" style="stop-color:#E0F2FE"/>
+                <stop offset="100%" style="stop-color:#FEF3C7"/>
+              </linearGradient>
+            </defs>
+          </svg>
+        </div>
+        <div class="ai-feature-content">
+          <h3>SpectraSync®</h3>
+          <div class="ai-feature-status on">ON</div>
+        </div>
+        <div class="ai-feature-description">
+          SpectraSync dynamically adjusts light spectrum and intensity in response to farm environmental data, supporting temperature, humidity, and crop-specific management.
+        </div>
+      </div>
+
+      <!-- E.V.I.E Feature -->
+      <div class="ai-feature-card" id="evieFeature" data-feature="evie">
+        <div class="ai-feature-icon evie-icon">
+          <svg width="24" height="24" viewBox="0 0 24 24" fill="none">
+            <circle cx="12" cy="12" r="10" stroke="currentColor" stroke-width="1.5"/>
+            <path d="M8 12L10 14L12 10L14 14L16 12" fill="currentColor" opacity="0.3"/>
+            <circle cx="12" cy="12" r="3" fill="currentColor" opacity="0.6"/>
+          </svg>
+        </div>
+        <div class="ai-feature-content">
+          <h3>E.V.I.E</h3>
+          <div class="ai-feature-status off">OFF</div>
+        </div>
+        <div class="ai-feature-description">
+          E.V.I.E autonomously manages the growing environment, crop forecasting, and placement. Explores sales trends, updates planting schedules, and applies incremental micro-changes.
+        </div>
+      </div>
+
+      <!-- IA In Training Feature -->
+      <div class="ai-feature-card active" id="iaTrainingFeature" data-feature="ia-training">
+        <div class="ai-feature-icon ia-training-icon">
+          <svg width="24" height="24" viewBox="0 0 24 24" fill="none">
+            <polygon points="12,2 22,20 2,20" stroke="currentColor" stroke-width="1.5" fill="none"/>
+            <path d="M12 8L12 14" stroke="currentColor" stroke-width="1.5"/>
+            <circle cx="12" cy="16" r="1" fill="currentColor"/>
+            <circle cx="8" cy="18" r="1" fill="currentColor" opacity="0.3"/>
+            <circle cx="16" cy="18" r="1" fill="currentColor" opacity="0.3"/>
+            <circle cx="6" cy="16" r="1" fill="currentColor" opacity="0.2"/>
+            <circle cx="18" cy="16" r="1" fill="currentColor" opacity="0.2"/>
+          </svg>
+        </div>
+        <div class="ai-feature-content">
+          <h3>IA In Training</h3>
+          <div class="ai-feature-status always-on">ALWAYS ON</div>
+        </div>
+        <div class="ai-feature-description">
+          Uses farm and external environmental data to continuously learn and adapt to local growing conditions, preparing for autonomous optimization.
+        </div>
+      </div>
+
+      <!-- IA Assist Feature -->
+      <div class="ai-feature-card active" id="iaAssistFeature" data-feature="ia-assist">
+        <div class="ai-feature-icon ia-assist-icon">
+          <svg width="24" height="24" viewBox="0 0 24 24" fill="none">
+            <path d="M12 2L15 9L22 9L17 14L19 22L12 18L5 22L7 14L2 9L9 9L12 2Z" stroke="currentColor" stroke-width="1.5" fill="none"/>
+            <path d="M12 8L12 14" stroke="currentColor" stroke-width="1.5"/>
+          </svg>
+        </div>
+        <div class="ai-feature-content">
+          <h3>IA Assist</h3>
+          <div class="ai-feature-status always-on">ALWAYS ON</div>
+        </div>
+        <div class="ai-feature-description">
+          Provides recommendations to growers, highlighting correlations and causal factors within the growing environment to support informed decisions.
+        </div>
+      </div>
+
+      <!-- Environmental Impact Index Feature -->
+      <div class="ai-feature-card" id="eiiFeature" data-feature="eii">
+        <div class="ai-feature-icon eii-icon">
+          <svg width="24" height="24" viewBox="0 0 24 24" fill="none">
+            <circle cx="12" cy="12" r="10" stroke="currentColor" stroke-width="1.5"/>
+            <path d="M8 12L10 10L12 14L16 8" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+            <circle cx="12" cy="12" r="1" fill="currentColor"/>
+          </svg>
+        </div>
+        <div class="ai-feature-content">
+          <h3>E.I² Environmental Impact Index</h3>
+          <div class="ai-feature-status dev">IN DEVELOPMENT</div>
+        </div>
+        <div class="ai-feature-description">
+          Measures and reports environmental impact, providing transparency and shared knowledge on sustainability performance for both farm operators and the public.
+        </div>
+      </div>
+    </div>
+  </section>
 
   <div id="tooltip" role="tooltip" aria-hidden="true"><div class="tip-arrow"></div><div id="tooltip-content"></div></div>
 
@@ -48,7 +160,7 @@
       </div>
       <p class="tiny" style="margin:8px 0 0;color:#475569">Conversational prompts, 1–3 taps each. We'll store the farm profile locally and at <code>/farm</code>.</p>
       <div id="farmBadge" class="farm-summary" style="margin-top:12px; display:none;"></div>
-      <button id="btnStartDeviceSetup" type="button" class="ghost" style="display:none;margin-top:12px">Start Device Setup</button>
+      <button id="btnStartDeviceSetup" type="button" class="ghost" style="display:none;margin-top:12px">Start here</button>
     </section>
 
     <!-- Grow Rooms Panel -->
@@ -340,40 +452,24 @@
       </div>
     </section>
 
-    <!-- SwitchBot Devices Panel -->
-    <section id="switchbotPanel" class="card">
+    <!-- IoT Devices Panel -->
+    <section id="iotPanel" class="card">
       <div class="row" style="justify-content:space-between;align-items:center">
         <h2 style="margin:0">
-          SwitchBot Devices
-          <span class="hint" tabindex="0" data-tip="Manage connected SwitchBot devices. View status, set names and locations, and identify controlled equipment.">?</span>
+          IoT Devices
+          <span class="hint" tabindex="0" data-tip="Manage all connected IoT devices including SwitchBot, Kasa, Shelly, and GreenReach devices. View status, set names and locations, and identify controlled equipment.">?</span>
         </h2>
         <div class="row" style="gap:6px">
-          <button id="btnOpenSwitchBotManager" type="button" class="primary">🏠 Open Device Manager</button>
+          <button id="btnDiscover" type="button" class="primary" title="Mock device discovery">Discover new GreenReach Devices</button>
+          <button id="btnOpenSwitchBotManager" type="button" class="ghost">Open Device Manager</button>
           <button id="btnRefreshSwitchBot" type="button" class="ghost">Refresh</button>
         </div>
       </div>
-      <p class="tiny" style="margin:8px 0 0;color:#475569">Configure and monitor your SwitchBot environmental sensors and smart devices. Click "Open Device Manager" to access the full management interface with live data.</p>
+      <p class="tiny" style="margin:8px 0 0;color:#475569">Configure and monitor your IoT devices including SwitchBot environmental sensors, Kasa smart plugs, Shelly relays, and GreenReach grow lights. Use "Discover" to find new GreenReach devices or "Open Device Manager" for full management interface.</p>
       
       <div id="switchbotDevicesList" style="margin-top:12px">
-        <!-- SwitchBot devices will be loaded here -->
+        <!-- IoT devices will be loaded here -->
       </div>
-    </section>
-
-    <section class="card env-card">
-      <div class="env-card__header">
-        <div>
-          <h2 style="margin:0">
-            Environment
-            <span class="hint" tabindex="0" data-tip="Live telemetry for each zone. SpectraSync™ adjusts lighting to steer climate within targets.">?</span>
-          </h2>
-          <span id="envStatus" class="tiny" aria-live="polite"></span>
-        </div>
-        <div class="env-card__actions">
-          <button id="btnSaveEnv" type="button" class="ghost">Save Targets</button>
-          <button id="btnReloadEnv" type="button" class="ghost">Reload</button>
-        </div>
-      </div>
-      <div id="envZones" class="env-zone-list" aria-live="polite"></div>
     </section>
 
     <section class="card">
@@ -558,7 +654,7 @@
                 <input id="roomDeviceHost" type="text" placeholder="Token or IP" style="min-width:160px">
                 <button id="roomAddDeviceBtn" type="button" class="primary">Add device</button>
                 <button id="roomDeviceScan" type="button" class="ghost">Scan network</button>
-                <button id="roomDemoSwitchBot" type="button" class="ghost" style="background:#0ea5e9;color:white">� Demo: Load Real SwitchBot Devices</button>
+                <button id="roomDemoSwitchBot" type="button" class="ghost" style="background:#0ea5e9;color:white">Demo: Load Real SwitchBot Devices</button>
               </div>
               <div class="tiny" style="color:#475569;margin-top:8px">
                 <strong>SwitchBot:</strong> App → Profile → Preferences → tap App Version 5–15× to unlock Developer Options, then copy the token + secret.<br>
@@ -985,6 +1081,16 @@
             </div>
           </section>
 
+          <section class="farm-step" data-step="contact">
+            <p class="farm-question">Who should we contact about this farm?</p>
+            <div class="farm-step__stack">
+              <input id="contactName" name="contactName" type="text" autocomplete="name" placeholder="Contact name" required>
+              <input id="contactEmail" name="contactEmail" type="email" autocomplete="email" placeholder="Email address" required>
+              <input id="contactPhone" name="contactPhone" type="tel" autocomplete="tel" placeholder="Phone number">
+              <input id="contactWebsite" name="contactWebsite" type="url" autocomplete="url" placeholder="Website (for branding)">
+            </div>
+          </section>
+
           <section class="farm-step" data-step="spaces">
             <p class="farm-question">Add your spaces—rooms first, then zones within each room.</p>
             <div class="farm-step__stack">
@@ -1024,7 +1130,7 @@
         <button type="button" id="deviceManagerClose" class="ghost" aria-label="Close">×</button>
       </header>
       <div class="device-manager__toolbar">
-        <button id="btnRunDiscovery" type="button" class="primary">🔍 Run discovery</button>
+        <button id="btnRunDiscovery" type="button" class="primary">Run discovery</button>
         <span id="discoveryStatus" class="tiny" aria-live="polite"></span>
         <div class="chip-row" role="tablist" aria-label="Discovery filters">
           <button type="button" class="chip-option" data-filter="all" aria-selected="true">All</button>
