@@ -112,5 +112,77 @@ export const SETUP_GUIDES: Record<string, SetupGuide> = {
         bodyMd: "Set **Name**, **Location**, **Zone**, and **Group** before saving."
       }
     ]
+  },
+  "ifttt-automation": {
+    id: "ifttt-automation",
+    title: "IFTTT Protocol Setup",
+    steps: [
+      {
+        title: "Connect IFTTT Account",
+        bodyMd: "Sign in to your IFTTT account and authorize Light Engine Charlie service.",
+        requiresExternalLogin: true,
+        openUrl: "https://ifttt.com/services/light_engine_charlie"
+      },
+      {
+        title: "Configure Device Triggers",
+        bodyMd: 
+          "Set up IF triggers for your device:\n" +
+          "- **Environmental**: Temperature, humidity, CO2 sensors\n" +
+          "- **Time-based**: Schedule changes, photoperiod shifts\n" +
+          "- **Manual**: Mobile app controls, voice commands\n" +
+          "- **System**: Power events, maintenance alerts"
+      },
+      {
+        title: "Define Actions",
+        bodyMd:
+          "Configure THEN actions for Light Engine:\n" +
+          "- **Spectrum Control**: Adjust light recipes\n" +
+          "- **Environmental**: Climate control responses\n" +
+          "- **Notifications**: Alert systems, data logging\n" +
+          "- **AI Training**: Feed data to IA systems"
+      },
+      {
+        title: "Test Automation",
+        bodyMd:
+          "Create a test applet to verify communication. Example:\n" +
+          "`IF temperature > 85°F THEN reduce light intensity by 20%`\n" +
+          "Monitor the activity log to confirm triggers are working."
+      },
+      {
+        title: "Enable AI Integration",
+        bodyMd:
+          "Toggle **IA Assist** and **IA In Training** to allow the AI to:\n" +
+          "- Learn from IFTTT automation patterns\n" +
+          "- Suggest optimization improvements\n" +
+          "- Create predictive automations based on environmental data"
+      }
+    ]
+  },
+  "webhook-direct": {
+    id: "webhook-direct", 
+    title: "Direct Webhook Integration",
+    steps: [
+      {
+        title: "Generate Webhook URL",
+        bodyMd: "Light Engine will generate a unique webhook endpoint for your device. Copy this URL for use in your automation platform."
+      },
+      {
+        title: "Configure External System",
+        bodyMd:
+          "In your automation platform (Home Assistant, Node-RED, etc.), set up HTTP POST requests to the webhook URL with JSON payload:\n" +
+          "```json\n" +
+          "{\n" +
+          "  \"action\": \"spectrum_change\",\n" +
+          "  \"intensity\": 85,\n" +
+          "  \"spectrum\": \"flowering\",\n" +
+          "  \"device_id\": \"your-device-id\"\n" +
+          "}\n" +
+          "```"
+      },
+      {
+        title: "Test Integration",
+        bodyMd: "Send a test webhook to verify Light Engine responds correctly. Check the device activity log for confirmation."
+      }
+    ]
   }
 };

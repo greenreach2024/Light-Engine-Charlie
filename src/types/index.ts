@@ -6,6 +6,8 @@ export type CommType =
   | "RS485"
   | "ANALOG_0_10V"
   | "PWM"
+  | "IFTTT"
+  | "WEBHOOK"
   | "OTHER";
 
 export type SupportBadge = "NATIVE" | "GENERIC" | "MANAGED" | "CUSTOM";

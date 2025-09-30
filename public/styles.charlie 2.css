@@ -1460,12 +1460,11 @@ input[type="range"]#grd {
   display: flex;
   gap: 0;
   margin-top: 8px;
-  height: 60px; /* Increased base height */
+  height: 50px; /* Base height */
   background: rgba(var(--gr-primary), 0.02);
   border-radius: 8px;
-  overflow: visible; /* Allow content to show on hover */
+  overflow: hidden;
   border: 1px solid var(--gr-border);
-  position: relative;
 }
 
 .ai-features-grid {
@@ -1500,8 +1499,6 @@ input[type="range"]#grd {
   background: linear-gradient(135deg, rgba(var(--gr-primary), 0.08) 0%, rgba(var(--gr-accent), 0.05) 100%);
   z-index: 10;
   box-shadow: 0 4px 20px rgba(var(--gr-primary), 0.15);
-  height: 110px; /* Expand height on hover to accommodate description */
-  margin-top: -10px; /* Offset to maintain alignment */
 }
 
 .ai-feature-card.active {
