@@ -198,6 +198,69 @@ async function api(path, opts = {}) {
   return response.json();
 }
 
+// --- Lights Status UI ---
+async function loadLightsStatus({ refresh = false } = {}) {
+  try {
+    const qs = refresh ? '?refresh=all' : '';
+    const data = await api(`/api/lights/status${qs}`);
+    const summaryEl = document.getElementById('lightsStatusSummary');
+    const listEl = document.getElementById('lightsStatusList');
+    if (!summaryEl || !listEl) return;
+
+    if (!data || data.ok !== true) {
+      summaryEl.textContent = 'Failed to load lights status';
+      return;
+    }
+
+    const { summary, entries, sources } = data;
+    summaryEl.textContent = `Total ${summary.total} · ON ${summary.on} · OFF ${summary.off} · Unknown ${summary.unknown}`;
+
+    // Render compact cards
+    listEl.innerHTML = '';
+    const makeBadge = (txt, cls) => `<span class="tag ${cls}" style="font-size:10px;padding:2px 6px;border-radius:999px">${txt}</span>`;
+    const onIcon = '<span style="color:#10b981">●</span>';
+    const offIcon = '<span style="color:#ef4444">●</span>';
+    const unkIcon = '<span style="color:#9ca3af">●</span>';
+
+    entries.forEach(e => {
+      const stateIcon = e.power === true ? onIcon : e.power === false ? offIcon : unkIcon;
+      const stateText = e.power === true ? 'ON' : e.power === false ? 'OFF' : '—';
+      const badge = makeBadge(e.source, '');
+      const bright = typeof e.brightness === 'number' ? ` · ${e.brightness}%` : '';
+      const room = e.room ? ` · ${e.room}` : '';
+      const vendor = e.vendor || '';
+      const title = e.name || e.id;
+      const sub = [vendor, e.type].filter(Boolean).join(' · ');
+      const meta = e.lastUpdated ? `<div class="tiny" style="color:#94a3b8">${new Date(e.lastUpdated).toLocaleTimeString()}</div>` : '';
+      const card = document.createElement('div');
+      card.className = 'card';
+      card.style.padding = '10px';
+      card.innerHTML = `
+        <div class="row" style="justify-content:space-between;align-items:center;margin-bottom:6px">
+          <strong style="color:#0f172a">${stateIcon} ${title}</strong>
+          ${badge}
+        </div>
+        <div class="tiny" style="color:#334155">${sub}${room}${bright}</div>
+        ${meta}
+      `;
+      listEl.appendChild(card);
+    });
+
+  } catch (e) {
+    const summaryEl = document.getElementById('lightsStatusSummary');
+    if (summaryEl) summaryEl.textContent = `Error: ${e.message}`;
+  }
+}
+
+function initLightsStatusUI() {
+  const btn = document.getElementById('btnRefreshLights');
+  if (btn) {
+    btn.addEventListener('click', () => loadLightsStatus({ refresh: true }));
+  }
+  // Initial load (cached to avoid rate limits)
+  loadLightsStatus({ refresh: false });
+}
+
 // --- Theming ---
 function applyTheme(palette, extras = {}) {
   if (!palette) return;
@@ -6896,6 +6959,9 @@ document.addEventListener('DOMContentLoaded', async () => {
     const title = document.querySelector('.header.logo h1');
     if (title && branding?.fontFamily) { title.style.fontFamily = branding.fontFamily + ', var(--gr-font)'; }
   } catch {}
+  
+  // Initialize Current Lights Status panel
+  try { initLightsStatusUI(); } catch (e) { console.warn('Lights status init failed', e); }
   
   setStatus("Dashboard loaded");
 });

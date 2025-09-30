@@ -2258,6 +2258,180 @@ app.post('/forwarder/network/test', async (req, res) => {
   });
 });
 
+// Consolidated Lights Status endpoint
+// GET /api/lights/status?refresh=switchbot|kasa|all&scanKasa=1&limit=<n>
+// Default is fast: use cached SwitchBot device/status; query controller for Kasa if available; registry devices are included as unknown
+app.get('/api/lights/status', asyncHandler(async (req, res) => {
+  const refreshParam = String(req.query.refresh || '').toLowerCase();
+  const refreshSwitchBot = refreshParam === 'switchbot' || refreshParam === 'all' || refreshParam === 'true' || refreshParam === '1';
+  const refreshKasa = refreshParam === 'kasa' || refreshParam === 'all';
+  const scanKasa = ['1', 'true', 'yes'].includes(String(req.query.scanKasa || '').toLowerCase());
+  const limit = Math.max(1, Math.min(100, parseInt(req.query.limit) || 100));
+
+  const entries = [];
+  const sourcesMeta = { switchbot: { used: false }, kasa: { used: false }, registry: { used: false } };
+
+  // Helper: normalize power flag
+  const normPower = (v) => {
+    if (typeof v === 'boolean') return v;
+    if (typeof v === 'number') return v > 0;
+    if (typeof v === 'string') return v.toLowerCase() === 'on' || v === '1' || v === 'true';
+    return null;
+  };
+
+  // 1) SwitchBot (from cache; optional refresh limited by API rate limits)
+  try {
+    const sb = await fetchSwitchBotDevices({ force: refreshSwitchBot });
+    sourcesMeta.switchbot = { used: true, cached: sb.fromCache, stale: sb.stale, fetchedAt: sb.fetchedAt ? new Date(sb.fetchedAt).toISOString() : null, error: sb.error?.message || null };
+    const list = sb.payload?.body?.deviceList || [];
+    for (const device of list) {
+      const type = String(device.deviceType || '').toLowerCase();
+      // Only include likely light-capable devices (bulb/strip/ceiling) and plugs used for lights
+      const looksLikeLight = /(bulb|light|strip)/.test(type);
+      const looksLikePlug = /plug/.test(type);
+      if (!looksLikeLight && !looksLikePlug) continue;
+
+      let power = null, brightness = null, meta = { cached: true, stale: false };
+      try {
+        const cacheEntry = getSwitchBotStatusEntry(device.deviceId);
+        if (cacheEntry.payload && cacheEntry.payload.body) {
+          power = normPower(cacheEntry.payload.body.power);
+          // Many SwitchBot lighting devices expose brightness as number 1-100
+          brightness = typeof cacheEntry.payload.body.brightness === 'number' ? cacheEntry.payload.body.brightness : null;
+          meta = { cached: true, stale: (Date.now() - cacheEntry.fetchedAt) > SWITCHBOT_STATUS_CACHE_TTL_MS, fetchedAt: new Date(cacheEntry.fetchedAt).toISOString(), error: cacheEntry.lastError?.message || null };
+        } else if (refreshSwitchBot) {
+          // Optional on-demand refresh for a small subset (respect rate limits externally)
+          const st = await fetchSwitchBotDeviceStatus(device.deviceId, { force: true });
+          power = normPower(st.payload?.body?.power);
+          brightness = typeof st.payload?.body?.brightness === 'number' ? st.payload.body.brightness : null;
+          meta = { cached: st.fromCache, stale: st.stale, fetchedAt: st.fetchedAt ? new Date(st.fetchedAt).toISOString() : null };
+        }
+      } catch (e) {
+        meta = { cached: false, stale: true, error: e.message };
+      }
+
+      entries.push({
+        id: `switchbot:${device.deviceId}`,
+        name: device.deviceName || `SwitchBot ${device.deviceType}`,
+        vendor: 'SwitchBot',
+        source: 'switchbot',
+        type: device.deviceType,
+        room: null,
+        zone: null,
+        power: power,
+        brightness,
+        watts: null,
+        lastUpdated: meta.fetchedAt || null,
+        meta
+      });
+      if (entries.length >= limit) break;
+    }
+  } catch (e) {
+    sourcesMeta.switchbot = { used: true, error: e.message };
+  }
+
+  // 2) Kasa devices: try controller first; optionally scan locally if requested
+  try {
+    let kasaDevices = [];
+    const controller = getController();
+    if (controller) {
+      try {
+        const r = await fetch(`${controller.replace(/\/$/, '')}/api/devices/kasa`);
+        if (r.ok) {
+          const body = await r.json();
+          if (Array.isArray(body?.devices)) {
+            kasaDevices = body.devices.map(d => ({
+              id: d.device_id,
+              name: d.name,
+              state: d.details?.state ?? d.state ?? null,
+              address: d.details?.host || null,
+              model: d.details?.model || d.model || null
+            }));
+          }
+        }
+      } catch {}
+    }
+
+    if (kasaDevices.length === 0 && (scanKasa || refreshKasa)) {
+      try {
+        // Use built-in discovery (slower). Avoid per-device status calls; rely on relay_state from discovery
+        const client = await createKasaClient();
+        const found = [];
+        client.startDiscovery({ timeout: 3500 });
+        client.on('device-new', async (device) => {
+          try {
+            const si = await device.getSysInfo();
+            found.push({ id: device.deviceId, name: device.alias || si.alias, state: si.relay_state ?? null, address: device.host, model: si.model || null });
+          } catch {}
+        });
+        await new Promise(resolve => setTimeout(resolve, 3800));
+        client.stopDiscovery();
+        kasaDevices = found;
+      } catch {}
+    }
+
+    if (kasaDevices.length) {
+      sourcesMeta.kasa = { used: true, count: kasaDevices.length };
+      for (const d of kasaDevices) {
+        entries.push({
+          id: `kasa:${d.id}`,
+          name: d.name || `Kasa ${d.model || ''}`.trim(),
+          vendor: 'TP-Link Kasa',
+          source: 'kasa',
+          type: 'smart-plug',
+          room: null,
+          zone: null,
+          power: normPower(d.state),
+          brightness: null,
+          watts: null,
+          lastUpdated: null,
+          meta: { discovered: true, address: d.address }
+        });
+        if (entries.length >= limit) break;
+      }
+    }
+  } catch (e) {
+    sourcesMeta.kasa = { used: true, error: e.message };
+  }
+
+  // 3) Device registry (NeDB) — include registered lights as inventory (status unknown)
+  try {
+    const rows = await devicesStore.find({});
+    const lights = rows.filter(r => /^light-/i.test(String(r.id || '')));
+    sourcesMeta.registry = { used: true, count: lights.length };
+    for (const d of lights) {
+      entries.push({
+        id: d.id,
+        name: d.deviceName || d.id,
+        vendor: d.manufacturer || 'Registered',
+        source: 'registry',
+        type: d.model || 'light-fixture',
+        room: d.room || null,
+        zone: d.zone || null,
+        power: null, // unknown live state
+        brightness: null,
+        watts: d.watts || null,
+        lastUpdated: d.updatedAt || d.createdAt || null,
+        meta: { registered: true }
+      });
+      if (entries.length >= limit) break;
+    }
+  } catch (e) {
+    sourcesMeta.registry = { used: true, error: e.message };
+  }
+
+  // Build summary
+  const summary = {
+    total: entries.length,
+    on: entries.filter(e => e.power === true).length,
+    off: entries.filter(e => e.power === false).length,
+    unknown: entries.filter(e => e.power !== true && e.power !== false).length,
+    byVendor: entries.reduce((acc, e) => { acc[e.vendor] = (acc[e.vendor] || 0) + 1; return acc; }, {})
+  };
+
+  res.json({ ok: true, summary, count: entries.length, entries, sources: sourcesMeta, generatedAt: new Date().toISOString() });
+}));
+
 app.get('/discovery/devices', async (req, res) => {
   const startedAt = new Date().toISOString();
   try {

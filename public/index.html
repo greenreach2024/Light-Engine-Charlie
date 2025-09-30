@@ -142,6 +142,21 @@
       </div>
     </noscript>
 
+    <!-- Current Lights Status Panel -->
+    <section id="lightsStatusPanel" class="card" style="border:1px solid #eee;border-radius:10px;padding:12px;margin-bottom:12px">
+      <div class="row" style="justify-content:space-between;align-items:center">
+        <h2 style="margin:0">
+          Current Lights Status
+          <span class="hint" tabindex="0" data-tip="Aggregates SwitchBot, Kasa, and registered fixtures. Uses cached cloud/device data by default to avoid rate limits.">?</span>
+        </h2>
+        <div class="row" style="gap:6px;align-items:center">
+          <button id="btnRefreshLights" type="button" class="ghost">Refresh</button>
+        </div>
+      </div>
+      <p id="lightsStatusSummary" class="tiny" aria-live="polite" style="color:#64748b;margin:6px 0">Loading…</p>
+      <div id="lightsStatusList" class="grid cols-3" style="gap:8px"></div>
+    </section>
+
     <!-- Farm Registration Panel (moved above Grow Rooms) -->
     <section id="farmPanel" class="card" style="border:1px solid #eee;border-radius:10px;padding:12px;margin-bottom:12px">
       <div class="row" style="justify-content:space-between;align-items:center">
