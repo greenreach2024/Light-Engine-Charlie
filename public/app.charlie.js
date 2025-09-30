@@ -2170,13 +2170,16 @@ class DeviceManagerWindow {
       showToast({ title: 'Discovery complete', msg: `Found ${this.devices.length} potential devices`, kind: 'success', icon: '🔍' });
     } catch (err) {
       console.error('Discovery failed', err);
-      this.devices = [
-        { id: 'wifi:192.168.1.50', name: 'Shelly Pro 4PM', protocol: 'wifi', confidence: 0.92, signal: -51, address: '192.168.1.50', vendor: 'Shelly', lastSeen: new Date().toISOString(), hints: { type: 'Light' }, status: 'new', assignment: null },
-        { id: 'ble:SwitchBot-Meter-01', name: 'SwitchBot Meter Plus', protocol: 'ble', confidence: 0.8, signal: -42, address: 'DF:11:02:AA:CD:01', vendor: 'SwitchBot', lastSeen: new Date().toISOString(), hints: { type: 'Sensor', metrics: ['temp','rh'] }, status: 'new', assignment: null },
-        { id: 'mqtt:sensor:co2', name: 'SenseCAP CO₂', protocol: 'mqtt', confidence: 0.7, signal: null, address: 'sensors/co2/01', vendor: 'Seeed', lastSeen: new Date().toISOString(), hints: { type: 'Sensor', metrics: ['co2'] }, status: 'new', assignment: null }
-      ];
-      if (this.statusEl) this.statusEl.textContent = 'Offline mode — showing demo devices';
-      showToast({ title: 'Discovery offline', msg: 'Showing demo devices because the scan failed.', kind: 'warn', icon: '⚠️' });
+      
+      // NO DEMO DEVICES - Show error and require live discovery
+      this.devices = [];
+      if (this.statusEl) this.statusEl.textContent = 'Discovery failed - no devices found';
+      showToast({ 
+        title: 'Discovery Failed', 
+        msg: 'Device discovery failed. Please check network connectivity and try again. No demo devices available.', 
+        kind: 'error', 
+        icon: '❌' 
+      });
     }
     this.render();
   }
@@ -4247,53 +4250,122 @@ class RoomWizard {
 
   async addDemoSwitchBotDevices() {
     try {
+      // Clear existing devices first
+      this.data.devices = [];
+      
       // Fetch real SwitchBot devices from the API
+      console.log('🔌 Fetching live SwitchBot device data...');
       const response = await fetch('/api/switchbot/devices?refresh=1');
+      
       if (!response.ok) {
-        throw new Error(`SwitchBot API returned HTTP ${response.status}`);
+        const errorText = await response.text();
+        throw new Error(`SwitchBot API returned HTTP ${response.status}: ${errorText}`);
       }
+      
       const data = await response.json();
       const meta = data.meta || {};
 
+      // Check for rate limiting
+      if (response.status === 429 || data.statusCode === 429) {
+        const retryAfter = data.retryAfter || 60;
+        console.warn(`⏱️ SwitchBot API rate limited. Retry after ${retryAfter} seconds.`);
+        showToast({ 
+          title: 'API Rate Limited', 
+          msg: `SwitchBot API is rate limited. Please wait ${retryAfter} seconds and refresh.`, 
+          kind: 'warn', 
+          icon: '⏱️' 
+        });
+        
+        // Show a message instead of loading mock data
+        if (this.statusEl) {
+          this.statusEl.textContent = `Rate limited - retry in ${retryAfter}s`;
+        }
+        return;
+      }
+
       if (meta.cached && meta.stale) {
-        console.warn('SwitchBot API returned stale cached data:', meta.error || 'Unknown error');
+        console.warn('⚠️ Using stale cached SwitchBot data:', meta.error || 'Unknown error');
+        showToast({ 
+          title: 'Using Cached Data', 
+          msg: 'SwitchBot API unavailable, using cached device data.', 
+          kind: 'info', 
+          icon: '💾' 
+        });
       } else if (meta.cached) {
-        console.info('Using cached SwitchBot device list (within TTL).');
+        console.info('📋 Using cached SwitchBot device list (within TTL).');
       }
 
       if (data.statusCode === 100 && data.body && data.body.deviceList) {
         const realDevices = data.body.deviceList;
 
-        // Clear existing devices and add real ones
-        this.data.devices = [];
+        if (realDevices.length === 0) {
+          console.warn('⚠️ No SwitchBot devices found in your account');
+          showToast({ 
+            title: 'No Devices Found', 
+            msg: 'No SwitchBot devices found in your account. Add devices in the SwitchBot app first.', 
+            kind: 'warn', 
+            icon: '📱' 
+          });
+          
+          if (this.statusEl) {
+            this.statusEl.textContent = 'No devices found in SwitchBot account';
+          }
+          return;
+        }
 
+        // Add real devices only
         realDevices.forEach((device, index) => {
-          const demoDevice = {
-            name: device.deviceName || `Farm Device ${index + 1}`,
+          const liveDevice = {
+            name: device.deviceName || `SwitchBot ${device.deviceType} ${index + 1}`,
             vendor: 'SwitchBot',
             model: device.deviceType,
-            host: 'switchbot-demo-token',
+            host: 'live-switchbot-api',
             switchBotId: device.deviceId,
             hubId: device.hubDeviceId,
             setup: this.getSetupForDeviceType(device.deviceType),
             isReal: true,
-            realDeviceData: device
+            isLive: true, // Mark as live data
+            realDeviceData: device,
+            lastUpdate: new Date().toISOString()
           };
-          this.data.devices.push(demoDevice);
+          this.data.devices.push(liveDevice);
         });
         
-        console.log(`✅ Loaded ${realDevices.length} SwitchBot device(s) for demo`, meta);
+        console.log(`✅ Loaded ${realDevices.length} LIVE SwitchBot device(s)`, meta);
+        showToast({ 
+          title: 'Live Devices Loaded', 
+          msg: `Successfully loaded ${realDevices.length} live SwitchBot devices.`, 
+          kind: 'success', 
+          icon: '🔌' 
+        });
+
+        if (this.statusEl) {
+          this.statusEl.textContent = `${realDevices.length} live devices connected`;
+        }
 
       } else {
-        throw new Error('Failed to load real devices');
+        throw new Error(`Invalid API response: statusCode ${data.statusCode || 'unknown'}`);
       }
     } catch (error) {
-      console.error('Failed to load real SwitchBot devices, using fallback:', error);
-      // Fallback to mock data if real API fails
-      this.addFallbackDemoDevices();
+      console.error('❌ Failed to load live SwitchBot devices:', error);
+      
+      // NO FALLBACK TO MOCK DATA - Show error instead
+      showToast({ 
+        title: 'Live Data Required', 
+        msg: `Cannot load live SwitchBot devices: ${error.message}. Please check your API credentials and network connection.`, 
+        kind: 'error', 
+        icon: '❌' 
+      });
+      
+      if (this.statusEl) {
+        this.statusEl.textContent = `Error: ${error.message}`;
+      }
+      
+      // Keep devices array empty to force live data requirement
+      this.data.devices = [];
     }
 
-    // Set shared SwitchBot configuration regardless of real vs fallback
+    // Set shared SwitchBot configuration for live devices
     this.setupSwitchBotConfiguration();
   }
 
@@ -4305,7 +4377,7 @@ class RoomWizard {
       };
     } else if (type.includes('plug') || type.includes('switch')) {
       return {
-        wifi: { ssid: 'GrowFarm_IoT', psk: '********', useStatic: false, staticIp: null }
+        wifi: { ssid: 'greenreach', psk: 'Farms2024', useStatic: false, staticIp: null }
       };
     } else if (type.includes('bot')) {
       return {
@@ -4313,70 +4385,22 @@ class RoomWizard {
       };
     } else {
       return {
-        wifi: { ssid: 'GrowFarm_IoT', psk: '********', useStatic: true, staticIp: `192.168.1.${40 + Math.floor(Math.random() * 10)}` }
+        wifi: { ssid: 'greenreach', psk: 'Farms2024', useStatic: true, staticIp: `192.168.1.${40 + Math.floor(Math.random() * 10)}` }
       };
     }
   }
 
   addFallbackDemoDevices() {
-    // Original mock devices as fallback
-    const demoDevices = [
-      {
-        name: 'Grow Room Temp/Humidity Sensor',
-        vendor: 'SwitchBot',
-        model: 'Meter Plus',
-        host: 'switchbot-demo-token',
-        setup: {
-          bluetooth: { name: 'WoSensorTH_A1B2C3', pin: null }
-        },
-        mockData: { temperature: 24.3, humidity: 52, battery: 87 }
-      },
-      {
-        name: 'Dehumidifier Smart Plug',
-        vendor: 'SwitchBot',
-        model: 'Plug Mini',
-        host: 'switchbot-demo-token',
-        setup: {
-          wifi: { ssid: 'GrowFarm_IoT', psk: '********', useStatic: false, staticIp: null }
-        },
-        mockData: { power: 450, voltage: 120.1, current: 3.75, state: 'on' }
-      },
-      {
-        name: 'Exhaust Fan Controller',
-        vendor: 'SwitchBot',
-        model: 'Bot',
-        host: 'switchbot-demo-token',
-        setup: {
-          bluetooth: { name: 'WoHand_D4E5F6', pin: null }
-        },
-        mockData: { position: 75, battery: 92, state: 'auto' }
-      },
-      {
-        name: 'CO2 Monitor',
-        vendor: 'SwitchBot',
-        model: 'Indoor Air Quality Monitor',
-        host: 'switchbot-demo-token',
-        setup: {
-          wifi: { ssid: 'GrowFarm_IoT', psk: '********', useStatic: true, staticIp: '192.168.1.45' }
-        },
-        mockData: { co2: 820, temperature: 23.8, humidity: 48, battery: 78 }
-      },
-      {
-        name: 'Water Pump Controller',
-        vendor: 'SwitchBot',
-        model: 'Plug',
-        host: 'switchbot-demo-token',
-        setup: {
-          wifi: { ssid: 'GrowFarm_IoT', psk: '********', useStatic: true, staticIp: '192.168.1.47' }
-        },
-        mockData: { power: 125, voltage: 120.3, current: 1.04, state: 'off', schedule: 'irrigation-cycle-1' }
-      }
-    ];
-
-    this.data.devices = this.data.devices || [];
-    demoDevices.forEach(device => {
-      this.data.devices.push(device);
+    // DISABLED: No more mock/demo fallback data
+    // This function is intentionally disabled to enforce live data only
+    console.warn('🚫 Mock fallback data is disabled. Only live SwitchBot devices are supported.');
+    showToast({ 
+      title: 'Live Data Only', 
+      msg: 'Mock devices are disabled. Please ensure your SwitchBot API is working and you have real devices.', 
+      kind: 'warn', 
+      icon: '🚫' 
     });
+    this.data.devices = [];
   }
 
   setupSwitchBotConfiguration() {

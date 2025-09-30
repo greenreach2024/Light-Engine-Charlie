@@ -7,8 +7,43 @@
   "contact": {
     "name": "Anne",
     "email": "info@greenreachfarms.com",
-    "phone": "6138881031"
+    "phone": "6138881031",
+    "website": "www.greenreachfarms.com"
   },
   "timezone": "America/Toronto",
-  "registered": "2025-09-29T16:01:40.110Z"
+  "registered": "2025-09-29T16:01:40.110Z",
+  "rooms": [
+    {
+      "id": "room-0",
+      "name": "North Greenhouse",
+      "zones": []
+    }
+  ],
+  "address": "",
+  "city": "",
+  "state": "",
+  "postalCode": "",
+  "connection": {
+    "type": "wifi",
+    "wifi": {
+      "ssid": "Farm-IoT",
+      "reuseDiscovery": true,
+      "tested": true,
+      "testResult": {
+        "status": "connected",
+        "ip": "192.168.1.120",
+        "gateway": "192.168.1.1",
+        "subnet": "192.168.1.0/24",
+        "latencyMs": 32,
+        "testedAt": "2025-09-30T15:10:24.250Z",
+        "ssid": "Farm-IoT"
+      }
+    }
+  },
+  "discovery": {
+    "subnet": "192.168.1.0/24",
+    "gateway": "192.168.1.1",
+    "reuseNetwork": true,
+    "ssid": "Farm-IoT"
+  }
 }

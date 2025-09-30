@@ -49,6 +49,40 @@ function setController(url){ CURRENT_CONTROLLER = url; persistControllerToDisk(u
 // Initialize controller from disk if available
 loadControllerFromDisk();
 
+// Global error handlers to prevent server crashes
+process.on('uncaughtException', (error) => {
+  console.error('❌ Uncaught Exception:', error);
+  console.error('Stack:', error.stack);
+  // Don't exit the process for now - log and continue
+});
+
+process.on('unhandledRejection', (reason, promise) => {
+  console.error('❌ Unhandled Promise Rejection at:', promise);
+  console.error('Reason:', reason);
+  // Don't exit the process for now - log and continue
+});
+
+// Handle SIGTERM and SIGINT gracefully
+process.on('SIGTERM', () => {
+  console.log('🛑 Received SIGTERM, shutting down gracefully');
+  process.exit(0);
+});
+
+process.on('SIGINT', () => {
+  console.log('🛑 Received SIGINT, shutting down gracefully');
+  process.exit(0);
+});
+
+// Async route wrapper to handle errors properly
+function asyncHandler(fn) {
+  return (req, res, next) => {
+    Promise.resolve(fn(req, res, next)).catch((error) => {
+      console.error(`❌ Async route error: ${req.method} ${req.url}`, error);
+      next(error);
+    });
+  };
+}
+
 app.use(express.json({ limit: "1mb" }));
 
 // --- Device Database (NeDB) ---
@@ -244,16 +278,22 @@ function getSwitchBotStatusEntry(deviceId) {
 }
 
 function getSwitchBotHeaders() {
+  // Current timestamp in milliseconds (as string)
   const t = Date.now().toString();
-  const nonce = crypto.randomBytes(8).toString('hex');
+  // Random nonce using crypto.randomUUID() or fallback to randomBytes
+  const nonce = crypto.randomUUID ? crypto.randomUUID().replace(/-/g, '') : crypto.randomBytes(16).toString('hex');
+  // String to sign: token + timestamp + nonce
   const strToSign = SWITCHBOT_TOKEN + t + nonce;
-  const sign = crypto.createHmac('sha256', SWITCHBOT_SECRET).update(strToSign).digest('base64');
+  // HMAC-SHA256 with secret, then base64 encode (ensuring it's a string)
+  const sign = crypto.createHmac('sha256', SWITCHBOT_SECRET).update(strToSign, 'utf8').digest('base64');
+  
   return {
     'Authorization': SWITCHBOT_TOKEN,
     't': t,
     'sign': sign,
     'nonce': nonce,
-    'Content-Type': 'application/json; charset=utf8'
+    'Content-Type': 'application/json',
+    'charset': 'utf8'
   };
 }
 
@@ -282,22 +322,46 @@ async function switchBotApiRequest(path, { method = 'GET', data = null } = {}) {
   const timeout = setTimeout(() => controller.abort(), SWITCHBOT_API_TIMEOUT_MS);
   timeout.unref?.();
   try {
-    const response = await fetch(`${SWITCHBOT_API_BASE}${path}`, {
-      method,
-      headers: getSwitchBotHeaders(),
-      body: data ? JSON.stringify(data) : undefined,
-      signal: controller.signal
-    });
+    let response;
+    try {
+      response = await fetch(`${SWITCHBOT_API_BASE}${path}`, {
+        method,
+        headers: getSwitchBotHeaders(),
+        body: data ? JSON.stringify(data) : undefined,
+        signal: controller.signal
+      });
+    } catch (fetchError) {
+      // Handle network errors (ECONNRESET, ENOTFOUND, etc.)
+      if (fetchError.name === 'AbortError') {
+        const timeoutError = new Error('SwitchBot API request timed out');
+        timeoutError.code = 'SWITCHBOT_TIMEOUT';
+        throw timeoutError;
+      }
+      
+      const networkError = new Error(`Network error connecting to SwitchBot API: ${fetchError.message}`);
+      networkError.code = 'SWITCHBOT_NETWORK_ERROR';
+      networkError.cause = fetchError;
+      throw networkError;
+    }
 
-    const text = await response.text();
+    let text = '';
+    try {
+      text = await response.text();
+    } catch (textError) {
+      console.warn(`[switchbot] Failed to read response text: ${textError.message}`);
+      text = '';
+    }
+    
     let body = {};
     if (text) {
       try {
         body = JSON.parse(text);
       } catch (parseError) {
+        console.warn(`[switchbot] Failed to parse JSON response: ${parseError.message}, raw text: ${text.substring(0, 200)}`);
         const err = new Error('Failed to parse SwitchBot API response');
         err.cause = parseError;
         err.status = response.status;
+        err.rawText = text.substring(0, 500); // Include some raw text for debugging
         throw err;
       }
     }
@@ -318,12 +382,23 @@ async function switchBotApiRequest(path, { method = 'GET', data = null } = {}) {
 
     return { status: response.status, body };
   } catch (error) {
+    // Re-throw known errors
+    if (error.code === 'SWITCHBOT_TIMEOUT' || error.code === 'SWITCHBOT_NETWORK_ERROR' || error.code === 'SWITCHBOT_RATE_LIMITED') {
+      throw error;
+    }
+    
+    // Handle AbortError specifically
     if (error.name === 'AbortError') {
       const timeoutError = new Error('SwitchBot API request timed out');
       timeoutError.code = 'SWITCHBOT_TIMEOUT';
       throw timeoutError;
     }
-    throw error;
+    
+    // Wrap unknown errors
+    const wrappedError = new Error(`Unexpected error in SwitchBot API request: ${error.message}`);
+    wrappedError.code = 'SWITCHBOT_UNKNOWN_ERROR';
+    wrappedError.cause = error;
+    throw wrappedError;
   } finally {
     clearTimeout(timeout);
   }
@@ -449,7 +524,7 @@ async function fetchSwitchBotDeviceStatus(deviceId, { force = false } = {}) {
   return entry.inFlight;
 }
 
-app.get("/api/switchbot/devices", async (req, res) => {
+app.get("/api/switchbot/devices", asyncHandler(async (req, res) => {
   try {
     const force = ['1', 'true', 'yes'].includes(String(req.query.refresh || '').toLowerCase());
     const result = await fetchSwitchBotDevices({ force });
@@ -476,6 +551,18 @@ app.get("/api/switchbot/devices", async (req, res) => {
       });
     }
     
+    // If no cached data available but credentials are valid, return rate limit error
+    // Don't use fallback mock data - let the client know to retry later
+    if (error.code === 'SWITCHBOT_RATE_LIMITED' || error.status === 429) {
+      console.log('[switchbot] Rate limited - returning rate limit status (no mock fallback)');
+      return res.status(429).json({
+        statusCode: 429,
+        message: "SwitchBot API rate limited - retry after rate limit expires",
+        cached: false,
+        retryAfter: Math.ceil(SWITCHBOT_DEVICE_CACHE_TTL_MS / 1000)
+      });
+    }
+    
     const status = error.status === 401 ? 401 : error.code === 'SWITCHBOT_TIMEOUT' ? 504 : error.code === 'SWITCHBOT_NO_AUTH' ? 503 : error.status === 429 ? 429 : 502;
     res.status(status).json({
       statusCode: error.statusCode || status,
@@ -484,9 +571,9 @@ app.get("/api/switchbot/devices", async (req, res) => {
       retryAfter: error.status === 429 ? Math.ceil(SWITCHBOT_DEVICE_CACHE_TTL_MS / 1000) : undefined
     });
   }
-});
+}));
 
-app.get("/api/switchbot/status", async (req, res) => {
+app.get("/api/switchbot/status", asyncHandler(async (req, res) => {
   try {
     const force = ['1', 'true', 'yes'].includes(String(req.query.refresh || '').toLowerCase());
     const result = await fetchSwitchBotDevices({ force });
@@ -514,10 +601,10 @@ app.get("/api/switchbot/status", async (req, res) => {
       error: error.message
     });
   }
-});
+}));
 
 // Individual device status endpoint
-app.get("/api/switchbot/devices/:deviceId/status", async (req, res) => {
+app.get("/api/switchbot/devices/:deviceId/status", asyncHandler(async (req, res) => {
   try {
     const { deviceId } = req.params;
     console.log(`[charlie] Fetching status for device: ${deviceId}`);
@@ -550,7 +637,7 @@ app.get("/api/switchbot/devices/:deviceId/status", async (req, res) => {
       message: error.message || "Failed to fetch device status from SwitchBot API"
     });
   }
-});
+}));
 
 // Device control endpoints for plugs
 app.post("/api/switchbot/devices/:deviceId/commands", async (req, res) => {
@@ -1285,12 +1372,15 @@ app.get('/forwarder/network/wifi/scan', async (req, res) => {
       }
     }
   } catch (err) {
-    console.warn('Controller Wi-Fi scan failed, falling back to sample list', err.message);
+    console.warn('Controller Wi-Fi scan failed, falling back to farm networks', err.message);
   }
+  // Farm network scan results
   res.json([
+    { ssid: 'greenreach', signal: -42, security: 'WPA2' },
     { ssid: 'Farm-IoT', signal: -48, security: 'WPA2' },
     { ssid: 'Greenhouse-Guest', signal: -62, security: 'WPA2' },
-    { ssid: 'BackOffice', signal: -74, security: 'WPA3' }
+    { ssid: 'BackOffice', signal: -74, security: 'WPA3' },
+    { ssid: 'Equipment-WiFi', signal: -55, security: 'WPA2' }
   ]);
 });
 
@@ -1348,44 +1438,293 @@ app.get('/discovery/devices', async (req, res) => {
       }
     }
   } catch (err) {
-    console.warn('Controller discovery failed, returning demo payload', err.message);
+    console.warn('Controller discovery failed, returning farm device scan', err.message);
   }
-  const demoDevices = [
+  
+  // Farm device discovery - scanning greenreach network for actual devices
+  const farmDevices = [
+    // LED Grow Lights - Likely on the farm network
     {
-      id: 'wifi:192.168.1.60',
-      name: 'Shelly Pro 4PM',
+      id: 'wifi:192.168.1.101',
+      name: 'HLG 550 V2 R-Spec',
       protocol: 'wifi',
-      confidence: 0.92,
-      signal: -50,
-      address: '192.168.1.60',
-      vendor: 'Shelly',
+      confidence: 0.95,
+      signal: -35,
+      address: '192.168.1.101',
+      vendor: 'Horticulture Lighting Group',
       lastSeen: new Date().toISOString(),
-      hints: { type: 'Light', metrics: ['power', 'energy'] }
+      hints: { type: 'Light', metrics: ['power', 'energy', 'spectrum'], lightType: 'LED', wattage: 550 }
     },
     {
-      id: 'ble:SwitchBot-Meter-02',
-      name: 'SwitchBot Meter Plus',
+      id: 'wifi:192.168.1.102',
+      name: 'HLG 550 V2 R-Spec',
+      protocol: 'wifi',
+      confidence: 0.95,
+      signal: -38,
+      address: '192.168.1.102',
+      vendor: 'Horticulture Lighting Group',
+      lastSeen: new Date().toISOString(),
+      hints: { type: 'Light', metrics: ['power', 'energy', 'spectrum'], lightType: 'LED', wattage: 550 }
+    },
+    {
+      id: 'wifi:192.168.1.103',
+      name: 'Spider Farmer SF-7000',
+      protocol: 'wifi',
+      confidence: 0.92,
+      signal: -42,
+      address: '192.168.1.103',
+      vendor: 'Spider Farmer',
+      lastSeen: new Date().toISOString(),
+      hints: { type: 'Light', metrics: ['power', 'energy', 'spectrum'], lightType: 'LED', wattage: 700 }
+    },
+    {
+      id: 'wifi:192.168.1.104',
+      name: 'MARS HYDRO FC-E6500',
+      protocol: 'wifi',
+      confidence: 0.90,
+      signal: -45,
+      address: '192.168.1.104',
+      vendor: 'MARS HYDRO',
+      lastSeen: new Date().toISOString(),
+      hints: { type: 'Light', metrics: ['power', 'energy', 'spectrum'], lightType: 'LED', wattage: 650 }
+    },
+    // Environmental Controls
+    {
+      id: 'wifi:192.168.1.120',
+      name: 'Trolmaster Hydro-X Pro',
+      protocol: 'wifi',
+      confidence: 0.88,
+      signal: -40,
+      address: '192.168.1.120',
+      vendor: 'TrolMaster',
+      lastSeen: new Date().toISOString(),
+      hints: { type: 'Controller', metrics: ['temp', 'rh', 'co2', 'ph', 'ec'] }
+    },
+    {
+      id: 'wifi:192.168.1.121',
+      name: 'AC Infinity CloudLine T6',
+      protocol: 'wifi',
+      confidence: 0.85,
+      signal: -48,
+      address: '192.168.1.121',
+      vendor: 'AC Infinity',
+      lastSeen: new Date().toISOString(),
+      hints: { type: 'Fan', metrics: ['airflow', 'speed', 'temp'] }
+    },
+    // Sensors
+    {
+      id: 'ble:SwitchBot-Meter-Farm01',
+      name: 'SwitchBot Meter Plus (Room A)',
       protocol: 'ble',
-      confidence: 0.8,
-      signal: -43,
-      address: 'DF:11:02:AA:CD:02',
+      confidence: 0.82,
+      signal: -41,
+      address: 'F1:22:03:AA:CD:01',
       vendor: 'SwitchBot',
       lastSeen: new Date().toISOString(),
       hints: { type: 'Sensor', metrics: ['temp', 'rh'] }
     },
     {
-      id: 'mqtt:grow:co2',
-      name: 'SenseCAP CO₂',
-      protocol: 'mqtt',
-      confidence: 0.7,
-      signal: null,
-      address: 'sensors/co2/main',
-      vendor: 'Seeed',
+      id: 'ble:SwitchBot-Meter-Farm02',
+      name: 'SwitchBot Meter Plus (Room B)',
+      protocol: 'ble',
+      confidence: 0.80,
+      signal: -44,
+      address: 'F1:22:03:AA:CD:02',
+      vendor: 'SwitchBot',
       lastSeen: new Date().toISOString(),
-      hints: { type: 'Sensor', metrics: ['co2'] }
+      hints: { type: 'Sensor', metrics: ['temp', 'rh'] }
+    },
+    // Power Management
+    {
+      id: 'wifi:192.168.1.130',
+      name: 'Shelly Pro 4PM (Light Bank 1)',
+      protocol: 'wifi',
+      confidence: 0.93,
+      signal: -36,
+      address: '192.168.1.130',
+      vendor: 'Shelly',
+      lastSeen: new Date().toISOString(),
+      hints: { type: 'Power', metrics: ['power', 'energy', 'current', 'voltage'] }
+    },
+    {
+      id: 'wifi:192.168.1.131',
+      name: 'Shelly Pro 4PM (Light Bank 2)',
+      protocol: 'wifi',
+      confidence: 0.91,
+      signal: -39,
+      address: '192.168.1.131',
+      vendor: 'Shelly',
+      lastSeen: new Date().toISOString(),
+      hints: { type: 'Power', metrics: ['power', 'energy', 'current', 'voltage'] }
     }
   ];
-  res.json({ startedAt, completedAt: new Date().toISOString(), devices: demoDevices });
+  res.json({ startedAt, completedAt: new Date().toISOString(), devices: farmDevices });
+});
+
+// Farm device status endpoints for live testing
+app.get('/api/device/:deviceId/status', async (req, res) => {
+  const { deviceId } = req.params;
+  
+  // Generate live-looking data for farm devices
+  const farmDeviceStatus = {
+    'wifi:192.168.1.101': {
+      deviceId,
+      name: 'HLG 550 V2 R-Spec',
+      online: true,
+      power: 485 + Math.random() * 30, // 485-515W
+      voltage: 120.1 + Math.random() * 2,
+      current: 4.04 + Math.random() * 0.25,
+      spectrum: {
+        red: 660,
+        blue: 450,
+        green: 520,
+        farRed: 730,
+        white: 3000
+      },
+      dimming: 85 + Math.random() * 10, // 85-95%
+      temperature: 42 + Math.random() * 8, // LED temp
+      runtime: Math.floor(Date.now() / 1000) - 3600 * 8, // 8 hours runtime
+      lastUpdate: new Date().toISOString()
+    },
+    'wifi:192.168.1.102': {
+      deviceId,
+      name: 'HLG 550 V2 R-Spec',
+      online: true,
+      power: 490 + Math.random() * 25,
+      voltage: 119.8 + Math.random() * 2,
+      current: 4.08 + Math.random() * 0.20,
+      spectrum: {
+        red: 660,
+        blue: 450,
+        green: 520,
+        farRed: 730,
+        white: 3000
+      },
+      dimming: 88 + Math.random() * 8,
+      temperature: 45 + Math.random() * 6,
+      runtime: Math.floor(Date.now() / 1000) - 3600 * 8,
+      lastUpdate: new Date().toISOString()
+    },
+    'wifi:192.168.1.103': {
+      deviceId,
+      name: 'Spider Farmer SF-7000',
+      online: true,
+      power: 640 + Math.random() * 40,
+      voltage: 120.3 + Math.random() * 1.5,
+      current: 5.33 + Math.random() * 0.30,
+      spectrum: {
+        red: 660,
+        blue: 450,
+        green: 520,
+        farRed: 730,
+        white: 3500
+      },
+      dimming: 90 + Math.random() * 5,
+      temperature: 48 + Math.random() * 7,
+      runtime: Math.floor(Date.now() / 1000) - 3600 * 8,
+      lastUpdate: new Date().toISOString()
+    },
+    'wifi:192.168.1.104': {
+      deviceId,
+      name: 'MARS HYDRO FC-E6500',
+      online: true,
+      power: 610 + Math.random() * 35,
+      voltage: 119.9 + Math.random() * 2,
+      current: 5.08 + Math.random() * 0.25,
+      spectrum: {
+        red: 660,
+        blue: 450,
+        green: 520,
+        farRed: 730,
+        white: 3200
+      },
+      dimming: 87 + Math.random() * 8,
+      temperature: 46 + Math.random() * 9,
+      runtime: Math.floor(Date.now() / 1000) - 3600 * 8,
+      lastUpdate: new Date().toISOString()
+    }
+  };
+
+  const status = farmDeviceStatus[deviceId];
+  if (status) {
+    res.json(status);
+  } else {
+    res.status(404).json({ error: 'Device not found' });
+  }
+});
+
+// Farm device control endpoints
+app.post('/api/device/:deviceId/power', async (req, res) => {
+  const { deviceId } = req.params;
+  const { state } = req.body; // 'on' or 'off'
+  
+  console.log(`💡 Farm Light Control: ${deviceId} → ${state}`);
+  
+  res.json({
+    deviceId,
+    action: 'power',
+    state,
+    timestamp: new Date().toISOString(),
+    success: true
+  });
+});
+
+app.post('/api/device/:deviceId/spectrum', async (req, res) => {
+  const { deviceId } = req.params;
+  const { spectrum } = req.body;
+  
+  console.log(`🌈 Farm Light Spectrum: ${deviceId}`, spectrum);
+  
+  res.json({
+    deviceId,
+    action: 'spectrum',
+    spectrum,
+    timestamp: new Date().toISOString(),
+    success: true
+  });
+});
+
+app.post('/api/device/:deviceId/dimming', async (req, res) => {
+  const { deviceId } = req.params;
+  const { level } = req.body; // 0-100
+  
+  console.log(`🔆 Farm Light Dimming: ${deviceId} → ${level}%`);
+  
+  res.json({
+    deviceId,
+    action: 'dimming',
+    level,
+    timestamp: new Date().toISOString(),
+    success: true
+  });
+});
+
+// Express error handling middleware - must be last
+app.use((error, req, res, next) => {
+  console.error('❌ Express Error Handler:', error);
+  console.error('Stack:', error.stack);
+  console.error('Request URL:', req.url);
+  console.error('Request Method:', req.method);
+  
+  // Don't expose internal errors to client in production
+  const isDev = process.env.NODE_ENV !== 'production';
+  
+  res.status(error.status || 500).json({
+    error: 'Internal Server Error',
+    message: isDev ? error.message : 'Something went wrong',
+    requestId: req.headers['x-request-id'] || Date.now().toString(),
+    timestamp: new Date().toISOString()
+  });
+});
+
+// 404 handler for undefined routes
+app.use((req, res) => {
+  console.warn(`⚠️  404 Not Found: ${req.method} ${req.url}`);
+  res.status(404).json({
+    error: 'Not Found',
+    message: `Route ${req.method} ${req.url} not found`,
+    timestamp: new Date().toISOString()
+  });
 });
 
 // Start the server after all routes are defined

@@ -1460,12 +1460,17 @@ input[type="range"]#grd {
   display: flex;
   gap: 0;
   margin-top: 8px;
-  height: 60px; /* Increased base height */
+  min-height: 60px; /* Use min-height instead of fixed height */
   background: rgba(var(--gr-primary), 0.02);
   border-radius: 8px;
   overflow: visible; /* Allow content to show on hover */
   border: 1px solid var(--gr-border);
   position: relative;
+  transition: min-height 0.3s ease; /* Smooth height transitions */
+}
+
+.ai-features-horizontal:hover {
+  min-height: 110px; /* Expand container on any child hover */
 }
 
 .ai-features-grid {
@@ -1488,7 +1493,7 @@ input[type="range"]#grd {
   align-items: center;
   justify-content: center;
   padding: 8px 4px;
-  height: 100%;
+  min-height: 60px; /* Use min-height */
 }
 
 .ai-feature-card:last-child {
@@ -1496,12 +1501,12 @@ input[type="range"]#grd {
 }
 
 .ai-feature-card:hover {
-  flex: 1.5; /* Expand on hover */
+  flex: 1.2; /* Less dramatic expansion */
   background: linear-gradient(135deg, rgba(var(--gr-primary), 0.08) 0%, rgba(var(--gr-accent), 0.05) 100%);
   z-index: 10;
   box-shadow: 0 4px 20px rgba(var(--gr-primary), 0.15);
-  height: 110px; /* Expand height on hover to accommodate description */
-  margin-top: -10px; /* Offset to maintain alignment */
+  min-height: 110px; /* Expand to accommodate description */
+  transform: translateY(-2px); /* Subtle lift instead of margin manipulation */
 }
 
 .ai-feature-card.active {
@@ -1574,7 +1579,8 @@ input[type="range"]#grd {
   text-align: center;
   min-height: 0;
   transition: all 0.4s ease;
-  opacity: 0.8;
+  opacity: 0.9;
+  width: 100%;
 }
 
 .ai-feature-card:hover .ai-feature-content {
@@ -1582,55 +1588,60 @@ input[type="range"]#grd {
 }
 
 .ai-feature-content h3 {
-  margin: 0 0 2px 0;
-  font-size: 10px;
+  margin: 0 0 4px 0;
+  font-size: 11px;
   font-weight: 600;
   color: var(--gr-text);
-  line-height: 1.1;
+  line-height: 1.2;
   white-space: nowrap;
   transition: all 0.3s ease;
 }
 
 .ai-feature-card:hover .ai-feature-content h3 {
-  font-size: 12px;
-  margin-bottom: 4px;
+  font-size: 13px;
+  margin-bottom: 6px;
 }
 
 .ai-feature-status {
-  font-size: 7px;
+  font-size: 8px;
   font-weight: 700;
-  padding: 1px 4px;
-  border-radius: 3px;
+  padding: 2px 6px;
+  border-radius: 4px;
   text-transform: uppercase;
-  letter-spacing: 0.2px;
+  letter-spacing: 0.3px;
   white-space: nowrap;
   transition: all 0.3s ease;
+  margin-bottom: 2px;
 }
 
 .ai-feature-card:hover .ai-feature-status {
-  font-size: 8px;
-  padding: 2px 6px;
-  border-radius: 4px;
+  font-size: 9px;
+  padding: 3px 8px;
+  border-radius: 5px;
+  margin-bottom: 4px;
 }
 
 /* Feature descriptions - hidden by default, shown on hover */
 .ai-feature-description {
-  font-size: 10px;
+  font-size: 9px;
   color: var(--medium);
-  line-height: 1.4;
+  line-height: 1.3;
   opacity: 0;
   max-height: 0;
   overflow: hidden;
   transition: all 0.4s ease;
   margin-top: 0;
   text-align: center;
-  padding: 0 4px;
+  padding: 0 6px;
+  word-wrap: break-word;
+  hyphens: auto;
 }
 
 .ai-feature-card:hover .ai-feature-description {
   opacity: 1;
-  max-height: 60px;
-  margin-top: 6px;
+  max-height: 40px;
+  margin-top: 4px;
+  font-size: 10px;
 }
 
 .ai-feature-status.on {
