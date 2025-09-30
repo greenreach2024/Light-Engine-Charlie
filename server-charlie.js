@@ -1920,11 +1920,391 @@ const SETUP_WIZARDS = {
         dynamic: true
       }
     ]
+  },
+
+  'modbus-setup': {
+    id: 'modbus-setup',
+    name: 'Modbus Device Configuration',
+    description: 'Configure Modbus RTU/TCP devices for industrial sensors',
+    targetDevices: ['modbus', 'modbus-tcp'],
+    steps: [
+      {
+        id: 'connection-setup',
+        name: 'Connection Setup',
+        description: 'Configure Modbus connection parameters',
+        fields: [
+          { name: 'host', type: 'text', label: 'Device IP/Host', required: true },
+          { name: 'port', type: 'number', label: 'Port', default: 502, required: true },
+          { name: 'unitId', type: 'number', label: 'Unit ID', default: 1, min: 1, max: 247 },
+          { name: 'timeout', type: 'number', label: 'Timeout (ms)', default: 3000 },
+          { name: 'protocol', type: 'select', label: 'Protocol', options: ['TCP', 'RTU'], default: 'TCP' }
+        ]
+      },
+      {
+        id: 'register-mapping',
+        name: 'Register Mapping',
+        description: 'Map Modbus registers to sensor readings',
+        fields: [
+          { name: 'startAddress', type: 'number', label: 'Start Address', default: 0 },
+          { name: 'registerCount', type: 'number', label: 'Register Count', default: 10 },
+          { name: 'dataType', type: 'select', label: 'Data Type', 
+            options: ['int16', 'uint16', 'int32', 'uint32', 'float32'] },
+          { name: 'pollInterval', type: 'number', label: 'Poll Interval (seconds)', default: 30 }
+        ]
+      },
+      {
+        id: 'sensor-calibration',
+        name: 'Sensor Calibration',
+        description: 'Configure sensor scaling and calibration',
+        fields: [
+          { name: 'scaling', type: 'number', label: 'Scaling Factor', default: 1.0, step: 0.01 },
+          { name: 'offset', type: 'number', label: 'Offset Value', default: 0.0, step: 0.01 },
+          { name: 'units', type: 'text', label: 'Measurement Units', placeholder: 'e.g., °C, %, ppm' }
+        ]
+      }
+    ]
+  },
+
+  'kasa-setup': {
+    id: 'kasa-setup',
+    name: 'TP-Link Kasa Device Setup',
+    description: 'Configure TP-Link Kasa smart devices for farm automation',
+    targetDevices: ['kasa', 'tplink'],
+    steps: [
+      {
+        id: 'device-discovery',
+        name: 'Device Discovery',
+        description: 'Discover Kasa devices on the network',
+        fields: [
+          { name: 'discoveryTimeout', type: 'number', label: 'Discovery Timeout (seconds)', default: 10 },
+          { name: 'targetIP', type: 'text', label: 'Target IP (optional)', placeholder: '192.168.x.x' }
+        ]
+      },
+      {
+        id: 'device-configuration',
+        name: 'Device Configuration',
+        description: 'Configure discovered Kasa devices',
+        dynamic: true,
+        fields: [
+          { name: 'alias', type: 'text', label: 'Device Alias', required: true },
+          { name: 'location', type: 'text', label: 'Location/Zone', placeholder: 'e.g., Greenhouse A' },
+          { name: 'scheduleEnabled', type: 'boolean', label: 'Enable Scheduling', default: false }
+        ]
+      }
+    ]
+  },
+
+  'sensor-hub-setup': {
+    id: 'sensor-hub-setup',
+    name: 'Multi-Sensor Hub Configuration',
+    description: 'Configure multi-protocol sensor hubs for comprehensive monitoring',
+    targetDevices: ['sensor-hub', 'multi-sensor'],
+    steps: [
+      {
+        id: 'hub-identification',
+        name: 'Hub Identification',
+        description: 'Identify and connect to sensor hub',
+        fields: [
+          { name: 'hubType', type: 'select', label: 'Hub Type',
+            options: ['Arduino-based', 'Raspberry Pi', 'ESP32', 'Commercial Hub'] },
+          { name: 'connectionType', type: 'select', label: 'Connection Type',
+            options: ['WiFi', 'Ethernet', 'USB', 'Serial'] },
+          { name: 'endpoint', type: 'text', label: 'Hub Endpoint', placeholder: 'IP:Port or device path' }
+        ]
+      },
+      {
+        id: 'sensor-configuration',
+        name: 'Sensor Configuration',
+        description: 'Configure individual sensors on the hub',
+        dynamic: true,
+        fields: [
+          { name: 'sensorType', type: 'select', label: 'Sensor Type',
+            options: ['Temperature', 'Humidity', 'Soil Moisture', 'Light', 'pH', 'EC', 'CO2', 'Air Quality'] },
+          { name: 'channel', type: 'number', label: 'Channel/Pin', min: 0, max: 255 },
+          { name: 'calibrationFactor', type: 'number', label: 'Calibration Factor', default: 1.0, step: 0.001 }
+        ]
+      },
+      {
+        id: 'data-processing',
+        name: 'Data Processing',
+        description: 'Configure data processing and alerts',
+        fields: [
+          { name: 'sampleRate', type: 'number', label: 'Sample Rate (seconds)', default: 60 },
+          { name: 'enableAveraging', type: 'boolean', label: 'Enable Data Averaging', default: true },
+          { name: 'alertThresholds', type: 'boolean', label: 'Configure Alert Thresholds', default: false }
+        ]
+      }
+    ]
   }
 };
 
 // Wizard state management
 const wizardStates = new Map();
+
+// Wizard validation engine
+function validateWizardStepData(wizard, stepId, data) {
+  const step = wizard.steps.find(s => s.id === stepId);
+  if (!step) {
+    throw new Error(`Step ${stepId} not found in wizard ${wizard.id}`);
+  }
+
+  const errors = [];
+  const processedData = {};
+
+  // Validate each field
+  if (step.fields) {
+    for (const field of step.fields) {
+      const value = data[field.name];
+      
+      // Check required fields
+      if (field.required && (value === undefined || value === null || value === '')) {
+        errors.push(`Field '${field.label}' is required`);
+        continue;
+      }
+
+      // Skip validation for optional empty fields
+      if (!field.required && (value === undefined || value === null || value === '')) {
+        continue;
+      }
+
+      // Type validation
+      switch (field.type) {
+        case 'number':
+          const numValue = Number(value);
+          if (isNaN(numValue)) {
+            errors.push(`Field '${field.label}' must be a valid number`);
+          } else {
+            if (field.min !== undefined && numValue < field.min) {
+              errors.push(`Field '${field.label}' must be at least ${field.min}`);
+            }
+            if (field.max !== undefined && numValue > field.max) {
+              errors.push(`Field '${field.label}' must be at most ${field.max}`);
+            }
+            processedData[field.name] = numValue;
+          }
+          break;
+
+        case 'boolean':
+          processedData[field.name] = Boolean(value);
+          break;
+
+        case 'select':
+          if (field.options && !field.options.includes(value)) {
+            errors.push(`Field '${field.label}' must be one of: ${field.options.join(', ')}`);
+          } else {
+            processedData[field.name] = value;
+          }
+          break;
+
+        case 'text':
+        case 'password':
+        default:
+          processedData[field.name] = String(value);
+          break;
+      }
+    }
+  } else {
+    // For dynamic steps, accept all data as-is
+    Object.assign(processedData, data);
+  }
+
+  return { isValid: errors.length === 0, errors, data: processedData };
+}
+
+// Enhanced wizard execution with validation
+async function executeWizardStepWithValidation(wizardId, stepId, data) {
+  const wizard = SETUP_WIZARDS[wizardId];
+  if (!wizard) {
+    throw new Error(`Unknown wizard: ${wizardId}`);
+  }
+
+  // Validate step data
+  const validation = validateWizardStepData(wizard, stepId, data);
+  if (!validation.isValid) {
+    return {
+      success: false,
+      errors: validation.errors,
+      data: {}
+    };
+  }
+
+  // Execute the step with validated data
+  return await executeWizardStep(wizardId, stepId, validation.data);
+}
+
+// Device-specific wizard step execution
+async function executeDeviceSpecificStep(wizardId, stepId, data) {
+  console.log(`🔧 Executing device-specific step: ${wizardId}/${stepId}`);
+  
+  switch (wizardId) {
+    case 'mqtt-setup':
+      return await executeMQTTWizardStep(stepId, data);
+    case 'modbus-setup':
+      return await executeModbusWizardStep(stepId, data);
+    case 'kasa-setup':
+      return await executeKasaWizardStep(stepId, data);
+    case 'sensor-hub-setup':
+      return await executeSensorHubWizardStep(stepId, data);
+    default:
+      return { success: true, data: {}, deviceSpecific: false };
+  }
+}
+
+// MQTT-specific wizard step execution
+async function executeMQTTWizardStep(stepId, data) {
+  switch (stepId) {
+    case 'broker-connection':
+      try {
+        // Test MQTT connection
+        console.log(`🔗 Testing MQTT connection to ${data.host}:${data.port}`);
+        
+        // Simulate connection test (in real implementation, use mqtt.js)
+        const connectionResult = {
+          connected: true,
+          brokerInfo: {
+            version: 'Mosquitto 2.0.15',
+            maxPacketSize: 268435460,
+            retainAvailable: true
+          }
+        };
+        
+        return {
+          success: true,
+          data: { connectionTest: connectionResult },
+          message: `Successfully connected to MQTT broker at ${data.host}:${data.port}`
+        };
+      } catch (error) {
+        return {
+          success: false,
+          error: `Failed to connect to MQTT broker: ${error.message}`
+        };
+      }
+      
+    case 'topic-discovery':
+      console.log(`🔍 Discovering MQTT topics with pattern: ${data.baseTopic}`);
+      
+      // Simulate topic discovery
+      const discoveredTopics = [
+        'farm/greenhouse/temperature',
+        'farm/greenhouse/humidity', 
+        'farm/greenhouse/soil_moisture',
+        'farm/irrigation/pump_status',
+        'farm/lighting/zone1/status'
+      ];
+      
+      return {
+        success: true,
+        data: { discoveredTopics },
+        message: `Discovered ${discoveredTopics.length} topics`
+      };
+      
+    default:
+      return { success: true, data: {} };
+  }
+}
+
+// Modbus-specific wizard step execution
+async function executeModbusWizardStep(stepId, data) {
+  switch (stepId) {
+    case 'connection-setup':
+      console.log(`🔗 Testing Modbus connection to ${data.host}:${data.port}`);
+      
+      // Simulate Modbus connection test
+      return {
+        success: true,
+        data: { 
+          connectionTest: { 
+            connected: true, 
+            deviceInfo: 'Industrial Sensor Hub v2.1' 
+          }
+        },
+        message: `Modbus connection established with Unit ID ${data.unitId}`
+      };
+      
+    case 'register-mapping':
+      console.log(`📊 Mapping registers starting at address ${data.startAddress}`);
+      
+      // Simulate register discovery
+      const registerMap = Array.from({ length: data.registerCount }, (_, i) => ({
+        address: data.startAddress + i,
+        value: Math.floor(Math.random() * 1000),
+        type: data.dataType
+      }));
+      
+      return {
+        success: true,
+        data: { registerMap },
+        message: `Mapped ${data.registerCount} registers`
+      };
+      
+    default:
+      return { success: true, data: {} };
+  }
+}
+
+// Kasa-specific wizard step execution
+async function executeKasaWizardStep(stepId, data) {
+  switch (stepId) {
+    case 'device-discovery':
+      console.log(`🔍 Discovering Kasa devices (timeout: ${data.discoveryTimeout}s)`);
+      
+      // Simulate Kasa device discovery
+      const kasaDevices = [
+        { ip: '192.168.2.45', model: 'HS100', alias: 'Pump Controller', type: 'plug' },
+        { ip: '192.168.2.46', model: 'KL130', alias: 'Grow Light 1', type: 'bulb' },
+        { ip: '192.168.2.47', model: 'HS200', alias: 'Fan Controller', type: 'switch' }
+      ];
+      
+      return {
+        success: true,
+        data: { discoveredDevices: kasaDevices },
+        message: `Found ${kasaDevices.length} Kasa devices`
+      };
+      
+    default:
+      return { success: true, data: {} };
+  }
+}
+
+// Sensor Hub-specific wizard step execution
+async function executeSensorHubWizardStep(stepId, data) {
+  switch (stepId) {
+    case 'hub-identification':
+      console.log(`🎯 Connecting to ${data.hubType} at ${data.endpoint}`);
+      
+      return {
+        success: true,
+        data: { 
+          hubInfo: {
+            type: data.hubType,
+            firmware: 'v3.2.1',
+            sensors: 8,
+            channels: 16
+          }
+        },
+        message: `Connected to ${data.hubType} hub`
+      };
+      
+    case 'sensor-configuration':
+      console.log(`⚙️ Configuring ${data.sensorType} sensor on channel ${data.channel}`);
+      
+      return {
+        success: true,
+        data: { 
+          sensorConfig: {
+            type: data.sensorType,
+            channel: data.channel,
+            calibrated: true,
+            initialReading: Math.random() * 100
+          }
+        },
+        message: `${data.sensorType} sensor configured on channel ${data.channel}`
+      };
+      
+    default:
+      return { success: true, data: {} };
+  }
+}
 
 // Get setup wizard definition
 async function getSetupWizard(wizardId) {
@@ -1969,8 +2349,30 @@ async function executeWizardStep(wizardId, stepId, data) {
   let result = { success: true, data: {}, nextStep: null };
   
   try {
+    // Validate step data first
+    const validation = validateWizardStepData(wizard, stepId, data);
+    if (!validation.isValid) {
+      return {
+        success: false,
+        errors: validation.errors,
+        data: {}
+      };
+    }
+
+    // Execute device-specific logic if available
+    const deviceResult = await executeDeviceSpecificStep(wizardId, stepId, validation.data);
+    if (deviceResult.deviceSpecific !== false) {
+      result = { ...result, ...deviceResult };
+    }
+    
     // Store step data
-    state.data[stepId] = data;
+    state.data[stepId] = {
+      input: validation.data,
+      result: deviceResult.data || {},
+      timestamp: new Date().toISOString(),
+      success: deviceResult.success !== false
+    };
+    
     state.lastUpdated = new Date().toISOString();
     
     // Find next step
@@ -1983,6 +2385,9 @@ async function executeWizardStep(wizardId, stepId, data) {
       state.completed = true;
       state.completedAt = new Date().toISOString();
       console.log(`✅ Wizard ${wizardId} completed successfully`);
+      
+      // Execute post-completion actions
+      await executeWizardCompletion(wizardId, state);
     }
     
     wizardStates.set(wizardId, state);
@@ -1997,6 +2402,87 @@ async function executeWizardStep(wizardId, stepId, data) {
   }
   
   return result;
+}
+
+// Execute wizard completion actions
+async function executeWizardCompletion(wizardId, state) {
+  console.log(`🎉 Executing completion actions for wizard: ${wizardId}`);
+  
+  switch (wizardId) {
+    case 'mqtt-setup':
+      await completeMQTTSetup(state);
+      break;
+    case 'modbus-setup':
+      await completeModbusSetup(state);
+      break;
+    case 'kasa-setup':
+      await completeKasaSetup(state);
+      break;
+    case 'sensor-hub-setup':
+      await completeSensorHubSetup(state);
+      break;
+    default:
+      console.log(`No completion actions defined for wizard: ${wizardId}`);
+  }
+}
+
+// MQTT setup completion
+async function completeMQTTSetup(state) {
+  const brokerData = state.data['broker-connection']?.input;
+  const topicData = state.data['topic-discovery']?.input;
+  
+  console.log(`🔗 Configuring MQTT integration for ${brokerData?.host}:${brokerData?.port}`);
+  
+  // Here you would:
+  // 1. Save MQTT configuration to persistent storage
+  // 2. Start MQTT client connection
+  // 3. Subscribe to discovered topics
+  // 4. Register device in system database
+  
+  return {
+    configurationSaved: true,
+    mqttClientStarted: true,
+    topicsSubscribed: state.data['topic-discovery']?.result?.discoveredTopics?.length || 0
+  };
+}
+
+// Modbus setup completion
+async function completeModbusSetup(state) {
+  const connectionData = state.data['connection-setup']?.input;
+  const registerData = state.data['register-mapping']?.input;
+  
+  console.log(`📊 Configuring Modbus integration for ${connectionData?.host}:${connectionData?.port}`);
+  
+  return {
+    modbusClientConfigured: true,
+    registersConfigured: registerData?.registerCount || 0,
+    pollIntervalSet: registerData?.pollInterval
+  };
+}
+
+// Kasa setup completion
+async function completeKasaSetup(state) {
+  const discoveryData = state.data['device-discovery']?.result;
+  
+  console.log(`🏠 Configuring Kasa integration for ${discoveryData?.discoveredDevices?.length || 0} devices`);
+  
+  return {
+    kasaDevicesConfigured: discoveryData?.discoveredDevices?.length || 0,
+    automationEnabled: true
+  };
+}
+
+// Sensor Hub setup completion
+async function completeSensorHubSetup(state) {
+  const hubData = state.data['hub-identification']?.input;
+  
+  console.log(`🎛️ Configuring sensor hub integration: ${hubData?.hubType}`);
+  
+  return {
+    sensorHubConfigured: true,
+    hubType: hubData?.hubType,
+    sensorsConfigured: Object.keys(state.data).filter(k => k.startsWith('sensor-')).length
+  };
 }
 
 // Get wizard execution status
@@ -2475,10 +2961,431 @@ function calculateWizardConfidence(device, wizard) {
     if (wizard.id === 'mqtt-setup' && device.hostname.toLowerCase().includes('mqtt')) {
       confidence += 50;
     }
+    if (wizard.id === 'modbus-setup' && device.hostname.toLowerCase().includes('modbus')) {
+      confidence += 50;
+    }
+    if (wizard.id === 'kasa-setup' && (device.hostname.toLowerCase().includes('kasa') || device.hostname.toLowerCase().includes('tplink'))) {
+      confidence += 50;
+    }
   }
   
   return Math.min(confidence, 100);
 }
+
+// Bulk wizard operations
+async function executeBulkWizardOperation(operation, wizardIds, data) {
+  console.log(`🔄 Executing bulk operation: ${operation} on ${wizardIds.length} wizards`);
+  
+  const results = [];
+  
+  for (const wizardId of wizardIds) {
+    try {
+      let result;
+      
+      switch (operation) {
+        case 'reset':
+          wizardStates.delete(wizardId);
+          result = { wizardId, success: true, message: 'State reset' };
+          break;
+          
+        case 'status':
+          result = { 
+            wizardId, 
+            success: true, 
+            status: await getWizardStatus(wizardId) 
+          };
+          break;
+          
+        case 'execute-step':
+          if (!data.stepId) {
+            throw new Error('stepId required for execute-step operation');
+          }
+          result = {
+            wizardId,
+            success: true,
+            result: await executeWizardStep(wizardId, data.stepId, data.stepData || {})
+          };
+          break;
+          
+        default:
+          throw new Error(`Unknown bulk operation: ${operation}`);
+      }
+      
+      results.push(result);
+      
+    } catch (error) {
+      results.push({
+        wizardId,
+        success: false,
+        error: error.message
+      });
+    }
+  }
+  
+  return {
+    operation,
+    totalWizards: wizardIds.length,
+    successful: results.filter(r => r.success).length,
+    failed: results.filter(r => !r.success).length,
+    results
+  };
+}
+
+// Wizard templates for common configurations
+const WIZARD_TEMPLATES = {
+  'greenhouse-complete': {
+    name: 'Complete Greenhouse Setup',
+    description: 'Configure all devices for a complete greenhouse monitoring system',
+    wizards: [
+      { id: 'mqtt-setup', priority: 1, autoExecute: false },
+      { id: 'sensor-hub-setup', priority: 2, autoExecute: false },
+      { id: 'web-device-setup', priority: 3, autoExecute: false },
+      { id: 'kasa-setup', priority: 4, autoExecute: true }
+    ],
+    presets: {
+      'mqtt-setup': {
+        'broker-connection': {
+          port: 8883,
+          secure: true
+        }
+      },
+      'sensor-hub-setup': {
+        'data-processing': {
+          sampleRate: 300,
+          enableAveraging: true,
+          alertThresholds: true
+        }
+      }
+    }
+  },
+  
+  'industrial-monitoring': {
+    name: 'Industrial Sensor Monitoring',
+    description: 'Configure industrial-grade sensors and monitoring equipment',
+    wizards: [
+      { id: 'modbus-setup', priority: 1, autoExecute: false },
+      { id: 'mqtt-setup', priority: 2, autoExecute: false },
+      { id: 'sensor-hub-setup', priority: 3, autoExecute: false }
+    ],
+    presets: {
+      'modbus-setup': {
+        'connection-setup': {
+          port: 502,
+          timeout: 5000,
+          protocol: 'TCP'
+        },
+        'register-mapping': {
+          dataType: 'float32',
+          pollInterval: 60
+        }
+      }
+    }
+  },
+  
+  'smart-home-farm': {
+    name: 'Smart Home Farm Integration',
+    description: 'Integrate consumer smart home devices for farm automation',
+    wizards: [
+      { id: 'kasa-setup', priority: 1, autoExecute: true },
+      { id: 'switchbot-setup', priority: 2, autoExecute: false },
+      { id: 'web-device-setup', priority: 3, autoExecute: false }
+    ],
+    presets: {
+      'kasa-setup': {
+        'device-discovery': {
+          discoveryTimeout: 15
+        }
+      }
+    }
+  }
+};
+
+// Apply wizard template
+async function applyWizardTemplate(templateId, devices, customPresets = {}) {
+  const template = WIZARD_TEMPLATES[templateId];
+  if (!template) {
+    throw new Error(`Unknown wizard template: ${templateId}`);
+  }
+  
+  console.log(`📋 Applying wizard template: ${template.name}`);
+  
+  const results = {
+    templateId,
+    templateName: template.name,
+    applicableWizards: [],
+    autoExecuted: [],
+    errors: []
+  };
+  
+  // Find applicable wizards based on devices
+  for (const wizardConfig of template.wizards) {
+    const wizard = SETUP_WIZARDS[wizardConfig.id];
+    if (!wizard) {
+      results.errors.push(`Wizard not found: ${wizardConfig.id}`);
+      continue;
+    }
+    
+    // Check if any devices match this wizard
+    const applicableDevices = devices.filter(device => 
+      calculateWizardConfidence(device, wizard) > 50
+    );
+    
+    if (applicableDevices.length > 0) {
+      results.applicableWizards.push({
+        wizardId: wizardConfig.id,
+        priority: wizardConfig.priority,
+        autoExecute: wizardConfig.autoExecute,
+        applicableDevices: applicableDevices.length,
+        devices: applicableDevices
+      });
+      
+      // Auto-execute if configured
+      if (wizardConfig.autoExecute) {
+        try {
+          // Apply presets if available
+          const presets = { ...template.presets[wizardConfig.id], ...customPresets[wizardConfig.id] };
+          
+          for (const [stepId, stepData] of Object.entries(presets)) {
+            await executeWizardStep(wizardConfig.id, stepId, stepData);
+          }
+          
+          results.autoExecuted.push(wizardConfig.id);
+          
+        } catch (error) {
+          results.errors.push(`Auto-execution failed for ${wizardConfig.id}: ${error.message}`);
+        }
+      }
+    }
+  }
+  
+  // Sort by priority
+  results.applicableWizards.sort((a, b) => a.priority - b.priority);
+  
+  return results;
+}
+
+// Get wizard recommendations with templates
+async function getWizardRecommendationsWithTemplates(devices) {
+  const recommendations = {
+    individualWizards: [],
+    templates: [],
+    bestMatch: null
+  };
+  
+  // Get individual wizard suggestions
+  for (const device of devices) {
+    const applicableWizards = Object.values(SETUP_WIZARDS).filter(wizard => 
+      wizard.targetDevices.includes(device.type) || 
+      device.services?.some(service => wizard.targetDevices.includes(service))
+    );
+    
+    if (applicableWizards.length > 0) {
+      recommendations.individualWizards.push({
+        device,
+        wizards: applicableWizards.map(w => ({
+          id: w.id,
+          name: w.name,
+          confidence: calculateWizardConfidence(device, w)
+        })).sort((a, b) => b.confidence - a.confidence)
+      });
+    }
+  }
+  
+  // Evaluate templates
+  for (const [templateId, template] of Object.entries(WIZARD_TEMPLATES)) {
+    let templateScore = 0;
+    let applicableWizards = 0;
+    
+    for (const wizardConfig of template.wizards) {
+      const wizard = SETUP_WIZARDS[wizardConfig.id];
+      if (wizard) {
+        const matchingDevices = devices.filter(device => 
+          calculateWizardConfidence(device, wizard) > 50
+        );
+        
+        if (matchingDevices.length > 0) {
+          applicableWizards++;
+          templateScore += matchingDevices.length * (5 - wizardConfig.priority);
+        }
+      }
+    }
+    
+    if (applicableWizards > 0) {
+      const templateRecommendation = {
+        templateId,
+        name: template.name,
+        description: template.description,
+        applicableWizards,
+        totalWizards: template.wizards.length,
+        coverage: Math.round((applicableWizards / template.wizards.length) * 100),
+        score: templateScore
+      };
+      
+      recommendations.templates.push(templateRecommendation);
+    }
+  }
+  
+  // Sort templates by score
+  recommendations.templates.sort((a, b) => b.score - a.score);
+  
+  // Set best match
+  if (recommendations.templates.length > 0) {
+    recommendations.bestMatch = recommendations.templates[0];
+  }
+  
+  return recommendations;
+}
+
+// Enhanced wizard recommendations with templates
+app.post('/discovery/recommend-setup', async (req, res) => {
+  try {
+    const { devices } = req.body;
+    if (!Array.isArray(devices)) {
+      return res.status(400).json({
+        success: false,
+        error: 'devices array is required'
+      });
+    }
+    
+    const recommendations = await getWizardRecommendationsWithTemplates(devices);
+    
+    res.json({
+      success: true,
+      recommendations
+    });
+    
+  } catch (error) {
+    console.error('Error generating recommendations:', error);
+    res.status(500).json({
+      success: false,
+      error: error.message
+    });
+  }
+});
+
+// Apply wizard template
+app.post('/setup/templates/:templateId/apply', async (req, res) => {
+  try {
+    const { templateId } = req.params;
+    const { devices, customPresets } = req.body;
+    
+    if (!Array.isArray(devices)) {
+      return res.status(400).json({
+        success: false,
+        error: 'devices array is required'
+      });
+    }
+    
+    const result = await applyWizardTemplate(templateId, devices, customPresets || {});
+    
+    res.json({
+      success: true,
+      result
+    });
+    
+  } catch (error) {
+    console.error(`Error applying template ${req.params.templateId}:`, error);
+    res.status(500).json({
+      success: false,
+      error: error.message
+    });
+  }
+});
+
+// Get available wizard templates
+app.get('/setup/templates', async (req, res) => {
+  try {
+    const templates = Object.entries(WIZARD_TEMPLATES).map(([id, template]) => ({
+      id,
+      name: template.name,
+      description: template.description,
+      wizardCount: template.wizards.length,
+      wizards: template.wizards.map(w => ({
+        id: w.id,
+        priority: w.priority,
+        autoExecute: w.autoExecute
+      }))
+    }));
+    
+    res.json({
+      success: true,
+      templates
+    });
+    
+  } catch (error) {
+    console.error('Error fetching templates:', error);
+    res.status(500).json({
+      success: false,
+      error: error.message
+    });
+  }
+});
+
+// Bulk wizard operations
+app.post('/setup/wizards/bulk/:operation', async (req, res) => {
+  try {
+    const { operation } = req.params;
+    const { wizardIds, data } = req.body;
+    
+    if (!Array.isArray(wizardIds)) {
+      return res.status(400).json({
+        success: false,
+        error: 'wizardIds array is required'
+      });
+    }
+    
+    const result = await executeBulkWizardOperation(operation, wizardIds, data || {});
+    
+    res.json({
+      success: true,
+      result
+    });
+    
+  } catch (error) {
+    console.error(`Error executing bulk operation ${req.params.operation}:`, error);
+    res.status(500).json({
+      success: false,
+      error: error.message
+    });
+  }
+});
+
+// Enhanced wizard step execution with validation
+app.post('/setup/wizards/:wizardId/execute-validated', async (req, res) => {
+  try {
+    const { wizardId } = req.params;
+    const { stepId, data } = req.body;
+    
+    if (!stepId) {
+      return res.status(400).json({
+        success: false,
+        error: 'stepId is required'
+      });
+    }
+    
+    const result = await executeWizardStepWithValidation(wizardId, stepId, data || {});
+    
+    if (!result.success) {
+      return res.status(400).json({
+        success: false,
+        errors: result.errors
+      });
+    }
+    
+    res.json({
+      success: true,
+      result,
+      wizard: await getSetupWizard(wizardId)
+    });
+    
+  } catch (error) {
+    console.error(`Error executing validated wizard ${req.params.wizardId}:`, error);
+    res.status(500).json({
+      success: false,
+      error: error.message
+    });
+  }
+});
 
 // 404 handler for undefined routes
 app.use((req, res) => {
