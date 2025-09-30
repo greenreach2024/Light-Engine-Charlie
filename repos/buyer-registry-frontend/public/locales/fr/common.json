@@ -1,0 +1,23 @@
+{
+  "app": {
+    "title": "Registre des acheteurs"
+  },
+  "navigation": {
+    "buyer": "Acheteur",
+    "seller": "Vendeur",
+    "agent": "Courtier",
+    "developer": "Promoteur",
+    "mortgage": "Hypothèque",
+    "admin": "Admin"
+  },
+  "buyer": {
+    "createWishlist": "Créer une liste de souhaits",
+    "matches": "Correspondances",
+    "messages": "Messages"
+  },
+  "seller": {
+    "listings": "Annonces",
+    "insights": "Statistiques",
+    "messages": "Messages"
+  }
+}

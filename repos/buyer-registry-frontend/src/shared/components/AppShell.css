@@ -1,0 +1,83 @@
+.app-shell {
+  font-family: "Segoe UI", sans-serif;
+  min-height: 100vh;
+  display: flex;
+  flex-direction: column;
+}
+
+.app-shell__header {
+  background: linear-gradient(90deg, #002050, #0057b7);
+  color: white;
+  padding: 1.5rem;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 2rem;
+}
+
+.app-shell__header nav {
+  display: flex;
+  gap: 1rem;
+  flex-wrap: wrap;
+}
+
+.app-shell__header a {
+  color: white;
+  text-decoration: none;
+  font-weight: 600;
+}
+
+.app-shell__main {
+  flex: 1;
+  padding: 2rem;
+  background-color: #f6f8fb;
+}
+
+.card {
+  background: white;
+  border-radius: 12px;
+  padding: 1.5rem;
+  box-shadow: 0 12px 24px rgba(0, 32, 80, 0.08);
+  display: grid;
+  gap: 1rem;
+}
+
+table.card {
+  width: 100%;
+  border-collapse: collapse;
+  display: table;
+}
+
+table.card th,
+table.card td {
+  text-align: left;
+  padding: 0.5rem 0.75rem;
+  border-bottom: 1px solid rgba(0, 32, 80, 0.08);
+}
+
+table.card thead th {
+  font-size: 0.875rem;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: #4a5568;
+}
+
+.match-grid {
+  list-style: none;
+  padding: 0;
+  margin: 2rem 0 0;
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+  gap: 1.5rem;
+}
+
+.match-grid .score {
+  color: #0057b7;
+  font-weight: 600;
+}
+
+.option-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  gap: 0.75rem;
+}
