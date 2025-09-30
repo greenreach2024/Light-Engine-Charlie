@@ -1485,7 +1485,8 @@ class FarmWizard {
         city: '',
         state: '',
         postal: '',
-        timezone: tz
+        timezone: tz,
+        coordinates: null // Will store { lat, lng }
       },
       contact: {
         name: '',
@@ -1543,6 +1544,10 @@ class FarmWizard {
     $('#contactWebsite')?.addEventListener('input', (e) => { this.data.contact.website = e.target.value || ''; });
     $('#btnAddRoom')?.addEventListener('click', () => this.addRoom());
     $('#newRoomName')?.addEventListener('keydown', (e) => { if (e.key === 'Enter') { e.preventDefault(); this.addRoom(); } });
+    
+    // Location finder
+    $('#btnFindLocation')?.addEventListener('click', () => this.findLocation());
+  $('#btnUseMyLocation')?.addEventListener('click', () => this.useMyLocation());
 
     document.querySelectorAll('#farmConnectionChoice .chip-option').forEach(btn => {
       btn.addEventListener('click', () => {
@@ -1921,6 +1926,12 @@ class FarmWizard {
     copy.location.state = safe.state || '';
     copy.location.postal = safe.postalCode || safe.postal || '';
     copy.location.timezone = safe.timezone || copy.location.timezone;
+    if (safe.location?.coordinates || safe.coordinates) {
+      const coords = safe.location?.coordinates || safe.coordinates;
+      if (coords && typeof coords.lat === 'number' && typeof coords.lng === 'number') {
+        copy.location.coordinates = { lat: coords.lat, lng: coords.lng };
+      }
+    }
     if (safe.contact) {
       copy.contact.name = safe.contact.name || '';
       copy.contact.email = safe.contact.email || '';
@@ -1966,6 +1977,11 @@ class FarmWizard {
       if (farm) {
         STATE.farm = this.normalizeFarm(farm);
         this.hydrateFromFarm(STATE.farm);
+        // If coordinates available, show current weather
+        const coords = STATE.farm.location?.coordinates || STATE.farm.coordinates;
+        if (coords && typeof coords.lat === 'number' && typeof coords.lng === 'number') {
+          try { this.loadWeather(coords.lat, coords.lng); } catch {}
+        }
         this.updateFarmDisplay();
         return;
       }
@@ -1977,6 +1993,10 @@ class FarmWizard {
       if (cached) {
         STATE.farm = this.normalizeFarm(cached);
         this.hydrateFromFarm(STATE.farm);
+        const coords2 = STATE.farm.location?.coordinates || STATE.farm.coordinates;
+        if (coords2 && typeof coords2.lat === 'number' && typeof coords2.lng === 'number') {
+          try { this.loadWeather(coords2.lat, coords2.lng); } catch {}
+        }
         this.updateFarmDisplay();
       }
     } catch {}
@@ -1997,7 +2017,8 @@ class FarmWizard {
       city: this.data.location.city,
       state: this.data.location.state,
       postalCode: this.data.location.postal,
-      timezone: this.data.location.timezone,
+  timezone: this.data.location.timezone,
+  coordinates: this.data.location.coordinates || existing.coordinates || null,
       contact: {
         name: this.data.contact.name,
         email: this.data.contact.email,
@@ -2092,6 +2113,184 @@ class FarmWizard {
         }
         select.value = guess;
       }
+    }
+  }
+
+  async findLocation() {
+    const button = $('#btnFindLocation');
+    const status = $('#locationStatus');
+    const resultsDiv = $('#locationResults');
+    const optionsDiv = $('#locationOptions');
+    
+    if (!button || !status) return;
+    
+    // Build address string from form fields
+    const address = [
+      this.data.location.address,
+      this.data.location.city,
+      this.data.location.state,
+      this.data.location.postal
+    ].filter(Boolean).join(', ');
+    
+    if (!address.trim()) {
+      status.textContent = 'Please enter address information first';
+      status.style.color = '#EF4444';
+      return;
+    }
+    
+    try {
+      button.disabled = true;
+      button.textContent = '🔍 Searching...';
+      status.textContent = 'Looking up location...';
+      status.style.color = '#666';
+      
+      const response = await fetch(`/api/geocode?address=${encodeURIComponent(address)}`);
+      const data = await response.json();
+      
+      if (!data.ok) {
+        throw new Error(data.error || 'Geocoding failed');
+      }
+      
+      if (!data.results || data.results.length === 0) {
+        status.textContent = 'No locations found. Try being more specific.';
+        status.style.color = '#EF4444';
+        return;
+      }
+      
+      // Show location options
+      if (optionsDiv) {
+        optionsDiv.innerHTML = data.results.map((location, index) => `
+          <div class="location-option" data-index="${index}" data-lat="${location.lat}" data-lng="${location.lng}">
+            ${location.display_name}
+          </div>
+        `).join('');
+        
+        // Add click handlers
+        optionsDiv.querySelectorAll('.location-option').forEach(option => {
+          option.addEventListener('click', () => {
+            const lat = parseFloat(option.dataset.lat);
+            const lng = parseFloat(option.dataset.lng);
+            this.selectLocation(lat, lng, option.textContent);
+          });
+        });
+      }
+      
+      if (resultsDiv) resultsDiv.style.display = 'block';
+      status.textContent = `Found ${data.results.length} location${data.results.length > 1 ? 's' : ''}:`;
+      status.style.color = '#16A34A';
+      
+    } catch (error) {
+      console.error('Location search error:', error);
+      status.textContent = 'Error finding location. Please try again.';
+      status.style.color = '#EF4444';
+    } finally {
+      button.disabled = false;
+      button.textContent = '📍 Find Location';
+    }
+  }
+  
+  selectLocation(lat, lng, displayName) {
+    const resultsDiv = $('#locationResults');
+    const status = $('#locationStatus');
+    
+    // Store coordinates
+    this.data.location.coordinates = { lat, lng };
+    
+    // Hide results
+    if (resultsDiv) resultsDiv.style.display = 'none';
+    
+    // Update status
+    if (status) {
+      status.textContent = `Location set: ${String(displayName || '').split(',')[0]}`;
+      status.style.color = '#16A34A';
+    }
+    
+    // Load weather for this location
+    this.loadWeather(lat, lng);
+  }
+  
+  async loadWeather(lat, lng) {
+    const weatherDiv = $('#weatherDisplay');
+    const weatherContent = $('#weatherContent');
+    
+    if (!weatherDiv || !weatherContent) return;
+    
+    try {
+      weatherContent.innerHTML = '<div style="text-align: center; color: #666;">Loading weather...</div>';
+      weatherDiv.style.display = 'block';
+      
+      const response = await fetch(`/api/weather?lat=${lat}&lng=${lng}`);
+      const data = await response.json();
+      
+      if (!data.ok) {
+        throw new Error(data.error || 'Weather fetch failed');
+      }
+      
+      const weather = data.current;
+      const tempF = Math.round(weather.temperature_f);
+      const tempC = Math.round(weather.temperature_c);
+      const humidity = Math.round(weather.humidity || 0);
+      const windSpeed = Math.round(weather.wind_speed || 0);
+      
+      weatherContent.innerHTML = `
+        <div class="weather-row">
+          <span class="weather-temp">${tempF}°F (${tempC}°C)</span>
+          <span class="weather-description">${escapeHtml(weather.description || '')}</span>
+        </div>
+        <div class="weather-row">
+          <span>Humidity:</span>
+          <span class="weather-value">${humidity}%</span>
+        </div>
+        <div class="weather-row">
+          <span>Wind Speed:</span>
+          <span class="weather-value">${windSpeed} km/h</span>
+        </div>
+        <div style="margin-top: 8px; font-size: 12px; color: #666;">
+          Updated: ${new Date(weather.last_updated).toLocaleTimeString()}
+        </div>
+      `;
+      
+    } catch (error) {
+      console.error('Weather loading error:', error);
+      weatherContent.innerHTML = `
+        <div style="color: #EF4444; font-size: 14px;">
+          ⚠️ Unable to load weather data
+        </div>
+      `;
+    }
+  }
+
+  async useMyLocation() {
+    const status = $('#locationStatus');
+    if (!navigator.geolocation) {
+      if (status) { status.textContent = 'Geolocation not supported by this browser.'; status.style.color = '#EF4444'; }
+      return;
+    }
+    try {
+      if (status) { status.textContent = 'Requesting your location…'; status.style.color = '#666'; }
+      const pos = await new Promise((resolve, reject) => {
+        navigator.geolocation.getCurrentPosition(resolve, reject, { enableHighAccuracy: true, timeout: 10000 });
+      });
+      const lat = pos.coords.latitude;
+      const lng = pos.coords.longitude;
+      this.data.location.coordinates = { lat, lng };
+      if (status) { status.textContent = `Location acquired (${lat.toFixed(4)}, ${lng.toFixed(4)}). Looking up address…`; status.style.color = '#16A34A'; }
+      // Reverse geocode to prefill address fields
+      const r = await fetch(`/api/reverse-geocode?lat=${encodeURIComponent(lat)}&lng=${encodeURIComponent(lng)}`);
+      const j = await r.json();
+      if (j?.ok && j.address) {
+        const { road, city, state, postal, display_name } = j.address;
+        // Fill fields when present
+        if (road) { this.data.location.address = road; const el = $('#farmAddress'); if (el) el.value = road; }
+        if (city) { this.data.location.city = city; const el = $('#farmCity'); if (el) el.value = city; }
+        if (state) { this.data.location.state = state; const el = $('#farmState'); if (el) el.value = state; }
+        if (postal) { this.data.location.postal = postal; const el = $('#farmPostal'); if (el) el.value = postal; }
+        if (status) { status.textContent = `Using ${display_name || 'current location'}`; status.style.color = '#16A34A'; }
+      }
+      // Fetch and show weather
+      await this.loadWeather(lat, lng);
+    } catch (e) {
+      if (status) { status.textContent = 'Unable to get your location.'; status.style.color = '#EF4444'; }
     }
   }
 }

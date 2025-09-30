@@ -1070,6 +1070,22 @@
                 <input id="farmState" type="text" autocomplete="address-level1" placeholder="State / Province" style="max-width:140px">
                 <input id="farmPostal" type="text" autocomplete="postal-code" placeholder="Postal code" style="max-width:140px">
               </div>
+              <div style="display: flex; gap: 6px; align-items: center; margin-top: 8px; flex-wrap: wrap;">
+                <button type="button" id="btnFindLocation" class="btn-secondary" style="font-size: 14px;">📍 Find Location</button>
+                <button type="button" id="btnUseMyLocation" class="btn-secondary" style="font-size: 14px;">🧭 Use my location</button>
+                <span id="locationStatus" class="tiny" style="color: #666;"></span>
+              </div>
+              <div id="locationResults" class="location-results" style="display: none; margin-top: 8px;">
+                <div class="tiny" style="margin-bottom: 4px; color: #666;">Select your farm location:</div>
+                <div id="locationOptions"></div>
+              </div>
+              <div id="weatherDisplay" class="weather-display" style="display: none; margin-top: 12px; padding: 12px; background: #f8f9fa; border-radius: 6px;">
+                <div class="weather-header" style="display: flex; align-items: center; gap: 8px; margin-bottom: 8px;">
+                  <span style="font-size: 18px;">🌤️</span>
+                  <strong style="color: #333;">Current Weather</strong>
+                </div>
+                <div id="weatherContent"></div>
+              </div>
               <label class="tiny" style="display:flex;align-items:center;gap:6px">
                 Timezone
                 <select id="farmTimezone" style="min-width:200px"></select>

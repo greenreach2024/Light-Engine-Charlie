@@ -8,21 +8,41 @@ import logging
 from datetime import datetime
 from typing import Any, Awaitable, Callable, Dict, List, Optional
 
-import paho.mqtt.client as mqtt
 import requests
-from kasa import Discover  # type: ignore
+
+# Lazy imports for optional dependencies
+KASA_AVAILABLE = False
+BLEAK_AVAILABLE = False
+ZEROCONF_AVAILABLE = False
+MQTT_AVAILABLE = False
+
+try:
+    import paho.mqtt.client as mqtt
+    MQTT_AVAILABLE = True
+except ImportError:
+    LOGGER = logging.getLogger(__name__)
+    LOGGER.warning("paho-mqtt not available. MQTT discovery disabled.")
+
+try:
+    from kasa import Discover  # type: ignore
+    KASA_AVAILABLE = True
+except ImportError:
+    LOGGER = logging.getLogger(__name__)
+    LOGGER.warning("python-kasa not available. Kasa discovery disabled.")
 
 try:
     from bleak import BleakScanner
     BLEAK_AVAILABLE = True
 except ImportError:
-    BLEAK_AVAILABLE = False
+    LOGGER = logging.getLogger(__name__)
+    LOGGER.warning("bleak not available. Bluetooth LE discovery disabled.")
 
 try:
     from zeroconf import ServiceBrowser, ServiceListener, Zeroconf
     ZEROCONF_AVAILABLE = True
 except ImportError:
-    ZEROCONF_AVAILABLE = False
+    LOGGER = logging.getLogger(__name__)
+    LOGGER.warning("zeroconf not available. mDNS discovery disabled.")
 
 from .config import EnvironmentConfig, MQTTConfig, SwitchBotConfig
 from .device_models import Device, SensorEvent
@@ -42,6 +62,10 @@ async def discover_kasa_devices(
     timeout: int,
 ) -> List[Device]:
     """Discover TP-Link Kasa devices on the local network."""
+    
+    if not KASA_AVAILABLE:
+        LOGGER.warning("Kasa discovery requested but python-kasa not available")
+        return []
 
     LOGGER.debug("Starting Kasa device discovery with timeout=%s", timeout)
     try:
@@ -166,6 +190,10 @@ async def discover_mqtt_devices(
     event_handler: Optional[Callable[[SensorEvent], Awaitable[None]]] = None,
 ) -> None:
     """Subscribe to MQTT topics to populate devices."""
+    
+    if not MQTT_AVAILABLE:
+        LOGGER.warning("MQTT discovery requested but paho-mqtt not available")
+        return
 
     LOGGER.debug("Beginning MQTT discovery window of %s seconds", listen_seconds)
     client = _MQTTDiscoveryClient(config=config, buffer=buffer, registry=registry, event_handler=event_handler)

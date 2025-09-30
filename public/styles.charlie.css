@@ -1738,3 +1738,77 @@ input[type="range"]#grd {
   0%, 100% { opacity: 1; }
   50% { opacity: 0.5; }
 }
+
+/* Location Finder and Weather Styles */
+.location-results {
+  border: 1px solid var(--gr-border);
+  border-radius: var(--radius);
+  background: var(--gr-surface);
+  max-height: 200px;
+  overflow-y: auto;
+}
+
+.location-option {
+  padding: 8px 12px;
+  cursor: pointer;
+  border-bottom: 1px solid var(--gr-border);
+  font-size: 14px;
+  line-height: 1.4;
+}
+
+.location-option:last-child {
+  border-bottom: none;
+}
+
+.location-option:hover {
+  background: var(--gr-primary-soft);
+}
+
+.location-option:active {
+  background: var(--gr-accent-soft);
+}
+
+.weather-display {
+  border: 1px solid var(--gr-border);
+  border-radius: var(--radius);
+  background: var(--gr-surface);
+}
+
+.weather-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 4px 0;
+  font-size: 14px;
+}
+
+.weather-value {
+  font-weight: 500;
+  color: var(--gr-primary);
+}
+
+.weather-temp {
+  font-size: 18px;
+  font-weight: 600;
+  color: var(--gr-text);
+}
+
+.weather-description {
+  font-style: italic;
+  color: var(--medium);
+  font-size: 13px;
+}
+
+@media (max-width: 480px) {
+  .location-results {
+    max-height: 150px;
+  }
+  
+  .weather-display {
+    padding: 8px;
+  }
+  
+  .weather-row {
+    font-size: 13px;
+  }
+}

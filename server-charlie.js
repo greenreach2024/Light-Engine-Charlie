@@ -5,12 +5,17 @@ import path from "path";
 import { fileURLToPath } from 'url';
 import Datastore from 'nedb-promises';
 import crypto from 'crypto';
+import AutomationRulesEngine from './lib/automation-engine.js';
 
 const app = express();
 const PORT = process.env.PORT || 8091;
 // Default controller target. Can be overridden with the CTRL env var.
 // Use the Pi forwarder when available for remote device reachability during development.
 let CURRENT_CONTROLLER = process.env.CTRL || "http://100.65.187.59:8089";
+// IFTTT integration config (optional)
+const IFTTT_KEY = process.env.IFTTT_KEY || process.env.IFTTT_WEBHOOK_KEY || "";
+const IFTTT_INBOUND_TOKEN = process.env.IFTTT_INBOUND_TOKEN || "";
+const IFTTT_ENABLED = Boolean(IFTTT_KEY);
 // Environment source: "local" (default) reads public/data/env.json
 // or "azure" pulls from an Azure Functions endpoint that returns latest readings
 const AZURE_LATEST_URL = process.env.AZURE_LATEST_URL || "";
@@ -73,6 +78,23 @@ process.on('SIGINT', () => {
   process.exit(0);
 });
 
+// Helper function for Kasa client import
+async function createKasaClient() {
+  try {
+    const kasaModule = await import('tplink-smarthome-api');
+    const Client = kasaModule.default?.Client || kasaModule.Client || kasaModule.default;
+    
+    if (!Client) {
+      throw new Error('tplink-smarthome-api Client not found in module exports');
+    }
+    
+    return new Client();
+  } catch (error) {
+    console.error('Failed to create Kasa client:', error.message);
+    throw new Error(`Kasa integration not available: ${error.message}`);
+  }
+}
+
 // Async route wrapper to handle errors properly
 function asyncHandler(fn) {
   return (req, res, next) => {
@@ -84,6 +106,81 @@ function asyncHandler(fn) {
 }
 
 app.use(express.json({ limit: "1mb" }));
+
+// --- Automation Rules Engine ---
+const automationEngine = new AutomationRulesEngine();
+console.log('[automation] Rules engine initialized with default farm automation rules');
+
+// --- IFTTT Integration (optional) ---
+// Status endpoint for quick checks
+app.get('/integrations/ifttt/status', (req, res) => {
+  res.json({
+    enabled: IFTTT_ENABLED,
+    outboundConfigured: Boolean(IFTTT_KEY),
+    inboundProtected: Boolean(IFTTT_INBOUND_TOKEN),
+    makerBase: 'https://maker.ifttt.com/trigger/{event}/json/with/key/{key}'
+  });
+});
+
+// Outbound trigger: POST /integrations/ifttt/trigger/:event
+// Body is forwarded as JSON to IFTTT (can include value1/value2/value3 or any JSON fields)
+app.post('/integrations/ifttt/trigger/:event', asyncHandler(async (req, res) => {
+  if (!IFTTT_KEY) return res.status(400).json({ ok: false, error: 'IFTTT_KEY not configured' });
+  const evt = String(req.params.event || '').trim();
+  if (!evt) return res.status(400).json({ ok: false, error: 'event is required' });
+
+  const url = `https://maker.ifttt.com/trigger/${encodeURIComponent(evt)}/json/with/key/${IFTTT_KEY}`;
+  const payload = req.body && Object.keys(req.body).length ? req.body : {};
+  const t0 = Date.now();
+  let response, text;
+  try {
+    response = await fetch(url, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) });
+    text = await response.text().catch(() => '');
+  } catch (e) {
+    return res.status(502).json({ ok: false, error: `IFTTT request failed: ${e.message}` });
+  }
+  const ms = Date.now() - t0;
+  return res.status(response.ok ? 200 : 502).json({ ok: response.ok, status: response.status, ms, event: evt, payload, responseBody: text });
+}));
+
+// Inbound webhook: IFTTT -> Charlie (secure with shared token)
+// Create an IFTTT applet action "Webhooks -> Make a web request" to this URL:
+// POST https://<public-host>/integrations/ifttt/incoming/<event>?token=<YOUR_TOKEN>
+// JSON body can include { deviceId, action, value, ... }
+app.post('/integrations/ifttt/incoming/:event', asyncHandler(async (req, res) => {
+  const token = req.query.token || req.headers['x-ifttt-token'];
+  if (!IFTTT_INBOUND_TOKEN) return res.status(501).json({ ok: false, error: 'Inbound token not configured on server' });
+  if (!token || String(token) !== String(IFTTT_INBOUND_TOKEN)) return res.status(401).json({ ok: false, error: 'Unauthorized' });
+
+  const evt = String(req.params.event || '').trim();
+  const body = req.body || {};
+  const receivedAt = new Date().toISOString();
+
+  // Process through automation engine for sensor-triggered automations
+  try {
+    await automationEngine.processIFTTTTrigger(evt, body);
+    console.log(`[automation] Processed IFTTT trigger: ${evt}`);
+  } catch (automationError) {
+    console.warn('IFTTT automation processing failed:', automationError.message);
+  }
+
+  // Minimal action router (extend as needed)
+  let routed = null;
+  try {
+    if (evt === 'device-control' && body.deviceId && body.action) {
+      // Map simple power actions to existing endpoints
+      if (['turnOn', 'turnOff'].includes(body.action)) {
+        const url = `http://127.0.0.1:${PORT}/api/device/${encodeURIComponent(body.deviceId)}/power`;
+        const resp = await fetch(url, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ state: body.action === 'turnOn' }) });
+        routed = { endpoint: url, status: resp.status };
+      }
+    }
+  } catch (e) {
+    console.warn('IFTTT inbound action route failed:', e.message);
+  }
+
+  res.json({ ok: true, event: evt, receivedAt, body, routed });
+}));
 
 // --- Device Database (NeDB) ---
 function deviceDocToJson(d){
@@ -125,7 +222,14 @@ async function seedDevicesFromMetaNedb(store){
 }
 
 const devicesStore = createDeviceStore();
-await seedDevicesFromMetaNedb(devicesStore);
+// Initialize device seeding asynchronously without blocking startup
+(async () => {
+  try {
+    await seedDevicesFromMetaNedb(devicesStore);
+  } catch (error) {
+    console.warn('[charlie] Device seeding failed:', error.message);
+  }
+})();
 
 // Devices API (NeDB)
 function setApiCors(res){
@@ -676,6 +780,224 @@ app.post("/api/switchbot/devices/:deviceId/commands", async (req, res) => {
   }
 });
 
+// Kasa device discovery endpoint
+app.get("/api/kasa/devices", asyncHandler(async (req, res) => {
+  try {
+    const client = await createKasaClient();
+    const devices = [];
+    
+    console.log('🔍 Discovering Kasa devices...');
+    
+    // Start discovery
+    client.startDiscovery({
+      port: 9999,
+      broadcast: '255.255.255.255',
+      timeout: parseInt(req.query.timeout) || 5000
+    });
+    
+    // Collect devices
+    client.on('device-new', async (device) => {
+      try {
+        const sysInfo = await device.getSysInfo();
+        devices.push({
+          deviceId: device.deviceId,
+          alias: device.alias || sysInfo.alias,
+          host: device.host,
+          port: device.port,
+          model: sysInfo.model,
+          type: sysInfo.type,
+          deviceType: sysInfo.mic_type || sysInfo.type,
+          softwareVersion: sysInfo.sw_ver,
+          hardwareVersion: sysInfo.hw_ver,
+          state: sysInfo.relay_state || 0,
+          ledOff: sysInfo.led_off || 0,
+          rssi: sysInfo.rssi,
+          latitude: sysInfo.latitude,
+          longitude: sysInfo.longitude,
+          discoveredAt: new Date().toISOString()
+        });
+      } catch (err) {
+        console.warn(`Error getting info for device ${device.deviceId}:`, err.message);
+        devices.push({
+          deviceId: device.deviceId,
+          alias: device.alias || 'Unknown Kasa Device',
+          host: device.host,
+          port: device.port,
+          error: err.message,
+          discoveredAt: new Date().toISOString()
+        });
+      }
+    });
+    
+    // Wait for discovery with proper timeout handling
+    const timeoutMs = parseInt(req.query.timeout) || 5000;
+    await new Promise(resolve => setTimeout(resolve, timeoutMs + 1000)); // Add 1 second buffer
+    client.stopDiscovery();
+    
+    res.json({
+      success: true,
+      count: devices.length,
+      devices: devices,
+      scanTime: new Date().toISOString()
+    });
+    
+  } catch (error) {
+    console.error('Kasa discovery error:', error);
+    res.status(500).json({
+      success: false,
+      error: error.message,
+      devices: []
+    });
+  }
+}));
+
+// Kasa device control endpoint
+app.post("/api/kasa/devices/:deviceId/control", asyncHandler(async (req, res) => {
+  try {
+    const { Client } = await import('tplink-smarthome-api');
+    const client = new Client();
+    const { deviceId } = req.params;
+    const { action, value } = req.body;
+    
+    // Find device by scanning (since we need IP)
+    let targetDevice = null;
+    
+    client.startDiscovery({ timeout: 3000 });
+    
+    await new Promise((resolve) => {
+      client.on('device-new', (device) => {
+        if (device.deviceId === deviceId) {
+          targetDevice = device;
+          client.stopDiscovery();
+          resolve();
+        }
+      });
+      
+      setTimeout(() => {
+        client.stopDiscovery();
+        resolve();
+      }, 3500);
+    });
+    
+    if (!targetDevice) {
+      return res.status(404).json({
+        success: false,
+        error: `Kasa device ${deviceId} not found on network`
+      });
+    }
+    
+    let result;
+    
+    switch (action) {
+      case 'turnOn':
+        result = await targetDevice.setPowerState(true);
+        break;
+      case 'turnOff':
+        result = await targetDevice.setPowerState(false);
+        break;
+      case 'toggle':
+        const info = await targetDevice.getSysInfo();
+        result = await targetDevice.setPowerState(!info.relay_state);
+        break;
+      case 'setAlias':
+        result = await targetDevice.setAlias(value);
+        break;
+      default:
+        return res.status(400).json({
+          success: false,
+          error: `Unknown action: ${action}`
+        });
+    }
+    
+    // Get updated status
+    const status = await targetDevice.getSysInfo();
+    
+    res.json({
+      success: true,
+      action: action,
+      deviceId: deviceId,
+      result: result,
+      status: {
+        state: status.relay_state,
+        alias: status.alias,
+        rssi: status.rssi
+      }
+    });
+    
+  } catch (error) {
+    console.error('Kasa control error:', error);
+    res.status(500).json({
+      success: false,
+      error: error.message
+    });
+  }
+}));
+
+// Kasa device status endpoint
+app.get("/api/kasa/devices/:deviceId/status", asyncHandler(async (req, res) => {
+  try {
+    const { Client } = await import('tplink-smarthome-api');
+    const client = new Client();
+    const { deviceId } = req.params;
+    
+    // Find and get status
+    let targetDevice = null;
+    
+    client.startDiscovery({ timeout: 3000 });
+    
+    await new Promise((resolve) => {
+      client.on('device-new', (device) => {
+        if (device.deviceId === deviceId) {
+          targetDevice = device;
+          client.stopDiscovery();
+          resolve();
+        }
+      });
+      
+      setTimeout(() => {
+        client.stopDiscovery();
+        resolve();
+      }, 3500);
+    });
+    
+    if (!targetDevice) {
+      return res.status(404).json({
+        success: false,
+        error: `Kasa device ${deviceId} not found`
+      });
+    }
+    
+    const [sysInfo, schedule, time, meter] = await Promise.allSettled([
+      targetDevice.getSysInfo(),
+      targetDevice.getScheduleNextAction?.() || Promise.resolve(null),
+      targetDevice.getTime?.() || Promise.resolve(null),
+      targetDevice.getMeterInfo?.() || Promise.resolve(null)
+    ]);
+    
+    res.json({
+      success: true,
+      deviceId: deviceId,
+      status: {
+        basic: sysInfo.status === 'fulfilled' ? sysInfo.value : null,
+        schedule: schedule.status === 'fulfilled' ? schedule.value : null,
+        time: time.status === 'fulfilled' ? time.value : null,
+        energy: meter.status === 'fulfilled' ? meter.value : null,
+        lastUpdated: new Date().toISOString()
+      },
+      errors: [sysInfo, schedule, time, meter]
+        .filter(p => p.status === 'rejected')
+        .map(p => p.reason?.message)
+    });
+    
+  } catch (error) {
+    console.error('Kasa status error:', error);
+    res.status(500).json({
+      success: false,
+      error: error.message
+    });
+  }
+}));
+
 // Device power control endpoint
 app.post("/api/device/:deviceId/power", async (req, res) => {
   try {
@@ -747,6 +1069,371 @@ app.post("/api/device/:deviceId/spectrum", async (req, res) => {
   } catch (error) {
     console.error(`Device spectrum control error for ${req.params.deviceId}:`, error);
     res.status(500).json({ success: false, message: error.message });
+  }
+});
+
+// --- Automation Rules Management API (BEFORE proxy) ---
+
+// Get all automation rules
+app.get('/api/automation/rules', (req, res) => {
+  try {
+    const rules = automationEngine.getRules();
+    res.json({
+      success: true,
+      rules,
+      count: rules.length
+    });
+  } catch (error) {
+    console.error('Error getting automation rules:', error);
+    res.status(500).json({
+      success: false,
+      error: error.message
+    });
+  }
+});
+
+// Add or update an automation rule
+app.post('/api/automation/rules', (req, res) => {
+  try {
+    const rule = req.body;
+    if (!rule.id || !rule.name || !rule.trigger || !rule.actions) {
+      return res.status(400).json({
+        success: false,
+        error: 'Rule must have id, name, trigger, and actions'
+      });
+    }
+    
+    automationEngine.addRule(rule);
+    res.json({
+      success: true,
+      message: `Rule ${rule.id} added/updated`,
+      rule: automationEngine.getRules().find(r => r.id === rule.id)
+    });
+  } catch (error) {
+    console.error('Error adding automation rule:', error);
+    res.status(500).json({
+      success: false,
+      error: error.message
+    });
+  }
+});
+
+// Delete an automation rule
+app.delete('/api/automation/rules/:ruleId', (req, res) => {
+  try {
+    const { ruleId } = req.params;
+    automationEngine.removeRule(ruleId);
+    res.json({
+      success: true,
+      message: `Rule ${ruleId} removed`
+    });
+  } catch (error) {
+    console.error('Error removing automation rule:', error);
+    res.status(500).json({
+      success: false,
+      error: error.message
+    });
+  }
+});
+
+// Enable/disable a rule
+app.patch('/api/automation/rules/:ruleId', (req, res) => {
+  try {
+    const { ruleId } = req.params;
+    const { enabled } = req.body;
+    
+    if (typeof enabled !== 'boolean') {
+      return res.status(400).json({
+        success: false,
+        error: 'enabled field must be boolean'
+      });
+    }
+    
+    automationEngine.setRuleEnabled(ruleId, enabled);
+    res.json({
+      success: true,
+      message: `Rule ${ruleId} ${enabled ? 'enabled' : 'disabled'}`,
+      rule: automationEngine.getRules().find(r => r.id === ruleId)
+    });
+  } catch (error) {
+    console.error('Error updating automation rule:', error);
+    res.status(500).json({
+      success: false,
+      error: error.message
+    });
+  }
+});
+
+// Get automation execution history
+app.get('/api/automation/history', (req, res) => {
+  try {
+    const limit = parseInt(req.query.limit) || 100;
+    const history = automationEngine.getHistory(limit);
+    res.json({
+      success: true,
+      history,
+      count: history.length
+    });
+  } catch (error) {
+    console.error('Error getting automation history:', error);
+    res.status(500).json({
+      success: false,
+      error: error.message
+    });
+  }
+});
+
+// Get current sensor cache
+app.get('/api/automation/sensors', (req, res) => {
+  try {
+    const sensors = automationEngine.getSensorCache();
+    res.json({
+      success: true,
+      sensors,
+      count: Object.keys(sensors).length
+    });
+  } catch (error) {
+    console.error('Error getting sensor cache:', error);
+    res.status(500).json({
+      success: false,
+      error: error.message
+    });
+  }
+});
+
+// Test automation rule with sample data
+app.post('/api/automation/test', async (req, res) => {
+  try {
+    const { sensorData } = req.body;
+    if (!sensorData || !sensorData.source || !sensorData.type || typeof sensorData.value !== 'number') {
+      return res.status(400).json({
+        success: false,
+        error: 'sensorData must have source, type, and numeric value'
+      });
+    }
+    
+    console.log('[automation] Testing rule execution with sample data:', sensorData);
+    await automationEngine.processSensorData(sensorData);
+    
+    res.json({
+      success: true,
+      message: 'Test sensor data processed through automation engine',
+      testData: sensorData
+    });
+  } catch (error) {
+    console.error('Error testing automation:', error);
+    res.status(500).json({
+      success: false,
+      error: error.message
+    });
+  }
+});
+
+// Manual trigger for specific automation rule
+app.post('/api/automation/trigger/:ruleId', async (req, res) => {
+  try {
+    const { ruleId } = req.params;
+    const { sensorData } = req.body;
+    
+    const rules = automationEngine.getRules();
+    const rule = rules.find(r => r.id === ruleId);
+    
+    if (!rule) {
+      return res.status(404).json({
+        success: false,
+        error: `Rule ${ruleId} not found`
+      });
+    }
+    
+    // Create mock sensor data if not provided
+    const mockData = sensorData || {
+      source: 'manual-trigger',
+      deviceId: 'test-device',
+      type: 'manual',
+      value: 1,
+      metadata: { manualTrigger: true }
+    };
+    
+    console.log(`[automation] Manually triggering rule ${ruleId}`);
+    await automationEngine.executeRule(rule, mockData, Date.now());
+    
+    res.json({
+      success: true,
+      message: `Rule ${ruleId} manually triggered`,
+      rule: rule.name,
+      triggerData: mockData
+    });
+  } catch (error) {
+    console.error('Error manually triggering rule:', error);
+    res.status(500).json({
+      success: false,
+      error: error.message
+    });
+  }
+});
+
+// Geocoding and Weather endpoints must be registered BEFORE the /api proxy below
+function getWeatherDescription(code) {
+  const descriptions = {
+    0: 'Clear sky', 1: 'Mainly clear', 2: 'Partly cloudy', 3: 'Overcast',
+    45: 'Fog', 48: 'Depositing rime fog', 51: 'Light drizzle', 53: 'Moderate drizzle', 55: 'Dense drizzle',
+    56: 'Light freezing drizzle', 57: 'Dense freezing drizzle', 61: 'Slight rain', 63: 'Moderate rain', 65: 'Heavy rain',
+    66: 'Light freezing rain', 67: 'Heavy freezing rain', 71: 'Slight snow fall', 73: 'Moderate snow fall', 75: 'Heavy snow fall', 77: 'Snow grains',
+    80: 'Slight rain showers', 81: 'Moderate rain showers', 82: 'Violent rain showers', 85: 'Slight snow showers', 86: 'Heavy snow showers',
+    95: 'Thunderstorm', 96: 'Thunderstorm with slight hail', 99: 'Thunderstorm with heavy hail'
+  };
+  return descriptions[code] || 'Unknown';
+}
+
+app.get('/api/geocode', async (req, res) => {
+  try {
+    setCors(res);
+    const { address } = req.query;
+    if (!address) return res.status(400).json({ ok: false, error: 'Address parameter required' });
+    const encodedAddress = encodeURIComponent(address);
+    const geocodeUrl = `https://nominatim.openstreetmap.org/search?format=json&q=${encodedAddress}&limit=5`;
+    const response = await fetch(geocodeUrl, { headers: { 'User-Agent': 'Light-Engine-Charlie/1.0 (Farm Management System)' } });
+    if (!response.ok) throw new Error(`Geocoding API error: ${response.status}`);
+    const data = await response.json();
+    const results = data.map(item => ({ display_name: item.display_name, lat: parseFloat(item.lat), lng: parseFloat(item.lon), formatted_address: item.display_name }));
+    res.json({ ok: true, results });
+  } catch (error) {
+    console.error('Geocoding error:', error);
+    res.status(500).json({ ok: false, error: error.message });
+  }
+});
+
+app.get('/api/weather', async (req, res) => {
+  try {
+    setCors(res);
+    const { lat, lng } = req.query;
+    if (!lat || !lng) return res.status(400).json({ ok: false, error: 'Latitude and longitude parameters required' });
+    const weatherUrl = `https://api.open-meteo.com/v1/forecast?latitude=${lat}&longitude=${lng}&current_weather=true&hourly=temperature_2m,relative_humidity_2m,precipitation,weather_code&timezone=auto`;
+    const response = await fetch(weatherUrl);
+    if (!response.ok) throw new Error(`Weather API error: ${response.status}`);
+    const data = await response.json();
+    const weather = {
+      ok: true,
+      current: {
+        temperature_c: data.current_weather.temperature,
+        temperature_f: (data.current_weather.temperature * 9/5) + 32,
+        humidity: Array.isArray(data.hourly?.relative_humidity_2m) ? data.hourly.relative_humidity_2m[0] : null,
+        wind_speed: data.current_weather.windspeed,
+        wind_direction: data.current_weather.winddirection,
+        weather_code: data.current_weather.weathercode,
+        is_day: data.current_weather.is_day,
+        description: getWeatherDescription(data.current_weather.weathercode),
+        last_updated: data.current_weather.time
+      },
+      location: { lat: parseFloat(lat), lng: parseFloat(lng) }
+    };
+    res.json(weather);
+  } catch (error) {
+    console.error('Weather API error:', error);
+    res.status(500).json({ ok: false, error: error.message });
+  }
+});
+
+// Reverse geocoding: lat/lng → address parts
+app.get('/api/reverse-geocode', async (req, res) => {
+  try {
+    setCors(res);
+    const { lat, lng } = req.query;
+    if (!lat || !lng) return res.status(400).json({ ok: false, error: 'Latitude and longitude required' });
+    const url = `https://nominatim.openstreetmap.org/reverse?format=json&lat=${encodeURIComponent(lat)}&lon=${encodeURIComponent(lng)}&addressdetails=1`;
+    const r = await fetch(url, { headers: { 'User-Agent': 'Light-Engine-Charlie/1.0 (Farm Management System)' } });
+    if (!r.ok) throw new Error(`Reverse geocoding error: ${r.status}`);
+    const data = await r.json();
+    const addr = data.address || {};
+    res.json({ ok: true, address: {
+      display_name: data.display_name || '',
+      road: addr.road || addr.house_number || '',
+      city: addr.city || addr.town || addr.village || addr.hamlet || '',
+      state: addr.state || addr.region || '',
+      postal: addr.postcode || '',
+      country: addr.country || ''
+    }});
+  } catch (e) {
+    console.error('Reverse geocoding error:', e);
+    res.status(500).json({ ok: false, error: e.message });
+  }
+});
+
+// In-memory weather cache and lightweight polling for automations
+let LAST_WEATHER = null;
+let LAST_WEATHER_AT = 0;
+let WEATHER_TIMER = null;
+
+async function fetchAndCacheWeather(lat, lng) {
+  try {
+    const url = `https://api.open-meteo.com/v1/forecast?latitude=${lat}&longitude=${lng}&current_weather=true&hourly=temperature_2m,relative_humidity_2m,precipitation,weather_code&timezone=auto`;
+    const r = await fetch(url);
+    if (!r.ok) throw new Error(`Weather API ${r.status}`);
+    const data = await r.json();
+    LAST_WEATHER = {
+      ok: true,
+      current: {
+        temperature_c: data.current_weather.temperature,
+        temperature_f: (data.current_weather.temperature * 9/5) + 32,
+        humidity: Array.isArray(data.hourly?.relative_humidity_2m) ? data.hourly.relative_humidity_2m[0] : null,
+        wind_speed: data.current_weather.windspeed,
+        wind_direction: data.current_weather.winddirection,
+        weather_code: data.current_weather.weathercode,
+        is_day: data.current_weather.is_day,
+        description: getWeatherDescription(data.current_weather.weathercode),
+        last_updated: data.current_weather.time
+      },
+      location: { lat: parseFloat(lat), lng: parseFloat(lng) }
+    };
+    LAST_WEATHER_AT = Date.now();
+
+    // Optional: feed into automation engine as sensor data
+    try {
+      if (automationEngine) {
+        const src = 'weather';
+        const ts = Date.now();
+        const w = LAST_WEATHER.current;
+        const readings = [];
+        if (typeof w.temperature_c === 'number') readings.push({ source: src, deviceId: 'outside', type: 'outside_temperature_c', value: w.temperature_c, metadata: { lat, lng, ts } });
+        if (typeof w.humidity === 'number') readings.push({ source: src, deviceId: 'outside', type: 'outside_humidity', value: w.humidity, metadata: { lat, lng, ts } });
+        if (typeof w.wind_speed === 'number') readings.push({ source: src, deviceId: 'outside', type: 'outside_wind_kmh', value: w.wind_speed, metadata: { lat, lng, ts } });
+        for (const r of readings) await automationEngine.processSensorData(r);
+      }
+    } catch (e) { console.warn('Weather → automation feed failed:', e.message); }
+
+  } catch (e) {
+    console.warn('fetchAndCacheWeather error:', e.message);
+  }
+}
+
+function setupWeatherPolling() {
+  try {
+    const farm = readJSONSafe(FARM_PATH, null);
+    const coords = farm?.coordinates || farm?.location?.coordinates;
+    if (!coords || typeof coords.lat !== 'number' || typeof coords.lng !== 'number') {
+      if (WEATHER_TIMER) { clearInterval(WEATHER_TIMER); WEATHER_TIMER = null; }
+      return;
+    }
+    // Kick off immediately and then every 10 minutes
+    fetchAndCacheWeather(coords.lat, coords.lng);
+    if (WEATHER_TIMER) clearInterval(WEATHER_TIMER);
+    WEATHER_TIMER = setInterval(() => fetchAndCacheWeather(coords.lat, coords.lng), 10 * 60 * 1000);
+  } catch {}
+}
+
+// Expose cached weather (falls back to fetching if stale and coords exist)
+app.get('/api/weather/current', async (req, res) => {
+  try {
+    setCors(res);
+    // If stale (>15 min) try refresh
+    const farm = readJSONSafe(FARM_PATH, null);
+    const coords = farm?.coordinates || farm?.location?.coordinates;
+    const isStale = !LAST_WEATHER || (Date.now() - LAST_WEATHER_AT) > (15 * 60 * 1000);
+    if (coords && isStale) await fetchAndCacheWeather(coords.lat, coords.lng);
+    if (!LAST_WEATHER) return res.status(404).json({ ok: false, error: 'No weather cached and no farm coordinates set' });
+    res.json(LAST_WEATHER);
+  } catch (e) {
+    res.status(500).json({ ok: false, error: e.message });
   }
 });
 
@@ -843,6 +1530,96 @@ app.post('/webhooks/ifttt/:deviceId', async (req, res) => {
   }
 });
 
+// Geocoding and Weather endpoints must be registered BEFORE the /api proxy below
+// Helper function to convert weather codes to descriptions
+// (removed duplicate getWeatherDescription)
+
+// Geocoding API to get coordinates from address
+app.get('/api/geocode', async (req, res) => {
+  try {
+    setCors(res);
+    const { address } = req.query;
+    
+    if (!address) {
+      return res.status(400).json({ ok: false, error: 'Address parameter required' });
+    }
+
+    // Use Nominatim (OpenStreetMap) for free geocoding
+    const encodedAddress = encodeURIComponent(address);
+    const geocodeUrl = `https://nominatim.openstreetmap.org/search?format=json&q=${encodedAddress}&limit=5`;
+    
+    const response = await fetch(geocodeUrl, {
+      headers: {
+        'User-Agent': 'Light-Engine-Charlie/1.0 (Farm Management System)'
+      }
+    });
+    
+    if (!response.ok) {
+      throw new Error(`Geocoding API error: ${response.status}`);
+    }
+    
+    const data = await response.json();
+    
+    const results = data.map(item => ({
+      display_name: item.display_name,
+      lat: parseFloat(item.lat),
+      lng: parseFloat(item.lon),
+      formatted_address: item.display_name
+    }));
+
+    res.json({ ok: true, results });
+  } catch (error) {
+    console.error('Geocoding error:', error);
+    res.status(500).json({ ok: false, error: error.message });
+  }
+});
+
+// Weather API to get current conditions
+app.get('/api/weather', async (req, res) => {
+  try {
+    setCors(res);
+    const { lat, lng } = req.query;
+    
+    if (!lat || !lng) {
+      return res.status(400).json({ ok: false, error: 'Latitude and longitude parameters required' });
+    }
+
+    // Use Open-Meteo for free weather data
+    const weatherUrl = `https://api.open-meteo.com/v1/forecast?latitude=${lat}&longitude=${lng}&current_weather=true&hourly=temperature_2m,relative_humidity_2m,precipitation,weather_code&timezone=auto`;
+    
+    const response = await fetch(weatherUrl);
+    
+    if (!response.ok) {
+      throw new Error(`Weather API error: ${response.status}`);
+    }
+    
+    const data = await response.json();
+    
+    const weather = {
+      ok: true,
+      current: {
+        temperature_c: data.current_weather.temperature,
+        temperature_f: (data.current_weather.temperature * 9/5) + 32,
+        humidity: Array.isArray(data.hourly?.relative_humidity_2m) ? data.hourly.relative_humidity_2m[0] : null,
+        wind_speed: data.current_weather.windspeed,
+        wind_direction: data.current_weather.winddirection,
+        weather_code: data.current_weather.weathercode,
+        is_day: data.current_weather.is_day,
+        description: getWeatherDescription(data.current_weather.weathercode),
+        last_updated: data.current_weather.time
+      },
+      location: {
+        lat: parseFloat(lat),
+        lng: parseFloat(lng)
+      }
+    };
+
+    res.json(weather);
+  } catch (error) {
+    console.error('Weather API error:', error);
+    res.status(500).json({ ok: false, error: error.message });
+  }
+});
 // IFTTT Service endpoints for device discovery
 app.get('/ifttt/v1/user/info', (req, res) => {
   // IFTTT service authentication endpoint
@@ -1172,11 +1949,15 @@ app.post('/farm', (req, res) => {
     // basic shape: store as-is
     fs.mkdirSync(DATA_DIR, { recursive: true });
     fs.writeFileSync(FARM_PATH, JSON.stringify(body, null, 2));
+    // Reconfigure weather polling when farm coordinates change
+    setupWeatherPolling();
     res.json({ ok:true });
   } catch (e) {
     res.status(500).json({ ok:false, error: e.message });
   }
 });
+
+// Geocoding API to get coordinates from address
 
 // Simple reachability probe: GET /probe?url=http://host:port
 app.get('/probe', async (req, res) => {
@@ -1307,10 +2088,11 @@ app.get("/env", async (req, res) => {
 
 // POST: ingest a telemetry message and upsert into env.json
 // Expected body: { zoneId, name, temperature, humidity, vpd, co2, battery, rssi, source }
-app.post("/ingest/env", (req, res) => {
+app.post("/ingest/env", async (req, res) => {
   try {
     const { zoneId, name, temperature, humidity, vpd, co2, battery, rssi, source } = req.body || {};
     if (!zoneId) return res.status(400).json({ ok: false, error: "zoneId required" });
+    
     // Load existing
     const data = JSON.parse(fs.readFileSync(ENV_PATH, "utf8"));
     data.zones = data.zones || [];
@@ -1339,6 +2121,59 @@ app.post("/ingest/env", (req, res) => {
     ensure("co2", co2);
 
     fs.writeFileSync(ENV_PATH, JSON.stringify(data, null, 2));
+
+    // Process sensor readings through automation engine
+    try {
+      const sensorReadings = [];
+      if (typeof temperature === "number" && !Number.isNaN(temperature)) {
+        sensorReadings.push({
+          source: source || 'env-ingest',
+          deviceId: zoneId,
+          type: 'temperature',
+          value: temperature,
+          metadata: { zone: zone.name, battery, rssi }
+        });
+      }
+      if (typeof humidity === "number" && !Number.isNaN(humidity)) {
+        sensorReadings.push({
+          source: source || 'env-ingest',
+          deviceId: zoneId,
+          type: 'humidity',
+          value: humidity,
+          metadata: { zone: zone.name, battery, rssi }
+        });
+      }
+      if (typeof co2 === "number" && !Number.isNaN(co2)) {
+        sensorReadings.push({
+          source: source || 'env-ingest',
+          deviceId: zoneId,
+          type: 'co2',
+          value: co2,
+          metadata: { zone: zone.name, battery, rssi }
+        });
+      }
+      if (typeof vpd === "number" && !Number.isNaN(vpd)) {
+        sensorReadings.push({
+          source: source || 'env-ingest',
+          deviceId: zoneId,
+          type: 'vpd',
+          value: vpd,
+          metadata: { zone: zone.name, battery, rssi }
+        });
+      }
+
+      // Process each sensor reading through automation rules
+      for (const reading of sensorReadings) {
+        await automationEngine.processSensorData(reading);
+      }
+      
+      if (sensorReadings.length > 0) {
+        console.log(`[automation] Processed ${sensorReadings.length} sensor readings from zone ${zoneId}`);
+      }
+    } catch (automationError) {
+      console.warn('Sensor automation processing failed:', automationError.message);
+    }
+
     return res.json({ ok: true });
   } catch (e) {
     return res.status(500).json({ ok: false, error: e.message });
@@ -1580,7 +2415,96 @@ async function discoverNetworkDevices() {
       }
     }
   } catch (e) {
-    console.warn('Kasa discovery via controller failed, trying direct network scan');
+    console.warn('Kasa discovery via controller failed, trying direct Kasa discovery');
+    
+    // Try direct Kasa device discovery using tplink-smarthome-api
+    try {
+      const { Client } = await import('tplink-smarthome-api');
+      const client = new Client();
+      
+      console.log('🔍 Scanning for Kasa devices on local network...');
+      
+      // Start device discovery
+      client.startDiscovery({
+        port: 9999,
+        broadcast: '255.255.255.255',
+        timeout: 5000
+      });
+      
+      // Collect discovered devices
+      const kasaDevices = new Map();
+      
+      client.on('device-new', (device) => {
+        console.log('📱 Found Kasa device:', device.alias, '@', device.host);
+        
+        // Get device info
+        device.getSysInfo().then(sysInfo => {
+          kasaDevices.set(device.deviceId, {
+            id: `kasa:${device.deviceId}`,
+            name: device.alias || sysInfo.alias || 'Unknown Kasa Device',
+            protocol: 'kasa-wifi',
+            confidence: 0.95,
+            signal: null,
+            address: device.host,
+            vendor: 'TP-Link Kasa',
+            lastSeen: new Date().toISOString(),
+            hints: {
+              type: sysInfo.type || 'smart-plug',
+              model: sysInfo.model,
+              deviceType: sysInfo.mic_type || sysInfo.type,
+              softwareVersion: sysInfo.sw_ver,
+              hardwareVersion: sysInfo.hw_ver,
+              capabilities: ['power_control', 'scheduling', 'remote_access'],
+              metrics: ['power', 'energy', 'state']
+            },
+            kasaDetails: {
+              deviceId: device.deviceId,
+              alias: device.alias,
+              model: sysInfo.model,
+              type: sysInfo.type,
+              state: sysInfo.relay_state || 0,
+              ledOff: sysInfo.led_off || 0,
+              latitude: sysInfo.latitude,
+              longitude: sysInfo.longitude
+            }
+          });
+        }).catch(err => {
+          console.warn('Error getting Kasa device info:', err.message);
+          // Add basic device info even if sysInfo fails
+          kasaDevices.set(device.deviceId, {
+            id: `kasa:${device.deviceId}`,
+            name: device.alias || 'Unknown Kasa Device',
+            protocol: 'kasa-wifi',
+            confidence: 0.8,
+            signal: null,
+            address: device.host,
+            vendor: 'TP-Link Kasa',
+            lastSeen: new Date().toISOString(),
+            hints: {
+              type: 'smart-device',
+              capabilities: ['power_control'],
+              metrics: ['state']
+            }
+          });
+        });
+      });
+      
+      // Wait for discovery to complete, then add devices
+      await new Promise(resolve => setTimeout(resolve, 6000));
+      client.stopDiscovery();
+      
+      // Add discovered Kasa devices to the main devices array
+      kasaDevices.forEach(device => devices.push(device));
+      
+      if (kasaDevices.size > 0) {
+        console.log(`✅ Found ${kasaDevices.size} Kasa device(s)`);
+      } else {
+        console.log('⚠️  No Kasa devices found on local network');
+      }
+      
+    } catch (kasaError) {
+      console.warn('Direct Kasa discovery failed:', kasaError.message);
+    }
   }
 
   // Direct network scan for common IoT device ports
@@ -2248,18 +3172,141 @@ async function executeKasaWizardStep(stepId, data) {
     case 'device-discovery':
       console.log(`🔍 Discovering Kasa devices (timeout: ${data.discoveryTimeout}s)`);
       
-      // Simulate Kasa device discovery
-      const kasaDevices = [
-        { ip: '192.168.2.45', model: 'HS100', alias: 'Pump Controller', type: 'plug' },
-        { ip: '192.168.2.46', model: 'KL130', alias: 'Grow Light 1', type: 'bulb' },
-        { ip: '192.168.2.47', model: 'HS200', alias: 'Fan Controller', type: 'switch' }
-      ];
+      try {
+        const { Client } = await import('tplink-smarthome-api');
+        const client = new Client();
+        const kasaDevices = [];
+        
+        // Start discovery
+        client.startDiscovery({
+          port: 9999,
+          broadcast: '255.255.255.255',
+          timeout: (data.discoveryTimeout || 10) * 1000
+        });
+        
+        // Collect devices
+        client.on('device-new', async (device) => {
+          try {
+            const sysInfo = await device.getSysInfo();
+            kasaDevices.push({
+              deviceId: device.deviceId,
+              ip: device.host,
+              model: sysInfo.model || 'Unknown',
+              alias: device.alias || sysInfo.alias || 'Unnamed Device',
+              type: sysInfo.type || 'plug',
+              state: sysInfo.relay_state || 0,
+              rssi: sysInfo.rssi,
+              softwareVersion: sysInfo.sw_ver,
+              hardwareVersion: sysInfo.hw_ver
+            });
+          } catch (err) {
+            console.warn(`Error getting Kasa device info:`, err.message);
+            kasaDevices.push({
+              deviceId: device.deviceId,
+              ip: device.host,
+              alias: device.alias || 'Unknown Kasa Device',
+              type: 'unknown',
+              error: err.message
+            });
+          }
+        });
+        
+        // Wait for discovery
+        await new Promise(resolve => setTimeout(resolve, (data.discoveryTimeout || 10) * 1000 + 1000));
+        client.stopDiscovery();
+        
+        // Filter by target IP if specified
+        let filteredDevices = kasaDevices;
+        if (data.targetIP) {
+          filteredDevices = kasaDevices.filter(device => 
+            device.ip.startsWith(data.targetIP.split('.').slice(0, 3).join('.'))
+          );
+        }
+        
+        return {
+          success: true,
+          data: { 
+            discoveredDevices: filteredDevices,
+            totalFound: kasaDevices.length,
+            filtered: data.targetIP ? filteredDevices.length : kasaDevices.length
+          },
+          message: `Found ${filteredDevices.length} Kasa device(s)${data.targetIP ? ` matching ${data.targetIP}` : ''}`
+        };
+        
+      } catch (error) {
+        console.error('Kasa discovery error:', error);
+        return {
+          success: false,
+          error: error.message,
+          data: { discoveredDevices: [] },
+          message: 'Failed to discover Kasa devices'
+        };
+      }
       
-      return {
-        success: true,
-        data: { discoveredDevices: kasaDevices },
-        message: `Found ${kasaDevices.length} Kasa devices`
-      };
+    case 'device-configuration':
+      console.log(`⚙️ Configuring Kasa device: ${data.alias}`);
+      
+      try {
+        // If we have device info from discovery, use it to configure
+        if (data.deviceId) {
+          const { Client } = await import('tplink-smarthome-api');
+          const client = new Client();
+          
+          // Try to find the device
+          let targetDevice = null;
+          client.startDiscovery({ timeout: 3000 });
+          
+          await new Promise((resolve) => {
+            client.on('device-new', (device) => {
+              if (device.deviceId === data.deviceId) {
+                targetDevice = device;
+                client.stopDiscovery();
+                resolve();
+              }
+            });
+            
+            setTimeout(() => {
+              client.stopDiscovery();
+              resolve();
+            }, 3500);
+          });
+          
+          if (targetDevice && data.alias !== targetDevice.alias) {
+            // Set new alias
+            await targetDevice.setAlias(data.alias);
+          }
+          
+          return {
+            success: true,
+            data: {
+              deviceId: data.deviceId,
+              alias: data.alias,
+              location: data.location,
+              scheduleEnabled: data.scheduleEnabled,
+              configured: true
+            },
+            message: `Successfully configured ${data.alias}`
+          };
+        }
+        
+        return {
+          success: true,
+          data: {
+            alias: data.alias,
+            location: data.location,
+            scheduleEnabled: data.scheduleEnabled
+          },
+          message: `Configuration saved for ${data.alias}`
+        };
+        
+      } catch (error) {
+        console.error('Kasa configuration error:', error);
+        return {
+          success: false,
+          error: error.message,
+          message: `Failed to configure ${data.alias}`
+        };
+      }
       
     default:
       return { success: true, data: {} };
@@ -3497,4 +4544,5 @@ app.post('/discovery/suggest-wizards', async (req, res) => {
 // Start the server after all routes are defined
 app.listen(PORT, () => {
   console.log(`[charlie] running http://127.0.0.1:${PORT} → ${getController()}`);
+  try { setupWeatherPolling(); } catch {}
 });
