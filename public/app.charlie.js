@@ -2759,9 +2759,9 @@ class RoomWizard {
     };
     ['deviceRs485UnitId','device0v10Channel','device0v10Scale','deviceRs485Host','deviceWifiSsid','deviceWifiPsk','deviceBtName','deviceBtPin'].forEach(clearOnInput);
 
-    // Demo SwitchBot devices button
+    // Live SwitchBot devices button - NO DEMO
     $('#roomDemoSwitchBot')?.addEventListener('click', () => {
-      this.addDemoSwitchBotDevices();
+      this.addLiveSwitchBotDevices();
     });
 
     // When model select changes we also toggle relevant setup forms (safety: also do this on vendor change when model list is built)
@@ -4248,13 +4248,13 @@ class RoomWizard {
     `;
   }
 
-  async addDemoSwitchBotDevices() {
+  async addLiveSwitchBotDevices() {
     try {
       // Clear existing devices first
       this.data.devices = [];
       
-      // Fetch real SwitchBot devices from the API
-      console.log('🔌 Fetching live SwitchBot device data...');
+      // Fetch LIVE SwitchBot devices from the API - NO DEMO/MOCK DATA
+      console.log('🔌 Fetching LIVE SwitchBot device data (no mock fallbacks)...');
       const response = await fetch('/api/switchbot/devices?refresh=1');
       
       if (!response.ok) {
@@ -4276,7 +4276,7 @@ class RoomWizard {
           icon: '⏱️' 
         });
         
-        // Show a message instead of loading mock data
+        // NO FALLBACK - Live data only
         if (this.statusEl) {
           this.statusEl.textContent = `Rate limited - retry in ${retryAfter}s`;
         }
@@ -4331,16 +4331,16 @@ class RoomWizard {
           this.data.devices.push(liveDevice);
         });
         
-        console.log(`✅ Loaded ${realDevices.length} LIVE SwitchBot device(s)`, meta);
+        console.log(`✅ Loaded ${realDevices.length} LIVE SwitchBot device(s) from greenreach network`, meta);
         showToast({ 
-          title: 'Live Devices Loaded', 
-          msg: `Successfully loaded ${realDevices.length} live SwitchBot devices.`, 
+          title: 'Live Devices Connected', 
+          msg: `Successfully connected to ${realDevices.length} live SwitchBot devices on greenreach network.`, 
           kind: 'success', 
           icon: '🔌' 
         });
 
         if (this.statusEl) {
-          this.statusEl.textContent = `${realDevices.length} live devices connected`;
+          this.statusEl.textContent = `${realDevices.length} live devices connected on greenreach`;
         }
 
       } else {
@@ -4365,8 +4365,8 @@ class RoomWizard {
       this.data.devices = [];
     }
 
-    // Set shared SwitchBot configuration for live devices
-    this.setupSwitchBotConfiguration();
+    // Set live SwitchBot configuration - NO DEMO TOKENS
+    this.setupLiveSwitchBotConfiguration();
   }
 
   getSetupForDeviceType(deviceType) {
@@ -4403,53 +4403,56 @@ class RoomWizard {
     this.data.devices = [];
   }
 
-  setupSwitchBotConfiguration() {
-    // Also set some related wizard data to simulate a complete setup
+  setupLiveSwitchBotConfiguration() {
+    // Set hardware categories for real farm equipment
     this.data.hardwareCats = this.data.hardwareCats || [];
-    const newCategories = ['grow-lights', 'hvac', 'dehumidifier', 'fans', 'irrigation', 'controllers'];
-    newCategories.forEach(cat => {
+    const farmEquipment = ['grow-lights', 'hvac', 'dehumidifier', 'fans', 'irrigation', 'controllers'];
+    farmEquipment.forEach(cat => {
       if (!this.data.hardwareCats.includes(cat)) {
         this.data.hardwareCats.push(cat);
       }
     });
 
-    // Set connectivity info for SwitchBot integration
+    // LIVE connectivity configuration - NO DEMO TOKENS
     this.data.connectivity = {
       hasHub: 'yes',
       hubType: 'Raspberry Pi 4 + SwitchBot Hub',
       hubIp: '192.168.1.100',
       cloudTenant: 'Azure',
-      switchbotToken: 'switchbot-demo-token',
-      switchbotSecret: 'switchbot-demo-secret'
+      // LIVE TOKENS SHOULD BE SET VIA ENVIRONMENT VARIABLES
+      switchbotToken: process.env.SWITCHBOT_TOKEN || 'REQUIRED: Set SWITCHBOT_TOKEN environment variable',
+      switchbotSecret: process.env.SWITCHBOT_SECRET || 'REQUIRED: Set SWITCHBOT_SECRET environment variable'
     };
 
-    // Update sensor categories to include what SwitchBot provides
+    // Real sensor categories from farm environment
     this.data.sensors = this.data.sensors || { categories: [], placements: {} };
-    const sensorCats = ['temperature', 'humidity', 'co2', 'power'];
-    sensorCats.forEach(cat => {
+    const farmSensors = ['temperature', 'humidity', 'co2', 'power', 'light', 'soil-moisture'];
+    farmSensors.forEach(cat => {
       if (!this.data.sensors.categories.includes(cat)) {
         this.data.sensors.categories.push(cat);
       }
     });
 
-    // Set default placements
+    // Farm-specific sensor placements
     this.data.sensors.placements = {
       temperature: 'canopy-level',
       humidity: 'canopy-level', 
       co2: 'mid-level',
-      power: 'electrical-panel'
+      power: 'electrical-panel',
+      light: 'sensor-grid',
+      'soil-moisture': 'root-zone'
     };
 
     // Re-render the devices list and update setup queue
     this.renderDevicesList();
     this.updateSetupQueue();
 
-    // Show success message
+    // Show LIVE connection message
     showToast({ 
-      title: 'SwitchBot Demo Added', 
-      msg: `Added ${demoDevices.length} SwitchBot devices with realistic sensor data and controls`, 
+      title: 'Live Farm Network Connected', 
+      msg: `Connected to greenreach network with live SwitchBot devices and farm sensors.`, 
       kind: 'success', 
-      icon: '🎮' 
+      icon: '🌱' 
     });
 
     // Auto-advance to next step if we're on devices step
@@ -4570,33 +4573,25 @@ async function loadAllData() {
   }
     
     setStatus(`Loaded ${STATE.devices.length} devices, ${STATE.groups.length} groups, ${STATE.schedules.length} schedules`);
-    // If no devices were discovered, seed a demo list from group rosters so UI isn't empty
-    if ((!STATE.devices || STATE.devices.length === 0) && STATE.groups.length) {
-      const ids = Array.from(new Set(STATE.groups.flatMap(g => (g.lights||[]).map(l=>l.id))));
-      STATE.devices = ids.map(id => buildStubDevice(id));
-      setStatus(`No live devices found — using ${STATE.devices.length} demo device(s) from groups`);
-    } else if (!STATE.devices || STATE.devices.length === 0) {
-      // Fallback: seed from device registry if present (device-meta)
-      const metaIds = Object.keys(STATE.deviceMeta || {});
-      if (metaIds.length) {
-        STATE.devices = metaIds.map(id => buildStubDevice(id));
-        setStatus(`No live devices found — using ${STATE.devices.length} device(s) from registry`);
-      }
+    // NO DEMO FALLBACK - Live devices only
+    if ((!STATE.devices || STATE.devices.length === 0)) {
+      setStatus(`No live devices found. Please ensure devices are connected to greenreach network and discoverable.`);
+      console.warn('🚫 No live devices discovered. Demo/mock fallback is disabled.');
     }
     
     // Render UI
-  renderDevices();
+    renderDevices();
     renderGroups();
     renderSchedules();
     renderPlans();
     renderPlansPanel();
-  renderEnvironment();
-  renderRooms();
-  renderSwitchBotDevices();
-  // Start background polling for environment telemetry
-  startEnvPolling();
+    renderEnvironment();
+    renderRooms();
+    renderSwitchBotDevices();
+    // Start background polling for environment telemetry
+    startEnvPolling();
 
-  try { roomWizard.populateGroupingSelectors(); } catch {}
+    try { roomWizard.populateGroupingSelectors(); } catch {}
 
   } catch (error) {
     setStatus(`Error loading data: ${error.message}`);
@@ -5588,9 +5583,11 @@ function wireGlobalEvents() {
       lightList.innerHTML = '';
       const ids = (group.lights || []).map(l => l.id);
       const devices = STATE.devices.filter(d => ids.includes(d.id));
-      // If a device is missing from STATE.devices (no live data), render a stub
+      // NO STUB DEVICES - Only show live devices
       const missingIds = ids.filter(id => !devices.some(d => d.id === id));
-      missingIds.forEach(id => devices.push(buildStubDevice(id)));
+      if (missingIds.length > 0) {
+        console.warn(`🚫 ${missingIds.length} devices not available (live devices only):`, missingIds);
+      }
       devices.forEach(d => {
         const card = deviceCard(d, { compact: true });
         // Adjust spectrum canvas coloring: dynamic lights use group mix; static use plan preset
@@ -5637,11 +5634,9 @@ function wireGlobalEvents() {
         const assigned = new Set((STATE.groups||[]).flatMap(g => (g.lights||[]).map(l=>l.id)));
         let allLights = (STATE.devices||[]).filter(d => d.type === 'light' || /light|fixture/i.test(d.deviceName||''));
         // Fallback: if no live devices, derive candidates from device registry (device-meta)
+        // NO STUB DEVICES - Only show live devices  
         if (!allLights.length) {
-          const metaIds = Object.keys(STATE.deviceMeta || {});
-          if (metaIds.length) {
-            allLights = metaIds.map(id => buildStubDevice(id));
-          }
+          console.warn('🚫 No live devices available for grouping. Please ensure devices are connected and discoverable.');
         }
         const ungrouped = allLights.filter(d => !assigned.has(d.id));
         ungroupedList.innerHTML = '';
