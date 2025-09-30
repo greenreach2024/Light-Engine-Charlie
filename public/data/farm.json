@@ -1,0 +1,14 @@
+{
+  "farmName": "Test Farm",
+  "branding": null,
+  "locations": [
+    "North Greenhouse"
+  ],
+  "contact": {
+    "name": "Anne",
+    "email": "info@greenreachfarms.com",
+    "phone": "6138881031"
+  },
+  "timezone": "America/Toronto",
+  "registered": "2025-09-29T16:01:40.110Z"
+}

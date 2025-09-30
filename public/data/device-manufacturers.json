@@ -1,0 +1,150 @@
+{
+  "generated": "2025-09-28",
+  "note": "Curated list of common smart device manufacturers, representative models, connectivity options, and key features. Use this KB to surface device setup flows in the RoomWizard.",
+  "manufacturers": [
+    {
+      "name": "SwitchBot",
+      "country": "JP",
+      "models": [
+        { "model": "SwitchBot Bulb A19", "connectivity": ["wifi"], "features": ["rgb","dimmable","schedule","scenes"] },
+  { "model": "SwitchBot Bot", "connectivity": ["bluetooth","infrared"], "features": ["push-button-actuation","automation","ir-bridge-required"], "requiresHub": true },
+        { "model": "SwitchBot Hub Mini", "connectivity": ["wifi"], "features": ["bluetooth-bridge","ir-bridge","cloud-api"] }
+      ],
+      "protocols": ["Wi‑Fi","Bluetooth LE"],
+      "notes": "Consumer-focused accessory maker; many devices connect via BLE and rely on a Hub for cloud/Wi‑Fi integration."
+    },
+    {
+      "name": "TP-Link (Kasa)",
+      "country": "CN",
+      "models": [
+        { "model": "HS100 Smart Plug", "connectivity": ["wifi"], "features": ["on-off","energy-monitoring","scheduling"] },
+        { "model": "KL125 Smart Bulb", "connectivity": ["wifi"], "features": ["rgb","tunable-white","dimming","scheduling"] }
+      ],
+      "protocols": ["Wi‑Fi"],
+      "notes": "Kasa devices use local TCP/HTTP APIs on the LAN for many models; widely supported."
+    },
+    {
+      "name": "Sonoff (ITEAD)",
+      "country": "CN",
+      "models": [
+        { "model": "Basic R3", "connectivity": ["wifi"], "features": ["relay-switch","tasmota-flashable","scheduling"] },
+        { "model": "S31 Lite (smart plug)", "connectivity": ["wifi"], "features": ["on-off","energy-monitoring"] }
+      ],
+      "protocols": ["Wi‑Fi","MQTT"],
+      "notes": "Popular for DIY; many users re-flash Sonoff with Tasmota or ESPHome to get local MQTT integration."
+    },
+    {
+      "name": "Shelly",
+      "country": "MK",
+      "models": [
+        { "model": "Shelly 1", "connectivity": ["wifi"], "features": ["relay","dry-contact","mqtt","local-api"] },
+        { "model": "Shelly Plug S", "connectivity": ["wifi"], "features": ["power-monitoring","on-off","scheduling"] }
+      ],
+      "protocols": ["Wi‑Fi","MQTT","HTTP API"],
+      "notes": "Small, local-first devices frequently used in commercial projects; first-class MQTT/local API support."
+    },
+    {
+      "name": "Tuya / Smart Life (multiple OEMs)",
+      "country": "CN",
+      "models": [
+        { "model": "Generic Tuya Smart Plug", "connectivity": ["wifi"], "features": ["on-off","energy-monitoring","cloud-first"] },
+  { "model": "Tuya Zigbee Bulb", "connectivity": ["zigbee"], "features": ["rgb","dimming"], "requiresHub": true }
+      ],
+      "protocols": ["Wi‑Fi","Zigbee","Cloud API"],
+      "notes": "Huge ecosystem of rebranded devices; local control varies. Many support Tuya cloud or can be integrated via Tuya local/virtual APIs or Tuya-convert alternatives."
+    },
+    {
+      "name": "Philips Hue (Signify)",
+      "country": "NL",
+      "models": [
+  { "model": "Hue Bulb (White & Color)", "connectivity": ["zigbee"], "features": ["rgb","dimming","hue-ecosystem"], "requiresHub": true },
+        { "model": "Hue Bridge", "connectivity": ["ethernet","zigbee"], "features": ["local-api","scenes","schedules"] }
+      ],
+      "protocols": ["Zigbee","REST (Bridge)"],
+      "notes": "Enterprise-grade lighting ecosystem with a local bridge and robust API."
+    },
+    {
+      "name": "LIFX",
+      "country": "US",
+      "models": [
+        { "model": "LIFX A19", "connectivity": ["wifi"], "features": ["rgb","high-CRI","effects","local-udp-api"] }
+      ],
+      "protocols": ["Wi‑Fi","Local UDP/HTTP APIs"],
+      "notes": "Wi‑Fi bulbs that expose a local LAN API, widely used where Zigbee isn't desired."
+    },
+    {
+      "name": "Yeelight (Xiaomi ecosystem)",
+      "country": "CN",
+      "models": [
+        { "model": "Yeelight Bulb", "connectivity": ["wifi"], "features": ["rgb","tunable-white","local-control"] }
+      ],
+      "protocols": ["Wi‑Fi","LAN TCP/UDP"],
+      "notes": "Often supports local control modes and has community integrations."
+    },
+    {
+      "name": "Meross",
+      "country": "CN",
+      "models": [
+        { "model": "Meross Smart Plug", "connectivity": ["wifi"], "features": ["on-off","energy-monitoring"] }
+      ],
+      "protocols": ["Wi‑Fi","MQTT (some)"],
+      "notes": "Consumer brand; some models have cloud-only operation unless reworked."
+    },
+    {
+      "name": "Aqara",
+      "country": "CN",
+      "models": [
+        { "model": "Aqara Hub", "connectivity": ["zigbee","wifi"], "features": ["zoning","sensors","local-bridge"] },
+  { "model": "Aqara Temperature Sensor", "connectivity": ["zigbee"], "features": ["temp","humidity"], "requiresHub": true }
+      ],
+      "protocols": ["Zigbee","HomeKit (bridge)"]
+    },
+    {
+      "name": "Ecobee / Nest (Google)",
+      "country": "US",
+      "models": [
+        { "model": "Ecobee SmartThermostat", "connectivity": ["wifi"], "features": ["thermostat-control","sensors","api"] },
+        { "model": "Nest Thermostat", "connectivity": ["wifi"], "features": ["thermostat-control","cloud-api"] }
+      ],
+      "protocols": ["Wi‑Fi","Cloud APIs"],
+      "notes": "Highly popular HVAC/thermostat devices, typically cloud-first but with established ecosystem integrations."
+    },
+    {
+      "name": "Bluetooth LE sensor makers (generic)",
+      "country": "various",
+      "models": [
+  { "model": "BLE Temperature/Humidity sensor", "connectivity": ["bluetooth"], "features": ["temp","humidity","battery"], "requiresHub": true }
+      ],
+      "protocols": ["Bluetooth LE"],
+      "notes": "Used for low-power sensors (temp/RH/soil) and often require a hub or a BLE gateway for cloud/local bridging."
+    },
+    {
+      "name": "Shelly / industrial IO",
+      "country": "various",
+      "models": [
+        { "model": "RS‑485 Bridge / Modbus Gateway", "connectivity": ["rs485","ethernet"], "features": ["modbus","device-bridging"] },
+        { "model": "0‑10V dimmer / sensor interface", "connectivity": ["0-10v","analog"], "features": ["analog-input","calibration"] }
+      ],
+      "protocols": ["Modbus","RS‑485","0‑10V analog"]
+    },
+    {
+      "name": "Sonos / commercial audio",
+      "country": "US",
+      "models": [
+        { "model": "Sonos One", "connectivity": ["wifi"], "features": ["audio","playback","grouping","local-control"] }
+      ],
+      "protocols": ["Wi‑Fi","UPnP","HTTP"],
+      "notes": "Included as example of networked devices that may be present in grow-room installations (alerts/music)."
+    },
+    {
+      "name": "Tasmota / ESPHome (custom firmware)",
+      "country": "community",
+      "models": [
+        { "model": "Generic ESP8266/ESP32 device (Tasmota)", "connectivity": ["wifi"], "features": ["mqtt","http-api","gpio-control"] },
+        { "model": "ESPHome device", "connectivity": ["wifi"], "features": ["mqtt","native-api","sensor-automation"] }
+      ],
+      "protocols": ["MQTT","HTTP"],
+      "notes": "A large portion of commercial/DIY devices can be re-flashed to Tasmota/ESPHome to provide local MQTT-based control."
+    }
+  ]
+}
