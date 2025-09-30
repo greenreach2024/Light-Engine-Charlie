@@ -1821,6 +1821,223 @@ function analyzeDiscoveredDevices(devices) {
   };
 }
 
+// Setup Wizard System - Device-specific configuration wizards
+const SETUP_WIZARDS = {
+  'mqtt-setup': {
+    id: 'mqtt-setup',
+    name: 'MQTT Device Integration',
+    description: 'Configure MQTT broker connection and device subscriptions',
+    targetDevices: ['mqtt', 'mqtt-tls'],
+    steps: [
+      {
+        id: 'broker-connection',
+        name: 'Broker Connection',
+        description: 'Configure MQTT broker connection settings',
+        fields: [
+          { name: 'host', type: 'text', label: 'MQTT Broker Host', required: true },
+          { name: 'port', type: 'number', label: 'Port', default: 1883, required: true },
+          { name: 'secure', type: 'boolean', label: 'Use TLS/SSL', default: false },
+          { name: 'username', type: 'text', label: 'Username (optional)' },
+          { name: 'password', type: 'password', label: 'Password (optional)' }
+        ]
+      },
+      {
+        id: 'topic-discovery',
+        name: 'Topic Discovery',
+        description: 'Discover available MQTT topics and sensors',
+        fields: [
+          { name: 'baseTopic', type: 'text', label: 'Base Topic Pattern', default: 'farm/#' },
+          { name: 'discoverTime', type: 'number', label: 'Discovery Time (seconds)', default: 30 }
+        ]
+      },
+      {
+        id: 'sensor-mapping',
+        name: 'Sensor Mapping',
+        description: 'Map discovered topics to sensor types',
+        dynamic: true
+      }
+    ]
+  },
+
+  'web-device-setup': {
+    id: 'web-device-setup',
+    name: 'Web-Enabled IoT Device Setup',
+    description: 'Configure web-based IoT devices with HTTP/HTTPS interfaces',
+    targetDevices: ['http', 'https', 'http-alt', 'http-mgmt'],
+    steps: [
+      {
+        id: 'device-identification',
+        name: 'Device Identification',
+        description: 'Identify device type and capabilities',
+        fields: [
+          { name: 'deviceUrl', type: 'url', label: 'Device URL', required: true },
+          { name: 'deviceType', type: 'select', label: 'Device Type', 
+            options: ['environmental-controller', 'sensor-hub', 'lighting-controller', 'irrigation-controller', 'other'] }
+        ]
+      },
+      {
+        id: 'authentication',
+        name: 'Authentication Setup',
+        description: 'Configure device authentication',
+        fields: [
+          { name: 'authType', type: 'select', label: 'Authentication Type',
+            options: ['none', 'basic', 'bearer', 'api-key'] },
+          { name: 'username', type: 'text', label: 'Username', conditional: 'authType=basic' },
+          { name: 'password', type: 'password', label: 'Password', conditional: 'authType=basic' }
+        ]
+      },
+      {
+        id: 'data-integration',
+        name: 'Data Integration',
+        description: 'Configure data polling and integration settings',
+        fields: [
+          { name: 'pollInterval', type: 'number', label: 'Polling Interval (seconds)', default: 60 },
+          { name: 'enableAlerts', type: 'boolean', label: 'Enable Alerts', default: true }
+        ]
+      }
+    ]
+  },
+
+  'switchbot-setup': {
+    id: 'switchbot-setup',
+    name: 'SwitchBot Device Setup',
+    description: 'Configure SwitchBot cloud-connected devices',
+    targetDevices: ['switchbot'],
+    steps: [
+      {
+        id: 'api-credentials',
+        name: 'API Credentials',
+        description: 'Configure SwitchBot Cloud API access',
+        fields: [
+          { name: 'token', type: 'text', label: 'SwitchBot Token', required: true },
+          { name: 'secret', type: 'text', label: 'SwitchBot Secret', required: true }
+        ]
+      },
+      {
+        id: 'device-discovery',
+        name: 'Device Discovery',
+        description: 'Discover SwitchBot devices in your account',
+        dynamic: true
+      }
+    ]
+  }
+};
+
+// Wizard state management
+const wizardStates = new Map();
+
+// Get setup wizard definition
+async function getSetupWizard(wizardId) {
+  const wizard = SETUP_WIZARDS[wizardId];
+  if (!wizard) {
+    throw new Error(`Unknown wizard: ${wizardId}`);
+  }
+  
+  // Initialize wizard state if not exists
+  if (!wizardStates.has(wizardId)) {
+    wizardStates.set(wizardId, {
+      currentStep: 0,
+      completed: false,
+      data: {},
+      startedAt: new Date().toISOString()
+    });
+  }
+  
+  return {
+    ...wizard,
+    state: wizardStates.get(wizardId)
+  };
+}
+
+// Execute a wizard step
+async function executeWizardStep(wizardId, stepId, data) {
+  const wizard = SETUP_WIZARDS[wizardId];
+  if (!wizard) {
+    throw new Error(`Unknown wizard: ${wizardId}`);
+  }
+  
+  const state = wizardStates.get(wizardId) || {
+    currentStep: 0,
+    completed: false,
+    data: {},
+    startedAt: new Date().toISOString()
+  };
+  
+  console.log(`🧙 Executing wizard ${wizardId} step ${stepId}:`, data);
+  
+  // Execute step-specific logic based on wizard type
+  let result = { success: true, data: {}, nextStep: null };
+  
+  try {
+    // Store step data
+    state.data[stepId] = data;
+    state.lastUpdated = new Date().toISOString();
+    
+    // Find next step
+    const currentStepIndex = wizard.steps.findIndex(s => s.id === stepId);
+    if (currentStepIndex < wizard.steps.length - 1) {
+      const nextStep = wizard.steps[currentStepIndex + 1];
+      result.nextStep = nextStep.id;
+      state.currentStep = currentStepIndex + 1;
+    } else {
+      state.completed = true;
+      state.completedAt = new Date().toISOString();
+      console.log(`✅ Wizard ${wizardId} completed successfully`);
+    }
+    
+    wizardStates.set(wizardId, state);
+    
+  } catch (error) {
+    console.error(`❌ Wizard step execution failed: ${wizardId}/${stepId}`, error);
+    result = {
+      success: false,
+      error: error.message,
+      data: {}
+    };
+  }
+  
+  return result;
+}
+
+// Get wizard execution status
+async function getWizardStatus(wizardId) {
+  const state = wizardStates.get(wizardId);
+  if (!state) {
+    return { exists: false };
+  }
+  
+  const wizard = SETUP_WIZARDS[wizardId];
+  return {
+    exists: true,
+    wizardId,
+    name: wizard.name,
+    currentStep: state.currentStep,
+    totalSteps: wizard.steps.length,
+    completed: state.completed,
+    progress: state.completed ? 100 : Math.round((state.currentStep / wizard.steps.length) * 100),
+    startedAt: state.startedAt,
+    lastUpdated: state.lastUpdated,
+    completedAt: state.completedAt,
+    data: state.data
+  };
+}
+
+// Get all available setup wizards
+async function getAllSetupWizards() {
+  return Object.keys(SETUP_WIZARDS).map(id => {
+    const wizard = SETUP_WIZARDS[id];
+    const state = wizardStates.get(id);
+    return {
+      id: wizard.id,
+      name: wizard.name,
+      description: wizard.description,
+      targetDevices: wizard.targetDevices,
+      stepCount: wizard.steps.length,
+      status: state ? (state.completed ? 'completed' : 'in-progress') : 'not-started'
+    };
+  });
+}
+
 // MQTT device discovery
 async function discoverMQTTDevices() {
   const devices = [];
@@ -2058,6 +2275,211 @@ app.use((error, req, res, next) => {
   });
 });
 
+// Setup wizard endpoints - triggered when devices are identified
+app.get('/setup/wizards/:wizardId', async (req, res) => {
+  const { wizardId } = req.params;
+  try {
+    const wizard = await getSetupWizard(wizardId);
+    if (!wizard) {
+      return res.status(404).json({ error: 'Wizard not found' });
+    }
+    res.json(wizard);
+  } catch (error) {
+    console.error('Failed to load setup wizard:', error);
+    res.status(500).json({ error: 'Failed to load setup wizard' });
+  }
+});
+
+// Get all available setup wizards
+app.get('/setup/wizards', async (req, res) => {
+  try {
+    const wizards = await getAllSetupWizards();
+    res.json({
+      success: true,
+      wizards
+    });
+  } catch (error) {
+    console.error('Error fetching setup wizards:', error);
+    res.status(500).json({
+      success: false,
+      error: error.message
+    });
+  }
+});
+
+// Get specific wizard definition and state
+app.get('/setup/wizards/:wizardId', async (req, res) => {
+  try {
+    const { wizardId } = req.params;
+    const wizard = await getSetupWizard(wizardId);
+    res.json({
+      success: true,
+      wizard
+    });
+  } catch (error) {
+    console.error(`Error fetching wizard ${req.params.wizardId}:`, error);
+    res.status(404).json({
+      success: false,
+      error: error.message
+    });
+  }
+});
+
+// Execute a wizard step
+app.post('/setup/wizards/:wizardId/execute', async (req, res) => {
+  try {
+    const { wizardId } = req.params;
+    const { stepId, data } = req.body;
+    
+    if (!stepId) {
+      return res.status(400).json({
+        success: false,
+        error: 'stepId is required'
+      });
+    }
+    
+    const result = await executeWizardStep(wizardId, stepId, data || {});
+    res.json({
+      success: result.success,
+      result,
+      wizard: await getSetupWizard(wizardId)
+    });
+  } catch (error) {
+    console.error(`Error executing wizard ${req.params.wizardId}:`, error);
+    res.status(500).json({
+      success: false,
+      error: error.message
+    });
+  }
+});
+
+// Get wizard execution status
+app.get('/setup/wizards/:wizardId/status', async (req, res) => {
+  try {
+    const { wizardId } = req.params;
+    const status = await getWizardStatus(wizardId);
+    
+    if (!status.exists) {
+      return res.status(404).json({
+        success: false,
+        error: 'Wizard not found or never started'
+      });
+    }
+    
+    res.json({
+      success: true,
+      status
+    });
+  } catch (error) {
+    console.error(`Error getting wizard status ${req.params.wizardId}:`, error);
+    res.status(500).json({
+      success: false,
+      error: error.message
+    });
+  }
+});
+
+// Reset wizard state (useful for testing)
+app.delete('/setup/wizards/:wizardId', async (req, res) => {
+  try {
+    const { wizardId } = req.params;
+    wizardStates.delete(wizardId);
+    console.log(`🗑️ Reset wizard state for ${wizardId}`);
+    res.json({
+      success: true,
+      message: `Wizard ${wizardId} state reset`
+    });
+  } catch (error) {
+    console.error(`Error resetting wizard ${req.params.wizardId}:`, error);
+    res.status(500).json({
+      success: false,
+      error: error.message
+    });
+  }
+});
+
+// Automatically suggest wizards for discovered devices
+app.post('/discovery/suggest-wizards', async (req, res) => {
+  try {
+    const { devices } = req.body;
+    if (!Array.isArray(devices)) {
+      return res.status(400).json({
+        success: false,
+        error: 'devices array is required'
+      });
+    }
+    
+    const suggestions = [];
+    
+    for (const device of devices) {
+      // Find applicable wizards for this device type
+      const applicableWizards = Object.values(SETUP_WIZARDS).filter(wizard => 
+        wizard.targetDevices.includes(device.type) || 
+        device.services?.some(service => wizard.targetDevices.includes(service))
+      );
+      
+      if (applicableWizards.length > 0) {
+        suggestions.push({
+          device: {
+            ip: device.ip,
+            hostname: device.hostname,
+            type: device.type,
+            services: device.services
+          },
+          recommendedWizards: applicableWizards.map(w => ({
+            id: w.id,
+            name: w.name,
+            description: w.description,
+            confidence: calculateWizardConfidence(device, w)
+          })).sort((a, b) => b.confidence - a.confidence)
+        });
+      }
+    }
+    
+    res.json({
+      success: true,
+      suggestions
+    });
+    
+  } catch (error) {
+    console.error('Error suggesting wizards:', error);
+    res.status(500).json({
+      success: false,
+      error: error.message
+    });
+  }
+});
+
+// Calculate wizard confidence score for device matching
+function calculateWizardConfidence(device, wizard) {
+  let confidence = 0;
+  
+  // Direct type match
+  if (wizard.targetDevices.includes(device.type)) {
+    confidence += 80;
+  }
+  
+  // Service match
+  if (device.services) {
+    const matchingServices = device.services.filter(service => 
+      wizard.targetDevices.includes(service)
+    );
+    confidence += matchingServices.length * 30;
+  }
+  
+  // Device-specific bonuses
+  if (device.hostname) {
+    if (wizard.id === 'switchbot-setup' && device.hostname.toLowerCase().includes('switchbot')) {
+      confidence += 50;
+    }
+    if (wizard.id === 'mqtt-setup' && device.hostname.toLowerCase().includes('mqtt')) {
+      confidence += 50;
+    }
+  }
+  
+  return Math.min(confidence, 100);
+}
+
 // 404 handler for undefined routes
 app.use((req, res) => {
   console.warn(`⚠️  404 Not Found: ${req.method} ${req.url}`);
@@ -2066,6 +2488,103 @@ app.use((req, res) => {
     message: `Route ${req.method} ${req.url} not found`,
     timestamp: new Date().toISOString()
   });
+});
+
+// Get wizard execution status
+app.get('/setup/wizards/:wizardId/status', async (req, res) => {
+  try {
+    const { wizardId } = req.params;
+    const status = await getWizardStatus(wizardId);
+    
+    if (!status.exists) {
+      return res.status(404).json({
+        success: false,
+        error: 'Wizard not found or never started'
+      });
+    }
+    
+    res.json({
+      success: true,
+      status
+    });
+  } catch (error) {
+    console.error(`Error getting wizard status ${req.params.wizardId}:`, error);
+    res.status(500).json({
+      success: false,
+      error: error.message
+    });
+  }
+});
+
+// Reset wizard state (useful for testing)
+app.delete('/setup/wizards/:wizardId', async (req, res) => {
+  try {
+    const { wizardId } = req.params;
+    wizardStates.delete(wizardId);
+    console.log(`🗑️ Reset wizard state for ${wizardId}`);
+    res.json({
+      success: true,
+      message: `Wizard ${wizardId} state reset`
+    });
+  } catch (error) {
+    console.error(`Error resetting wizard ${req.params.wizardId}:`, error);
+    res.status(500).json({
+      success: false,
+      error: error.message
+    });
+  }
+});
+
+// Automatically suggest wizards for discovered devices
+app.post('/discovery/suggest-wizards', async (req, res) => {
+  try {
+    const { devices } = req.body;
+    if (!Array.isArray(devices)) {
+      return res.status(400).json({
+        success: false,
+        error: 'devices array is required'
+      });
+    }
+    
+    const suggestions = [];
+    
+    for (const device of devices) {
+      // Find applicable wizards for this device type
+      const applicableWizards = Object.values(SETUP_WIZARDS).filter(wizard => 
+        wizard.targetDevices.includes(device.type) || 
+        device.services?.some(service => wizard.targetDevices.includes(service))
+      );
+      
+      if (applicableWizards.length > 0) {
+        suggestions.push({
+          device: {
+            ip: device.ip,
+            hostname: device.hostname,
+            type: device.type,
+            services: device.services
+          },
+          recommendedWizards: applicableWizards.map(w => ({
+            id: w.id,
+            name: w.name,
+            description: w.description,
+            confidence: calculateWizardConfidence(device, w)
+          })).sort((a, b) => b.confidence - a.confidence)
+        });
+      }
+    }
+    
+    res.json({
+      success: true,
+      suggestions
+    });
+    
+  } catch (error) {
+    console.error('Error suggesting wizards:', error);
+    res.status(500).json({
+      success: false,
+      error: error.message
+    });
+  }
 });
 
 // Start the server after all routes are defined
