@@ -1,0 +1,13 @@
+[HPM] Proxy created: /  -> http://100.65.187.59:8089
+[HPM] Subscribed to http-proxy events: [ 'proxyReq', 'error', 'close' ]
+[charlie] running http://127.0.0.1:8091 → http://100.65.187.59:8089
+[switchbot] Rate limited by API. Will use cached data if available.
+SwitchBot API error: Error: Too Many Requests
+    at switchBotApiRequest (file:///Users/petergilbert/Desktop/GreenReach/Light-Engine-Charlie/server-charlie.js:306:19)
+    at process.processTicksAndRejections (node:internal/process/task_queues:105:5)
+    at async file:///Users/petergilbert/Desktop/GreenReach/Light-Engine-Charlie/server-charlie.js:359:24
+    at async file:///Users/petergilbert/Desktop/GreenReach/Light-Engine-Charlie/server-charlie.js:455:20 {
+  status: 429,
+  response: { message: 'Too Many Requests' },
+  code: 'SWITCHBOT_RATE_LIMITED'
+}
