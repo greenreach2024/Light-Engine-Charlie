@@ -327,7 +327,7 @@
       
       // Try SwitchBot API as fallback (with rate limiting protection)
       try {
-        const response = await fetch(`/switchbot/devices/${deviceId}/status`);
+        const response = await fetch(`/api/switchbot/devices/${deviceId}/status`);
         if (response.status === 429) {
           throw new Error('Rate limit reached');
         }
@@ -339,14 +339,26 @@
     }
 
     async function sendCommand(deviceId, command, parameter = '', commandType = 'command') {
-      const data = await fetchSwitchBotAPI(`/devices/${deviceId}/commands`, {
+      const response = await fetch(`/api/switchbot/devices/${deviceId}/commands`, {
         method: 'POST',
+        headers: {
+          'Content-Type': 'application/json'
+        },
         body: JSON.stringify({
           command,
           parameter,
           commandType
         })
       });
+
+      const data = await response.json();
+      if (!response.ok || data.statusCode !== 100) {
+        const message = data?.message || `Command failed with status ${response.status}`;
+        const error = new Error(message);
+        error.data = data;
+        error.status = response.status;
+        throw error;
+      }
       return data;
     }
 

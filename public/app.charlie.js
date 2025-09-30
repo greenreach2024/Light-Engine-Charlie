@@ -4069,21 +4069,31 @@ class RoomWizard {
   async addDemoSwitchBotDevices() {
     try {
       // Fetch real SwitchBot devices from the API
-      const response = await fetch('/api/switchbot/devices');
+      const response = await fetch('/api/switchbot/devices?refresh=1');
+      if (!response.ok) {
+        throw new Error(`SwitchBot API returned HTTP ${response.status}`);
+      }
       const data = await response.json();
-      
+      const meta = data.meta || {};
+
+      if (meta.cached && meta.stale) {
+        console.warn('SwitchBot API returned stale cached data:', meta.error || 'Unknown error');
+      } else if (meta.cached) {
+        console.info('Using cached SwitchBot device list (within TTL).');
+      }
+
       if (data.statusCode === 100 && data.body && data.body.deviceList) {
         const realDevices = data.body.deviceList;
-        
+
         // Clear existing devices and add real ones
         this.data.devices = [];
-        
+
         realDevices.forEach((device, index) => {
           const demoDevice = {
             name: device.deviceName || `Farm Device ${index + 1}`,
             vendor: 'SwitchBot',
             model: device.deviceType,
-            host: '4e6fc805b4a0dd7ed693af1dcf89d9731113d4706b2d796759aafe09cf8f07aed370d35bab4fb4799e1bda57d03c0aed',
+            host: 'switchbot-demo-token',
             switchBotId: device.deviceId,
             hubId: device.hubDeviceId,
             setup: this.getSetupForDeviceType(device.deviceType),
@@ -4093,8 +4103,8 @@ class RoomWizard {
           this.data.devices.push(demoDevice);
         });
         
-        console.log(`✅ Loaded ${realDevices.length} real SwitchBot devices for demo`);
-        
+        console.log(`✅ Loaded ${realDevices.length} SwitchBot device(s) for demo`, meta);
+
       } else {
         throw new Error('Failed to load real devices');
       }
@@ -4136,7 +4146,7 @@ class RoomWizard {
         name: 'Grow Room Temp/Humidity Sensor',
         vendor: 'SwitchBot',
         model: 'Meter Plus',
-        host: '4e6fc805b4a0dd7ed693af1dcf89d9731113d4706b2d796759aafe09cf8f07aed370d35bab4fb4799e1bda57d03c0aed',
+        host: 'switchbot-demo-token',
         setup: {
           bluetooth: { name: 'WoSensorTH_A1B2C3', pin: null }
         },
@@ -4146,7 +4156,7 @@ class RoomWizard {
         name: 'Dehumidifier Smart Plug',
         vendor: 'SwitchBot',
         model: 'Plug Mini',
-        host: '4e6fc805b4a0dd7ed693af1dcf89d9731113d4706b2d796759aafe09cf8f07aed370d35bab4fb4799e1bda57d03c0aed',
+        host: 'switchbot-demo-token',
         setup: {
           wifi: { ssid: 'GrowFarm_IoT', psk: '********', useStatic: false, staticIp: null }
         },
@@ -4156,7 +4166,7 @@ class RoomWizard {
         name: 'Exhaust Fan Controller',
         vendor: 'SwitchBot',
         model: 'Bot',
-        host: '4e6fc805b4a0dd7ed693af1dcf89d9731113d4706b2d796759aafe09cf8f07aed370d35bab4fb4799e1bda57d03c0aed',
+        host: 'switchbot-demo-token',
         setup: {
           bluetooth: { name: 'WoHand_D4E5F6', pin: null }
         },
@@ -4166,7 +4176,7 @@ class RoomWizard {
         name: 'CO2 Monitor',
         vendor: 'SwitchBot',
         model: 'Indoor Air Quality Monitor',
-        host: '4e6fc805b4a0dd7ed693af1dcf89d9731113d4706b2d796759aafe09cf8f07aed370d35bab4fb4799e1bda57d03c0aed',
+        host: 'switchbot-demo-token',
         setup: {
           wifi: { ssid: 'GrowFarm_IoT', psk: '********', useStatic: true, staticIp: '192.168.1.45' }
         },
@@ -4176,7 +4186,7 @@ class RoomWizard {
         name: 'Water Pump Controller',
         vendor: 'SwitchBot',
         model: 'Plug',
-        host: '4e6fc805b4a0dd7ed693af1dcf89d9731113d4706b2d796759aafe09cf8f07aed370d35bab4fb4799e1bda57d03c0aed',
+        host: 'switchbot-demo-token',
         setup: {
           wifi: { ssid: 'GrowFarm_IoT', psk: '********', useStatic: true, staticIp: '192.168.1.47' }
         },
@@ -4206,8 +4216,8 @@ class RoomWizard {
       hubType: 'Raspberry Pi 4 + SwitchBot Hub',
       hubIp: '192.168.1.100',
       cloudTenant: 'Azure',
-      switchbotToken: '4e6fc805b4a0dd7ed693af1dcf89d9731113d4706b2d796759aafe09cf8f07aed370d35bab4fb4799e1bda57d03c0aed',
-      switchbotSecret: '141c0bc9906ab1f4f73dd9f0c298046b'
+      switchbotToken: 'switchbot-demo-token',
+      switchbotSecret: 'switchbot-demo-secret'
     };
 
     // Update sensor categories to include what SwitchBot provides
@@ -4744,9 +4754,19 @@ function openSwitchBotManager() {
 async function refreshSwitchBotDevices() {
   try {
     // Try to fetch live data from SwitchBot API
-    const response = await fetch('/switchbot/devices');
+    const response = await fetch('/api/switchbot/devices?refresh=1');
+    if (!response.ok) {
+      const text = await response.text();
+      throw new Error(`SwitchBot API request failed (${response.status}): ${text || 'No response body'}`);
+    }
+
     const data = await response.json();
-    
+    const meta = data.meta || {};
+
+    if (meta.cached && meta.stale) {
+      console.warn('SwitchBot device refresh using stale cache because live request failed:', meta.error || 'Unknown error');
+    }
+
     if (data.statusCode === 100 && data.body?.deviceList) {
       // Update the local data file with live data
       const devices = data.body.deviceList.map(device => ({
@@ -4763,15 +4783,18 @@ async function refreshSwitchBotDevices() {
       
       // Save to local data file
       const ok = await saveJSON('./data/switchbot-devices.json', { devices });
-      
+
       if (ok) {
         STATE.switchbotDevices = devices;
         renderSwitchBotDevices();
+        const toastKind = meta.cached && meta.stale ? 'warn' : 'success';
         showToast({
           title: 'SwitchBot Sync Complete',
-          msg: `Found ${devices.length} devices from SwitchBot API`,
-          kind: 'success',
-          icon: '🏠'
+          msg: meta.cached && meta.stale
+            ? `Loaded ${devices.length} cached device(s); live refresh failed`
+            : `Found ${devices.length} device(s) from SwitchBot API`,
+          kind: toastKind,
+          icon: toastKind === 'warn' ? '⚠️' : '🏠'
         }, 3000);
       }
     } else {
