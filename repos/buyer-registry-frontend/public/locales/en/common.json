@@ -1,0 +1,23 @@
+{
+  "app": {
+    "title": "Buyer Registry"
+  },
+  "navigation": {
+    "buyer": "Buyer",
+    "seller": "Seller",
+    "agent": "Agent",
+    "developer": "Developer",
+    "mortgage": "Mortgage",
+    "admin": "Admin"
+  },
+  "buyer": {
+    "createWishlist": "Create wishlist",
+    "matches": "Matches",
+    "messages": "Messages"
+  },
+  "seller": {
+    "listings": "Listings",
+    "insights": "Insights",
+    "messages": "Messages"
+  }
+}

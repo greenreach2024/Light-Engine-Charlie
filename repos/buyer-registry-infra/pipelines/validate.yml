@@ -1,0 +1,23 @@
+name: Validate Infrastructure
+
+on:
+  pull_request:
+    paths:
+      - 'bicep/**'
+      - 'environments/**'
+      - 'pipelines/**'
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Set up Azure CLI
+        uses: azure/setup-azure@v3
+      - name: Validate Bicep templates
+        run: |
+          az bicep build --file bicep/main.bicep
+      - name: Run Checkov
+        uses: bridgecrewio/checkov-action@v12
+        with:
+          directory: bicep
