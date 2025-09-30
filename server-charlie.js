@@ -1504,10 +1504,15 @@ app.get('/discovery/devices', async (req, res) => {
     }
     
     console.log(`✅ Discovery complete: Found ${discoveredDevices.length} live devices`);
+    
+    // Analyze discovered devices and suggest setup wizards
+    const deviceAnalysis = analyzeDiscoveredDevices(discoveredDevices);
+    
     res.json({ 
       startedAt, 
       completedAt: new Date().toISOString(), 
       devices: discoveredDevices,
+      analysis: deviceAnalysis,
       message: discoveredDevices.length === 0 ? 
         'No devices found. Ensure SwitchBot API is configured and devices are on greenreach network.' :
         `Found ${discoveredDevices.length} live devices on greenreach network.`
@@ -1578,10 +1583,242 @@ async function discoverNetworkDevices() {
     console.warn('Kasa discovery via controller failed, trying direct network scan');
   }
 
-  // TODO: Add mDNS/Bonjour discovery for other WiFi devices
-  // TODO: Add network ping sweep for common device ports
+  // Direct network scan for common IoT device ports
+  try {
+    const networkDevices = await scanNetworkForDevices();
+    devices.push(...networkDevices);
+  } catch (e) {
+    console.warn('Direct network scan failed:', e.message);
+  }
   
   return devices;
+}
+
+// Scan network for common IoT devices using nmap-like discovery
+async function scanNetworkForDevices() {
+  const devices = [];
+  const { exec } = await import('child_process');
+  const { promisify } = await import('util');
+  const execAsync = promisify(exec);
+  
+  try {
+    // Get current network range
+    const { stdout: ifconfigOut } = await execAsync('ifconfig en0 | grep "inet " | grep -v 127.0.0.1');
+    const ipMatch = ifconfigOut.match(/inet (\d+\.\d+\.\d+\.\d+)/);
+    if (!ipMatch) {
+      console.warn('Could not determine network range');
+      return devices;
+    }
+    
+    const currentIP = ipMatch[1];
+    const networkBase = currentIP.split('.').slice(0, 3).join('.');
+    console.log(`🔍 Scanning network range ${networkBase}.0/24 for IoT devices...`);
+    
+    // Scan for devices with common IoT ports
+    const commonPorts = [80, 443, 8080, 8081, 1883, 8883, 9999, 10002, 502, 8000];
+    const { stdout: nmapOut } = await execAsync(
+      `nmap -p ${commonPorts.join(',')} --open ${networkBase}.0/24 | grep -E "(Nmap scan report|open)"`
+    );
+    
+    const lines = nmapOut.split('\n');
+    let currentHost = null;
+    let deviceIP = null;
+    
+    for (const line of lines) {
+      if (line.includes('Nmap scan report')) {
+        const hostMatch = line.match(/Nmap scan report for (.+) \((\d+\.\d+\.\d+\.\d+)\)/);
+        if (hostMatch) {
+          currentHost = hostMatch[1];
+          deviceIP = hostMatch[2];
+        } else {
+          const ipMatch = line.match(/Nmap scan report for (\d+\.\d+\.\d+\.\d+)/);
+          if (ipMatch) {
+            deviceIP = ipMatch[1];
+            currentHost = deviceIP;
+          }
+        }
+      } else if (line.includes('open') && deviceIP) {
+        const portMatch = line.match(/(\d+)\/tcp\s+open\s+(\w+)/);
+        if (portMatch) {
+          const port = parseInt(portMatch[1]);
+          const service = portMatch[2];
+          
+          // Identify device type based on port and service
+          const deviceInfo = identifyDeviceByPort(port, service, currentHost, deviceIP);
+          if (deviceInfo) {
+            devices.push({
+              id: `network:${deviceIP}:${port}`,
+              name: deviceInfo.name,
+              protocol: deviceInfo.protocol,
+              confidence: deviceInfo.confidence,
+              signal: null,
+              address: deviceIP,
+              vendor: deviceInfo.vendor,
+              lastSeen: new Date().toISOString(),
+              hints: {
+                type: deviceInfo.type,
+                port: port,
+                service: service,
+                host: currentHost,
+                capabilities: deviceInfo.capabilities,
+                metrics: deviceInfo.metrics
+              }
+            });
+          }
+        }
+      }
+    }
+    
+  } catch (e) {
+    console.warn('Network scanning failed:', e.message);
+  }
+  
+  return devices;
+}
+
+// Identify device type based on port and service patterns
+function identifyDeviceByPort(port, service, host, ip) {
+  const devicePatterns = {
+    // MQTT Brokers
+    1883: { name: 'MQTT Broker', protocol: 'mqtt', vendor: 'Unknown MQTT', type: 'mqtt-broker', 
+            confidence: 0.8, capabilities: ['publish', 'subscribe'], metrics: ['topics', 'clients'] },
+    8883: { name: 'MQTT Broker (TLS)', protocol: 'mqtt-tls', vendor: 'Unknown MQTT', type: 'mqtt-broker',
+            confidence: 0.8, capabilities: ['publish', 'subscribe', 'tls'], metrics: ['topics', 'clients'] },
+    
+    // Web-based IoT devices
+    80: { name: `IoT Device (${host})`, protocol: 'http', vendor: 'Unknown', type: 'web-device',
+          confidence: 0.6, capabilities: ['web-interface'], metrics: ['status', 'uptime'] },
+    443: { name: `IoT Device HTTPS (${host})`, protocol: 'https', vendor: 'Unknown', type: 'web-device',
+           confidence: 0.6, capabilities: ['web-interface', 'tls'], metrics: ['status', 'uptime'] },
+    8080: { name: `IoT Web Interface (${host})`, protocol: 'http-alt', vendor: 'Unknown', type: 'web-device',
+            confidence: 0.7, capabilities: ['web-interface'], metrics: ['status', 'config'] },
+    8081: { name: `IoT Management Interface (${host})`, protocol: 'http-mgmt', vendor: 'Unknown', type: 'management-device',
+            confidence: 0.7, capabilities: ['management', 'config'], metrics: ['status', 'config'] },
+    
+    // Modbus (Industrial/Agricultural)
+    502: { name: `Modbus Device (${host})`, protocol: 'modbus', vendor: 'Industrial', type: 'modbus-device',
+           confidence: 0.9, capabilities: ['modbus-tcp'], metrics: ['registers', 'coils', 'inputs'] },
+    
+    // Other common IoT ports
+    9999: { name: `IoT Service (${host})`, protocol: 'custom', vendor: 'Unknown', type: 'iot-device',
+            confidence: 0.5, capabilities: ['custom-protocol'], metrics: ['status'] },
+    10002: { name: `Network Device (${host})`, protocol: 'custom', vendor: 'Network', type: 'network-device',
+             confidence: 0.6, capabilities: ['network'], metrics: ['status', 'connectivity'] },
+    8000: { name: `Development Server (${host})`, protocol: 'http-dev', vendor: 'Dev', type: 'dev-server',
+            confidence: 0.4, capabilities: ['development'], metrics: ['requests', 'status'] }
+  };
+  
+  return devicePatterns[port] || null;
+}
+
+// Analyze discovered devices and suggest setup wizards
+function analyzeDiscoveredDevices(devices) {
+  const protocols = new Map();
+  const vendors = new Map();
+  const deviceTypes = new Map();
+  const setupWizards = [];
+  
+  // Categorize devices
+  devices.forEach(device => {
+    // Count by protocol
+    const protocolCount = protocols.get(device.protocol) || 0;
+    protocols.set(device.protocol, protocolCount + 1);
+    
+    // Count by vendor
+    const vendorCount = vendors.get(device.vendor) || 0;
+    vendors.set(device.vendor, vendorCount + 1);
+    
+    // Count by device type
+    const typeCount = deviceTypes.get(device.hints?.type || 'unknown') || 0;
+    deviceTypes.set(device.hints?.type || 'unknown', typeCount + 1);
+  });
+  
+  // Suggest setup wizards based on discovered devices
+  if (protocols.has('switchbot')) {
+    setupWizards.push({
+      id: 'switchbot-setup',
+      name: 'SwitchBot Device Setup',
+      description: `Configure ${protocols.get('switchbot')} SwitchBot devices`,
+      deviceCount: protocols.get('switchbot'),
+      priority: 'high',
+      capabilities: ['automation', 'monitoring', 'control']
+    });
+  }
+  
+  if (protocols.has('kasa-wifi')) {
+    setupWizards.push({
+      id: 'kasa-setup', 
+      name: 'TP-Link Kasa Setup',
+      description: `Configure ${protocols.get('kasa-wifi')} Kasa smart devices`,
+      deviceCount: protocols.get('kasa-wifi'),
+      priority: 'high',
+      capabilities: ['lighting', 'power-monitoring', 'scheduling']
+    });
+  }
+  
+  if (protocols.has('mqtt') || protocols.has('mqtt-tls')) {
+    const mqttCount = (protocols.get('mqtt') || 0) + (protocols.get('mqtt-tls') || 0);
+    setupWizards.push({
+      id: 'mqtt-setup',
+      name: 'MQTT Device Integration', 
+      description: `Configure ${mqttCount} MQTT-enabled devices`,
+      deviceCount: mqttCount,
+      priority: 'medium',
+      capabilities: ['messaging', 'sensor-data', 'real-time-updates']
+    });
+  }
+  
+  if (protocols.has('modbus')) {
+    setupWizards.push({
+      id: 'modbus-setup',
+      name: 'Industrial/Agricultural Modbus Devices',
+      description: `Configure ${protocols.get('modbus')} Modbus devices`,
+      deviceCount: protocols.get('modbus'),
+      priority: 'high',
+      capabilities: ['industrial-control', 'sensor-reading', 'automation']
+    });
+  }
+  
+  if (protocols.has('bluetooth-le')) {
+    setupWizards.push({
+      id: 'ble-setup',
+      name: 'Bluetooth LE Sensor Setup',
+      description: `Configure ${protocols.get('bluetooth-le')} BLE sensors`,
+      deviceCount: protocols.get('bluetooth-le'),
+      priority: 'medium',
+      capabilities: ['proximity-sensing', 'battery-monitoring', 'environmental-data']
+    });
+  }
+  
+  // Web-based devices (HTTP/HTTPS)
+  const webDevices = (protocols.get('http') || 0) + (protocols.get('https') || 0) + 
+                     (protocols.get('http-alt') || 0) + (protocols.get('http-mgmt') || 0);
+  if (webDevices > 0) {
+    setupWizards.push({
+      id: 'web-device-setup',
+      name: 'Web-Enabled IoT Devices',
+      description: `Configure ${webDevices} web-accessible IoT devices`,
+      deviceCount: webDevices,
+      priority: 'medium',
+      capabilities: ['web-interface', 'remote-access', 'configuration']
+    });
+  }
+  
+  return {
+    summary: {
+      totalDevices: devices.length,
+      protocolCount: protocols.size,
+      vendorCount: vendors.size,
+      typeCount: deviceTypes.size
+    },
+    protocols: Object.fromEntries(protocols),
+    vendors: Object.fromEntries(vendors),
+    deviceTypes: Object.fromEntries(deviceTypes),
+    suggestedWizards: setupWizards.sort((a, b) => {
+      const priorityOrder = { high: 3, medium: 2, low: 1 };
+      return priorityOrder[b.priority] - priorityOrder[a.priority];
+    })
+  };
 }
 
 // MQTT device discovery
