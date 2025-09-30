@@ -6413,20 +6413,58 @@ function initializeTopCard() {
   // Update farm name and logo when farm data is available
   const updateFarmDisplay = () => {
     const farmNameEl = document.getElementById('farmName');
-    const defaultTitleEl = document.getElementById('defaultTitle');
+    const farmBrandingSection = document.getElementById('farmBrandingSection');
     const farmLogoEl = document.getElementById('farmLogo');
+    const lightEngineTitleEl = document.getElementById('lightEngineTitle');
+    const farmTaglineEl = document.getElementById('farmTagline');
     
     if (STATE.farm && STATE.farm.name) {
+      // Show farm branding section
+      if (farmBrandingSection) {
+        farmBrandingSection.style.display = 'block';
+      }
+      
+      // Update farm name
       if (farmNameEl) {
         farmNameEl.textContent = STATE.farm.name;
-        farmNameEl.style.display = 'inline';
       }
-      if (defaultTitleEl) {
-        defaultTitleEl.style.display = 'none';
+      
+      // Update farm tagline if available
+      if (farmTaglineEl && STATE.farm.tagline) {
+        farmTaglineEl.textContent = STATE.farm.tagline;
+        farmTaglineEl.style.display = 'block';
       }
+      
+      // Update farm logo
       if (farmLogoEl && STATE.farm.logo) {
         farmLogoEl.src = STATE.farm.logo;
         farmLogoEl.style.display = 'block';
+      }
+      
+      // Apply farm brand colors to Light Engine Charlie title (colors only, not fonts)
+      if (lightEngineTitleEl && STATE.farm.brandColors) {
+        const brandColors = STATE.farm.brandColors;
+        if (brandColors.primary) {
+          lightEngineTitleEl.style.color = brandColors.primary;
+          // Update CSS custom property for farm accent color
+          document.documentElement.style.setProperty('--farm-accent', brandColors.primary);
+        }
+        
+        // Set farm brand CSS variables for farm branding elements
+        if (brandColors.primary) {
+          document.documentElement.style.setProperty('--farm-primary', brandColors.primary);
+        }
+        if (brandColors.secondary) {
+          document.documentElement.style.setProperty('--farm-secondary', brandColors.secondary);
+        }
+        if (STATE.farm.brandFont) {
+          document.documentElement.style.setProperty('--farm-font', STATE.farm.brandFont);
+        }
+      }
+    } else {
+      // Hide farm branding section if no farm data
+      if (farmBrandingSection) {
+        farmBrandingSection.style.display = 'none';
       }
     }
   };
@@ -6496,13 +6534,17 @@ function initializeAIFeatures() {
       }
     });
 
-    // Add hover tooltip functionality
-    card.addEventListener('mouseenter', () => {
-      showTooltipFor(card, featureData.description);
+    // Add hover tooltip functionality using existing tooltip system
+    card.addEventListener('mouseenter', (e) => {
+      card.setAttribute('data-tip', featureData.description);
+      showTipFor(card);
     });
 
     card.addEventListener('mouseleave', () => {
-      hideTooltip();
+      const tooltip = document.getElementById('tooltip');
+      if (tooltip) {
+        tooltip.setAttribute('aria-hidden', 'true');
+      }
     });
   });
 
@@ -6532,34 +6574,7 @@ function updateFeatureStatus(card, status) {
   statusEl.textContent = status === 'on' ? 'ON' : 
                         status === 'off' ? 'OFF' : 
                         status === 'always-on' ? 'ALWAYS ON' : 
-                        status === 'dev' ? 'IN DEVELOPMENT' : status.toUpperCase();
-}
-
-function showTooltipFor(element, text) {
-  const tooltip = document.getElementById('tooltip');
-  const content = document.getElementById('tooltip-content');
-  if (!tooltip || !content) return;
-  
-  content.textContent = text;
-  tooltip.style.display = 'block';
-  tooltip.setAttribute('aria-hidden', 'false');
-  
-  const rect = element.getBoundingClientRect();
-  const tooltipRect = tooltip.getBoundingClientRect();
-  
-  const top = rect.top - tooltipRect.height - 10;
-  const left = Math.max(10, Math.min(rect.left, window.innerWidth - tooltipRect.width - 10));
-  
-  tooltip.style.top = `${top}px`;
-  tooltip.style.left = `${left}px`;
-}
-
-function hideTooltip() {
-  const tooltip = document.getElementById('tooltip');
-  if (tooltip) {
-    tooltip.style.display = 'none';
-    tooltip.setAttribute('aria-hidden', 'true');
-  }
+                        status === 'dev' ? 'DEV' : status.toUpperCase();
 }
 
 document.addEventListener('DOMContentLoaded', async () => {
