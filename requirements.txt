@@ -1,0 +1,6 @@
+fastapi
+uvicorn
+paho-mqtt
+python-kasa
+requests
+pyyaml
