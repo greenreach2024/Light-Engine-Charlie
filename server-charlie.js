@@ -215,8 +215,12 @@ const SWITCHBOT_TOKEN = process.env.SWITCHBOT_TOKEN || "4e6fc805b4a0dd7ed693af1d
 const SWITCHBOT_SECRET = process.env.SWITCHBOT_SECRET || "141c0bc9906ab1f4f73dd9f0c298046b";
 const SWITCHBOT_API_BASE = 'https://api.switch-bot.com/v1.1';
 const SWITCHBOT_API_TIMEOUT_MS = Number(process.env.SWITCHBOT_API_TIMEOUT_MS || 8000);
-const SWITCHBOT_DEVICE_CACHE_TTL_MS = Number(process.env.SWITCHBOT_DEVICE_CACHE_TTL_MS || 300_000); // 5 minutes
-const SWITCHBOT_STATUS_CACHE_TTL_MS = Number(process.env.SWITCHBOT_STATUS_CACHE_TTL_MS || 120_000); // 2 minutes
+const SWITCHBOT_DEVICE_CACHE_TTL_MS = Number(process.env.SWITCHBOT_DEVICE_CACHE_TTL_MS || 600_000); // 10 minutes
+const SWITCHBOT_STATUS_CACHE_TTL_MS = Number(process.env.SWITCHBOT_STATUS_CACHE_TTL_MS || 300_000); // 5 minutes
+const SWITCHBOT_RATE_LIMIT_MS = Number(process.env.SWITCHBOT_RATE_LIMIT_MS || 6000); // 6 seconds between requests (10 per minute max)
+
+// Rate limiting state
+let lastSwitchBotRequest = 0;
 
 const switchBotDevicesCache = {
   payload: null,
@@ -264,6 +268,16 @@ async function switchBotApiRequest(path, { method = 'GET', data = null } = {}) {
     throw err;
   }
 
+  // Rate limiting: ensure minimum time between requests
+  const now = Date.now();
+  const timeSinceLastRequest = now - lastSwitchBotRequest;
+  if (timeSinceLastRequest < SWITCHBOT_RATE_LIMIT_MS) {
+    const waitTime = SWITCHBOT_RATE_LIMIT_MS - timeSinceLastRequest;
+    console.log(`[switchbot] Rate limiting: waiting ${waitTime}ms before next request`);
+    await new Promise(resolve => setTimeout(resolve, waitTime));
+  }
+  lastSwitchBotRequest = Date.now();
+
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), SWITCHBOT_API_TIMEOUT_MS);
   timeout.unref?.();
@@ -292,6 +306,13 @@ async function switchBotApiRequest(path, { method = 'GET', data = null } = {}) {
       const err = new Error(body?.message || `SwitchBot API request failed with status ${response.status}`);
       err.status = response.status;
       err.response = body;
+      
+      // Special handling for rate limiting
+      if (response.status === 429) {
+        err.code = 'SWITCHBOT_RATE_LIMITED';
+        console.log(`[switchbot] Rate limited by API. Will use cached data if available.`);
+      }
+      
       throw err;
     }
 
@@ -439,10 +460,28 @@ app.get("/api/switchbot/devices", async (req, res) => {
     });
   } catch (error) {
     console.error('SwitchBot API error:', error);
+    
+    // If rate limited, try to return cached data with appropriate status
+    if (error.code === 'SWITCHBOT_RATE_LIMITED' && switchBotDevicesCache.payload) {
+      console.log('[switchbot] Returning cached data due to rate limiting');
+      const meta = buildSwitchBotMeta({
+        fromCache: true,
+        stale: true,
+        fetchedAt: switchBotDevicesCache.fetchedAt,
+        error: error
+      });
+      return res.status(200).json({
+        ...switchBotDevicesCache.payload,
+        meta
+      });
+    }
+    
     const status = error.status === 401 ? 401 : error.code === 'SWITCHBOT_TIMEOUT' ? 504 : error.code === 'SWITCHBOT_NO_AUTH' ? 503 : error.status === 429 ? 429 : 502;
     res.status(status).json({
       statusCode: error.statusCode || status,
-      message: error.message || "Failed to fetch devices from SwitchBot API"
+      message: error.message || "Failed to fetch devices from SwitchBot API",
+      cached: Boolean(switchBotDevicesCache.payload),
+      retryAfter: error.status === 429 ? Math.ceil(SWITCHBOT_DEVICE_CACHE_TTL_MS / 1000) : undefined
     });
   }
 });
