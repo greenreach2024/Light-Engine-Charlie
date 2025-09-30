@@ -12,6 +12,18 @@ import paho.mqtt.client as mqtt
 import requests
 from kasa import Discover  # type: ignore
 
+try:
+    from bleak import BleakScanner
+    BLEAK_AVAILABLE = True
+except ImportError:
+    BLEAK_AVAILABLE = False
+
+try:
+    from zeroconf import ServiceBrowser, ServiceListener, Zeroconf
+    ZEROCONF_AVAILABLE = True
+except ImportError:
+    ZEROCONF_AVAILABLE = False
+
 from .config import EnvironmentConfig, MQTTConfig, SwitchBotConfig
 from .device_models import Device, SensorEvent
 from .state import DeviceRegistry, SensorEventBuffer
@@ -223,6 +235,129 @@ def fetch_switchbot_status(device_id: str, config: SwitchBotConfig) -> Optional[
     return body
 
 
+async def discover_ble_devices(registry: DeviceRegistry, scan_duration: float = 10.0) -> List[Device]:
+    """Discover Bluetooth Low Energy devices."""
+    
+    if not BLEAK_AVAILABLE:
+        LOGGER.warning("Bleak not available - BLE discovery disabled")
+        return []
+    
+    LOGGER.debug("Starting BLE device discovery for %s seconds", scan_duration)
+    devices: List[Device] = []
+    
+    try:
+        discovered = await BleakScanner.discover(timeout=scan_duration, return_adv=True)
+        
+        for device_address, (device, advertisement_data) in discovered.items():
+            # Filter out devices without names or services (likely not IoT devices)
+            if not device.name and not advertisement_data.service_uuids:
+                continue
+                
+            device_obj = Device(
+                device_id=device.address,
+                name=device.name or f"BLE Device {device.address[-8:]}",
+                category="ble-peripheral",
+                protocol="bluetooth-le",
+                online=True,
+                capabilities={
+                    "services": list(advertisement_data.service_uuids),
+                    "connectable": True,
+                },
+                details={
+                    "address": device.address,
+                    "rssi": advertisement_data.rssi,
+                    "manufacturer_data": dict(advertisement_data.manufacturer_data) if advertisement_data.manufacturer_data else {},
+                    "service_data": dict(advertisement_data.service_data) if advertisement_data.service_data else {},
+                },
+            )
+            
+            registry.upsert(device_obj)
+            devices.append(device_obj)
+            LOGGER.info("Discovered BLE device %s (%s)", device_obj.name, device.address)
+            
+    except Exception as exc:
+        LOGGER.error("BLE discovery failed: %s", exc)
+        
+    return devices
+
+
+class mDNSListener(ServiceListener):
+    """Service listener for mDNS device discovery."""
+    
+    def __init__(self, registry: DeviceRegistry):
+        self.registry = registry
+        self.discovered_devices: List[Device] = []
+    
+    def add_service(self, zc: Zeroconf, type_: str, name: str) -> None:
+        info = zc.get_service_info(type_, name)
+        if info:
+            device = Device(
+                device_id=f"mdns:{name}",
+                name=name.split('.')[0],  # Remove service type from name
+                category="network-service",
+                protocol="mdns",
+                online=True,
+                capabilities={
+                    "service_type": type_,
+                    "port": info.port,
+                },
+                details={
+                    "addresses": [addr.compressed for addr in info.parsed_addresses()],
+                    "port": info.port,
+                    "service_type": type_,
+                    "properties": {k.decode('utf-8'): v.decode('utf-8') for k, v in info.properties.items()},
+                },
+            )
+            
+            self.registry.upsert(device)
+            self.discovered_devices.append(device)
+            LOGGER.info("Discovered mDNS service %s (%s)", device.name, type_)
+
+
+async def discover_mdns_devices(registry: DeviceRegistry, scan_duration: float = 10.0) -> List[Device]:
+    """Discover devices via mDNS/Bonjour."""
+    
+    if not ZEROCONF_AVAILABLE:
+        LOGGER.warning("Zeroconf not available - mDNS discovery disabled")
+        return []
+    
+    LOGGER.debug("Starting mDNS device discovery for %s seconds", scan_duration)
+    
+    zc = Zeroconf()
+    listener = mDNSListener(registry)
+    
+    # Common IoT device service types
+    service_types = [
+        "_http._tcp.local.",
+        "_https._tcp.local.", 
+        "_ipp._tcp.local.",
+        "_airplay._tcp.local.",
+        "_homekit._tcp.local.",
+        "_hap._tcp.local.",
+        "_matter._tcp.local.",
+        "_thread._tcp.local.",
+        "_meshcop._tcp.local.",
+        "_kasa._tcp.local.",
+        "_tplink._tcp.local.",
+    ]
+    
+    try:
+        browsers = []
+        for service_type in service_types:
+            browser = ServiceBrowser(zc, service_type, listener)
+            browsers.append(browser)
+        
+        # Let discovery run for specified duration
+        await asyncio.sleep(scan_duration)
+        
+    except Exception as exc:
+        LOGGER.error("mDNS discovery failed: %s", exc)
+    finally:
+        zc.close()
+    
+    return listener.discovered_devices
+
+
 async def full_discovery_cycle(
     config: EnvironmentConfig,
     registry: DeviceRegistry,
@@ -232,8 +367,17 @@ async def full_discovery_cycle(
     """Run discovery for all protocols with graceful error handling."""
 
     tasks: List[asyncio.Future] = []
+    
+    # WiFi/Network device discovery
     tasks.append(asyncio.ensure_future(discover_kasa_devices(registry=registry, timeout=config.kasa_discovery_timeout)))
+    
+    # mDNS/Bonjour discovery
+    tasks.append(asyncio.ensure_future(discover_mdns_devices(registry=registry, scan_duration=5.0)))
+    
+    # BLE device discovery
+    tasks.append(asyncio.ensure_future(discover_ble_devices(registry=registry, scan_duration=8.0)))
 
+    # MQTT device discovery
     if config.mqtt:
         tasks.append(
             asyncio.ensure_future(
@@ -246,6 +390,7 @@ async def full_discovery_cycle(
             )
         )
 
+    # SwitchBot Cloud API discovery
     if config.switchbot:
         loop = asyncio.get_event_loop()
         tasks.append(loop.run_in_executor(None, discover_switchbot_devices, registry, config.switchbot))
@@ -258,8 +403,10 @@ async def full_discovery_cycle(
 
 __all__ = [
     "discover_kasa_devices",
-    "discover_mqtt_devices",
+    "discover_mqtt_devices", 
     "discover_switchbot_devices",
+    "discover_ble_devices",
+    "discover_mdns_devices",
     "fetch_switchbot_status",
     "full_discovery_cycle",
 ]

@@ -4,3 +4,5 @@ paho-mqtt
 python-kasa
 requests
 pyyaml
+bleak  # Bluetooth Low Energy support
+zeroconf  # mDNS/Bonjour discovery

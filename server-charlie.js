@@ -1438,128 +1438,232 @@ app.get('/discovery/devices', async (req, res) => {
       }
     }
   } catch (err) {
-    console.warn('Controller discovery failed, returning farm device scan', err.message);
+    console.warn('Controller discovery failed, attempting live network scan', err.message);
   }
   
-  // Farm device discovery - scanning greenreach network for actual devices
-  const farmDevices = [
-    // LED Grow Lights - Likely on the farm network
-    {
-      id: 'wifi:192.168.1.101',
-      name: 'HLG 550 V2 R-Spec',
-      protocol: 'wifi',
-      confidence: 0.95,
-      signal: -35,
-      address: '192.168.1.101',
-      vendor: 'Horticulture Lighting Group',
-      lastSeen: new Date().toISOString(),
-      hints: { type: 'Light', metrics: ['power', 'energy', 'spectrum'], lightType: 'LED', wattage: 550 }
-    },
-    {
-      id: 'wifi:192.168.1.102',
-      name: 'HLG 550 V2 R-Spec',
-      protocol: 'wifi',
-      confidence: 0.95,
-      signal: -38,
-      address: '192.168.1.102',
-      vendor: 'Horticulture Lighting Group',
-      lastSeen: new Date().toISOString(),
-      hints: { type: 'Light', metrics: ['power', 'energy', 'spectrum'], lightType: 'LED', wattage: 550 }
-    },
-    {
-      id: 'wifi:192.168.1.103',
-      name: 'Spider Farmer SF-7000',
-      protocol: 'wifi',
-      confidence: 0.92,
-      signal: -42,
-      address: '192.168.1.103',
-      vendor: 'Spider Farmer',
-      lastSeen: new Date().toISOString(),
-      hints: { type: 'Light', metrics: ['power', 'energy', 'spectrum'], lightType: 'LED', wattage: 700 }
-    },
-    {
-      id: 'wifi:192.168.1.104',
-      name: 'MARS HYDRO FC-E6500',
-      protocol: 'wifi',
-      confidence: 0.90,
-      signal: -45,
-      address: '192.168.1.104',
-      vendor: 'MARS HYDRO',
-      lastSeen: new Date().toISOString(),
-      hints: { type: 'Light', metrics: ['power', 'energy', 'spectrum'], lightType: 'LED', wattage: 650 }
-    },
-    // Environmental Controls
-    {
-      id: 'wifi:192.168.1.120',
-      name: 'Trolmaster Hydro-X Pro',
-      protocol: 'wifi',
-      confidence: 0.88,
-      signal: -40,
-      address: '192.168.1.120',
-      vendor: 'TrolMaster',
-      lastSeen: new Date().toISOString(),
-      hints: { type: 'Controller', metrics: ['temp', 'rh', 'co2', 'ph', 'ec'] }
-    },
-    {
-      id: 'wifi:192.168.1.121',
-      name: 'AC Infinity CloudLine T6',
-      protocol: 'wifi',
-      confidence: 0.85,
-      signal: -48,
-      address: '192.168.1.121',
-      vendor: 'AC Infinity',
-      lastSeen: new Date().toISOString(),
-      hints: { type: 'Fan', metrics: ['airflow', 'speed', 'temp'] }
-    },
-    // Sensors
-    {
-      id: 'ble:SwitchBot-Meter-Farm01',
-      name: 'SwitchBot Meter Plus (Room A)',
-      protocol: 'ble',
-      confidence: 0.82,
-      signal: -41,
-      address: 'F1:22:03:AA:CD:01',
-      vendor: 'SwitchBot',
-      lastSeen: new Date().toISOString(),
-      hints: { type: 'Sensor', metrics: ['temp', 'rh'] }
-    },
-    {
-      id: 'ble:SwitchBot-Meter-Farm02',
-      name: 'SwitchBot Meter Plus (Room B)',
-      protocol: 'ble',
-      confidence: 0.80,
-      signal: -44,
-      address: 'F1:22:03:AA:CD:02',
-      vendor: 'SwitchBot',
-      lastSeen: new Date().toISOString(),
-      hints: { type: 'Sensor', metrics: ['temp', 'rh'] }
-    },
-    // Power Management
-    {
-      id: 'wifi:192.168.1.130',
-      name: 'Shelly Pro 4PM (Light Bank 1)',
-      protocol: 'wifi',
-      confidence: 0.93,
-      signal: -36,
-      address: '192.168.1.130',
-      vendor: 'Shelly',
-      lastSeen: new Date().toISOString(),
-      hints: { type: 'Power', metrics: ['power', 'energy', 'current', 'voltage'] }
-    },
-    {
-      id: 'wifi:192.168.1.131',
-      name: 'Shelly Pro 4PM (Light Bank 2)',
-      protocol: 'wifi',
-      confidence: 0.91,
-      signal: -39,
-      address: '192.168.1.131',
-      vendor: 'Shelly',
-      lastSeen: new Date().toISOString(),
-      hints: { type: 'Power', metrics: ['power', 'energy', 'current', 'voltage'] }
+  // LIVE DEVICE DISCOVERY - Scan greenreach network for real devices
+  console.log('🔍 Starting live device discovery on greenreach network...');
+  
+  try {
+    const discoveredDevices = [];
+    
+    // 1. Try to discover SwitchBot devices via API
+    if (process.env.SWITCHBOT_TOKEN && process.env.SWITCHBOT_SECRET) {
+      try {
+        const switchbotResponse = await fetch('/api/switchbot/devices?refresh=1');
+        if (switchbotResponse.ok) {
+          const switchbotData = await switchbotResponse.json();
+          if (switchbotData.statusCode === 100 && switchbotData.body?.deviceList) {
+            switchbotData.body.deviceList.forEach(device => {
+              discoveredDevices.push({
+                id: `switchbot:${device.deviceId}`,
+                name: device.deviceName || `SwitchBot ${device.deviceType}`,
+                protocol: 'switchbot-cloud',
+                confidence: 0.95,
+                signal: null,
+                address: device.deviceId,
+                vendor: 'SwitchBot',
+                lastSeen: new Date().toISOString(),
+                hints: { 
+                  type: device.deviceType, 
+                  switchbotId: device.deviceId,
+                  hubId: device.hubDeviceId,
+                  metrics: getSwitchBotMetrics(device.deviceType)
+                }
+              });
+            });
+          }
+        }
+      } catch (e) {
+        console.warn('SwitchBot discovery failed:', e.message);
+      }
     }
-  ];
-  res.json({ startedAt, completedAt: new Date().toISOString(), devices: farmDevices });
+    
+    // 2. Network scanning for WiFi/IP devices
+    try {
+      const networkDevices = await discoverNetworkDevices();
+      discoveredDevices.push(...networkDevices);
+    } catch (e) {
+      console.warn('Network device discovery failed:', e.message);
+    }
+
+    // 3. MQTT device discovery (if configured)
+    try {
+      const mqttDevices = await discoverMQTTDevices();
+      discoveredDevices.push(...mqttDevices);
+    } catch (e) {
+      console.warn('MQTT device discovery failed:', e.message);
+    }
+
+    // 4. BLE device discovery (if available)
+    try {
+      const bleDevices = await discoverBLEDevices();
+      discoveredDevices.push(...bleDevices);
+    } catch (e) {
+      console.warn('BLE device discovery failed:', e.message);
+    }
+    
+    console.log(`✅ Discovery complete: Found ${discoveredDevices.length} live devices`);
+    res.json({ 
+      startedAt, 
+      completedAt: new Date().toISOString(), 
+      devices: discoveredDevices,
+      message: discoveredDevices.length === 0 ? 
+        'No devices found. Ensure SwitchBot API is configured and devices are on greenreach network.' :
+        `Found ${discoveredDevices.length} live devices on greenreach network.`
+    });
+    
+  } catch (error) {
+    console.error('❌ Live device discovery failed:', error);
+    res.status(500).json({ 
+      startedAt, 
+      completedAt: new Date().toISOString(), 
+      devices: [], 
+      error: 'Live device discovery failed. No mock devices available.',
+      message: 'Please check network connectivity and device configuration.'
+    });
+  }
 });
+
+// Helper function to get metrics based on SwitchBot device type
+function getSwitchBotMetrics(deviceType) {
+  const type = deviceType.toLowerCase();
+  if (type.includes('meter') || type.includes('sensor')) {
+    return ['temperature', 'humidity', 'battery'];
+  } else if (type.includes('plug')) {
+    return ['power', 'energy', 'current', 'voltage'];
+  } else if (type.includes('hub')) {
+    return ['signal', 'connectivity'];
+  } else if (type.includes('bot')) {
+    return ['position', 'battery'];
+  } else if (type.includes('bulb') || type.includes('strip')) {
+    return ['brightness', 'color', 'power'];
+  }
+  return ['status', 'battery'];
+}
+
+// Network device discovery (WiFi/IP devices)
+async function discoverNetworkDevices() {
+  const devices = [];
+  
+  // Discover TP-Link Kasa devices via Python backend if available
+  try {
+    const controller = getController();
+    if (controller) {
+      const kasaResponse = await fetch(`${controller}/api/devices/kasa`);
+      if (kasaResponse.ok) {
+        const kasaData = await kasaResponse.json();
+        if (kasaData.devices) {
+          kasaData.devices.forEach(device => {
+            devices.push({
+              id: `kasa:${device.device_id}`,
+              name: device.name,
+              protocol: 'kasa-wifi',
+              confidence: 0.9,
+              signal: null,
+              address: device.details?.host || 'unknown',
+              vendor: 'TP-Link Kasa',
+              lastSeen: new Date().toISOString(),
+              hints: {
+                type: device.category,
+                capabilities: device.capabilities,
+                metrics: ['power', 'energy', 'brightness']
+              }
+            });
+          });
+        }
+      }
+    }
+  } catch (e) {
+    console.warn('Kasa discovery via controller failed, trying direct network scan');
+  }
+
+  // TODO: Add mDNS/Bonjour discovery for other WiFi devices
+  // TODO: Add network ping sweep for common device ports
+  
+  return devices;
+}
+
+// MQTT device discovery
+async function discoverMQTTDevices() {
+  const devices = [];
+  
+  // Check if MQTT broker is configured via Python backend
+  try {
+    const controller = getController();
+    if (controller) {
+      const mqttResponse = await fetch(`${controller}/api/devices/mqtt`);
+      if (mqttResponse.ok) {
+        const mqttData = await mqttResponse.json();
+        if (mqttData.devices) {
+          mqttData.devices.forEach(device => {
+            devices.push({
+              id: `mqtt:${device.device_id}`,
+              name: device.name,
+              protocol: 'mqtt',
+              confidence: 0.85,
+              signal: null,
+              address: device.details?.topic || 'unknown',
+              vendor: 'MQTT Device',
+              lastSeen: device.details?.last_seen || new Date().toISOString(),
+              hints: {
+                type: device.category,
+                topic: device.details?.topic,
+                capabilities: device.capabilities,
+                metrics: ['sensor_data', 'status', 'battery']
+              }
+            });
+          });
+        }
+      }
+    }
+  } catch (e) {
+    console.warn('MQTT discovery via controller failed:', e.message);
+  }
+
+  return devices;
+}
+
+// BLE device discovery
+async function discoverBLEDevices() {
+  const devices = [];
+  
+  // Check for BLE devices via Python backend (if noble/bleak is available)
+  try {
+    const controller = getController();
+    if (controller) {
+      const bleResponse = await fetch(`${controller}/api/devices/ble`);
+      if (bleResponse.ok) {
+        const bleData = await bleResponse.json();
+        if (bleData.devices) {
+          bleData.devices.forEach(device => {
+            devices.push({
+              id: `ble:${device.device_id}`,
+              name: device.name || `BLE Device ${device.device_id.substring(0, 8)}`,
+              protocol: 'bluetooth-le',
+              confidence: 0.8,
+              signal: device.rssi || null,
+              address: device.device_id,
+              vendor: device.manufacturer || 'Unknown BLE',
+              lastSeen: new Date().toISOString(),
+              hints: {
+                type: device.category || 'ble-peripheral',
+                rssi: device.rssi,
+                services: device.services || [],
+                metrics: ['battery', 'signal_strength', 'sensor_data']
+              }
+            });
+          });
+        }
+      }
+    }
+  } catch (e) {
+    // BLE discovery is optional - many systems don't have it
+    console.log('BLE discovery not available (normal on many systems)');
+  }
+
+  return devices;
+}
 
 // Farm device status endpoints for live testing
 app.get('/api/device/:deviceId/status', async (req, res) => {

@@ -162,6 +162,56 @@ async def trigger_discovery() -> dict:
     return {"status": "scheduled"}
 
 
+@app.get("/api/devices/kasa", response_model=dict)
+async def get_kasa_devices() -> dict:
+    """Get TP-Link Kasa devices discovered on the network."""
+    from .device_discovery import discover_kasa_devices
+    
+    devices = await discover_kasa_devices(REGISTRY, timeout=5)
+    return {
+        "devices": [device.__dict__ for device in devices],
+        "protocol": "kasa-wifi",
+        "timestamp": asyncio.get_event_loop().time()
+    }
+
+
+@app.get("/api/devices/mqtt", response_model=dict) 
+async def get_mqtt_devices() -> dict:
+    """Get MQTT devices that have been discovered."""
+    mqtt_devices = [device for device in REGISTRY.list() if device.protocol == "mqtt"]
+    return {
+        "devices": [device.__dict__ for device in mqtt_devices],
+        "protocol": "mqtt",
+        "timestamp": asyncio.get_event_loop().time()
+    }
+
+
+@app.get("/api/devices/ble", response_model=dict)
+async def get_ble_devices() -> dict:
+    """Get Bluetooth Low Energy devices discovered nearby."""
+    from .device_discovery import discover_ble_devices
+    
+    devices = await discover_ble_devices(REGISTRY, scan_duration=8.0)
+    return {
+        "devices": [device.__dict__ for device in devices],
+        "protocol": "bluetooth-le", 
+        "timestamp": asyncio.get_event_loop().time()
+    }
+
+
+@app.get("/api/devices/mdns", response_model=dict)
+async def get_mdns_devices() -> dict:
+    """Get mDNS/Bonjour devices discovered on the network."""
+    from .device_discovery import discover_mdns_devices
+    
+    devices = await discover_mdns_devices(REGISTRY, scan_duration=5.0)
+    return {
+        "devices": [device.__dict__ for device in devices],
+        "protocol": "mdns",
+        "timestamp": asyncio.get_event_loop().time()
+    }
+
+
 @app.get("/lighting/fixtures", response_model=List[LightingFixtureResponse])
 async def list_fixtures() -> List[LightingFixtureResponse]:
     return [
