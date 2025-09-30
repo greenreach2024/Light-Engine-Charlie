@@ -215,8 +215,8 @@ const SWITCHBOT_TOKEN = process.env.SWITCHBOT_TOKEN || "4e6fc805b4a0dd7ed693af1d
 const SWITCHBOT_SECRET = process.env.SWITCHBOT_SECRET || "141c0bc9906ab1f4f73dd9f0c298046b";
 const SWITCHBOT_API_BASE = 'https://api.switch-bot.com/v1.1';
 const SWITCHBOT_API_TIMEOUT_MS = Number(process.env.SWITCHBOT_API_TIMEOUT_MS || 8000);
-const SWITCHBOT_DEVICE_CACHE_TTL_MS = Number(process.env.SWITCHBOT_DEVICE_CACHE_TTL_MS || 60_000);
-const SWITCHBOT_STATUS_CACHE_TTL_MS = Number(process.env.SWITCHBOT_STATUS_CACHE_TTL_MS || 30_000);
+const SWITCHBOT_DEVICE_CACHE_TTL_MS = Number(process.env.SWITCHBOT_DEVICE_CACHE_TTL_MS || 300_000); // 5 minutes
+const SWITCHBOT_STATUS_CACHE_TTL_MS = Number(process.env.SWITCHBOT_STATUS_CACHE_TTL_MS || 120_000); // 2 minutes
 
 const switchBotDevicesCache = {
   payload: null,
@@ -1122,10 +1122,6 @@ app.post("/data/:name", (req, res) => {
 
 // Data persistence endpoints
 
-app.listen(PORT, () => {
-  console.log(`[charlie] running http://127.0.0.1:${PORT} → ${getController()}`);
-});
-
 app.get('/forwarder/network/wifi/scan', async (req, res) => {
   try {
     const controller = getController();
@@ -1239,4 +1235,9 @@ app.get('/discovery/devices', async (req, res) => {
     }
   ];
   res.json({ startedAt, completedAt: new Date().toISOString(), devices: demoDevices });
+});
+
+// Start the server after all routes are defined
+app.listen(PORT, () => {
+  console.log(`[charlie] running http://127.0.0.1:${PORT} → ${getController()}`);
 });
