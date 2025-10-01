@@ -1,0 +1,24 @@
+{
+  "groups": [
+    {
+      "id": "group-test",
+      "name": "Test",
+      "lights": [
+        {
+          "id": "light-002",
+          "name": "LIGHT 002"
+        },
+        {
+          "id": "light-003",
+          "name": "LIGHT 003"
+        },
+        {
+          "id": "light-004",
+          "name": "LIGHT 004"
+        }
+      ],
+      "plan": "herbs-general",
+      "schedule": "schedule-gn01jt"
+    }
+  ]
+}

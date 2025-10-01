@@ -1,0 +1,58 @@
+{
+  "fixtures": [
+    {
+      "vendor": "Gavita",
+      "model": "Pro 1700e",
+      "watts": 645,
+      "control": "0-10V",
+      "spectrum": { "cw": 45, "ww": 45, "bl": 5, "rd": 5 },
+      "tags": ["LED", "bar"],
+      "confidence": 0.92
+    },
+    {
+      "vendor": "Fluence",
+      "model": "SPYDR X Plus",
+      "watts": 655,
+      "control": "0-10V",
+      "spectrum": { "cw": 50, "ww": 40, "bl": 5, "rd": 5 },
+      "tags": ["LED", "bar"],
+      "confidence": 0.88
+    },
+    {
+      "vendor": "Luxx",
+      "model": "645 Pro",
+      "watts": 645,
+      "control": "0-10V",
+      "spectrum": { "cw": 46, "ww": 44, "bl": 5, "rd": 5 },
+      "tags": ["LED", "bar"],
+      "confidence": 0.85
+    },
+    {
+      "vendor": "GreenReach",
+      "model": "Hex12 Controller",
+      "watts": 12,
+      "control": "LAN API",
+      "spectrum": { "cw": 45, "ww": 45, "bl": 0, "rd": 0 },
+      "tags": ["controller"],
+      "confidence": 0.99
+    },
+    {
+      "vendor": "Horticulture Lighting Group",
+      "model": "HLG 650R",
+      "watts": 630,
+      "control": "0-10V",
+      "spectrum": { "cw": 48, "ww": 42, "bl": 5, "rd": 5 },
+      "tags": ["LED", "bar"],
+      "confidence": 0.84
+    },
+    {
+      "vendor": "Gavita",
+      "model": "CT 1930e",
+      "watts": 780,
+      "control": "0-10V",
+      "spectrum": { "cw": 40, "ww": 50, "bl": 5, "rd": 5 },
+      "tags": ["LED"],
+      "confidence": 0.8
+    }
+  ]
+}

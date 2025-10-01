@@ -1,0 +1,34 @@
+{
+  "plans": [
+    {
+      "id": "lettuce-veg",
+      "name": "Lettuce Vegetative",
+      "description": "Optimized spectrum for leafy greens growth",
+      "spectrum": { "cw": 45, "ww": 35, "bl": 15, "rd": 5 },
+      "ppfd": 200,
+      "dli": 14.4,
+      "crop": "Greens",
+      "stage": "Vegetative"
+    },
+    {
+      "id": "herbs-general",
+      "name": "Herbs General",
+      "description": "Balanced spectrum for herb cultivation",
+      "spectrum": { "cw": 40, "ww": 30, "bl": 20, "rd": 10 },
+      "ppfd": 180,
+      "dli": 12.96,
+      "crop": "Herbs",
+      "stage": "Vegetative"
+    },
+    {
+      "id": "strawberry-flower",
+      "name": "Strawberry Flowering",
+      "description": "Enhanced red spectrum for flowering",
+      "spectrum": { "cw": 30, "ww": 25, "bl": 15, "rd": 30 },
+      "ppfd": 250,
+      "dli": 18.0,
+      "crop": "Strawberries",
+      "stage": "Flowering"
+    }
+  ]
+}
