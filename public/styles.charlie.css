@@ -51,6 +51,74 @@
   --shadow-lg: 0 10px 15px -3px rgb(0 0 0 / 0.1), 0 4px 6px -4px rgb(0 0 0 / 0.1);
 }
 
+/* Scanning Radar Animation */
+.scanning-radar {
+  position: relative;
+  width: 60px;
+  height: 60px;
+  margin: 0 auto;
+  border-radius: 50%;
+  background: conic-gradient(from 0deg, transparent 0deg, var(--gr-primary, #0D7D7D) 30deg, transparent 60deg);
+  animation: radar-sweep 2s linear infinite;
+}
+
+.scanning-radar::before {
+  content: '';
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  width: 80%;
+  height: 80%;
+  transform: translate(-50%, -50%);
+  border: 2px solid var(--gr-border, #DCE5E5);
+  border-radius: 50%;
+  background: var(--gr-surface, white);
+}
+
+.scanning-radar::after {
+  content: '';
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  width: 40%;
+  height: 40%;
+  transform: translate(-50%, -50%);
+  border: 1px solid var(--gr-border, #DCE5E5);
+  border-radius: 50%;
+  background: var(--gr-primary, #0D7D7D);
+  opacity: 0.3;
+}
+
+@keyframes radar-sweep {
+  0% { transform: rotate(0deg); }
+  100% { transform: rotate(360deg); }
+}
+
+.scanning-container {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 12px;
+  padding: 20px;
+  border: 2px dashed var(--gr-border, #DCE5E5);
+  border-radius: 8px;
+  background: var(--gr-bg, #F7FAFA);
+  margin: 16px 0;
+}
+
+.scanning-text {
+  font-size: 14px;
+  color: var(--gr-text, #0B1220);
+  font-weight: 500;
+  text-align: center;
+}
+
+.scanning-status {
+  font-size: 12px;
+  color: var(--medium, #475569);
+  text-align: center;
+}
+
 * {
   box-sizing: border-box;
 }
@@ -331,6 +399,7 @@ button:disabled {
   height: 8px;
   background: var(--dark);
   transform: rotate(45deg);
+  transition: top 0.2s ease;
 }
 
 .hint {
@@ -546,6 +615,58 @@ input[type="checkbox"] {
 
 .room-setup-queue .chip {
   margin: 2px 0;
+}
+
+/* Flowchart queue styling: arrows between steps */
+.flowchart-queue {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px 18px; /* extra horizontal space for arrows */
+  align-items: center;
+}
+
+.flowchart-queue .flow-step { position: relative; }
+
+/* Arrow connector for each step except the last */
+.flowchart-queue .flow-step::after {
+  content: '';
+  position: absolute;
+  top: 50%;
+  right: -14px;
+  transform: translateY(-50%);
+  width: 12px;
+  height: 2px;
+  background: var(--gr-border, #DCE5E5);
+}
+
+.flowchart-queue .flow-step::before {
+  content: '';
+  position: absolute;
+  top: 50%;
+  right: -16px;
+  transform: translateY(-50%) rotate(45deg);
+  width: 6px;
+  height: 6px;
+  border-right: 2px solid var(--gr-border, #DCE5E5);
+  border-top: 2px solid var(--gr-border, #DCE5E5);
+  background: transparent;
+}
+
+/* Hide arrow on the last item in the row (fallback) */
+.flowchart-queue .flow-step:last-child::after,
+.flowchart-queue .flow-step:last-child::before { display: none; }
+
+/* When a step is done/warn, tint its arrow accordingly */
+.flowchart-queue .chip--success.flow-step::after,
+.flowchart-queue .chip--success.flow-step::before {
+  background: var(--gr-primary, #0D7D7D);
+  border-color: var(--gr-primary, #0D7D7D);
+}
+
+.flowchart-queue .chip--warn.flow-step::after,
+.flowchart-queue .chip--warn.flow-step::before {
+  background: #F59E0B;
+  border-color: #F59E0B;
 }
 
 .sensor-grid {
@@ -1739,6 +1860,23 @@ input[type="range"]#grd {
   50% { opacity: 0.5; }
 }
 
+/* Pulse Button Animation */
+.pulse-button {
+  animation: pulse 2s cubic-bezier(0.4, 0, 0.6, 1) infinite;
+}
+
+/* Branding Preview Card Interactions */
+.branding-preview-card:hover {
+  background: var(--gr-surface) !important;
+  border-color: var(--gr-accent) !important;
+  box-shadow: 0 2px 8px rgba(13, 125, 125, 0.15) !important;
+  transform: translateY(-1px);
+}
+
+.branding-preview-card:active {
+  transform: translateY(0px);
+}
+
 /* Location Finder and Weather Styles */
 .location-results {
   border: 1px solid var(--gr-border);
@@ -1811,4 +1949,44 @@ input[type="range"]#grd {
   .weather-row {
     font-size: 13px;
   }
+}
+
+/* Device Discovery Styles */
+.discovery-device-list {
+  max-height: 300px;
+  overflow-y: auto;
+  border: 1px solid var(--gr-border);
+  border-radius: 6px;
+  padding: 8px;
+  background: var(--gr-surface);
+}
+
+.discovery-device-item {
+  transition: background-color 0.15s ease;
+}
+
+.discovery-device-item:hover {
+  background-color: var(--gr-bg);
+}
+
+.discovery-status {
+  display: inline-flex;
+  align-items: center;
+  font-size: 14px;
+  font-weight: 500;
+}
+
+.discovery-status .spinner {
+  width: 16px;
+  height: 16px;
+  border: 2px solid #e5e7eb;
+  border-top: 2px solid #3b82f6;
+  border-radius: 50%;
+  animation: spin 1s linear infinite;
+  margin-right: 6px;
+}
+
+@keyframes spin {
+  0% { transform: rotate(0deg); }
+  100% { transform: rotate(360deg); }
 }

@@ -28,8 +28,6 @@ const STATE = {
   switchbotDevices: [],
   currentGroup: null,
   currentSchedule: null,
-  researchMode: false,
-  deviceResearchLocal: true,
   editingGroupId: null,
   deviceMeta: {},
   deviceKB: { fixtures: [] },
@@ -38,43 +36,6 @@ const STATE = {
   pendingBrand: null
 };
 
-// --- Research Mode Feature Flag ---
-const RESEARCH_MODE_KEY = 'gr.researchMode';
-const DEVICES_LOCAL_RESEARCH_KEY = 'gr.devices.localResearch';
-const DEVICE_SCOPE_KEY = 'gr.deviceScope';
-const DEVICE_SELECTION_KEY = 'gr.deviceSelection';
-function getResearchMode() {
-  const raw = localStorage.getItem(RESEARCH_MODE_KEY);
-  return raw === 'true';
-}
-function setResearchMode(val) {
-  localStorage.setItem(RESEARCH_MODE_KEY, val ? 'true' : 'false');
-  STATE.researchMode = val;
-}
-
-function getDevicesLocalResearch() {
-  const raw = localStorage.getItem(DEVICES_LOCAL_RESEARCH_KEY);
-  return raw === null ? true : raw === 'true';
-}
-function setDevicesLocalResearch(val) {
-  localStorage.setItem(DEVICES_LOCAL_RESEARCH_KEY, val ? 'true' : 'false');
-  STATE.deviceResearchLocal = !!val;
-}
-
-// Persisted Devices picks (scope + selected ids)
-function getDevicePickState() {
-  try {
-    const scope = localStorage.getItem(DEVICE_SCOPE_KEY) || 'devices';
-    const ids = JSON.parse(localStorage.getItem(DEVICE_SELECTION_KEY) || '[]');
-    return { scope, ids: Array.isArray(ids) ? ids : [] };
-  } catch { return { scope: 'devices', ids: [] }; }
-}
-function setDevicePickState(scope, ids) {
-  try {
-    if (scope) localStorage.setItem(DEVICE_SCOPE_KEY, scope);
-    if (ids) localStorage.setItem(DEVICE_SELECTION_KEY, JSON.stringify(ids));
-  } catch {}
-}
 
 // --- Data Loading Utilities ---
 async function loadJSON(path) {
@@ -264,6 +225,25 @@ function initLightsStatusUI() {
 // --- Theming ---
 function applyTheme(palette, extras = {}) {
   if (!palette) return;
+  
+  // Constrain primary color to no lighter than mid-grey (#666666)
+  if (palette.primary) {
+    const ratio = (color) => {
+      const hex = color.startsWith('#') ? color : (()=>{const ctx=document.createElement('canvas').getContext('2d');ctx.fillStyle=color;return ctx.fillStyle;})();
+      const h = hex.length===4?`#${hex[1]}${hex[1]}${hex[2]}${hex[2]}${hex[3]}${hex[3]}`:hex;
+      const r = parseInt(h.slice(1,3),16)/255, g=parseInt(h.slice(3,5),16)/255, b=parseInt(h.slice(5,7),16)/255;
+      const l = (v)=> v<=0.03928? v/12.92 : Math.pow((v+0.055)/1.055, 2.4);
+      return 0.2126*l(r)+0.7152*l(g)+0.0722*l(b);
+    };
+    
+    // If primary color is too light (luminance > 0.35), darken it
+    if (ratio(palette.primary) > 0.35) {
+      console.warn('🎨 Primary color too light, constraining to mid-grey maximum');
+      // Use mid-grey as maximum lightness
+      palette.primary = '#666666';
+    }
+  }
+  
   const root = document.documentElement;
   const map = {
     '--gr-bg': palette.background,
@@ -318,17 +298,46 @@ function applyTheme(palette, extras = {}) {
     };
     const tVsSurface = contrast(ratio(cText), ratio(cSurface));
     const tVsBg = contrast(ratio(cText), ratio(cBg));
-    if (tVsSurface < 4.5 || tVsBg < 4.5) {
-      // Attempt auto-fix by nudging text towards a better contrast color
-      const candidates = ['#0B1220', '#111827', '#FFFFFF'];
-      let best = cText; let bestScore = Math.min(tVsSurface, tVsBg);
+    
+    // Enhanced contrast guard - prevent light text on light backgrounds
+    const isLightText = ratio(cText) > 0.35; // Text luminance > 0.35 means too light (mid-grey limit)
+    const isLightSurface = ratio(cSurface) > 0.5; // Surface luminance > 0.5 means light surface
+    const isLightBg = ratio(cBg) > 0.5; // Background luminance > 0.5 means light background
+    
+    // Prevent light text on light surfaces AND enforce mid-grey maximum lightness
+    if ((isLightText && isLightSurface) || (isLightText && isLightBg) || tVsSurface < 4.5 || tVsBg < 4.5 || ratio(cText) > 0.35) {
+      console.warn('🎨 Contrast issue detected - fixing text color (limiting to mid-grey or darker)');
+      
+      // Dark color candidates only - no lighter than mid-grey (#666666)
+      const candidates = ['#0B1220', '#111827', '#1F2937', '#374151', '#4B5563', '#6B7280', '#666666'];
+      let best = cText; 
+      let bestScore = Math.min(tVsSurface, tVsBg);
+      
       for (const cand of candidates) {
-        const sc = Math.min(contrast(ratio(cand), ratio(cSurface)), contrast(ratio(cand), ratio(cBg)));
-        if (sc > bestScore) { bestScore = sc; best = cand; }
+        // Ensure candidate is not lighter than mid-grey
+        if (ratio(cand) > 0.35) continue;
+        
+        const candVsSurface = contrast(ratio(cand), ratio(cSurface));
+        const candVsBg = contrast(ratio(cand), ratio(cBg));
+        const sc = Math.min(candVsSurface, candVsBg);
+        if (sc > bestScore && sc >= 4.5) { // Only accept if meets WCAG AA standard
+          bestScore = sc; 
+          best = cand; 
+        }
       }
-      if (best !== cText) { root.style.setProperty('--gr-text', best); }
+      
+      if (best !== cText) { 
+        root.style.setProperty('--gr-text', best); 
+        console.log('🎨 Text color auto-corrected to:', best, 'for contrast ratio:', bestScore.toFixed(2));
+      }
+      
       if (bestScore < 4.5) {
-        showToast({ title:'Low contrast warning', msg:'Some text may be hard to read with the current theme. Consider adjusting Text/Background colors.', kind:'warn', icon:'\u26a0\ufe0f' }, 6000);
+        showToast({ 
+          title:'⚠️ Contrast Warning', 
+          msg:'Text color has been limited to mid-grey or darker for readability. Consider using darker brand colors.', 
+          kind:'warn', 
+          icon:'⚠️' 
+        }, 8000);
       }
     }
   } catch {}
@@ -752,19 +761,55 @@ function renderSpectrumCanvas(canvas, spd, opts = {}) {
 function showTipFor(el) {
   const tip = document.getElementById('tooltip');
   const content = document.getElementById('tooltip-content');
+  const arrow = document.querySelector('.tip-arrow');
   if (!tip || !content) return;
   
   const text = el.getAttribute('data-tip') || '';
   content.textContent = text || '';
   
+  // Temporarily show tooltip to measure its height
+  tip.style.visibility = 'hidden';
+  tip.setAttribute('data-show', '1');
+  
   const rect = el.getBoundingClientRect();
-  const top = window.scrollY + rect.top - tip.offsetHeight - 10;
+  const tipHeight = tip.offsetHeight;
+  
+  // Check if this is an AI feature card - if so, position below
+  const isAIFeature = el.classList.contains('ai-feature-card') || 
+                     el.closest('.ai-features-horizontal') !== null ||
+                     el.closest('#environmentalAiCard') !== null;
+  
+  let top, arrowTop;
+  
+  if (isAIFeature) {
+    // Position below for AI features
+    top = window.scrollY + rect.bottom + 10;
+    arrowTop = -4; // Arrow points up (tooltip below element)
+  } else {
+    // Original logic for other elements (position above, fallback to below)
+    top = window.scrollY + rect.top - tipHeight - 10;
+    if (top <= 0) {
+      // Fallback to below if not enough space above
+      top = window.scrollY + rect.bottom + 10;
+      arrowTop = -4; // Arrow points up
+    } else {
+      arrowTop = tipHeight - 4; // Arrow points down (tooltip above element)
+    }
+  }
+  
   const left = Math.max(10, Math.min(window.scrollX + rect.left, 
     window.scrollX + document.documentElement.clientWidth - 340));
   
-  tip.style.top = (top > 0 ? top : (window.scrollY + rect.bottom + 10)) + 'px';
+  // Apply final positioning and make visible
+  tip.style.top = top + 'px';
   tip.style.left = left + 'px';
-  tip.setAttribute('data-show', '1');
+  tip.style.visibility = 'visible';
+  
+  // Update arrow position
+  if (arrow) {
+    arrow.style.top = arrowTop + 'px';
+  }
+  
   tip.setAttribute('aria-hidden', 'false');
 }
 
@@ -1073,145 +1118,6 @@ function deviceCard(device, options = {}) {
       }
     });
 
-    // Research Mode Controls (similar to group controls)
-    if (STATE.researchMode && STATE.deviceResearchLocal) {
-      // Power controls
-      const powerRow = document.createElement('div');
-      powerRow.className = 'row';
-      powerRow.style.gap = '6px';
-      powerRow.style.marginTop = '8px';
-      
-      const onBtn = document.createElement('button');
-      onBtn.type = 'button';
-      onBtn.className = 'ghost';
-      onBtn.textContent = 'ON';
-      onBtn.style.fontSize = '12px';
-      onBtn.style.padding = '4px 8px';
-      
-      const offBtn = document.createElement('button');
-      offBtn.type = 'button';
-      offBtn.className = 'ghost';
-      offBtn.textContent = 'OFF';
-      offBtn.style.fontSize = '12px';
-      offBtn.style.padding = '4px 8px';
-
-      const applyBtn = document.createElement('button');
-      applyBtn.type = 'button';
-      applyBtn.className = 'primary';
-      applyBtn.textContent = 'Apply';
-      applyBtn.style.fontSize = '12px';
-      applyBtn.style.padding = '4px 8px';
-      
-      powerRow.append(onBtn, offBtn, applyBtn);
-      card.appendChild(powerRow);
-
-      // Spectrum sliders for research mode
-      const spectrumControls = document.createElement('div');
-      spectrumControls.className = 'device-research-controls';
-      spectrumControls.style.display = 'none';
-      spectrumControls.style.marginTop = '8px';
-      spectrumControls.innerHTML = `
-        <div class="tiny" style="margin-bottom:4px">Live Spectrum Control</div>
-        <div style="display:grid;grid-template-columns:auto 1fr auto;gap:4px;align-items:center;font-size:11px">
-          <span>CW</span><input class="dev-cw-live" type="range" min="0" max="100" value="${device.cwPct ?? device.cw ?? 45}" style="margin:0"><span class="dev-cw-val">${Math.round(device.cwPct ?? device.cw ?? 45)}%</span>
-          <span>WW</span><input class="dev-ww-live" type="range" min="0" max="100" value="${device.wwPct ?? device.ww ?? 45}" style="margin:0"><span class="dev-ww-val">${Math.round(device.wwPct ?? device.ww ?? 45)}%</span>
-          <span>Blue</span><input class="dev-bl-live" type="range" min="0" max="100" value="${device.blPct ?? device.bl ?? 0}" style="margin:0"><span class="dev-bl-val">${Math.round(device.blPct ?? device.bl ?? 0)}%</span>
-          <span>Red</span><input class="dev-rd-live" type="range" min="0" max="100" value="${device.rdPct ?? device.rd ?? 0}" style="margin:0"><span class="dev-rd-val">${Math.round(device.rdPct ?? device.rd ?? 0)}%</span>
-        </div>
-      `;
-      card.appendChild(spectrumControls);
-
-      // Toggle spectrum controls with edit button
-      editBtn.addEventListener('click', () => {
-        const isVisible = spectrumControls.style.display !== 'none';
-        spectrumControls.style.display = isVisible ? 'none' : 'block';
-        editor.style.display = 'none'; // Hide the old editor
-      });
-
-      // Live spectrum control event handlers
-      const cwSlider = spectrumControls.querySelector('.dev-cw-live');
-      const wwSlider = spectrumControls.querySelector('.dev-ww-live');
-      const blSlider = spectrumControls.querySelector('.dev-bl-live');
-      const rdSlider = spectrumControls.querySelector('.dev-rd-live');
-      const cwVal = spectrumControls.querySelector('.dev-cw-val');
-      const wwVal = spectrumControls.querySelector('.dev-ww-val');
-      const blVal = spectrumControls.querySelector('.dev-bl-val');
-      const rdVal = spectrumControls.querySelector('.dev-rd-val');
-
-      [cwSlider, wwSlider, blSlider, rdSlider].forEach((slider, idx) => {
-        const valSpan = [cwVal, wwVal, blVal, rdVal][idx];
-        slider?.addEventListener('input', () => {
-          if (valSpan) valSpan.textContent = `${slider.value}%`;
-          // Update spectrum preview
-          const pct = {
-            cw: Number(cwSlider?.value || 45),
-            ww: Number(wwSlider?.value || 45),
-            bl: Number(blSlider?.value || 0),
-            rd: Number(rdSlider?.value || 0)
-          };
-          renderSpectrumCanvas(spectrumCanvas, computeWeightedSPD(pct), { width: 300, height: 36 });
-        });
-      });
-
-      // Power control handlers
-      onBtn.addEventListener('click', async () => {
-        try {
-          const resp = await fetch(`/api/device/${encodeURIComponent(device.id)}/power`, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ state: 'on' })
-          });
-          if (resp.ok) {
-            setStatus(`${device.deviceName || device.id} turned ON`);
-          } else {
-            setStatus(`Failed to turn ON ${device.deviceName || device.id}`);
-          }
-        } catch (err) {
-          setStatus(`Error controlling ${device.deviceName || device.id}`);
-        }
-      });
-
-      offBtn.addEventListener('click', async () => {
-        try {
-          const resp = await fetch(`/api/device/${encodeURIComponent(device.id)}/power`, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ state: 'off' })
-          });
-          if (resp.ok) {
-            setStatus(`${device.deviceName || device.id} turned OFF`);
-          } else {
-            setStatus(`Failed to turn OFF ${device.deviceName || device.id}`);
-          }
-        } catch (err) {
-          setStatus(`Error controlling ${device.deviceName || device.id}`);
-        }
-      });
-
-      applyBtn.addEventListener('click', async () => {
-        try {
-          const pct = {
-            cw: Number(cwSlider?.value || 45),
-            ww: Number(wwSlider?.value || 45),
-            bl: Number(blSlider?.value || 0),
-            rd: Number(rdSlider?.value || 0)
-          };
-          const resp = await fetch(`/api/device/${encodeURIComponent(device.id)}/spectrum`, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify(pct)
-          });
-          if (resp.ok) {
-            setStatus(`Spectrum applied to ${device.deviceName || device.id}`);
-          } else {
-            setStatus(`Failed to apply spectrum to ${device.deviceName || device.id}`);
-          }
-        } catch (err) {
-          setStatus(`Error applying spectrum to ${device.deviceName || device.id}`);
-        }
-      });
-    }
-
     return card;
   }
 
@@ -1337,7 +1243,7 @@ function deviceCard(device, options = {}) {
   header.append(titleWrap, onlineBadge);
   card.appendChild(header);
 
-  // Advanced controls (Research Mode conditional)
+  // Advanced controls
   const badgeRow = document.createElement('div');
   badgeRow.className = 'device-badges';
   const spectraChip = document.createElement('span');
@@ -1446,9 +1352,6 @@ function deviceCard(device, options = {}) {
   );
   spectrumWrap.appendChild(chRow);
   card.appendChild(spectrumWrap);
-
-  // Research Mode conditional rendering (respect global + local toggles)
-  if (!STATE.researchMode || !STATE.deviceResearchLocal) { badgeRow.style.display = 'none'; }
 
   // Control buttons
   const controls = document.createElement('div');
@@ -1572,10 +1475,17 @@ class FarmWizard {
     $('#btnLaunchFarm')?.addEventListener('click', () => { this.data = this.defaultData(); this.open(); });
     $('#btnEditFarm')?.addEventListener('click', () => this.edit());
     $('#farmModalClose')?.addEventListener('click', () => this.close());
-    $('#farmModalBackdrop')?.addEventListener('click', () => this.close());
+    // Remove backdrop click to close - wizard should only close on save
+    // $('#farmModalBackdrop')?.addEventListener('click', () => this.close());
     $('#farmPrev')?.addEventListener('click', () => this.prevStep());
     $('#farmNext')?.addEventListener('click', () => this.nextStep());
-    this.form?.addEventListener('submit', (e) => this.saveFarm(e));
+    this.form?.addEventListener('submit', (e) => {
+      e.preventDefault(); // Always prevent default form submission
+      // Only save if we're on the final step (review)
+      if (this.currentStep === this.baseSteps.length - 1) {
+        this.saveFarm(e);
+      }
+    });
 
     $('#btnScanWifi')?.addEventListener('click', () => this.scanWifiNetworks(true));
     $('#btnManualSsid')?.addEventListener('click', () => this.handleManualSsid());
@@ -1595,22 +1505,27 @@ class FarmWizard {
       try { localStorage.setItem(this.discoveryStorageKeys.reuse, reuse ? 'true' : 'false'); } catch {}
     });
     $('#btnTestWifi')?.addEventListener('click', () => this.testWifi());
-    $('#farmName')?.addEventListener('input', (e) => { this.data.location.farmName = e.target.value || ''; });
-    $('#farmAddress')?.addEventListener('input', (e) => { this.data.location.address = e.target.value || ''; this.guessTimezone(); });
-    $('#farmCity')?.addEventListener('input', (e) => { this.data.location.city = e.target.value || ''; this.guessTimezone(); });
-    $('#farmState')?.addEventListener('input', (e) => { this.data.location.state = e.target.value || ''; this.guessTimezone(); });
-    $('#farmPostal')?.addEventListener('input', (e) => { this.data.location.postal = e.target.value || ''; });
-    $('#farmTimezone')?.addEventListener('change', (e) => { this.data.location.timezone = e.target.value || this.data.location.timezone; });
-    $('#contactName')?.addEventListener('input', (e) => { this.data.contact.name = e.target.value || ''; });
-    $('#contactEmail')?.addEventListener('input', (e) => { this.data.contact.email = e.target.value || ''; });
-    $('#contactPhone')?.addEventListener('input', (e) => { this.data.contact.phone = e.target.value || ''; });
-    $('#contactWebsite')?.addEventListener('input', (e) => { this.data.contact.website = e.target.value || ''; });
+    // All form field listeners are now attached in attachFormListeners() when modal opens
+    
+    // Website branding button - opens wizard directly
+    $('#websiteBrandingButton')?.addEventListener('click', () => {
+      this.openBrandingWizard();
+    });
+    
+    // Enable Enter key on website input to trigger branding wizard
+    $('#contactWebsite')?.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter') {
+        e.preventDefault();
+        if (this.data.contact.website?.trim()) {
+          this.openBrandingWizard();
+        }
+      }
+    });
     $('#btnAddRoom')?.addEventListener('click', () => this.addRoom());
     $('#newRoomName')?.addEventListener('keydown', (e) => { if (e.key === 'Enter') { e.preventDefault(); this.addRoom(); } });
     
-    // Location finder
-    $('#btnFindLocation')?.addEventListener('click', () => this.findLocation());
-  $('#btnUseMyLocation')?.addEventListener('click', () => this.useMyLocation());
+    // Location finder - only use current location now
+    $('#btnUseMyLocation')?.addEventListener('click', () => this.useMyLocation());
 
     document.querySelectorAll('#farmConnectionChoice .chip-option').forEach(btn => {
       btn.addEventListener('click', () => {
@@ -1667,12 +1582,43 @@ class FarmWizard {
     this.renderWifiNetworks();
     this.updateWifiPasswordUI();
     this.renderRoomsEditor();
+    
+    // Attach form event listeners after modal is shown
+    this.attachFormListeners();
+  }
+
+  attachFormListeners() {
+    // Attach input event listeners for form fields - need to do this after modal is shown
+    $('#farmName')?.addEventListener('input', (e) => { 
+      const value = e.target.value?.trim() || '';
+      this.data.location.farmName = value; 
+      console.log('🏠 Farm name updated:', this.data.location.farmName);
+      this.updateLiveBranding(); 
+    });
+    $('#farmName')?.addEventListener('blur', (e) => {
+      // Ensure data is saved on blur as well
+      const value = e.target.value?.trim() || '';
+      this.data.location.farmName = value;
+      console.log('🏠 Farm name saved on blur:', this.data.location.farmName);
+    });
+    $('#farmAddress')?.addEventListener('input', (e) => { this.data.location.address = e.target.value || ''; this.guessTimezone(); });
+    $('#farmCity')?.addEventListener('input', (e) => { this.data.location.city = e.target.value || ''; this.guessTimezone(); });
+    $('#farmState')?.addEventListener('input', (e) => { this.data.location.state = e.target.value || ''; this.guessTimezone(); });
+    $('#farmPostal')?.addEventListener('input', (e) => { this.data.location.postal = e.target.value || ''; });
+    $('#farmTimezone')?.addEventListener('change', (e) => { this.data.location.timezone = e.target.value || this.data.location.timezone; });
+    $('#contactName')?.addEventListener('input', (e) => { this.data.contact.name = e.target.value || ''; this.updateLiveBranding(); });
+    $('#contactEmail')?.addEventListener('input', (e) => { this.data.contact.email = e.target.value || ''; });
+    $('#contactPhone')?.addEventListener('input', (e) => { this.data.contact.phone = e.target.value || ''; });
+    $('#contactWebsite')?.addEventListener('input', (e) => { 
+      this.data.contact.website = e.target.value || ''; 
+      this.updateLiveBranding();
+      this.fetchWebsiteBranding();
+      this.updateWebsiteBrandingButton();
+    });
   }
 
   edit() {
-    if (!STATE.farm) return this.open();
-    this.hydrateFromFarm(STATE.farm);
-    this.steps = this.getVisibleSteps();
+    // Open the normal farm registration wizard
     this.open();
   }
 
@@ -1712,6 +1658,16 @@ class FarmWizard {
     }
     if (activeId === 'wifi-select' && this.wifiNetworks.length === 0) this.scanWifiNetworks();
     if (activeId === 'wifi-password') this.updateWifiPasswordUI();
+    
+    // Update live branding when relevant steps are shown
+    if (activeId === 'location' || activeId === 'contact') {
+      this.updateLiveBranding();
+    }
+    
+    // Trigger branding fetch in review step
+    if (activeId === 'review') {
+      this.updateLiveBranding();
+    }
   }
 
   handleManualSsid() {
@@ -1747,7 +1703,18 @@ class FarmWizard {
 
   async scanWifiNetworks(force = false) {
     const status = $('#wifiScanStatus');
+    const scanningIndicator = $('#wifiScanningIndicator');
+    const networkList = $('#wifiNetworkList');
+    
+    // Show scanning radar and hide network list
+    if (scanningIndicator) {
+      scanningIndicator.style.display = 'flex';
+    }
+    if (networkList) {
+      networkList.style.display = 'none';
+    }
     if (status) status.textContent = 'Scanning…';
+    
     try {
       const resp = await fetch(`/forwarder/network/wifi/scan${force ? '?force=1' : ''}`);
       if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
@@ -1768,6 +1735,15 @@ class FarmWizard {
       ];
       if (status) status.textContent = 'Using cached sample networks';
     }
+    
+    // Hide scanning radar and show network list
+    if (scanningIndicator) {
+      scanningIndicator.style.display = 'none';
+    }
+    if (networkList) {
+      networkList.style.display = 'block';
+    }
+    
     this.renderWifiNetworks();
   }
 
@@ -1795,8 +1771,24 @@ class FarmWizard {
   async testWifi() {
     if (this.data.connection.type !== 'wifi') return;
     if (!this.data.connection.wifi.ssid) { alert('Pick a Wi‑Fi network first.'); return; }
+    
     const status = $('#wifiTestStatus');
-    if (status) status.innerHTML = '<div class="tiny">Testing…</div>';
+    const testingIndicator = $('#wifiTestingIndicator');
+    const testButton = $('#btnTestWifi');
+    
+    // Show testing indicator and disable button
+    if (testingIndicator) {
+      testingIndicator.style.display = 'flex';
+    }
+    if (testButton) {
+      testButton.disabled = true;
+      testButton.textContent = 'Testing...';
+    }
+    if (status) {
+      status.innerHTML = '<div class="tiny">Testing connection...</div>';
+      status.style.display = 'none'; // Hide status while testing indicator is shown
+    }
+    
     try {
       const resp = await fetch('/forwarder/network/test', {
         method: 'POST',
@@ -1830,6 +1822,19 @@ class FarmWizard {
       this.data.connection.wifi.testResult = { status: 'error', message: err.message };
       showToast({ title: 'Wi‑Fi test error', msg: err.message || String(err), kind: 'warn', icon: '⚠️' });
     }
+    
+    // Hide testing indicator, restore button, and show status
+    if (testingIndicator) {
+      testingIndicator.style.display = 'none';
+    }
+    if (testButton) {
+      testButton.disabled = false;
+      testButton.textContent = 'Test connection';
+    }
+    if (status) {
+      status.style.display = 'block';
+    }
+    
     this.updateWifiPasswordUI();
   }
 
@@ -1918,6 +1923,8 @@ class FarmWizard {
 
   validateCurrentStep() {
     const stepId = this.steps[this.currentStep];
+    console.log('🔍 Validating step:', stepId, 'with data:', this.data);
+    
     if (stepId === 'connection-choice' && !['wifi','ethernet'].includes(this.data.connection.type)) {
       alert('Pick Wi‑Fi or Ethernet to continue.');
       return false;
@@ -1930,9 +1937,35 @@ class FarmWizard {
       alert('Run the Wi‑Fi test so we know the credentials work.');
       return false;
     }
-    if (stepId === 'location' && !this.data.location.farmName) {
-      alert('Add a farm name so we can label the site.');
-      return false;
+    if (stepId === 'location') {
+      // Capture all location data for subscription services
+      const farmNameEl = $('#farmName');
+      const farmNameValue = farmNameEl?.value?.trim() || '';
+      const addressEl = $('#farmAddress');
+      const addressValue = addressEl?.value?.trim() || '';
+      const cityEl = $('#farmCity');
+      const cityValue = cityEl?.value?.trim() || '';
+      const stateEl = $('#farmState');
+      const stateValue = stateEl?.value?.trim() || '';
+      const postalEl = $('#farmPostal');
+      const postalValue = postalEl?.value?.trim() || '';
+      
+      // Always update the data with current form values (required for subscriptions)
+      this.data.location.farmName = farmNameValue;
+      this.data.location.address = addressValue;
+      this.data.location.city = cityValue;
+      this.data.location.state = stateValue;
+      this.data.location.postal = postalValue;
+      
+      console.log('✅ Location data captured for subscriptions:', {
+        farmName: farmNameValue || '(blank)',
+        address: addressValue || '(blank)',
+        city: cityValue || '(blank)', 
+        state: stateValue || '(blank)',
+        postal: postalValue || '(blank)'
+      });
+      
+      return true; // Always allow progression - data collection for future subscriptions
     }
     if (stepId === 'contact' && (!this.data.contact.name || !this.data.contact.email)) {
       alert('Contact name and email are required.');
@@ -1963,13 +1996,37 @@ class FarmWizard {
     const rooms = this.data.rooms;
     const timezone = this.data.location.timezone;
     const addressParts = [this.data.location.address, this.data.location.city, this.data.location.state, this.data.location.postal].filter(Boolean);
+    
+    // Build branding section if we have farm name or website
+    let brandingSection = '';
+    if (this.data.location.farmName || this.data.contact.website) {
+      const farmName = this.data.location.farmName || 'Untitled Farm';
+      let logoSection = '';
+      if (this.data.contact.website) {
+        const domain = this.extractDomain(this.data.contact.website);
+        logoSection = `<img id="reviewFarmLogo" style="width:24px;height:24px;margin-right:8px;vertical-align:middle;display:none">`;
+      }
+      brandingSection = `<div style="border:1px solid var(--gr-border);border-radius:8px;padding:12px;margin:12px 0;background:var(--gr-surface)">
+        <div style="font-size:18px;font-weight:600;margin-bottom:8px;display:flex;align-items:center">
+          ${logoSection}<span>${escapeHtml(farmName)}</span>
+        </div>
+        ${this.data.contact.website ? `<div class="tiny" style="color:var(--gr-primary)">🌐 <a href="${this.data.contact.website.startsWith('http') ? this.data.contact.website : 'https://' + this.data.contact.website}" target="_blank" style="color:var(--gr-primary);text-decoration:none">${this.extractDomain(this.data.contact.website)}</a></div>` : ''}
+      </div>`;
+      
+      // Fetch website branding for the logo
+      if (this.data.contact.website) {
+        this.fetchWebsiteBrandingForReview();
+      }
+    }
+    
     host.innerHTML = `
+      ${brandingSection}
       <div><strong>Connection:</strong> ${conn.type === 'wifi' ? `Wi‑Fi · ${escapeHtml(conn.wifi.ssid || '')}` : 'Ethernet'} ${conn.wifi.testResult?.status === 'connected' ? '✅' : ''}</div>
       <div><strong>Farm:</strong> ${escapeHtml(this.data.location.farmName || 'Untitled')}</div>
       <div><strong>Address:</strong> ${escapeHtml(addressParts.join(', ') || '—')}</div>
       <div><strong>Timezone:</strong> ${escapeHtml(timezone)}</div>
       <div><strong>Contact:</strong> ${escapeHtml(this.data.contact.name || '')} ${this.data.contact.email ? `&lt;${escapeHtml(this.data.contact.email)}&gt;` : ''} ${this.data.contact.phone ? escapeHtml(this.data.contact.phone) : ''}</div>
-      ${this.data.contact.website ? `<div><strong>Website:</strong> <a href="${escapeHtml(this.data.contact.website)}" target="_blank">${escapeHtml(this.data.contact.website)}</a></div>` : ''}
+      ${this.data.contact.website ? `<div><strong>Website:</strong> <a href="${this.data.contact.website.startsWith('http') ? escapeHtml(this.data.contact.website) : 'https://' + escapeHtml(this.data.contact.website)}" target="_blank">${escapeHtml(this.data.contact.website)}</a></div>` : ''}
       <div><strong>Rooms:</strong> ${rooms.map(r => `${escapeHtml(r.name)} (${r.zones.length || 0} zones)`).join(', ')}</div>`;
   }
 
@@ -2026,6 +2083,9 @@ class FarmWizard {
     const contactEmailEl = $('#contactEmail'); if (contactEmailEl) contactEmailEl.value = this.data.contact.email;
     const contactPhoneEl = $('#contactPhone'); if (contactPhoneEl) contactPhoneEl.value = this.data.contact.phone;
     const contactWebsiteEl = $('#contactWebsite'); if (contactWebsiteEl) contactWebsiteEl.value = this.data.contact.website;
+    
+    // Update the website branding button state
+    this.updateWebsiteBrandingButton();
   }
 
   updateConnectionButtons() {
@@ -2071,6 +2131,13 @@ class FarmWizard {
 
   async saveFarm(event) {
     event?.preventDefault();
+    
+    // Only allow saving from the review step (final step)
+    if (this.currentStep !== this.baseSteps.length - 1) {
+      console.log('Save attempt from non-final step, ignoring');
+      return;
+    }
+    
     if (!this.validateCurrentStep()) { this.showStep(this.currentStep); return; }
     const existing = STATE.farm || {};
     const payload = {
@@ -2180,10 +2247,10 @@ class FarmWizard {
   }
 
   async findLocation() {
-    const button = $('#btnFindLocation');
-    const status = $('#locationStatus');
-    const resultsDiv = $('#locationResults');
-    const optionsDiv = $('#locationOptions');
+    // DEPRECATED: GPS coordinates button removed from UI
+    // Location data is now collected via "Use Current Location" button only
+    console.log('🚫 findLocation() called but GPS coordinates button has been removed from UI');
+    return;
     
     if (!button || !status) return;
     
@@ -2356,6 +2423,864 @@ class FarmWizard {
       if (status) { status.textContent = 'Unable to get your location.'; status.style.color = '#EF4444'; }
     }
   }
+
+  updateLiveBranding() {
+    // Update farm branding in real-time as user types
+    const farmName = this.data.location?.farmName || '';
+    const contactName = this.data.contact?.name || '';
+    const website = this.data.contact?.website || '';
+    
+    const brandingSection = $('#farmBrandingSection');
+    const farmNameEl = $('#farmName');
+    const farmTaglineEl = $('#farmTagline');
+    const brandingPreview = $('#brandingPreview');
+    const brandingPreviewContent = $('#brandingPreviewContent');
+    
+    if (farmName || contactName || website) {
+      // Show branding section if we have any info
+      if (brandingSection) brandingSection.style.display = 'block';
+      
+      // Update farm name display
+      if (farmNameEl && farmName) {
+        farmNameEl.textContent = farmName;
+      }
+      
+      // Update tagline with available info
+      if (farmTaglineEl) {
+        const taglineParts = [];
+        if (contactName) taglineParts.push(`Contact: ${contactName}`);
+        if (website) {
+          const domain = this.extractDomain(website);
+          if (domain) taglineParts.push(domain);
+        }
+        farmTaglineEl.textContent = taglineParts.join(' • ') || 'Farm details being configured...';
+      }
+      
+      // Update preview in contact step
+      if (brandingPreview && brandingPreviewContent) {
+        brandingPreview.style.display = 'block';
+        const previewParts = [];
+        if (farmName) previewParts.push(`🏡 <strong>${farmName}</strong>`);
+        if (contactName) previewParts.push(`👤 ${contactName}`);
+        if (website) {
+          const domain = this.extractDomain(website);
+          previewParts.push(`🌐 <a href="${website.startsWith('http') ? website : 'https://' + website}" target="_blank" style="color:var(--gr-primary)">${domain}</a>`);
+        }
+        brandingPreviewContent.innerHTML = previewParts.join('<br>') || 'Enter farm name and website to see your branding...';
+      }
+    } else {
+      // Hide branding if no info
+      if (brandingSection) brandingSection.style.display = 'none';
+      if (brandingPreview) brandingPreview.style.display = 'none';
+    }
+  }
+
+  extractDomain(url) {
+    try {
+      if (!url.startsWith('http://') && !url.startsWith('https://')) {
+        url = 'https://' + url;
+      }
+      const urlObj = new URL(url);
+      return urlObj.hostname.replace('www.', '');
+    } catch {
+      return url.replace(/^(https?:\/\/)?(www\.)?/, '').split('/')[0];
+    }
+  }
+
+  updateWebsiteBrandingButton() {
+    const websiteButton = document.getElementById('websiteBrandingButton');
+    const website = this.data.contact?.website?.trim();
+    
+    if (websiteButton) {
+      if (website) {
+        websiteButton.disabled = false;
+        websiteButton.style.opacity = '1';
+        websiteButton.style.cursor = 'pointer';
+        websiteButton.title = 'Open branding wizard';
+      } else {
+        websiteButton.disabled = true;
+        websiteButton.style.opacity = '0.5';
+        websiteButton.style.cursor = 'not-allowed';
+        websiteButton.title = 'Enter a website URL first';
+      }
+    }
+  }
+
+  extractDomain(url) {
+    // Helper to extract clean domain from URL
+    if (!url) return '';
+    try {
+      const cleanUrl = url.startsWith('http') ? url : 'https://' + url;
+      const domain = new URL(cleanUrl).hostname;
+      return domain.replace('www.', '');
+    } catch (e) {
+      // If URL parsing fails, just clean up what we have
+      return url.replace(/^(https?:\/\/)?(www\.)?/, '').split('/')[0];
+    }
+  }
+
+  async fetchWebsiteBrandingForReview() {
+    // Special method for review step branding
+    const website = this.data.contact?.website?.trim();
+    if (!website) return;
+
+    try {
+      const domain = this.extractDomain(website);
+      const faviconUrl = `https://${domain}/favicon.ico`;
+      
+      const reviewLogo = $('#reviewFarmLogo');
+      if (reviewLogo) {
+        // Create a new image element to test if favicon loads
+        const testImg = new Image();
+        testImg.onload = () => {
+          reviewLogo.src = faviconUrl;
+          reviewLogo.style.display = 'inline-block';
+        };
+        testImg.onerror = () => {
+          reviewLogo.style.display = 'none';
+        };
+        // Start loading the test image
+        testImg.src = faviconUrl;
+      }
+    } catch (error) {
+      console.log('Review branding fetch failed:', error.message);
+    }
+  }
+
+  showBrandingModal() {
+    // Enhanced branding preview modal
+    const farmName = this.data.location?.farmName || '';
+    const contactName = this.data.contact?.name || '';
+    const website = this.data.contact?.website || '';
+    const domain = website ? this.extractDomain(website) : '';
+    
+    let logoHtml = '';
+    if (website) {
+      logoHtml = `<img id="modalFaviconImg" style="width:32px;height:32px;margin-right:12px;vertical-align:middle;display:none">`;
+    }
+    
+    const modalContent = `
+      <div id="brandingModalBackdrop" style="position:fixed;top:0;left:0;right:0;bottom:0;background:rgba(0,0,0,0.5);z-index:10000;display:flex;align-items:center;justify-content:center">
+        <div style="background:white;border-radius:12px;padding:24px;max-width:500px;margin:20px;box-shadow:0 20px 40px rgba(0,0,0,0.2)" onclick="event.stopPropagation()">
+          <div style="display:flex;align-items:center;margin-bottom:16px">
+            <h3 style="margin:0;flex:1">🎨 Live Branding Preview</h3>
+            <button id="closeBrandingModal" style="background:none;border:none;font-size:24px;cursor:pointer;color:#666">&times;</button>
+          </div>
+          
+          <div style="border:1px solid var(--gr-border);border-radius:8px;padding:20px;background:var(--gr-bg);margin-bottom:16px">
+            <div style="font-size:20px;font-weight:600;margin-bottom:8px;display:flex;align-items:center">
+              ${logoHtml}<span>${farmName || 'Your Farm Name'}</span>
+            </div>
+            ${contactName ? `<div style="color:var(--medium);margin-bottom:4px">👤 Contact: ${contactName}</div>` : ''}
+            ${website ? `<div style="color:var(--gr-primary)">🌐 <a href="${website.startsWith('http') ? website : 'https://' + website}" target="_blank" style="color:var(--gr-primary);text-decoration:none">${domain}</a></div>` : ''}
+            ${(!farmName && !contactName && !website) ? '<div style="color:var(--medium);font-style:italic">Complete your farm details to see branding preview</div>' : ''}
+          </div>
+          
+          <div style="text-align:center;margin-bottom:16px">
+            <button id="openBrandingWizard" style="background:var(--gr-accent);color:white;border:none;padding:10px 20px;border-radius:6px;cursor:pointer;margin-right:8px">🎨 Customize Branding</button>
+            <button id="closeBrandingModalBtn" style="background:var(--gr-primary);color:white;border:none;padding:8px 16px;border-radius:6px;cursor:pointer">Close Preview</button>
+          </div>
+        </div>
+      </div>
+    `;
+    
+    // Remove any existing modal
+    const existing = document.getElementById('brandingModalBackdrop');
+    if (existing) existing.remove();
+    
+    document.body.insertAdjacentHTML('beforeend', modalContent);
+    
+    // Load favicon for modal if website exists
+    if (website) {
+      const modalImg = document.getElementById('modalFaviconImg');
+      if (modalImg) {
+        const testImg = new Image();
+        testImg.onload = () => {
+          modalImg.src = `https://${domain}/favicon.ico`;
+          modalImg.style.display = 'inline-block';
+        };
+        testImg.onerror = () => {
+          modalImg.style.display = 'none';
+        };
+        testImg.src = `https://${domain}/favicon.ico`;
+      }
+    }
+    
+    // Add event listeners for close functionality
+    document.getElementById('closeBrandingModal').addEventListener('click', () => {
+      document.getElementById('brandingModalBackdrop').remove();
+    });
+    
+    document.getElementById('closeBrandingModalBtn').addEventListener('click', () => {
+      document.getElementById('brandingModalBackdrop').remove();
+    });
+    
+    document.getElementById('brandingModalBackdrop').addEventListener('click', () => {
+      document.getElementById('brandingModalBackdrop').remove();
+    });
+    
+    document.getElementById('openBrandingWizard').addEventListener('click', () => {
+      document.getElementById('brandingModalBackdrop').remove();
+      this.openBrandingWizard();
+    });
+  }
+
+  openBrandingWizard() {
+    // Comprehensive branding editor wizard
+    const farmName = this.data.location?.farmName || 'Your Farm';
+    const website = this.data.contact?.website || '';
+    const domain = website ? this.extractDomain(website) : '';
+    
+    // Get current branding from state or defaults, but ALWAYS use current website for logo
+    const currentBranding = STATE.farm?.branding || {
+      palette: {
+        primary: '#0D7D7D',
+        accent: '#64C7C7',
+        background: '#F7FAFA',
+        surface: '#FFFFFF',
+        border: '#DCE5E5',
+        text: '#0B1220'
+      },
+      fontFamily: '',
+      logo: '',
+      tagline: 'Growing with technology',
+      fontCss: []
+    };
+    
+    // ALWAYS use the current website's favicon as the logo, overriding any saved logo
+    const currentLogo = domain ? `https://${domain}/favicon.ico` : '';
+    currentBranding.logo = currentLogo;
+    
+    const wizardContent = `
+      <div id="brandingWizardBackdrop" style="position:fixed;top:0;left:0;right:0;bottom:0;background:rgba(0,0,0,0.5);z-index:10001;display:flex;align-items:center;justify-content:center">
+        <div style="background:white;border-radius:12px;padding:24px;max-width:600px;width:90%;margin:20px;box-shadow:0 20px 40px rgba(0,0,0,0.2);max-height:80vh;overflow-y:auto" onclick="event.stopPropagation()">
+          <div style="display:flex;align-items:center;margin-bottom:20px">
+            <h3 style="margin:0;flex:1">🎨 ${farmName} Branding Editor</h3>
+            ${website ? `<div id="autoExtractionStatus" style="padding:6px 12px;margin-right:8px;background:#f3f4f6;color:#6b7280;border:1px solid #d1d5db;border-radius:4px;font-size:12px">🔄 Auto-extracting...</div>` : ''}
+            <button id="closeBrandingWizard" style="background:none;border:none;font-size:24px;cursor:pointer;color:#666">&times;</button>
+          </div>
+          
+          <!-- Live Preview Section -->
+          <div id="brandingLivePreview" style="border:2px solid var(--gr-border);border-radius:8px;padding:16px;margin-bottom:20px;background:var(--gr-bg)">
+            <div style="font-weight:600;margin-bottom:8px;color:var(--gr-primary)">Live Preview</div>
+            <div style="display:flex;align-items:center;padding:12px;background:white;border-radius:6px;border:1px solid var(--gr-border)">
+              <img id="previewLogo" style="width:32px;height:32px;margin-right:12px;border-radius:4px;display:none">
+              <div>
+                <div id="previewFarmName" style="font-size:18px;font-weight:600;color:var(--gr-text)">${farmName}</div>
+                <div id="previewTagline" style="font-size:12px;color:var(--gr-primary)">${currentBranding.tagline || 'Growing with technology'}</div>
+              </div>
+            </div>
+          </div>
+          
+          <!-- Farm Details Section -->
+          <div style="margin-bottom:20px">
+            <h4 style="margin:0 0 12px;color:var(--gr-text)">Farm Details</h4>
+            <div style="margin-bottom:12px">
+              <label style="display:block;margin-bottom:4px;font-size:12px;color:var(--medium)">Farm Name</label>
+              <input type="text" id="farmNameInput" value="${farmName}" placeholder="Your Farm Name" style="width:100%;padding:8px;border:1px solid var(--gr-border);border-radius:4px">
+            </div>
+            <div>
+              <label style="display:block;margin-bottom:4px;font-size:12px;color:var(--medium)">Tagline</label>
+              <input type="text" id="taglineInput" value="${currentBranding.tagline || 'Growing with technology'}" placeholder="Farm tagline or motto" style="width:100%;padding:8px;border:1px solid var(--gr-border);border-radius:4px">
+            </div>
+          </div>
+          
+          <!-- Color Palette Section -->
+          <div style="margin-bottom:20px">
+            <h4 style="margin:0 0 12px;color:var(--gr-text)">Color Palette</h4>
+            <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px">
+              <div>
+                <label style="display:block;margin-bottom:4px;font-size:12px;color:var(--medium)">Primary Color</label>
+                <input type="color" id="primaryColor" value="${currentBranding.palette.primary}" style="width:100%;height:40px;border:1px solid var(--gr-border);border-radius:4px">
+              </div>
+              <div>
+                <label style="display:block;margin-bottom:4px;font-size:12px;color:var(--medium)">Accent Color</label>
+                <input type="color" id="accentColor" value="${currentBranding.palette.accent}" style="width:100%;height:40px;border:1px solid var(--gr-border);border-radius:4px">
+              </div>
+              <div>
+                <label style="display:block;margin-bottom:4px;font-size:12px;color:var(--medium)">Background</label>
+                <input type="color" id="backgroundColor" value="${currentBranding.palette.background}" style="width:100%;height:40px;border:1px solid var(--gr-border);border-radius:4px">
+              </div>
+              <div>
+                <label style="display:block;margin-bottom:4px;font-size:12px;color:var(--medium)">Text Color</label>
+                <input type="color" id="textColor" value="${currentBranding.palette.text}" style="width:100%;height:40px;border:1px solid var(--gr-border);border-radius:4px">
+              </div>
+            </div>
+          </div>
+          
+          <!-- Logo Section -->
+          <div style="margin-bottom:20px">
+            <h4 style="margin:0 0 12px;color:var(--gr-text)">Logo</h4>
+            <input type="url" id="logoUrl" placeholder="Logo URL (or leave blank to use website favicon)" value="${currentBranding.logo}" style="width:100%;padding:8px;border:1px solid var(--gr-border);border-radius:4px;margin-bottom:8px">
+            <div style="font-size:12px;color:var(--medium)">💡 We'll automatically use your website's favicon if no logo is provided</div>
+            ${domain ? `<div style="font-size:12px;color:var(--gr-primary);margin-top:4px">🔗 Auto-detected from ${domain}</div>` : ''}
+          </div>
+          
+          <!-- Font Section -->
+          <div style="margin-bottom:20px">
+            <h4 style="margin:0 0 12px;color:var(--gr-text)">Typography</h4>
+            <select id="fontFamily" style="width:100%;padding:8px;border:1px solid var(--gr-border);border-radius:4px">
+              <option value="">Default Font</option>
+              <option value="Inter" ${currentBranding.fontFamily === 'Inter' ? 'selected' : ''}>Inter (Modern)</option>
+              <option value="Roboto" ${currentBranding.fontFamily === 'Roboto' ? 'selected' : ''}>Roboto (Clean)</option>
+              <option value="Open Sans" ${currentBranding.fontFamily === 'Open Sans' ? 'selected' : ''}>Open Sans (Friendly)</option>
+              <option value="Montserrat" ${currentBranding.fontFamily === 'Montserrat' ? 'selected' : ''}>Montserrat (Bold)</option>
+              <option value="Poppins" ${currentBranding.fontFamily === 'Poppins' ? 'selected' : ''}>Poppins (Rounded)</option>
+            </select>
+          </div>
+          
+          <!-- Action Buttons -->
+          <div style="display:flex;gap:8px;justify-content:flex-end">
+            <button id="testTheme" style="background:#ff6b6b;color:white;border:none;padding:10px 16px;border-radius:6px;cursor:pointer">🧪 Test Theme</button>
+            <button id="resetBranding" style="background:var(--medium);color:white;border:none;padding:10px 16px;border-radius:6px;cursor:pointer">Reset to Default</button>
+            <button id="saveBranding" style="background:var(--gr-primary);color:white;border:none;padding:10px 20px;border-radius:6px;cursor:pointer">Save Branding</button>
+          </div>
+        </div>
+      </div>
+    `;
+    
+    // Remove any existing wizard
+    const existing = document.getElementById('brandingWizardBackdrop');
+    if (existing) existing.remove();
+    
+    document.body.insertAdjacentHTML('beforeend', wizardContent);
+    
+    // Load the preview logo if available
+    const previewLogo = document.getElementById('previewLogo');
+    if (previewLogo && currentBranding.logo) {
+      const testImg = new Image();
+      testImg.onload = () => {
+        previewLogo.src = currentBranding.logo;
+        previewLogo.style.display = 'inline-block';
+      };
+      testImg.onerror = () => {
+        previewLogo.style.display = 'none';
+      };
+      testImg.src = currentBranding.logo;
+    }
+    
+    // Add event listeners
+    this.setupBrandingWizardListeners();
+    
+    // Immediately populate the logo URL field with the current website favicon
+    const logoUrlField = document.getElementById('logoUrl');
+    if (logoUrlField && currentLogo) {
+      logoUrlField.value = currentLogo;
+    }
+    
+    // Initialize the preview with current values
+    this.updateBrandingPreview();
+  }
+
+  setupBrandingWizardListeners() {
+    // Close wizard - apply current changes before closing
+    document.getElementById('closeBrandingWizard').addEventListener('click', () => {
+      this.applyCurrentBrandingChanges();
+      document.getElementById('brandingWizardBackdrop').remove();
+    });
+    
+    // Auto-extract website branding if website exists
+    const website = this.data.contact?.website;
+    if (website) {
+      console.log('🎨 Auto-extracting website branding from:', website);
+      // Trigger automatic extraction after a short delay
+      setTimeout(() => {
+        this.fetchWebsiteBrandingData();
+      }, 500);
+    }
+    
+    // Farm name and tagline inputs - live preview updates
+    document.getElementById('farmNameInput').addEventListener('input', (e) => {
+      this.updateBrandingPreview();
+    });
+    
+    document.getElementById('taglineInput').addEventListener('input', (e) => {
+      this.updateBrandingPreview();
+    });
+    
+    // Color inputs - live preview updates
+    const colorInputs = ['primaryColor', 'accentColor', 'backgroundColor', 'textColor'];
+    colorInputs.forEach(inputId => {
+      document.getElementById(inputId).addEventListener('input', (e) => {
+        this.updateBrandingPreview();
+      });
+    });
+    
+    // Logo URL input
+    document.getElementById('logoUrl').addEventListener('input', (e) => {
+      this.updateBrandingPreview();
+    });
+    
+    // Font family select
+    document.getElementById('fontFamily').addEventListener('change', (e) => {
+      this.updateBrandingPreview();
+    });
+    
+    // Test theme button for debugging
+    document.getElementById('testTheme').addEventListener('click', () => {
+      console.log('Testing theme application...');
+      // Apply a bright test theme to see if applyTheme works
+      const testPalette = {
+        primary: '#ff6b6b',
+        accent: '#4ecdc4', 
+        background: '#ffe66d',
+        surface: '#ffffff',
+        border: '#ff8e53',
+        text: '#2d3436'
+      };
+      applyTheme(testPalette, { fontFamily: 'Arial, sans-serif' });
+      console.log('Test theme applied!');
+    });
+
+    // Reset branding
+    document.getElementById('resetBranding').addEventListener('click', () => {
+      this.resetBrandingToDefaults();
+    });    // Save branding
+    document.getElementById('saveBranding').addEventListener('click', () => {
+      this.saveBrandingChanges();
+    });
+  }
+
+  updateBrandingPreview() {
+    console.log('updateBrandingPreview called');
+    const primary = document.getElementById('primaryColor').value;
+    const accent = document.getElementById('accentColor').value;
+    const background = document.getElementById('backgroundColor').value;
+    const text = document.getElementById('textColor').value;
+    const logoUrl = document.getElementById('logoUrl').value;
+    const fontFamily = document.getElementById('fontFamily').value;
+    const farmName = document.getElementById('farmNameInput').value;
+    const tagline = document.getElementById('taglineInput').value;
+    
+    console.log('Preview values:', { primary, accent, background, text, logoUrl, fontFamily, farmName, tagline });
+    
+    // Update the live preview container with new colors - make it very visible
+    const previewContainer = document.getElementById('brandingLivePreview');
+    if (previewContainer) {
+      // Apply colors directly to the preview container
+      previewContainer.style.borderColor = accent;
+      previewContainer.style.backgroundColor = background;
+      previewContainer.style.borderWidth = '3px'; // Make border more visible
+      console.log('Updated preview container with background:', background, 'border:', accent);
+    }
+    
+    // Update preview elements directly
+    const previewLogo = document.getElementById('previewLogo');
+    const previewFarmName = document.getElementById('previewFarmName');
+    const previewTagline = document.getElementById('previewTagline');
+    
+    console.log('Preview elements found:', { 
+      previewLogo: !!previewLogo, 
+      previewFarmName: !!previewFarmName, 
+      previewTagline: !!previewTagline,
+      previewContainer: !!previewContainer
+    });
+
+    if (logoUrl && previewLogo) {
+      // Validate logo URL before attempting to load
+      if (logoUrl.startsWith('http://') || logoUrl.startsWith('https://')) {
+        console.log('Loading logo:', logoUrl);
+        const testImg = new Image();
+        testImg.onload = () => {
+          console.log('Logo loaded successfully');
+          previewLogo.src = logoUrl;
+          previewLogo.style.display = 'inline-block';
+        };
+        testImg.onerror = () => {
+          console.log('Logo failed to load');
+          previewLogo.style.display = 'none';
+        };
+        testImg.src = logoUrl;
+      } else {
+        console.log('Invalid logo URL, hiding logo');
+        previewLogo.style.display = 'none';
+      }
+    } else if (previewLogo) {
+      console.log('No logo URL, hiding logo');
+      previewLogo.style.display = 'none';
+    }
+    
+    if (previewFarmName) {
+      previewFarmName.textContent = farmName || 'Your Farm';
+      previewFarmName.style.color = text;
+      previewFarmName.style.fontFamily = fontFamily || 'inherit';
+      previewFarmName.style.fontWeight = 'bold'; // Make more visible
+      console.log('Updated farm name preview with color:', text, 'font:', fontFamily);
+    }
+    
+    if (previewTagline) {
+      previewTagline.textContent = tagline || 'Growing with technology';
+      previewTagline.style.color = primary;
+      previewTagline.style.fontFamily = fontFamily || 'inherit';
+      console.log('Updated tagline preview with color:', primary, 'font:', fontFamily);
+    }
+    
+    // Update the inner preview card background and styling - make it more prominent
+    const previewCard = previewContainer?.querySelector('div[style*="background:white"]');
+    if (previewCard) {
+      previewCard.style.backgroundColor = '#ffffff';
+      previewCard.style.borderColor = primary;
+      previewCard.style.borderWidth = '2px';
+      previewCard.style.borderStyle = 'solid';
+      console.log('Updated preview card styling with primary color border:', primary);
+    }
+  }
+
+  applyCurrentBrandingChanges() {
+    // Apply current branding wizard values to the UI without saving
+    try {
+      const farmName = document.getElementById('farmNameInput')?.value;
+      const tagline = document.getElementById('taglineInput')?.value;
+      
+      const branding = {
+        palette: {
+          primary: document.getElementById('primaryColor')?.value || '#0D7D7D',
+          accent: document.getElementById('accentColor')?.value || '#64C7C7',
+          background: document.getElementById('backgroundColor')?.value || '#F7FAFA',
+          surface: '#FFFFFF',
+          border: '#DCE5E5',
+          text: document.getElementById('textColor')?.value || '#0B1220'
+        },
+        logo: document.getElementById('logoUrl')?.value || '',
+        tagline: tagline || 'Growing with technology',
+        fontFamily: document.getElementById('fontFamily')?.value || '',
+        fontCss: document.getElementById('fontFamily')?.value ? [`https://fonts.googleapis.com/css2?family=${document.getElementById('fontFamily').value.replace(' ', '+')}&display=swap`] : []
+      };
+      
+      // Update farm name in wizard data if changed
+      if (farmName && farmName !== this.data.location.farmName) {
+        this.data.location.farmName = farmName;
+      }
+      
+      // Update STATE.farm temporarily for header display
+      if (!STATE.farm) STATE.farm = {};
+      STATE.farm.branding = branding;
+      STATE.farm.name = farmName || STATE.farm.name;
+      STATE.farm.tagline = tagline || STATE.farm.tagline;
+      STATE.farm.logo = branding.logo || STATE.farm.logo;
+      
+      // Apply the theme immediately
+      this.applyBranding(branding);
+      
+      // Update the header display immediately
+      this.updateFarmHeaderDisplay();
+      
+      // Update the live branding preview in the wizard
+      this.updateLiveBranding();
+      
+      // Force refresh of any displayed branding elements
+      initializeTopCard();
+    } catch (e) {
+      console.warn('Failed to apply current branding changes:', e);
+    }
+  }
+
+  resetBrandingToDefaults() {
+    const farmName = this.data.location?.farmName || 'Your Farm';
+    
+    document.getElementById('farmNameInput').value = farmName;
+    document.getElementById('taglineInput').value = 'Growing with technology';
+    document.getElementById('primaryColor').value = '#0D7D7D';
+    document.getElementById('accentColor').value = '#64C7C7';
+    document.getElementById('backgroundColor').value = '#F7FAFA';
+    document.getElementById('textColor').value = '#0B1220';
+    document.getElementById('logoUrl').value = '';
+    document.getElementById('fontFamily').value = '';
+    this.updateBrandingPreview();
+  }
+
+  async saveBrandingChanges() {
+    const farmName = document.getElementById('farmNameInput').value;
+    const tagline = document.getElementById('taglineInput').value;
+    
+    const branding = {
+      palette: {
+        primary: document.getElementById('primaryColor').value,
+        accent: document.getElementById('accentColor').value,
+        background: document.getElementById('backgroundColor').value,
+        surface: '#FFFFFF',
+        border: '#DCE5E5',
+        text: document.getElementById('textColor').value
+      },
+      logo: document.getElementById('logoUrl').value,
+      tagline: tagline || 'Growing with technology',
+      fontFamily: document.getElementById('fontFamily').value,
+      fontCss: document.getElementById('fontFamily').value ? [`https://fonts.googleapis.com/css2?family=${document.getElementById('fontFamily').value.replace(' ', '+')}&display=swap`] : []
+    };
+    
+    console.log('🎨 Saving branding with palette:', branding.palette);
+    
+    // Update farm name in wizard data
+    if (farmName) {
+      this.data.location.farmName = farmName;
+    }
+    
+    // Update STATE.farm with branding and farm details
+    if (!STATE.farm) STATE.farm = {};
+    STATE.farm.branding = branding;
+    STATE.farm.name = farmName;
+    STATE.farm.tagline = tagline;
+    STATE.farm.logo = branding.logo;
+    
+    console.log('🎨 Updated STATE.farm.branding:', STATE.farm.branding);
+    
+    // Apply the theme immediately - THIS IS CRITICAL
+    console.log('🎨 Calling applyBranding with:', branding);
+    this.applyBranding(branding);
+    
+    // Also apply theme directly to make sure it works
+    console.log('🎨 Calling applyTheme directly with palette:', branding.palette);
+    applyTheme(branding.palette, { 
+      fontFamily: branding.fontFamily || '',
+      logoHeight: branding.logoHeight || ''
+    });
+    
+    // Update the header display immediately
+    this.updateFarmHeaderDisplay();
+    
+    // Update the live branding preview in the wizard
+    this.updateLiveBranding();
+    
+    // Update any form fields with the new farm name
+    const farmNameEl = document.getElementById('farmName');
+    if (farmNameEl && farmName) {
+      farmNameEl.value = farmName;
+    }
+    
+    // Force refresh of any displayed branding elements
+    initializeTopCard();
+    
+    // Save to localStorage
+    try {
+      localStorage.setItem('gr.farm', JSON.stringify(STATE.farm));
+    } catch (e) {
+      console.warn('Could not save branding to localStorage:', e);
+    }
+    
+    // Save to server if farm is registered
+    if (STATE.farm.name) {
+      try {
+        await safeFarmSave(STATE.farm);
+        showToast({ title: 'Branding saved', msg: 'Your farm branding has been updated successfully.', kind: 'success', icon: '🎨' });
+      } catch (e) {
+        showToast({ title: 'Save warning', msg: 'Branding applied locally but could not sync to server.', kind: 'warn', icon: '⚠️' });
+      }
+    } else {
+      showToast({ title: 'Branding applied', msg: 'Branding will be saved when you complete farm registration.', kind: 'info', icon: '🎨' });
+    }
+    
+    // Close the wizard
+    document.getElementById('brandingWizardBackdrop').remove();
+  }
+  
+  // Add a helper function to update the farm header display
+  updateFarmHeaderDisplay() {
+    const farmNameEl = document.getElementById('farmName');
+    const farmBrandingSection = document.getElementById('farmBrandingSection');
+    const farmLogoEl = document.getElementById('farmLogo');
+    const farmTaglineEl = document.getElementById('farmTagline');
+    
+    if (STATE.farm && STATE.farm.name) {
+      // Show farm branding section
+      if (farmBrandingSection) {
+        farmBrandingSection.style.display = 'block';
+      }
+      
+      // Update farm name
+      if (farmNameEl) {
+        farmNameEl.textContent = STATE.farm.name;
+      }
+      
+      // Update farm tagline if available
+      if (farmTaglineEl && STATE.farm.tagline) {
+        farmTaglineEl.textContent = STATE.farm.tagline;
+        farmTaglineEl.style.display = 'block';
+      }
+      
+      // Update farm logo
+      if (farmLogoEl && STATE.farm.logo) {
+        // Validate logo URL before attempting to load
+        const logoUrl = STATE.farm.logo.trim();
+        if (logoUrl && (logoUrl.startsWith('http://') || logoUrl.startsWith('https://'))) {
+          // Use test image approach to avoid 404s
+          const testImg = new Image();
+          testImg.onload = () => {
+            farmLogoEl.src = logoUrl;
+            farmLogoEl.style.display = 'block';
+          };
+          testImg.onerror = () => {
+            farmLogoEl.style.display = 'none';
+          };
+          testImg.src = logoUrl;
+        } else {
+          farmLogoEl.style.display = 'none';
+        }
+      }
+    }
+  }
+
+  applyBranding(branding) {
+    console.log('🎨 applyBranding called with:', branding);
+    
+    // Apply theme using the global applyTheme function for comprehensive theming
+    if (branding.palette) {
+      console.log('🎨 Applying theme with palette:', branding.palette);
+      applyTheme(branding.palette, { 
+        fontFamily: branding.fontFamily || '',
+        logoHeight: branding.logoHeight || ''
+      });
+      console.log('🎨 Theme applied successfully');
+    } else {
+      console.warn('🎨 No palette found in branding object!');
+    }
+    
+    // Update the farm logo in the header
+    if (branding.logo) {
+      const logoUrl = branding.logo.trim();
+      if (logoUrl && (logoUrl.startsWith('http://') || logoUrl.startsWith('https://'))) {
+        const farmLogo = document.getElementById('farmLogo');
+        if (farmLogo) {
+          // Use test image approach to avoid 404s
+          const testImg = new Image();
+          testImg.onload = () => {
+            farmLogo.src = logoUrl;
+            farmLogo.style.display = 'block';
+          };
+          testImg.onerror = () => {
+            farmLogo.style.display = 'none';
+          };
+          testImg.src = logoUrl;
+        }
+      }
+    }
+    
+    // Load custom fonts
+    if (branding.fontCss && branding.fontCss.length) {
+      const fontLink = document.getElementById('gr-brand-fonts') || document.createElement('link');
+      fontLink.id = 'gr-brand-fonts';
+      fontLink.rel = 'stylesheet';
+      fontLink.href = branding.fontCss[0];
+      if (!document.getElementById('gr-brand-fonts')) {
+        document.head.appendChild(fontLink);
+      }
+    }
+  }
+
+  async fetchWebsiteBranding() {
+    clearTimeout(this.websiteTimeout);
+    this.websiteTimeout = setTimeout(async () => {
+      const website = this.data.contact?.website?.trim();
+      if (!website) return;
+
+      try {
+        // Try to fetch website metadata for enhanced branding
+        const url = website.startsWith('http') ? website : `https://${website}`;
+        
+        // Use a simple approach to try to get favicon
+        const domain = this.extractDomain(website);
+        const faviconUrl = `https://${domain}/favicon.ico`;
+        
+        // Note: We don't update the main farmLogo here anymore - that should only 
+        // happen when the user explicitly applies branding changes
+        
+        // Update tagline with website info
+        const farmTaglineEl = $('#farmTagline');
+        if (farmTaglineEl && !this.data.location?.farmName) {
+          farmTaglineEl.innerHTML = `<a href="${url}" target="_blank" style="color:var(--gr-primary);text-decoration:none">${domain}</a>`;
+        }
+        
+      } catch (error) {
+        console.log('Website branding fetch failed:', error.message);
+      }
+    }, 1000); // 1 second debounce
+  }
+
+  async fetchWebsiteBrandingData() {
+    const website = this.data.contact?.website?.trim();
+    if (!website) {
+      console.log('No website URL available for auto-extraction');
+      return;
+    }
+
+    const statusEl = document.getElementById('autoExtractionStatus');
+    if (statusEl) {
+      statusEl.textContent = '⏳ Extracting branding...';
+      statusEl.style.background = '#fef3c7';
+      statusEl.style.color = '#92400e';
+    }
+
+    try {
+      const url = website.startsWith('http') ? website : `https://${website}`;
+      console.log('🎨 Auto-fetching branding from:', url);
+      
+      const response = await fetch(`/brand/extract?url=${encodeURIComponent(url)}`);
+      const data = await response.json();
+      
+      console.log('🎨 Website branding data received:', data);
+      
+      if (data.ok && data.palette) {
+        // Update the form inputs with extracted data
+        if (data.palette.primary) {
+          document.getElementById('primaryColor').value = data.palette.primary;
+        }
+        if (data.palette.accent) {
+          document.getElementById('accentColor').value = data.palette.accent;
+        }
+        if (data.palette.background) {
+          document.getElementById('backgroundColor').value = data.palette.background;
+        }
+        if (data.palette.text) {
+          document.getElementById('textColor').value = data.palette.text;
+        }
+        if (data.logo) {
+          document.getElementById('logoUrl').value = data.logo;
+        }
+        if (data.fontFamily) {
+          document.getElementById('fontFamily').value = data.fontFamily;
+        }
+        
+        // Update the live preview
+        this.updateBrandingPreview();
+        
+        console.log('🎨 Branding wizard auto-populated with website data');
+        
+        // Update status to success
+        if (statusEl) {
+          statusEl.textContent = '✅ Branding extracted!';
+          statusEl.style.background = '#d1fae5';
+          statusEl.style.color = '#065f46';
+          setTimeout(() => {
+            statusEl.style.opacity = '0';
+            setTimeout(() => statusEl.remove(), 300);
+          }, 2000);
+        }
+      } else {
+        console.log('🎨 Failed to extract branding:', data.error);
+        
+        // Update status to partial success
+        if (statusEl) {
+          statusEl.textContent = '⚠️ Partial extraction';
+          statusEl.style.background = '#fef3c7';
+          statusEl.style.color = '#92400e';
+        }
+        
+        // At least try to set the logo if we have it
+        if (data.logo) {
+          document.getElementById('logoUrl').value = data.logo;
+          this.updateBrandingPreview();
+        }
+      }
+    } catch (error) {
+      console.error('🎨 Error fetching website branding:', error);
+      
+      // Update status to error
+      if (statusEl) {
+        statusEl.textContent = '❌ Extraction failed';
+        statusEl.style.background = '#fee2e2';
+        statusEl.style.color = '#991b1b';
+      }
+    }
+  }
 }
 
 
@@ -2378,7 +3303,6 @@ class DeviceManagerWindow {
   }
 
   bind() {
-    $('#btnStartDeviceSetup')?.addEventListener('click', () => this.open());
     $('#btnDiscover')?.addEventListener('click', () => this.open());
     this.closeBtn?.addEventListener('click', () => this.close());
     this.backdrop?.addEventListener('click', () => this.close());
@@ -2607,9 +3531,9 @@ class RoomWizard {
     // Auto-advance behavior: when a required field for a step is completed,
     // the wizard will advance automatically. Can be disabled if needed.
     this.autoAdvance = true;
-    // equipment-first: begin with hardware categories before fixtures/control
+    // equipment-first: begin with device discovery, then hardware categories before fixtures/control
     // Steps can be augmented dynamically based on selected hardware (e.g., hvac, dehumidifier, etc.)
-    this.baseSteps = ['connectivity','devices','hardware','category-setup','sensors','room-name','location','layout','zones','fixtures','control','energy','grouping','review'];
+    this.baseSteps = ['device-discovery','connectivity','devices','hardware','category-setup','sensors','room-name','location','layout','zones','fixtures','control','energy','grouping','review'];
     this.steps = this.baseSteps.slice();
     this.currentStep = 0;
     this.data = {
@@ -3150,6 +4074,13 @@ class RoomWizard {
         this.data.grouping.spectraSync = !!ev.target.checked;
       });
     }
+
+    // Device Discovery step handlers
+    $('#roomDiscoveryRun')?.addEventListener('click', () => this.runDeviceDiscovery());
+    $('#roomDiscoveryStop')?.addEventListener('click', () => this.stopDeviceDiscovery());
+    $('#roomDiscoverySelectAll')?.addEventListener('click', () => this.selectAllDiscoveredDevices());
+    $('#roomDiscoverySelectNone')?.addEventListener('click', () => this.selectNoDiscoveredDevices());
+    $('#roomDiscoveryRefresh')?.addEventListener('click', () => this.refreshDeviceDiscovery());
   }
 
   open(room = null) {
@@ -3234,6 +4165,37 @@ class RoomWizard {
     else { next.style.display = 'inline-block'; save.style.display = 'none'; }
 
     const stepKey = this.steps[index];
+    
+    // Handle transition from device-discovery to connectivity
+    if (stepKey === 'connectivity' && this.previousStep === 'device-discovery') {
+      const selectedDevices = this.getSelectedDiscoveredDevices();
+      if (selectedDevices.length > 0) {
+        // Auto-populate devices from discovery
+        this.data.devices = this.data.devices || [];
+        selectedDevices.forEach(device => {
+          const deviceEntry = {
+            name: device.deviceName || device.id || 'Discovered Device',
+            vendor: device.vendor || '',
+            model: device.model || '',
+            host: device.ip || device.host || '',
+            setup: this.inferSetupFromDevice(device),
+            source: 'discovery'
+          };
+          this.data.devices.push(deviceEntry);
+        });
+        this.renderDevicesList();
+        showToast({ 
+          title: 'Devices Added', 
+          msg: `${selectedDevices.length} discovered devices added to setup`, 
+          kind: 'success', 
+          icon: '✅' 
+        }, 3000);
+      }
+    }
+    
+    // Track previous step for transitions
+    this.previousStep = stepKey;
+    
     if (stepKey === 'room-name') {
       const nameInput = document.getElementById('roomName');
       if (nameInput) nameInput.value = this.data.name || '';
@@ -4260,6 +5222,8 @@ class RoomWizard {
   updateSetupQueue() {
     const host = document.getElementById('roomSetupQueue');
     if (!host) return;
+    // Ensure flowchart styling class is present on the queue container
+    host.classList.add('flowchart-queue');
     const chips = [];
     const progressStates = [];
     const push = (step, label, status = 'todo', extra = {}) => {
@@ -4267,9 +5231,13 @@ class RoomWizard {
       const emoji = status === 'done' ? '✅' : status === 'warn' ? '⚠️' : '•';
       const attrs = [`data-step="${step}"`];
       if (extra.cat) attrs.push(`data-cat="${extra.cat}"`);
-      const cls = status === 'done' ? 'chip chip--success tiny' : status === 'warn' ? 'chip chip--warn tiny' : 'chip tiny';
+      const cls = status === 'done' ? 'chip chip--success tiny flow-step' : status === 'warn' ? 'chip chip--warn tiny flow-step' : 'chip tiny flow-step';
       chips.push(`<button type="button" class="${cls}" ${attrs.join(' ')}>${emoji} ${escapeHtml(label)}</button>`);
     };
+
+    // Step 1: Device Discovery - scan for all communication protocols
+    const discoveryStatus = (this.data.discoveredDevices || []).length ? 'done' : 'todo';
+    push('device-discovery', 'Discovery', discoveryStatus);
 
     const conn = this.data.connectivity || {};
     let connectivityStatus = 'todo';
@@ -4761,6 +5729,145 @@ class RoomWizard {
       alert('Failed to save room');
     }
   }
+
+  // Device Discovery Methods
+  async runDeviceDiscovery() {
+    const statusEl = $('#roomDiscoveryStatus');
+    const runBtn = $('#roomDiscoveryRun');
+    const stopBtn = $('#roomDiscoveryStop');
+    const resultsEl = $('#roomDiscoveryResults');
+      const progressEl = $('#roomDiscoveryProgress');
+    
+      // Show enhanced scanning radar
+      if (progressEl) progressEl.style.display = 'flex';
+      if (statusEl) statusEl.innerHTML = '<span style="color:#0ea5e9">🔍 Multi-protocol scan in progress...</span>';
+      if (runBtn) {
+        runBtn.style.display = 'none';
+        runBtn.disabled = true;
+      }
+    if (stopBtn) stopBtn.style.display = 'inline-block';
+    
+    this.discoveryRunning = true;
+    this.discoveredDevices = [];
+    
+    try {
+      // Use the existing device discovery from DeviceManagerWindow
+      if (deviceManagerWindow) {
+        await deviceManagerWindow.runDiscovery();
+        this.discoveredDevices = deviceManagerWindow.devices || [];
+        
+          if (statusEl) statusEl.innerHTML = `<span style="color:#059669">✅ Found ${this.discoveredDevices.length} devices across all protocols</span>`;
+        this.renderDiscoveredDevices();
+        if (resultsEl) resultsEl.style.display = 'block';
+      }
+    } catch (error) {
+        if (statusEl) statusEl.innerHTML = '<span style="color:#dc2626">❌ Multi-protocol discovery failed</span>';
+      console.error('Device discovery failed:', error);
+    }
+    
+      // Hide scanning radar
+      if (progressEl) progressEl.style.display = 'none';
+    this.discoveryRunning = false;
+      if (runBtn) {
+        runBtn.style.display = 'inline-block';
+        runBtn.disabled = false;
+      }
+    if (stopBtn) stopBtn.style.display = 'none';
+  }
+  
+  stopDeviceDiscovery() {
+    this.discoveryRunning = false;
+    const statusEl = $('#roomDiscoveryStatus');
+    const runBtn = $('#roomDiscoveryRun');
+    const stopBtn = $('#roomDiscoveryStop');
+    
+    if (statusEl) statusEl.innerHTML = '<span style="color:#f59e0b">⏹️ Discovery stopped</span>';
+    if (runBtn) runBtn.style.display = 'inline-block';
+    if (stopBtn) stopBtn.style.display = 'none';
+  }
+  
+  renderDiscoveredDevices() {
+    const listEl = $('#roomDiscoveryDeviceList');
+    if (!listEl || !this.discoveredDevices) return;
+    
+    listEl.innerHTML = this.discoveredDevices.map((device, idx) => `
+      <div class="discovery-device-item" style="display:flex;align-items:center;padding:8px;border:1px solid #e5e7eb;border-radius:6px;margin-bottom:6px">
+        <input type="checkbox" id="discoveryDevice${idx}" data-device-idx="${idx}" style="margin-right:8px">
+        <div style="flex:1">
+          <div class="tiny" style="font-weight:500">${device.deviceName || device.id || 'Unknown Device'}</div>
+          <div class="tiny" style="color:#6b7280">${device.ip || device.host || ''} • ${device.type || 'Unknown type'}</div>
+        </div>
+        <div class="tiny" style="color:#374151">${device.online ? '🟢 Online' : '🔴 Offline'}</div>
+      </div>
+    `).join('');
+  }
+  
+  selectAllDiscoveredDevices() {
+    const listEl = $('#roomDiscoveryDeviceList');
+    if (!listEl) return;
+    
+    listEl.querySelectorAll('input[type="checkbox"]').forEach(cb => cb.checked = true);
+  }
+  
+  selectNoDiscoveredDevices() {
+    const listEl = $('#roomDiscoveryDeviceList');
+    if (!listEl) return;
+    
+    listEl.querySelectorAll('input[type="checkbox"]').forEach(cb => cb.checked = false);
+  }
+  
+  refreshDeviceDiscovery() {
+    this.runDeviceDiscovery();
+  }
+  
+  getSelectedDiscoveredDevices() {
+    const listEl = $('#roomDiscoveryDeviceList');
+    if (!listEl || !this.discoveredDevices) return [];
+    
+    const selected = [];
+    listEl.querySelectorAll('input[type="checkbox"]:checked').forEach(cb => {
+      const idx = parseInt(cb.dataset.deviceIdx);
+      if (!isNaN(idx) && this.discoveredDevices[idx]) {
+        selected.push(this.discoveredDevices[idx]);
+      }
+    });
+    
+    return selected;
+  }
+  
+  inferSetupFromDevice(device) {
+    // Infer device setup configuration based on device properties
+    const setup = {};
+    
+    if (device.ip || device.host) {
+      // Device has network connectivity - likely WiFi
+      setup.wifi = {
+        ssid: 'auto-discovered',
+        psk: null,
+        useStatic: !!device.ip,
+        staticIp: device.ip || null
+      };
+    }
+    
+    if (device.type) {
+      const type = device.type.toLowerCase();
+      if (type.includes('bluetooth') || type.includes('ble')) {
+        setup.bluetooth = {
+          name: device.deviceName || device.id,
+          pin: null
+        };
+      }
+      if (type.includes('modbus') || type.includes('rs485')) {
+        setup.rs485 = {
+          host: device.ip || device.host,
+          unitId: device.unitId || 1,
+          baud: 9600
+        };
+      }
+    }
+    
+    return setup;
+  }
 }
 
 // --- Data Loading and Initialization ---
@@ -4926,25 +6033,8 @@ function renderDevices() {
   }
   hydrateDeviceSelect();
 
-  // Farmer mode or local off: hide cards and show message, but keep the select populated
-  if (!STATE.researchMode || !STATE.deviceResearchLocal) {
-    // Auto-enable research toggles if there is a non-empty selection, so cards appear as soon as possible
-    try {
-      const sel = Array.from(multiSel?.selectedOptions || []).map(o => o.value);
-      if (sel.length > 0) {
-        if (!STATE.researchMode) { setResearchMode(true); const t = $('#researchModeToggle'); if (t) t.checked = true; }
-        if (!STATE.deviceResearchLocal) { setDevicesLocalResearch(true); const t2 = $('#devicesResearchToggle'); if (t2) t2.checked = true; }
-      }
-    } catch {}
-    if (!STATE.researchMode || !STATE.deviceResearchLocal) {
-    container.innerHTML = '';
-    if (emptyMsg) emptyMsg.style.display = 'block';
-    if (note) note.textContent = '';
-    return;
-    }
-  } else {
-    if (emptyMsg) emptyMsg.style.display = 'none';
-  }
+  // Always show device cards if there's a selection
+  if (emptyMsg) emptyMsg.style.display = 'none';
 
   const scope = scopeSel?.value || 'devices';
   const selected = Array.from(multiSel?.selectedOptions || []).map(o => o.value);
@@ -5411,7 +6501,7 @@ function renderPlansPanel() {
 }
 
 // --- Research Mode Integration ---
-function refreshDeviceCards() { renderDevices(); }
+
 
 // --- Config banner and modal helpers ---
 async function loadConfig() {
@@ -5500,29 +6590,6 @@ function closeEnvModal() {
 
 // --- Global Event Handlers ---
 function wireGlobalEvents() {
-  // Research Mode toggle
-  const toggle = $('#researchModeToggle');
-  if (toggle) {
-    STATE.researchMode = getResearchMode();
-    toggle.checked = STATE.researchMode;
-    toggle.addEventListener('change', () => {
-      STATE.researchMode = toggle.checked;
-      setResearchMode(STATE.researchMode);
-      refreshDeviceCards();
-    });
-  }
-
-  // Local Devices research toggle
-  const devToggle = $('#devicesResearchToggle');
-  if (devToggle) {
-    STATE.deviceResearchLocal = getDevicesLocalResearch();
-    devToggle.checked = STATE.deviceResearchLocal;
-    devToggle.addEventListener('change', () => {
-      setDevicesLocalResearch(devToggle.checked);
-      renderDevices();
-    });
-  }
-
   // Global device controls
   $('#refresh')?.addEventListener('click', loadAllData);
   $('#allOn')?.addEventListener('click', async () => {
@@ -5555,7 +6622,8 @@ function wireGlobalEvents() {
   // Modal close handlers
   document.addEventListener('keydown', (e) => {
     if (e.key === 'Escape') {
-      document.querySelectorAll('[aria-hidden="false"]').forEach(modal => {
+      // Close all modals except farm registration (which should only close on save)
+      document.querySelectorAll('[aria-hidden="false"]:not(#farmModal)').forEach(modal => {
         modal.setAttribute('aria-hidden', 'true');
       });
     }
@@ -6718,28 +7786,38 @@ function initializeTopCard() {
       
       // Update farm logo
       if (farmLogoEl && STATE.farm.logo) {
-        farmLogoEl.src = STATE.farm.logo;
-        farmLogoEl.style.display = 'block';
+        // Validate logo URL before attempting to load
+        const logoUrl = STATE.farm.logo.trim();
+        if (logoUrl && (logoUrl.startsWith('http://') || logoUrl.startsWith('https://'))) {
+          // Use test image approach to avoid 404s
+          const testImg = new Image();
+          testImg.onload = () => {
+            farmLogoEl.src = logoUrl;
+            farmLogoEl.style.display = 'block';
+          };
+          testImg.onerror = () => {
+            farmLogoEl.style.display = 'none';
+          };
+          testImg.src = logoUrl;
+        } else {
+          farmLogoEl.style.display = 'none';
+        }
       }
       
-      // Apply farm brand colors to Light Engine Charlie title (colors only, not fonts)
-      if (lightEngineTitleEl && STATE.farm.brandColors) {
-        const brandColors = STATE.farm.brandColors;
-        if (brandColors.primary) {
-          lightEngineTitleEl.style.color = brandColors.primary;
-          // Update CSS custom property for farm accent color
-          document.documentElement.style.setProperty('--farm-accent', brandColors.primary);
-        }
+      // Apply farm branding theme if available
+      if (lightEngineTitleEl && STATE.farm.branding && STATE.farm.branding.palette) {
+        const palette = STATE.farm.branding.palette;
+        console.log('🎨 initializeTopCard applying theme with palette:', palette);
         
-        // Set farm brand CSS variables for farm branding elements
-        if (brandColors.primary) {
-          document.documentElement.style.setProperty('--farm-primary', brandColors.primary);
-        }
-        if (brandColors.secondary) {
-          document.documentElement.style.setProperty('--farm-secondary', brandColors.secondary);
-        }
-        if (STATE.farm.brandFont) {
-          document.documentElement.style.setProperty('--farm-font', STATE.farm.brandFont);
+        // Apply the complete theme using applyTheme function
+        applyTheme(palette, {
+          fontFamily: STATE.farm.branding.fontFamily || '',
+          logoHeight: STATE.farm.branding.logoHeight || ''
+        });
+        
+        // Also set the title color specifically
+        if (palette.primary) {
+          lightEngineTitleEl.style.color = palette.primary;
         }
       }
     } else {
@@ -6822,10 +7900,7 @@ function initializeAIFeatures() {
     });
 
     card.addEventListener('mouseleave', () => {
-      const tooltip = document.getElementById('tooltip');
-      if (tooltip) {
-        tooltip.setAttribute('aria-hidden', 'true');
-      }
+      hideTip();
     });
   });
 
@@ -6859,6 +7934,14 @@ function updateFeatureStatus(card, status) {
 }
 
 document.addEventListener('DOMContentLoaded', async () => {
+  // Clean up any existing invalid img src attributes that might cause 404s
+  document.querySelectorAll('img').forEach(img => {
+    if (img.src && !img.src.startsWith('http://') && !img.src.startsWith('https://') && !img.src.startsWith('data:') && img.src.includes('.')) {
+      img.src = '';
+      img.style.display = 'none';
+    }
+  });
+  
   wireHints();
   wireGlobalEvents();
   // Load runtime config and show chip
@@ -6869,6 +7952,14 @@ document.addEventListener('DOMContentLoaded', async () => {
   // Initialize AI features and top card
   initializeTopCard();
   initializeAIFeatures();
+  
+  // Apply saved branding if available
+  if (STATE.farm && STATE.farm.branding) {
+    applyTheme(STATE.farm.branding.palette, {
+      fontFamily: STATE.farm.branding.fontFamily || '',
+      logoHeight: STATE.farm.branding.logoHeight || ''
+    });
+  }
   
   // Initialize farm wizard
   farmWizard = new FarmWizard();
@@ -6948,6 +8039,13 @@ document.addEventListener('DOMContentLoaded', async () => {
   // Apply saved branding if present
   try {
     const farmLocal = JSON.parse(localStorage.getItem('gr.farm') || 'null') || STATE.farm;
+    
+    // Clean up invalid logo URLs from localStorage
+    if (farmLocal?.branding?.logo && !farmLocal.branding.logo.startsWith('http://') && !farmLocal.branding.logo.startsWith('https://')) {
+      farmLocal.branding.logo = '';
+      localStorage.setItem('gr.farm', JSON.stringify(farmLocal));
+    }
+    
     const branding = farmLocal?.branding || STATE.farm?.branding;
     if (branding?.palette) applyTheme(branding.palette, { fontFamily: branding.fontFamily || '' });
     if (Array.isArray(branding?.fontCss) && branding.fontCss.length) {
@@ -6955,7 +8053,25 @@ document.addEventListener('DOMContentLoaded', async () => {
       link.href = branding.fontCss[0];
     }
     const headerLogo = document.querySelector('.header.logo img');
-    if (headerLogo && branding?.logo) { headerLogo.src = branding.logo; headerLogo.style.display = 'inline-block'; }
+    if (headerLogo && branding?.logo) { 
+      // Validate logo URL before attempting to load
+      const logoUrl = branding.logo.trim();
+      if (logoUrl && (logoUrl.startsWith('http://') || logoUrl.startsWith('https://'))) {
+        // Use test image approach to avoid 404s
+        const testImg = new Image();
+        testImg.onload = () => {
+          headerLogo.src = logoUrl;
+          headerLogo.style.display = 'inline-block';
+        };
+        testImg.onerror = () => {
+          headerLogo.style.display = 'none';
+        };
+        testImg.src = logoUrl;
+      } else {
+        // Invalid URL format, hide logo
+        headerLogo.style.display = 'none';
+      }
+    }
     const title = document.querySelector('.header.logo h1');
     if (title && branding?.fontFamily) { title.style.fontFamily = branding.fontFamily + ', var(--gr-font)'; }
   } catch {}

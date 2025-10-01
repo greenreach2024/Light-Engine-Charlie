@@ -28,10 +28,6 @@
           </h1>
           <div id="communicationStatus" class="tiny" style="color:var(--medium);margin-top:4px;text-align:right">System Online</div>
         </div>
-        <label class="row" style="align-items:center;gap:8px;background:rgba(var(--gr-primary-rgb, 13, 125, 125), 0.05);padding:8px 12px;border-radius:8px;border:1px solid rgba(var(--gr-primary-rgb, 13, 125, 125), 0.1)">
-          <input id="researchModeToggle" type="checkbox" style="width:18px;height:18px" />
-          <span class="tiny" style="font-weight:500;color:var(--gr-primary)">Research Mode</span>
-        </label>
       </div>
     </div>
   </section>
@@ -166,12 +162,11 @@
         </h2>
         <div class="row" style="gap:6px">
           <button id="btnLaunchFarm" type="button" class="primary">Register Farm</button>
-          <button id="btnEditFarm" type="button" class="ghost" style="display:none">Edit</button>
+          <button id="btnEditFarm" type="button" class="primary pulse-button" style="display:none;padding:12px 24px;font-size:16px;font-weight:600;background:linear-gradient(135deg, var(--gr-primary) 0%, var(--gr-accent) 100%);border:none;box-shadow:0 4px 12px rgba(13, 125, 125, 0.3);transform:scale(1.05)">Start here</button>
         </div>
       </div>
       <p class="tiny" style="margin:8px 0 0;color:#475569">Conversational prompts, 1–3 taps each. We'll store the farm profile locally and at <code>/farm</code>.</p>
       <div id="farmBadge" class="farm-summary" style="margin-top:12px; display:none;"></div>
-      <button id="btnStartDeviceSetup" type="button" class="ghost" style="display:none;margin-top:12px">Start here</button>
     </section>
 
     <!-- Grow Rooms Panel -->
@@ -187,35 +182,6 @@
       </div>
       <p class="tiny" style="margin:8px 0 0;color:#475569">This wizard mirrors Farm Registration but is scoped to a single room.</p>
       <div id="roomsList" style="margin-top:12px"></div>
-    </section>
-
-    <section id="devicesPanel" class="card">
-      <div class="row" style="justify-content:space-between;align-items:center;margin:0 0 8px">
-        <h2 style="margin:0">
-          Devices
-          <span class="hint" tabindex="0" data-tip="Research-only telemetry. When Research Mode is on, view up to 10 devices or 5 groups with PPFD/DLI, energy (kWh 1/7/30), spectrum, and Now/ON/OFF controls. Plans and schedules are managed below.">?</span>
-        </h2>
-        <label class="row" style="align-items:center;gap:6px">
-          <input id="devicesResearchToggle" type="checkbox" style="width:18px;height:18px" />
-          <span class="tiny">Research Mode</span>
-        </label>
-      </div>
-      <div class="row" style="gap:8px;flex-wrap:wrap;margin-bottom:8px;align-items:center">
-        <label class="row" style="gap:6px">
-          <span class="tiny">Scope</span>
-          <select id="deviceScope" style="min-width:160px">
-            <option value="devices">Devices</option>
-            <option value="groups">Groups</option>
-          </select>
-        </label>
-        <label class="row" style="gap:6px;align-items:center">
-          <span class="tiny">Select</span>
-          <select id="deviceSelect" multiple size="4" style="min-width:260px"></select>
-        </label>
-        <span class="tiny" id="devicesNote" aria-live="polite"></span>
-      </div>
-      <p id="devicesEmpty" class="tiny" style="display:none;color:#64748b;margin:6px 0">No devices selected — enable Research Mode to view details. Plans and schedules are managed from the Groups section.</p>
-      <div id="devices" class="grid cols-3"></div>
     </section>
 
     <!-- Plans (Grow recipes) Panel -->
@@ -615,6 +581,42 @@
           <p class="tiny" style="color:#64748b;margin-top:4px">Each chip is a todo. Tap one to jump to that part of the wizard so nothing is left half-configured.</p>
         </div>
         <div id="roomSteps">
+          <section class="room-step" data-step="device-discovery">
+            <p class="room-question">Let's discover devices across all communication protocols.</p>
+            <div class="farm-step__stack">
+              <div class="tiny" style="color:#475569">This comprehensive scan will detect devices using multiple communication methods including Wi-Fi, Bluetooth Low Energy (BLE), Zigbee, Z-Wave, and other smart device protocols commonly used in grow room automation.</div>
+              
+              <!-- Discovery progress indicator -->
+              <div id="roomDiscoveryProgress" class="scanning-container" style="display: none;">
+                <div class="scanning-radar"></div>
+                <div class="scanning-text">Scanning All Protocols</div>
+                <div class="scanning-status">Detecting Wi-Fi • BLE • Zigbee • Z-Wave • mDNS • Network devices...</div>
+              </div>
+              
+              <div class="row" style="gap:8px;align-items:center;flex-wrap:wrap;margin-top:12px">
+                <button id="roomDiscoveryRun" type="button" class="primary">🔍 Start Multi-Protocol Discovery</button>
+                <button id="roomDiscoveryStop" type="button" class="ghost" style="display:none">Stop Discovery</button>
+                <div class="discovery-status" id="roomDiscoveryStatus" style="margin-left:12px"></div>
+              </div>
+              <div class="tiny" style="color:#64748b;margin-top:8px">Discovery scans multiple protocols simultaneously: Wi-Fi networks, Bluetooth devices, smart plugs, sensors, controllers, and IoT devices. This typically takes 30-90 seconds for complete coverage.</div>
+              
+              <!-- Discovery Results -->
+              <div id="roomDiscoveryResults" style="margin-top:16px;display:none">
+                <div class="tiny" style="margin-bottom:8px">Discovered devices</div>
+                <div id="roomDiscoveryDeviceList" class="discovery-device-list"></div>
+                <div class="row" style="gap:8px;margin-top:12px">
+                  <button id="roomDiscoverySelectAll" type="button" class="ghost">Select All</button>
+                  <button id="roomDiscoverySelectNone" type="button" class="ghost">Select None</button>
+                  <button id="roomDiscoveryRefresh" type="button" class="ghost">Refresh</button>
+                </div>
+              </div>
+              
+              <div class="tiny" style="color:#475569;margin-top:12px">
+                Selected devices will be automatically configured in the next steps. You can also manually add devices later if they weren't discovered.
+              </div>
+            </div>
+          </section>
+
           <section class="room-step" data-step="connectivity">
             <p class="room-question">First, let's make sure the local hub is online.</p>
             <div class="farm-step__stack">
@@ -1046,6 +1048,14 @@
           <section class="farm-step" data-step="wifi-select">
             <p class="farm-question">Great—let’s pick the Wi‑Fi network.</p>
             <div class="farm-step__stack">
+              
+              <!-- Scanning indicator -->
+              <div id="wifiScanningIndicator" class="scanning-container" style="display: none;">
+                <div class="scanning-radar"></div>
+                <div class="scanning-text">Scanning for Wi-Fi networks</div>
+                <div class="scanning-status">Please wait while we discover available networks...</div>
+              </div>
+              
               <div class="row" style="gap:6px;align-items:center;flex-wrap:wrap">
                 <button id="btnScanWifi" type="button" class="ghost">Scan again</button>
                 <span id="wifiScanStatus" class="tiny" aria-live="polite"></span>
@@ -1070,6 +1080,14 @@
           <section class="farm-step" data-step="wifi-test">
             <p class="farm-question">Testing that connection…</p>
             <div class="farm-step__stack">
+              
+              <!-- Testing indicator -->
+              <div id="wifiTestingIndicator" class="scanning-container" style="display: none;">
+                <div class="scanning-radar"></div>
+                <div class="scanning-text">Testing Wi-Fi Connection</div>
+                <div class="scanning-status">Verifying network connectivity and internet access...</div>
+              </div>
+              
               <button id="btnTestWifi" type="button" class="primary">Test connection</button>
               <div id="wifiTestStatus" class="farm-review" aria-live="polite"></div>
             </div>
@@ -1079,16 +1097,22 @@
             <p class="farm-question">Where is this farm?</p>
             <div class="farm-step__stack">
               <input id="farmName" name="farmName" type="text" autocomplete="organization" placeholder="Farm name" required>
+              
+              <!-- Use Current Location moved to top -->
+              <div style="display: flex; gap: 6px; align-items: center; margin: 8px 0; flex-wrap: wrap;">
+                <button type="button" id="btnUseMyLocation" class="btn-secondary" style="font-size: 14px;" title="Uses your device's current location to automatically fill address and get GPS coordinates">🧭 Use Current Location</button>
+                <span id="locationStatus" class="tiny" style="color: #666;"></span>
+              </div>
+              <div class="tiny" style="color:#666;margin-bottom:8px;line-height:1.3">
+                <strong>🧭 Use Current Location:</strong> Uses your device's GPS to automatically fill in your current address and coordinates for subscription services
+              </div>
+              
+              <p class="tiny" style="color:#64748b;margin:4px 0">Or enter your farm's address manually below (this information will be used for subscriptions):</p>
               <input id="farmAddress" type="text" autocomplete="street-address" placeholder="Street address">
               <div class="row" style="gap:6px;flex-wrap:wrap">
                 <input id="farmCity" type="text" autocomplete="address-level2" placeholder="City">
                 <input id="farmState" type="text" autocomplete="address-level1" placeholder="State / Province" style="max-width:140px">
                 <input id="farmPostal" type="text" autocomplete="postal-code" placeholder="Postal code" style="max-width:140px">
-              </div>
-              <div style="display: flex; gap: 6px; align-items: center; margin-top: 8px; flex-wrap: wrap;">
-                <button type="button" id="btnFindLocation" class="btn-secondary" style="font-size: 14px;">📍 Find Location</button>
-                <button type="button" id="btnUseMyLocation" class="btn-secondary" style="font-size: 14px;">🧭 Use my location</button>
-                <span id="locationStatus" class="tiny" style="color: #666;"></span>
               </div>
               <div id="locationResults" class="location-results" style="display: none; margin-top: 8px;">
                 <div class="tiny" style="margin-bottom: 4px; color: #666;">Select your farm location:</div>
@@ -1114,7 +1138,19 @@
               <input id="contactName" name="contactName" type="text" autocomplete="name" placeholder="Contact name" required>
               <input id="contactEmail" name="contactEmail" type="email" autocomplete="email" placeholder="Email address" required>
               <input id="contactPhone" name="contactPhone" type="tel" autocomplete="tel" placeholder="Phone number">
-              <input id="contactWebsite" name="contactWebsite" type="url" autocomplete="url" placeholder="Website (for branding)">
+              <div style="display:flex;align-items:center;gap:8px">
+                <input id="contactWebsite" name="contactWebsite" type="url" autocomplete="url" placeholder="Website (for branding)" style="border:2px solid var(--gr-accent);box-shadow:0 0 0 2px rgba(100, 199, 199, 0.1);flex:1">
+                <button id="websiteBrandingButton" type="button" style="background:var(--gr-primary);color:white;border:none;padding:8px 16px;border-radius:6px;cursor:pointer;font-size:14px;font-weight:600;white-space:nowrap;min-width:80px;opacity:0.5;transition:all 0.2s ease" disabled>
+                  🎨 Enter
+                </button>
+              </div>
+              <div id="brandingPreview" class="tiny branding-preview-card" style="margin-top:8px;padding:12px;background:var(--gr-bg);border:1px solid var(--gr-border);border-radius:6px;display:none;cursor:pointer;transition:all 0.2s ease" onclick="farmWizard.showBrandingModal()">
+                <div style="color:var(--gr-primary);font-weight:600;margin-bottom:4px;display:flex;align-items:center;gap:6px">
+                  🎨 Live Branding Preview 
+                  <span style="font-size:10px;opacity:0.7;background:var(--gr-primary);color:white;padding:2px 6px;border-radius:10px">CLICK TO EXPAND</span>
+                </div>
+                <div id="brandingPreviewContent" style="color:var(--medium)">Enter farm name and website to see your branding...</div>
+              </div>
             </div>
           </section>
 
