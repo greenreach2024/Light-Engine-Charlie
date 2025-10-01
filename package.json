@@ -1,0 +1,11 @@
+{
+  "name": "light-engine-charlie",
+  "version": "1.0.0",
+  "description": "Light Engine Charlie server and UI",
+  "main": "server-charlie.js",
+  "type": "module",
+  "scripts": {
+    "start": "node server-charlie.js",
+    "check": "node --check server-charlie.js"
+  }
+}
