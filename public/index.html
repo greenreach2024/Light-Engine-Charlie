@@ -575,11 +575,7 @@
       <form id="roomWizardForm" novalidate>
         <p class="tiny" id="roomModalProgress" aria-live="polite">Step 1 of 9</p>
         <h2 id="roomModalTitle" style="margin:0 0 12px">Set up a Grow Room</h2>
-        <div class="room-setup-queue" id="roomSetupQueueWrap">
-          <p class="tiny" style="margin-bottom:4px;color:#475569">Setup queue</p>
-          <div id="roomSetupQueue" class="chip-row" role="list"></div>
-          <p class="tiny" style="color:#64748b;margin-top:4px">Each chip is a todo. Tap one to jump to that part of the wizard so nothing is left half-configured.</p>
-        </div>
+        
         <div id="roomSteps">
           <section class="room-step" data-step="device-discovery">
             <p class="room-question">Let's discover devices across all communication protocols.</p>
@@ -721,7 +717,7 @@
           </section>
 
           <section class="room-step" data-step="hardware">
-            <p class="room-question">Which equipment do those devices operate?</p>
+            <p class="room-question">Which equipment are you setting up in this room?</p>
             <div class="farm-step__stack">
               <div class="tiny">Select all that apply</div>
               <div id="roomHardwareCats" class="chip-row" role="group" aria-label="Hardware categories">
@@ -734,9 +730,7 @@
                 <button type="button" class="chip-option" data-value="controllers">Controllers / hubs</button>
                 <button type="button" class="chip-option" data-value="other">Other</button>
               </div>
-              <input id="roomDeviceSearch" type="text" placeholder="Search gear (e.g., Gavita 1700e, SwitchBot Plug, Kasa Strip)" autocomplete="off">
-              <ul id="roomDeviceSearchResults" class="farm-kb-results" aria-live="polite"></ul>
-              <p class="tiny" style="color:#64748b">Picking a known model seeds the three-tap micro-form so you only confirm count, control, and energy.</p>
+              <!-- Removed the hardware search UI here to reduce confusion; use Fixtures or Devices steps instead. -->
             </div>
           </section>
 
@@ -746,10 +740,15 @@
             <p class="tiny" id="catSetupIntro" style="color:#475569">We’ll capture a quick count, control method, and energy metering for each device type.</p>
             <p class="tiny" id="catSetupStatusLine" aria-live="polite" style="color:#0f172a"></p>
             <div class="farm-step__stack" id="catSetupBody"></div>
-            <div class="row" id="catSetupActions" style="gap:8px;flex-wrap:wrap;margin-top:12px">
-              <button type="button" class="ghost" id="catTestControl">Test control</button>
-              <button type="button" class="primary" id="catSaveContinue">Mark complete &amp; next</button>
-              <button type="button" class="ghost" id="catSaveDone">Mark follow-up</button>
+            <div id="catActionPanel" class="card action-panel" style="margin-top:12px">
+              <div class="tiny" style="margin-bottom:8px;color:#475569">Actions</div>
+              <div class="row" id="catSetupActions" style="gap:8px;flex-wrap:wrap">
+                <button type="button" class="ghost" id="catTestControl">Test control</button>
+                <button type="button" class="primary" id="catSaveContinue">Mark complete &amp; next</button>
+                <button type="button" class="ghost" id="catSaveDone">Mark follow-up</button>
+              </div>
+            </div>
+            <div class="row" id="catSetupActionsSecondary" style="gap:8px;flex-wrap:wrap;margin-top:8px">
               <button type="button" class="ghost" id="catSkip">Skip for now</button>
               <button type="button" class="ghost" id="catAddNew">Add device</button>
             </div>

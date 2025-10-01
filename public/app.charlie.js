@@ -8,7 +8,7 @@ function showToast({ title = '', msg = '', kind = 'info', icon = '' }, ttlMs = 4
   if (!host) return;
   const el = document.createElement('div');
   el.className = `toast toast--${kind}`;
-  el.innerHTML = `<div class="toast-icon">${icon||''}</div><div class="toast-body"><div class="toast-title">${title}</div><div class="toast-msg">${msg}</div></div><button class="toast-close" aria-label="Close">×</button>`;
+  el.innerHTML = `<div class="toast-icon">${icon || ''}</div><div class="toast-body"><div class="toast-title">${title}</div><div class="toast-msg">${msg}</div></div><button class="toast-close" aria-label="Close">×</button>`;
   host.appendChild(el);
   const closer = el.querySelector('.toast-close');
   closer?.addEventListener('click', ()=> el.remove());
@@ -4001,7 +4001,8 @@ class RoomWizard {
         });
       });
     }
-  $('#roomHubDetect')?.addEventListener('click', () => this.detectHub());
+    $('#roomHubDetect')?.addEventListener('click', () => this.detectHub());
+    $('#roomHubVerify')?.addEventListener('click', () => this.verifyHub());
     $('#roomDeviceScan')?.addEventListener('click', () => this.scanLocalDevices());
 
     $('#roomHubType')?.addEventListener('input', (e) => {
@@ -4014,15 +4015,11 @@ class RoomWizard {
       this.data.connectivity.hubIp = (e.target.value || '').trim();
       this.updateSetupQueue();
     });
-    // Cloud tenant is head-office managed; keep hidden and fixed to default
-    const tenantField = document.getElementById('roomCloudTenant');
-    if (tenantField) {
-      try { tenantField.value = 'Azure'; } catch {}
-      tenantField.setAttribute('disabled', '');
-      tenantField.setAttribute('aria-hidden', 'true');
-      if (!this.data.connectivity) this.data.connectivity = {};
-      if (!this.data.connectivity.cloudTenant) this.data.connectivity.cloudTenant = 'Azure';
-    }
+    $('#roomCloudTenant')?.addEventListener('input', (e) => {
+      this.data.connectivity = this.data.connectivity || {};
+      this.data.connectivity.cloudTenant = (e.target.value || '').trim();
+      this.updateSetupQueue();
+    });
 
     const bindRoleInput = (id, key) => {
       const el = document.getElementById(id);
@@ -4244,15 +4241,14 @@ class RoomWizard {
       const container = document.getElementById('roomControlMethod');
       if (!container) return;
       container.querySelectorAll('.chip-option').forEach(b => {
-        b.removeAttribute('data-active');
-        if (this.data.controlMethod && b.dataset.value === this.data.controlMethod) b.setAttribute('data-active','');
+        b.classList.remove('active');
+        if (this.data.controlMethod && b.dataset.value === this.data.controlMethod) b.classList.add('active');
         b.onclick = () => {
           const v = b.dataset.value;
           this.data.controlMethod = v;
-          container.querySelectorAll('.chip-option').forEach(x => x.removeAttribute('data-active'));
-          b.setAttribute('data-active','');
-          const detailsEl = document.getElementById('roomControlDetails');
-          if (detailsEl) detailsEl.textContent = this.controlHintFor(v);
+          container.querySelectorAll('.chip-option').forEach(x => x.classList.remove('active'));
+          b.classList.add('active');
+          document.getElementById('roomControlDetails').textContent = this.controlHintFor(v);
           this.inferSensors();
           const smart = ['wifi', 'smart-plug', 'rs485', 'other'].includes(v);
           const devicesStepEl = document.querySelector('.room-step[data-step="devices"]');
@@ -4260,10 +4256,7 @@ class RoomWizard {
           if (this.autoAdvance) setTimeout(() => this.tryAutoAdvance(), 80);
         };
       });
-      if (this.data.controlMethod) {
-        const detailsEl = document.getElementById('roomControlDetails');
-        if (detailsEl) detailsEl.textContent = this.controlHintFor(this.data.controlMethod);
-      }
+      if (this.data.controlMethod) document.getElementById('roomControlDetails').textContent = this.controlHintFor(this.data.controlMethod);
     }
     if (stepKey === 'sensors') {
       const container = document.getElementById('roomSensorCats');
@@ -4307,20 +4300,9 @@ class RoomWizard {
       const viewerInput = document.getElementById('roomRoleViewer'); if (viewerInput) viewerInput.value = (roles.viewer || []).join(', ');
       const statusEl = document.getElementById('roomHubStatus');
       if (statusEl) {
-        if (hub.hasHub) statusEl.textContent = hub.hubIp ? `Hub recorded at ${hub.hubIp}. Checking local services…` : 'Hub recorded. Add IP to enable edge control.';
+        if (hub.hasHub) statusEl.textContent = hub.hubIp ? `Hub recorded at ${hub.hubIp}. Verify Node-RED when ready.` : 'Hub recorded. Add IP to enable edge control.';
         else statusEl.textContent = '';
       }
-      // Adaptive intro messaging based on discovery context
-      try {
-        const intro = document.getElementById('roomConnectivityIntro');
-        const dd = (this.discoveredDevices && Array.isArray(this.discoveredDevices) ? this.discoveredDevices : (Array.isArray(this.data?.discoveredDevices) ? this.data.discoveredDevices : []));
-        const anySwitchBot = dd.some(d => /switch\s*bot|switchbot/i.test(`${d.vendor||''} ${d.deviceName||''} ${d.model||''}`));
-        if (intro) {
-          intro.textContent = anySwitchBot ? 'We found SwitchBot devices. Let’s sync with your SwitchBot hub.' : 'Is your local smart hub on-line?';
-        }
-      } catch {}
-      // Auto-verify hub/forwarder in the background
-      this.verifyHub(true);
     }
     if (stepKey === 'energy') {
       document.querySelectorAll('#roomEnergy .chip-option').forEach(btn => {
@@ -4407,12 +4389,42 @@ class RoomWizard {
       case 'category-setup': {
         // Persist current category form values into this.data.
         this.captureCurrentCategoryForm();
-        // Enforce completion before allowing Next to move to another step/category
+        // If no categories require setup, allow progression
+        const hasQueue = Array.isArray(this.categoryQueue) && this.categoryQueue.length > 0;
         const catId = this.getCurrentCategoryId();
+        if (!hasQueue || !catId) { void this.persistProgress(); break; }
+
+        // Determine if testing is actually possible
+        const hasDevices = Array.isArray(this.data.devices) && this.data.devices.length > 0;
+        const hasLights = (STATE.devices||[]).some(d=>d.type==='light' || /light|fixture/i.test(d.deviceName||''));
+        let canTest = false;
+        if (catId === 'grow-lights') canTest = hasLights;
+        else if (catId === 'controllers') canTest = true; // hub probe
+        else if (catId === 'sensors') canTest = true;     // show live sample
+        else canTest = hasDevices;                        // other categories require devices present
+
         const st = this.categoryProgress?.[catId]?.status;
-        if (!st || st !== 'complete') {
-          alert('This category is not confirmed yet. Run Test Control and confirm before proceeding.');
-          return false;
+        if (st === 'complete') { void this.persistProgress(); break; }
+
+        // If cannot test, allow progression but mark follow-up
+        if (!canTest) {
+          const note = (catId === 'grow-lights' && !hasLights) ? 'Add or pair a light to enable testing' : 'No paired devices yet';
+          this.categoryProgress[catId] = this.categoryProgress[catId] || {};
+          if (!this.categoryProgress[catId].status || this.categoryProgress[catId].status === 'needs-info') {
+            this.categoryProgress[catId].status = 'needs-setup';
+            this.categoryProgress[catId].notes = note;
+          }
+          void this.persistProgress();
+          break;
+        }
+
+        // If test is possible but not completed, ask the user; allow proceed if they confirm, marking follow-up
+        const ok = confirm('Test control has not been confirmed for this category. Continue and mark for follow-up?');
+        if (!ok) return false;
+        this.categoryProgress[catId] = this.categoryProgress[catId] || {};
+        if (!this.categoryProgress[catId].status || this.categoryProgress[catId].status === 'needs-info') {
+          this.categoryProgress[catId].status = 'needs-setup';
+          this.categoryProgress[catId].notes = 'Test later';
         }
         void this.persistProgress();
         break; }
@@ -4498,7 +4510,7 @@ class RoomWizard {
   rebuildDynamicSteps() {
     const selected = Array.isArray(this.data.hardwareCats) ? this.data.hardwareCats.slice() : [];
     // Define which categories have micro-forms; order them after hardware and before fixtures
-    const formCats = selected.filter(c => ['hvac','dehumidifier','fans','vents','irrigation','controllers','other'].includes(c));
+  const formCats = selected.filter(c => ['grow-lights','hvac','dehumidifier','fans','vents','irrigation','controllers','other'].includes(c));
     // Preserve user selection order using hardwareOrder we maintain on toggles
     const chipOrder = (Array.isArray(this.data.hardwareOrder) ? this.data.hardwareOrder : [])
       .filter(v => formCats.includes(v));
@@ -4510,9 +4522,11 @@ class RoomWizard {
     const newSteps = [];
     for (let i = 0; i < this.baseSteps.length; i++) {
       const k = this.baseSteps[i];
+      // Skip the baseline category-setup entry; we'll inject it after hardware only if queue is non-empty
+      if (k === 'category-setup') continue;
       newSteps.push(k);
       if (k === 'hardware' && this.categoryQueue.length) {
-        // inject one "category-setup" placeholder right after hardware
+        // inject one "category-setup" placeholder right after hardware when needed
         newSteps.push('category-setup');
       }
     }
@@ -4557,17 +4571,21 @@ class RoomWizard {
     const v = (x)=> x==null? '' : String(x);
     const data = (this.data.category || (this.data.category = {}));
     const catData = (data[catId] || (data[catId] = {}));
-    // Template helpers for chip groups (use data-active for visual state)
+    // Template helpers for chip groups
     const chipRow = (id, values, selected) => {
-      const normalize = (opt) => typeof opt === 'string' ? { value: opt, label: opt } : opt;
-      return `<div class="chip-row" id="${id}">` + values.map(o => {
-        const opt = normalize(o);
-        const isSel = selected && (String(selected) === String(opt.value));
-        return `<button type="button" class="chip-option" data-value="${opt.value}"${isSel ? ' data-active' : ''}>${opt.label}</button>`;
-      }).join('') + `</div>`;
+      return `<div class="chip-row" id="${id}">` + values.map(opt => `<button type="button" class="chip-option${selected===opt? ' active':''}" data-value="${opt}">${opt}</button>`).join('') + `</div>`;
     };
     let html = '';
-    if (catId === 'hvac') {
+    if (catId === 'grow-lights') {
+      html = `
+        <div class="tiny">Grow lights</div>
+        <label class="tiny">How many fixtures? <input type="number" id="cat-lights-count" min="0" value="${v(catData.count||0)}" style="width:110px"></label>
+        <div class="tiny" style="margin-top:6px">Control method</div>
+        ${chipRow('cat-lights-control', ['Wi‑Fi','Bluetooth','Smart plug','0-10V','RS-485','Other'], catData.control)}
+        <div class="tiny" style="margin-top:6px">Energy</div>
+        ${chipRow('cat-lights-energy', ['Built-in','Smart plugs','CT/branch','None'], catData.energy)}
+      `;
+    } else if (catId === 'hvac') {
       html = `
         <div class="tiny">HVAC units</div>
         <label class="tiny">How many? <input type="number" id="cat-hvac-count" min="0" value="${v(catData.count||0)}" style="width:80px"></label>
@@ -4575,22 +4593,6 @@ class RoomWizard {
         ${chipRow('cat-hvac-control', ['Thermostat','Modbus/BACnet','Relay','Other'], catData.control)}
         <div class="tiny" style="margin-top:6px">Energy</div>
         ${chipRow('cat-hvac-energy', ['Built-in','CT/branch','None'], catData.energy)}
-      `;
-    } else if (catId === 'grow-lights') {
-      // Dedicated lights micro-form so users can pick Smart plug or Wi‑Fi control directly
-      html = `
-        <div class="tiny">Grow lights</div>
-        <label class="tiny">How many fixtures? <input type="number" id="cat-light-count" min="0" value="${v(catData.count||0)}" style="width:100px"></label>
-        <div class="tiny" style="margin-top:6px">Control</div>
-        ${chipRow('cat-light-control', [
-          { value: 'wifi', label: 'Wi‑Fi / App' },
-          { value: 'smart-plug', label: 'Smart plug' },
-          { value: '0-10v', label: '0‑10V / Wired' },
-          { value: 'rs485', label: 'RS‑485 / Modbus' },
-          { value: 'other', label: 'Other' }
-        ], catData.control)}
-        <div class="tiny" style="margin-top:6px">Energy</div>
-        ${chipRow('cat-light-energy', ['Built-in','CT/branch','Smart plug','None'], catData.energy)}
       `;
     } else if (catId === 'dehumidifier') {
       html = `
@@ -4639,32 +4641,39 @@ class RoomWizard {
     body.querySelectorAll('.chip-row').forEach(row => {
       row.addEventListener('click', (e) => {
         const btn = e.target.closest('.chip-option'); if (!btn) return;
-        row.querySelectorAll('.chip-option').forEach(b => b.removeAttribute('data-active'));
-        btn.setAttribute('data-active','');
+        row.querySelectorAll('.chip-option').forEach(b => b.classList.remove('active'));
+        btn.classList.add('active');
         const val = btn.getAttribute('data-value');
         const id = row.getAttribute('id');
+        if (id === 'cat-lights-control') this.data.category['grow-lights'].control = val;
+        if (id === 'cat-lights-energy') this.data.category['grow-lights'].energy = val;
         if (id === 'cat-hvac-control') this.data.category.hvac.control = val;
         if (id === 'cat-hvac-energy') this.data.category.hvac.energy = val;
-        if (id === 'cat-light-control') {
-          this.data.category['grow-lights'].control = val;
-          // Sync the global controlMethod so Devices step visibility and hints align
-          this.data.controlMethod = val;
-          const cmHost = document.getElementById('roomControlMethod');
-          if (cmHost) cmHost.querySelectorAll('.chip-option').forEach(b => {
-            if (b.dataset.value === val) b.setAttribute('data-active',''); else b.removeAttribute('data-active');
-          });
-          const details = document.getElementById('roomControlDetails');
-          if (details) details.textContent = this.controlHintFor(val);
-        }
-        if (id === 'cat-light-energy') this.data.category['grow-lights'].energy = val;
         if (id === 'cat-dehu-control') this.data.category.dehumidifier.control = val;
         if (id === 'cat-dehu-energy') this.data.category.dehumidifier.energy = val;
         if (id === 'cat-fans-control') this.data.category.fans.control = val;
         if (id === 'cat-vents-control') this.data.category.vents.control = val;
         if (id === 'cat-irr-control') this.data.category.irrigation.control = val;
-        this.updateSetupQueue();
       }, { once: false });
     });
+
+    // If Grow lights control picked, sync to overall Control step chips
+    if (catId === 'grow-lights') {
+      const container = document.getElementById('roomControlMethod');
+      const map = { 'Wi‑Fi': 'wifi', 'Bluetooth': 'bluetooth', 'Smart plug': 'smart-plug', '0-10V': '0-10v', 'RS-485': 'rs485', 'Other': 'other' };
+      const chosen = this.data.category['grow-lights']?.control || '';
+      const cm = map[chosen] || '';
+      if (cm) {
+        this.data.controlMethod = cm;
+        if (container) {
+          container.querySelectorAll('.chip-option').forEach(btn => {
+            if (btn.dataset.value === cm) btn.setAttribute('data-active',''); else btn.removeAttribute('data-active');
+          });
+        }
+        const details = document.getElementById('roomControlDetails');
+        if (details) details.textContent = this.controlHintFor(cm);
+      }
+    }
   }
 
   // Capture inputs for the current category
@@ -4675,11 +4684,11 @@ class RoomWizard {
     const catData = (data[catId] || (data[catId] = {}));
     const getNum = (id) => { const el = document.getElementById(id); if (!el) return undefined; const n = Number(el.value||0); return Number.isFinite(n)? n: undefined; };
     const getStr = (id) => { const el = document.getElementById(id); return el ? (el.value||'').trim() : undefined; };
+    if (catId === 'grow-lights') {
+      catData.count = getNum('cat-lights-count') ?? catData.count;
+    }
     if (catId === 'hvac') {
       catData.count = getNum('cat-hvac-count') ?? catData.count;
-    }
-    if (catId === 'grow-lights') {
-      catData.count = getNum('cat-light-count') ?? catData.count;
     }
     if (catId === 'dehumidifier') {
       catData.count = getNum('cat-dehu-count') ?? catData.count;
@@ -4711,6 +4720,22 @@ class RoomWizard {
     const skip = document.getElementById('catSkip');
     const addNew = document.getElementById('catAddNew');
     const catId = this.getCurrentCategoryId();
+    // Determine whether anything is actually testable for this category
+    const hasDevices = Array.isArray(this.data.devices) && this.data.devices.length > 0;
+    const hasLights = (STATE.devices||[]).some(d=>d.type==='light' || /light|fixture/i.test(d.deviceName||''));
+    let canTest = false;
+    if (catId === 'grow-lights') canTest = hasLights;
+    else if (catId === 'controllers') canTest = true; // hub probe
+    else if (catId === 'sensors') canTest = true;     // show live sample
+    else canTest = hasDevices;                        // other categories require devices present
+    if (testBtn) {
+      testBtn.disabled = !canTest;
+      testBtn.title = canTest ? '' : 'Nothing to test yet — add or pair a device first';
+    }
+    if (!canTest && status) {
+      const hint = 'Nothing to test yet — use Add device to pair hardware. You can still Mark complete & next.';
+      status.textContent = status.textContent ? `${status.textContent} — ${hint}` : hint;
+    }
     const mark = (st, note='', opts = {}) => {
       this.categoryProgress[catId] = this.categoryProgress[catId] || {};
       this.categoryProgress[catId].status = st;
@@ -4761,15 +4786,32 @@ class RoomWizard {
     saveCont?.addEventListener('click', () => {
       this.captureCurrentCategoryForm();
       // Enforce: every device must have a control method when applicable
-  const requiresControl = ['hvac','grow-lights','dehumidifier','fans','vents','irrigation'].includes(catId);
+  const requiresControl = ['grow-lights','hvac','dehumidifier','fans','vents','irrigation'].includes(catId);
       if (requiresControl) {
         const d = this.data.category?.[catId];
         if (!d || !d.control) { alert('Select a control method before continuing.'); return; }
       }
-      // Require controlConfirmed for non-sensor categories unless user later resumes
+      // If test isn't possible or hasn't been run, allow progression but mark follow-up
       const st = this.categoryProgress[catId]?.status;
-      if (!st || (st!=='complete')) { alert('Run Test Control and confirm before continuing.'); return; }
-      // Advance within category queue
+      if (st === 'complete') {
+        this.nextStep();
+        return;
+      }
+      // No testable devices yet or user opted not to test — mark as needs-setup and proceed with guidance
+      const reason = canTest ? 'Test later' : 'No paired devices yet';
+      const note = catId === 'grow-lights' && !hasLights ? 'Add or pair a light to enable testing' : reason;
+      // Persist a warning status to reflect follow-up needed
+      const prior = this.categoryProgress[catId]?.status;
+      if (!prior || prior === 'needs-info') {
+        // only write when not previously set to a stronger state
+        this.categoryProgress[catId] = this.categoryProgress[catId] || {};
+        this.categoryProgress[catId].status = 'needs-setup';
+        this.categoryProgress[catId].notes = note;
+        void this.persistProgress();
+      }
+      this.updateCategoryNav();
+      this.updateSetupQueue();
+      showToast({ title:'Proceeding without test', msg:`${this.categoryLabel(catId)} marked for follow-up — ${note}.`, kind:'info', icon:'➡️' }, 4000);
       this.nextStep();
     });
 
@@ -4972,29 +5014,24 @@ class RoomWizard {
         if (status) status.textContent = 'Hub not detected automatically. Enter IP manually.';
       }
     } catch (err) {
-      if (status) status.textContent = 'Could not reach hub automatically. Enter the IP manually.';
+      if (status) status.textContent = 'Could not reach hub automatically. Enter the IP and tenant manually.';
     }
     this.updateSetupQueue();
-    // Attempt background verification after detection
-    try { await this.verifyHub(true); } catch {}
   }
 
-  async verifyHub(silent = false) {
+  async verifyHub() {
     const status = document.getElementById('roomHubStatus');
-    if (!silent && status) status.textContent = 'Checking local services…';
+    if (status) status.textContent = 'Verifying Node-RED…';
     try {
       const resp = await fetch('/forwarder/healthz');
       if (resp.ok) {
-        if (status) status.textContent = '✅ Edge forwarder is healthy. Local automations will run even during cloud outages.';
-        this.data.connectivity = this.data.connectivity || {};
-        if (this.data.connectivity.hasHub !== false) this.data.connectivity.hasHub = true;
+        if (status) status.textContent = 'Forwarder healthy — confirm Node-RED flows are running on the hub for edge control.';
       } else {
-        if (status) status.textContent = '⚠️ Hub reachable but reported an error. Ensure Node-RED/bridges are running on the hub.';
+        if (status) status.textContent = 'Forwarder returned an error. Ensure Node-RED is running on the local hub.';
       }
     } catch (err) {
-      if (status) status.textContent = '⚠️ Unable to reach the hub right now. Enter the IP or check local connectivity.';
+      if (status) status.textContent = 'Unable to reach the hub right now. Check local connectivity and Node-RED status.';
     }
-    this.updateSetupQueue();
   }
 
   async scanLocalDevices() {
@@ -5070,6 +5107,7 @@ class RoomWizard {
     if (text.includes('0-10')) return '0-10v';
     if (text.includes('modbus') || text.includes('rs485') || text.includes('bacnet')) return 'rs485';
     if (text.includes('smart plug') || text.includes('smart-plug') || text.includes('plug') || text.includes('kasa') || text.includes('switchbot')) return 'smart-plug';
+    if (text.includes('bluetooth') || text.includes('ble')) return 'bluetooth';
     if (text.includes('wifi') || text.includes('wi-fi') || text.includes('cloud')) return 'wifi';
     return 'other';
   }
@@ -5163,7 +5201,7 @@ class RoomWizard {
         const container = document.getElementById('roomControlMethod');
         if (container) {
           container.querySelectorAll('.chip-option').forEach(btn => {
-            if (btn.dataset.value === method) btn.setAttribute('data-active',''); else btn.removeAttribute('data-active');
+            if (btn.dataset.value === method) btn.classList.add('active'); else btn.classList.remove('active');
           });
         }
         const details = document.getElementById('roomControlDetails');
@@ -5208,7 +5246,7 @@ class RoomWizard {
         const container = document.getElementById('roomControlMethod');
         if (container) {
           container.querySelectorAll('.chip-option').forEach(btn => {
-            if (btn.dataset.value === cm) btn.setAttribute('data-active',''); else btn.removeAttribute('data-active');
+            if (btn.dataset.value === cm) btn.classList.add('active'); else btn.classList.remove('active');
           });
         }
         const details = document.getElementById('roomControlDetails');
@@ -5282,18 +5320,15 @@ class RoomWizard {
   updateSetupQueue() {
     const host = document.getElementById('roomSetupQueue');
     if (!host) return;
-    // Ensure flowchart styling class is present on the queue container
-    host.classList.add('flowchart-queue', 'flowchart-queue--svg');
     const chips = [];
     const progressStates = [];
     const push = (step, label, status = 'todo', extra = {}) => {
       if (step !== 'review') progressStates.push(status);
-      // Numbered badge per step to reinforce flow
-      const idxNum = chips.length + 1;
+      const emoji = status === 'done' ? '✅' : status === 'warn' ? '⚠️' : '•';
       const attrs = [`data-step="${step}"`];
       if (extra.cat) attrs.push(`data-cat="${extra.cat}"`);
-      const cls = status === 'done' ? 'chip chip--success tiny flow-step' : status === 'warn' ? 'chip chip--warn tiny flow-step' : 'chip tiny flow-step';
-      chips.push(`<button type="button" class="${cls}" ${attrs.join(' ')}><span class="chip-step" aria-hidden="true">${idxNum}</span><span class="chip-label">${escapeHtml(label)}</span></button>`);
+      const cls = status === 'done' ? 'chip chip--success tiny' : status === 'warn' ? 'chip chip--warn tiny' : 'chip tiny';
+      chips.push(`<button type="button" class="${cls}" ${attrs.join(' ')}>${emoji} ${escapeHtml(label)}</button>`);
     };
 
     // Step 1: Device Discovery - scan for all communication protocols
@@ -5306,7 +5341,7 @@ class RoomWizard {
     else if (conn.hasHub === false) connectivityStatus = (this.data.hardwareCats || []).includes('controllers') ? 'warn' : 'warn';
     push('connectivity', 'Connectivity', connectivityStatus);
 
-    const smartControl = ['wifi', 'smart-plug', 'rs485', 'other'].includes(this.data.controlMethod);
+  const smartControl = ['wifi', 'bluetooth', 'smart-plug', 'rs485', 'other'].includes(this.data.controlMethod);
     const devicesStatus = (this.data.devices || []).length ? 'done' : (smartControl ? 'warn' : 'todo');
     push('devices', 'Devices', devicesStatus);
 
@@ -5349,104 +5384,7 @@ class RoomWizard {
     const reviewStatus = hasTodo ? 'todo' : hasWarn ? 'warn' : 'done';
     push('review', 'Review', reviewStatus);
 
-    // Render chips and an SVG overlay for creative flow arrows
-    host.innerHTML = '';
-    // Create SVG overlay (positioned absolutely via CSS)
-    const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
-    svg.setAttribute('class', 'flowchart-svg');
-    svg.setAttribute('role', 'presentation');
-    svg.setAttribute('aria-hidden', 'true');
-    const defs = document.createElementNS('http://www.w3.org/2000/svg', 'defs');
-    const marker = document.createElementNS('http://www.w3.org/2000/svg', 'marker');
-    marker.setAttribute('id', 'flowArrow');
-    marker.setAttribute('markerWidth', '8');
-    marker.setAttribute('markerHeight', '8');
-    marker.setAttribute('refX', '6');
-    marker.setAttribute('refY', '3');
-    marker.setAttribute('orient', 'auto');
-    const arrowPath = document.createElementNS('http://www.w3.org/2000/svg', 'path');
-    arrowPath.setAttribute('d', 'M0,0 L6,3 L0,6 Z');
-    arrowPath.setAttribute('class', 'flow-arrowhead');
-    marker.appendChild(arrowPath);
-    defs.appendChild(marker);
-    svg.appendChild(defs);
-    host.appendChild(svg);
-
-    // Chips container
-    const frag = document.createDocumentFragment();
-    const chipsWrap = document.createElement('div');
-    chipsWrap.setAttribute('class', 'flowchips');
-    chipsWrap.innerHTML = chips.join('');
-    frag.appendChild(chipsWrap);
-    host.appendChild(frag);
-
-    // Draw connecting arrows between chips (handles wrap across rows)
-    const drawArrows = () => {
-      // Clear old paths
-      while (svg.lastChild && svg.lastChild.nodeName.toLowerCase() !== 'defs') svg.removeChild(svg.lastChild);
-      const btns = Array.from(host.querySelectorAll('button.flow-step'));
-      if (btns.length < 2) return;
-      // Size SVG to container
-      const rect = host.getBoundingClientRect();
-      const scrollH = host.scrollHeight;
-      svg.setAttribute('width', String(rect.width));
-      svg.setAttribute('height', String(scrollH));
-      svg.setAttribute('viewBox', `0 0 ${rect.width} ${scrollH}`);
-      const hostTop = host.getBoundingClientRect().top + window.scrollY;
-      const hostLeft = host.getBoundingClientRect().left + window.scrollX;
-
-      const getCenter = (el) => {
-        const r = el.getBoundingClientRect();
-        const cx = r.left + window.scrollX - hostLeft + r.width; // right edge
-        const cy = r.top + window.scrollY - hostTop + r.height / 2; // middle vertically
-        const lx = r.left + window.scrollX - hostLeft; // left edge
-        return { r: { x: cx, y: cy }, l: { x: lx, y: cy }, box: r };
-      };
-
-      for (let i = 0; i < btns.length - 1; i++) {
-        const a = btns[i];
-        const b = btns[i + 1];
-        const ca = getCenter(a);
-        const cb = getCenter(b);
-        const sameRow = Math.abs(ca.r.y - cb.l.y) < 14; // rough row tolerance
-        const path = document.createElementNS('http://www.w3.org/2000/svg', 'path');
-        // Color by progress of source chip
-        const cls = a.classList.contains('chip--success') ? 'flow-path flow-path--success' : a.classList.contains('chip--warn') ? 'flow-path flow-path--warn' : 'flow-path';
-        path.setAttribute('class', cls);
-        path.setAttribute('marker-end', 'url(#flowArrow)');
-        if (sameRow && cb.l.x > ca.r.x) {
-          // Straight line to the next chip on the same row
-          const mx = ca.r.x + 6;
-          const my = ca.r.y;
-          const ex = cb.l.x - 6;
-          const ey = cb.l.y;
-          path.setAttribute('d', `M ${mx} ${my} L ${ex} ${ey}`);
-        } else {
-          // Wrapped to the next row: draw a smooth elbow
-          const startX = ca.r.x + 6;
-          const startY = ca.r.y;
-          const midX = startX + 18; // small horizontal lead
-          const downY = cb.l.y - 10; // approach above target
-          const endX = cb.l.x - 6;
-          const endY = cb.l.y;
-          const d = [
-            `M ${startX} ${startY}`,
-            `C ${midX} ${startY}, ${midX} ${downY}, ${endX} ${downY}`,
-            `L ${endX} ${endY}`
-          ].join(' ');
-          path.setAttribute('d', d);
-        }
-        svg.appendChild(path);
-      }
-    };
-
-    // Initial draw and on resize (debounced)
-    drawArrows();
-    let _flowRaf = null;
-    const onResize = () => { if (_flowRaf) cancelAnimationFrame(_flowRaf); _flowRaf = requestAnimationFrame(drawArrows); };
-    // Attach a temporary resize observer tied to this host
-    if (!this._flowResizeHandler) this._flowResizeHandler = onResize;
-    window.addEventListener('resize', this._flowResizeHandler, { passive: true });
+    host.innerHTML = chips.join('');
     host.querySelectorAll('button[data-step]').forEach(btn => {
       btn.addEventListener('click', () => {
         const step = btn.getAttribute('data-step');
@@ -5487,6 +5425,7 @@ class RoomWizard {
   controlHintFor(v) {
     const map = {
       'wifi': 'Wi‑Fi/Cloud-controlled fixtures often expose energy and runtime telemetry; they may also report PPFD if integrated.',
+      'bluetooth': 'Bluetooth control pairs locally and may require a nearby hub or phone; telemetry depends on vendor integration.',
       'smart-plug': 'Smart plugs give power/energy telemetry but typically do not provide PPFD or temperature readings.',
       '0-10v': '0‑10V wired control usually implies no integrated sensors; external PPFD or temp sensors are commonly used.',
       'rs485': 'RS‑485/Modbus fixtures or drivers may expose metering and diagnostics depending on vendor.',
@@ -5889,14 +5828,6 @@ class RoomWizard {
   }
 
   // Device Discovery Methods
-  // Tiny helper to flash a CSS class on a button for visual feedback
-  flashButton(btn, cls = 'btn-active', ms = 700) {
-    try {
-      if (!btn) return;
-      btn.classList.add(cls);
-      setTimeout(() => { try { btn.classList.remove(cls); } catch {} }, ms);
-    } catch {}
-  }
   async runDeviceDiscovery() {
     const statusEl = $('#roomDiscoveryStatus');
     const runBtn = $('#roomDiscoveryRun');
@@ -5907,8 +5838,11 @@ class RoomWizard {
       // Show enhanced scanning radar
       if (progressEl) progressEl.style.display = 'flex';
       if (statusEl) statusEl.innerHTML = '<span style="color:#0ea5e9">🔍 Multi-protocol scan in progress...</span>';
-      if (runBtn) { this.flashButton(runBtn, 'btn-running', 1200); runBtn.style.display = 'none'; runBtn.disabled = true; }
-    if (stopBtn) { stopBtn.style.display = 'inline-block'; stopBtn.classList.add('btn-running'); }
+      if (runBtn) {
+        runBtn.style.display = 'none';
+        runBtn.disabled = true;
+      }
+    if (stopBtn) stopBtn.style.display = 'inline-block';
     
     this.discoveryRunning = true;
     this.discoveredDevices = [];
@@ -5916,24 +5850,26 @@ class RoomWizard {
     try {
       // Use the existing device discovery from DeviceManagerWindow
       if (deviceManagerWindow) {
-  await deviceManagerWindow.runDiscovery();
-  this.discoveredDevices = deviceManagerWindow.devices || [];
-  try { this.data.discoveredDevices = Array.isArray(this.discoveredDevices) ? this.discoveredDevices.slice() : []; } catch {}
+        await deviceManagerWindow.runDiscovery();
+        this.discoveredDevices = deviceManagerWindow.devices || [];
         
-          if (statusEl) statusEl.innerHTML = `<span style=\"color:#059669\">✅ Found ${this.discoveredDevices.length} devices across all protocols</span>`;
+          if (statusEl) statusEl.innerHTML = `<span style="color:#059669">✅ Found ${this.discoveredDevices.length} devices across all protocols</span>`;
         this.renderDiscoveredDevices();
         if (resultsEl) resultsEl.style.display = 'block';
       }
     } catch (error) {
-        if (statusEl) statusEl.innerHTML = '<span style=\"color:#dc2626\">❌ Multi-protocol discovery failed</span>';
+        if (statusEl) statusEl.innerHTML = '<span style="color:#dc2626">❌ Multi-protocol discovery failed</span>';
       console.error('Device discovery failed:', error);
     }
     
       // Hide scanning radar
       if (progressEl) progressEl.style.display = 'none';
     this.discoveryRunning = false;
-      if (runBtn) { runBtn.style.display = 'inline-block'; runBtn.disabled = false; this.flashButton(runBtn, 'btn-success', 750); }
-    if (stopBtn) { stopBtn.style.display = 'none'; stopBtn.classList.remove('btn-running'); }
+      if (runBtn) {
+        runBtn.style.display = 'inline-block';
+        runBtn.disabled = false;
+      }
+    if (stopBtn) stopBtn.style.display = 'none';
   }
   
   stopDeviceDiscovery() {
@@ -5943,8 +5879,8 @@ class RoomWizard {
     const stopBtn = $('#roomDiscoveryStop');
     
     if (statusEl) statusEl.innerHTML = '<span style="color:#f59e0b">⏹️ Discovery stopped</span>';
-    if (runBtn) { runBtn.style.display = 'inline-block'; this.flashButton(runBtn, 'btn-danger', 600); }
-    if (stopBtn) { stopBtn.style.display = 'none'; stopBtn.classList.remove('btn-running'); }
+    if (runBtn) runBtn.style.display = 'inline-block';
+    if (stopBtn) stopBtn.style.display = 'none';
   }
   
   renderDiscoveredDevices() {
@@ -5963,25 +5899,22 @@ class RoomWizard {
     `).join('');
   }
   
-  selectAllDiscoveredDevices(ev) {
+  selectAllDiscoveredDevices() {
     const listEl = $('#roomDiscoveryDeviceList');
     if (!listEl) return;
     
     listEl.querySelectorAll('input[type="checkbox"]').forEach(cb => cb.checked = true);
-    try { const btn = document.getElementById('roomDiscoverySelectAll'); this.flashButton(btn, 'btn-active', 400); } catch {}
   }
   
-  selectNoDiscoveredDevices(ev) {
+  selectNoDiscoveredDevices() {
     const listEl = $('#roomDiscoveryDeviceList');
     if (!listEl) return;
     
     listEl.querySelectorAll('input[type="checkbox"]').forEach(cb => cb.checked = false);
-    try { const btn = document.getElementById('roomDiscoverySelectNone'); this.flashButton(btn, 'btn-active', 400); } catch {}
   }
   
   refreshDeviceDiscovery() {
     this.runDeviceDiscovery();
-    try { const btn = document.getElementById('roomDiscoveryRefresh'); this.flashButton(btn, 'btn-active', 400); } catch {}
   }
   
   getSelectedDiscoveredDevices() {

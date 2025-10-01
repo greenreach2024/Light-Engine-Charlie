@@ -163,6 +163,12 @@ h3 { font-size: 1.125rem; }
   transition: box-shadow 0.2s ease;
 }
 
+/* Category setup action panel refinement */
+.action-panel {
+  background: var(--gr-bg, #F7FAFA);
+  border: 1px dashed var(--gr-border, #DCE5E5);
+}
+
 /* Form Elements */
 input, select, textarea, button {
   font-family: inherit;
@@ -643,89 +649,6 @@ input[type="checkbox"] {
 .room-setup-queue .chip {
   margin: 2px 0;
 }
-
-/* Flowchart queue styling: arrows between steps */
-.flowchart-queue {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 10px 18px; /* extra horizontal space for arrows */
-  align-items: center;
-}
-
-.flowchart-queue .flow-step { position: relative; }
-
-/* Arrow connector for each step except the last */
-.flowchart-queue .flow-step::after {
-  content: '';
-  position: absolute;
-  top: 50%;
-  right: -14px;
-  transform: translateY(-50%);
-  width: 12px;
-  height: 2px;
-  background: var(--gr-border, #DCE5E5);
-}
-
-.flowchart-queue .flow-step::before {
-  content: '';
-  position: absolute;
-  top: 50%;
-  right: -16px;
-  transform: translateY(-50%) rotate(45deg);
-  width: 6px;
-  height: 6px;
-  border-right: 2px solid var(--gr-border, #DCE5E5);
-  border-top: 2px solid var(--gr-border, #DCE5E5);
-  background: transparent;
-}
-
-/* Hide arrow on the last item in the row (fallback) */
-.flowchart-queue .flow-step:last-child::after,
-.flowchart-queue .flow-step:last-child::before { display: none; }
-
-/* When a step is done/warn, tint its arrow accordingly */
-.flowchart-queue .chip--success.flow-step::after,
-.flowchart-queue .chip--success.flow-step::before {
-  background: var(--gr-primary, #0D7D7D);
-  border-color: var(--gr-primary, #0D7D7D);
-}
-
-.flowchart-queue .chip--warn.flow-step::after,
-.flowchart-queue .chip--warn.flow-step::before {
-  background: #F59E0B;
-  border-color: #F59E0B;
-}
-
-/* SVG overlay arrows mode */
-.flowchart-queue--svg {
-  position: relative;
-}
-.flowchart-queue--svg .flowchart-svg {
-  position: absolute;
-  inset: 0 0 auto 0; /* anchor to top-left, height set dynamically */
-  pointer-events: none;
-  overflow: visible;
-}
-.flowchart-queue--svg .flow-path {
-  fill: none;
-  stroke: var(--gr-border, #DCE5E5);
-  stroke-width: 2;
-}
-.flowchart-queue--svg .flow-path--success { stroke: var(--gr-primary, #0D7D7D); }
-.flowchart-queue--svg .flow-path--warn { stroke: #F59E0B; }
-.flowchart-queue--svg .flow-arrowhead { fill: currentColor; }
-.flowchart-queue--svg .flow-path,
-.flowchart-queue--svg .flow-arrowhead {
-  color: var(--gr-border, #DCE5E5);
-}
-.flowchart-queue--svg .flow-path--success + .flow-arrowhead,
-.flowchart-queue--svg .flow-path--success { color: var(--gr-primary, #0D7D7D); }
-.flowchart-queue--svg .flow-path--warn + .flow-arrowhead,
-.flowchart-queue--svg .flow-path--warn { color: #F59E0B; }
-
-/* Hide pseudo-element arrows when SVG mode is active to avoid double arrows */
-.flowchart-queue--svg .flow-step::after,
-.flowchart-queue--svg .flow-step::before { display: none !important; }
 
 /* Numbered step badge */
 .flowchart-queue .chip .chip-step {
