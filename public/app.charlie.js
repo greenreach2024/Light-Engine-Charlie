@@ -4015,11 +4015,15 @@ class RoomWizard {
       this.data.connectivity.hubIp = (e.target.value || '').trim();
       this.updateSetupQueue();
     });
-    $('#roomCloudTenant')?.addEventListener('input', (e) => {
-      this.data.connectivity = this.data.connectivity || {};
-      this.data.connectivity.cloudTenant = (e.target.value || '').trim();
-      this.updateSetupQueue();
-    });
+    // Cloud tenant is head-office managed; keep hidden and fixed to default
+    const tenantField = document.getElementById('roomCloudTenant');
+    if (tenantField) {
+      try { tenantField.value = 'Azure'; } catch {}
+      tenantField.setAttribute('disabled', '');
+      tenantField.setAttribute('aria-hidden', 'true');
+      if (!this.data.connectivity) this.data.connectivity = {};
+      if (!this.data.connectivity.cloudTenant) this.data.connectivity.cloudTenant = 'Azure';
+    }
 
     const bindRoleInput = (id, key) => {
       const el = document.getElementById(id);

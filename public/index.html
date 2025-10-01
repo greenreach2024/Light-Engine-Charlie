@@ -634,9 +634,13 @@
                 <button id="roomHubVerify" type="button" class="ghost">Verify Node-RED</button>
               </div>
               <p class="tiny" id="roomHubStatus" aria-live="polite" style="color:#0f172a;margin-top:4px"></p>
-              <div class="tiny" style="color:#475569;margin-top:6px">We use the hub to push credentials to SwitchBot, Kasa, Shelly, and other devices. <a href="https://www.digi.com/blog/post/edge-computing-vs-cloud-computing" target="_blank" rel="noopener">Edge computing</a> keeps automations responsive even during cloud outages.</div>
-              <div class="tiny" style="color:#64748b;margin-top:12px">Cloud tenant</div>
-              <input id="roomCloudTenant" type="text" value="Azure" style="min-width:200px">
+              <div class="tiny" style="color:#475569;margin-top:6px">
+                This Light Engine runs on an edge device. We'll check for a local hub and common vendor bridges (Node‑RED flows, Home Assistant add‑ons, or vendor hubs) so devices can be discovered and managed locally.
+                We use the hub to securely push credentials to SwitchBot, Kasa, Shelly, and other devices. <a href="https://www.digi.com/blog/post/edge-computing-vs-cloud-computing" target="_blank" rel="noopener">Edge computing</a> keeps automations responsive even during cloud outages.
+              </div>
+              <!-- Cloud tenant is centrally managed by Head Office. Keep a hidden field for data binding. -->
+              <input id="roomCloudTenant" type="hidden" value="Azure" aria-hidden="true">
+              <div class="tiny" style="color:#64748b;margin-top:12px">Cloud integration is preconfigured and managed by Head Office.</div>
               <div class="tiny" style="color:#64748b;margin-top:12px">Assign farm management roles</div>
               <div class="role-grid">
                 <label class="tiny">Admins
