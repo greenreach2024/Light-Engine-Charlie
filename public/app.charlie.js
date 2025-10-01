@@ -4244,14 +4244,15 @@ class RoomWizard {
       const container = document.getElementById('roomControlMethod');
       if (!container) return;
       container.querySelectorAll('.chip-option').forEach(b => {
-        b.classList.remove('active');
-        if (this.data.controlMethod && b.dataset.value === this.data.controlMethod) b.classList.add('active');
+        b.removeAttribute('data-active');
+        if (this.data.controlMethod && b.dataset.value === this.data.controlMethod) b.setAttribute('data-active','');
         b.onclick = () => {
           const v = b.dataset.value;
           this.data.controlMethod = v;
-          container.querySelectorAll('.chip-option').forEach(x => x.classList.remove('active'));
-          b.classList.add('active');
-          document.getElementById('roomControlDetails').textContent = this.controlHintFor(v);
+          container.querySelectorAll('.chip-option').forEach(x => x.removeAttribute('data-active'));
+          b.setAttribute('data-active','');
+          const detailsEl = document.getElementById('roomControlDetails');
+          if (detailsEl) detailsEl.textContent = this.controlHintFor(v);
           this.inferSensors();
           const smart = ['wifi', 'smart-plug', 'rs485', 'other'].includes(v);
           const devicesStepEl = document.querySelector('.room-step[data-step="devices"]');
@@ -4259,7 +4260,10 @@ class RoomWizard {
           if (this.autoAdvance) setTimeout(() => this.tryAutoAdvance(), 80);
         };
       });
-      if (this.data.controlMethod) document.getElementById('roomControlDetails').textContent = this.controlHintFor(this.data.controlMethod);
+      if (this.data.controlMethod) {
+        const detailsEl = document.getElementById('roomControlDetails');
+        if (detailsEl) detailsEl.textContent = this.controlHintFor(this.data.controlMethod);
+      }
     }
     if (stepKey === 'sensors') {
       const container = document.getElementById('roomSensorCats');
@@ -4553,9 +4557,14 @@ class RoomWizard {
     const v = (x)=> x==null? '' : String(x);
     const data = (this.data.category || (this.data.category = {}));
     const catData = (data[catId] || (data[catId] = {}));
-    // Template helpers for chip groups
+    // Template helpers for chip groups (use data-active for visual state)
     const chipRow = (id, values, selected) => {
-      return `<div class="chip-row" id="${id}">` + values.map(opt => `<button type="button" class="chip-option${selected===opt? ' active':''}" data-value="${opt}">${opt}</button>`).join('') + `</div>`;
+      const normalize = (opt) => typeof opt === 'string' ? { value: opt, label: opt } : opt;
+      return `<div class="chip-row" id="${id}">` + values.map(o => {
+        const opt = normalize(o);
+        const isSel = selected && (String(selected) === String(opt.value));
+        return `<button type="button" class="chip-option" data-value="${opt.value}"${isSel ? ' data-active' : ''}>${opt.label}</button>`;
+      }).join('') + `</div>`;
     };
     let html = '';
     if (catId === 'hvac') {
@@ -4566,6 +4575,22 @@ class RoomWizard {
         ${chipRow('cat-hvac-control', ['Thermostat','Modbus/BACnet','Relay','Other'], catData.control)}
         <div class="tiny" style="margin-top:6px">Energy</div>
         ${chipRow('cat-hvac-energy', ['Built-in','CT/branch','None'], catData.energy)}
+      `;
+    } else if (catId === 'grow-lights') {
+      // Dedicated lights micro-form so users can pick Smart plug or Wi‑Fi control directly
+      html = `
+        <div class="tiny">Grow lights</div>
+        <label class="tiny">How many fixtures? <input type="number" id="cat-light-count" min="0" value="${v(catData.count||0)}" style="width:100px"></label>
+        <div class="tiny" style="margin-top:6px">Control</div>
+        ${chipRow('cat-light-control', [
+          { value: 'wifi', label: 'Wi‑Fi / App' },
+          { value: 'smart-plug', label: 'Smart plug' },
+          { value: '0-10v', label: '0‑10V / Wired' },
+          { value: 'rs485', label: 'RS‑485 / Modbus' },
+          { value: 'other', label: 'Other' }
+        ], catData.control)}
+        <div class="tiny" style="margin-top:6px">Energy</div>
+        ${chipRow('cat-light-energy', ['Built-in','CT/branch','Smart plug','None'], catData.energy)}
       `;
     } else if (catId === 'dehumidifier') {
       html = `
@@ -4614,17 +4639,30 @@ class RoomWizard {
     body.querySelectorAll('.chip-row').forEach(row => {
       row.addEventListener('click', (e) => {
         const btn = e.target.closest('.chip-option'); if (!btn) return;
-        row.querySelectorAll('.chip-option').forEach(b => b.classList.remove('active'));
-        btn.classList.add('active');
+        row.querySelectorAll('.chip-option').forEach(b => b.removeAttribute('data-active'));
+        btn.setAttribute('data-active','');
         const val = btn.getAttribute('data-value');
         const id = row.getAttribute('id');
         if (id === 'cat-hvac-control') this.data.category.hvac.control = val;
         if (id === 'cat-hvac-energy') this.data.category.hvac.energy = val;
+        if (id === 'cat-light-control') {
+          this.data.category['grow-lights'].control = val;
+          // Sync the global controlMethod so Devices step visibility and hints align
+          this.data.controlMethod = val;
+          const cmHost = document.getElementById('roomControlMethod');
+          if (cmHost) cmHost.querySelectorAll('.chip-option').forEach(b => {
+            if (b.dataset.value === val) b.setAttribute('data-active',''); else b.removeAttribute('data-active');
+          });
+          const details = document.getElementById('roomControlDetails');
+          if (details) details.textContent = this.controlHintFor(val);
+        }
+        if (id === 'cat-light-energy') this.data.category['grow-lights'].energy = val;
         if (id === 'cat-dehu-control') this.data.category.dehumidifier.control = val;
         if (id === 'cat-dehu-energy') this.data.category.dehumidifier.energy = val;
         if (id === 'cat-fans-control') this.data.category.fans.control = val;
         if (id === 'cat-vents-control') this.data.category.vents.control = val;
         if (id === 'cat-irr-control') this.data.category.irrigation.control = val;
+        this.updateSetupQueue();
       }, { once: false });
     });
   }
@@ -4639,6 +4677,9 @@ class RoomWizard {
     const getStr = (id) => { const el = document.getElementById(id); return el ? (el.value||'').trim() : undefined; };
     if (catId === 'hvac') {
       catData.count = getNum('cat-hvac-count') ?? catData.count;
+    }
+    if (catId === 'grow-lights') {
+      catData.count = getNum('cat-light-count') ?? catData.count;
     }
     if (catId === 'dehumidifier') {
       catData.count = getNum('cat-dehu-count') ?? catData.count;
@@ -4720,7 +4761,7 @@ class RoomWizard {
     saveCont?.addEventListener('click', () => {
       this.captureCurrentCategoryForm();
       // Enforce: every device must have a control method when applicable
-      const requiresControl = ['hvac','dehumidifier','fans','vents','irrigation'].includes(catId);
+  const requiresControl = ['hvac','grow-lights','dehumidifier','fans','vents','irrigation'].includes(catId);
       if (requiresControl) {
         const d = this.data.category?.[catId];
         if (!d || !d.control) { alert('Select a control method before continuing.'); return; }
@@ -5122,7 +5163,7 @@ class RoomWizard {
         const container = document.getElementById('roomControlMethod');
         if (container) {
           container.querySelectorAll('.chip-option').forEach(btn => {
-            if (btn.dataset.value === method) btn.classList.add('active'); else btn.classList.remove('active');
+            if (btn.dataset.value === method) btn.setAttribute('data-active',''); else btn.removeAttribute('data-active');
           });
         }
         const details = document.getElementById('roomControlDetails');
@@ -5167,7 +5208,7 @@ class RoomWizard {
         const container = document.getElementById('roomControlMethod');
         if (container) {
           container.querySelectorAll('.chip-option').forEach(btn => {
-            if (btn.dataset.value === cm) btn.classList.add('active'); else btn.classList.remove('active');
+            if (btn.dataset.value === cm) btn.setAttribute('data-active',''); else btn.removeAttribute('data-active');
           });
         }
         const details = document.getElementById('roomControlDetails');
