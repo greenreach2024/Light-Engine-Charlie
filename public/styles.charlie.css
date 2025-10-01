@@ -669,6 +669,64 @@ input[type="checkbox"] {
   border-color: #F59E0B;
 }
 
+/* SVG overlay arrows mode */
+.flowchart-queue--svg {
+  position: relative;
+}
+.flowchart-queue--svg .flowchart-svg {
+  position: absolute;
+  inset: 0 0 auto 0; /* anchor to top-left, height set dynamically */
+  pointer-events: none;
+  overflow: visible;
+}
+.flowchart-queue--svg .flow-path {
+  fill: none;
+  stroke: var(--gr-border, #DCE5E5);
+  stroke-width: 2;
+}
+.flowchart-queue--svg .flow-path--success { stroke: var(--gr-primary, #0D7D7D); }
+.flowchart-queue--svg .flow-path--warn { stroke: #F59E0B; }
+.flowchart-queue--svg .flow-arrowhead { fill: currentColor; }
+.flowchart-queue--svg .flow-path,
+.flowchart-queue--svg .flow-arrowhead {
+  color: var(--gr-border, #DCE5E5);
+}
+.flowchart-queue--svg .flow-path--success + .flow-arrowhead,
+.flowchart-queue--svg .flow-path--success { color: var(--gr-primary, #0D7D7D); }
+.flowchart-queue--svg .flow-path--warn + .flow-arrowhead,
+.flowchart-queue--svg .flow-path--warn { color: #F59E0B; }
+
+/* Hide pseudo-element arrows when SVG mode is active to avoid double arrows */
+.flowchart-queue--svg .flow-step::after,
+.flowchart-queue--svg .flow-step::before { display: none !important; }
+
+/* Numbered step badge */
+.flowchart-queue .chip .chip-step {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 18px;
+  height: 18px;
+  margin-right: 6px;
+  border-radius: 999px;
+  font-size: 11px;
+  line-height: 1;
+  background: var(--gr-accent-soft, #E6F5F5);
+  color: var(--gr-primary, #0D7D7D);
+  border: 1px solid var(--gr-border, #DCE5E5);
+}
+.flowchart-queue .chip--success .chip-step {
+  background: color-mix(in srgb, var(--gr-primary, #0D7D7D) 15%, white);
+  color: var(--gr-primary, #0D7D7D);
+  border-color: var(--gr-primary, #0D7D7D);
+}
+.flowchart-queue .chip--warn .chip-step {
+  background: #FEF3C7;
+  color: #B45309;
+  border-color: #F59E0B;
+}
+.flowchart-queue .chip .chip-label { vertical-align: middle; }
+
 .sensor-grid {
   display: grid;
   gap: 12px;

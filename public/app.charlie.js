@@ -5223,16 +5223,17 @@ class RoomWizard {
     const host = document.getElementById('roomSetupQueue');
     if (!host) return;
     // Ensure flowchart styling class is present on the queue container
-    host.classList.add('flowchart-queue');
+    host.classList.add('flowchart-queue', 'flowchart-queue--svg');
     const chips = [];
     const progressStates = [];
     const push = (step, label, status = 'todo', extra = {}) => {
       if (step !== 'review') progressStates.push(status);
-      const emoji = status === 'done' ? '✅' : status === 'warn' ? '⚠️' : '•';
+      // Numbered badge per step to reinforce flow
+      const idxNum = chips.length + 1;
       const attrs = [`data-step="${step}"`];
       if (extra.cat) attrs.push(`data-cat="${extra.cat}"`);
       const cls = status === 'done' ? 'chip chip--success tiny flow-step' : status === 'warn' ? 'chip chip--warn tiny flow-step' : 'chip tiny flow-step';
-      chips.push(`<button type="button" class="${cls}" ${attrs.join(' ')}>${emoji} ${escapeHtml(label)}</button>`);
+      chips.push(`<button type="button" class="${cls}" ${attrs.join(' ')}><span class="chip-step" aria-hidden="true">${idxNum}</span><span class="chip-label">${escapeHtml(label)}</span></button>`);
     };
 
     // Step 1: Device Discovery - scan for all communication protocols
@@ -5288,7 +5289,104 @@ class RoomWizard {
     const reviewStatus = hasTodo ? 'todo' : hasWarn ? 'warn' : 'done';
     push('review', 'Review', reviewStatus);
 
-    host.innerHTML = chips.join('');
+    // Render chips and an SVG overlay for creative flow arrows
+    host.innerHTML = '';
+    // Create SVG overlay (positioned absolutely via CSS)
+    const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+    svg.setAttribute('class', 'flowchart-svg');
+    svg.setAttribute('role', 'presentation');
+    svg.setAttribute('aria-hidden', 'true');
+    const defs = document.createElementNS('http://www.w3.org/2000/svg', 'defs');
+    const marker = document.createElementNS('http://www.w3.org/2000/svg', 'marker');
+    marker.setAttribute('id', 'flowArrow');
+    marker.setAttribute('markerWidth', '8');
+    marker.setAttribute('markerHeight', '8');
+    marker.setAttribute('refX', '6');
+    marker.setAttribute('refY', '3');
+    marker.setAttribute('orient', 'auto');
+    const arrowPath = document.createElementNS('http://www.w3.org/2000/svg', 'path');
+    arrowPath.setAttribute('d', 'M0,0 L6,3 L0,6 Z');
+    arrowPath.setAttribute('class', 'flow-arrowhead');
+    marker.appendChild(arrowPath);
+    defs.appendChild(marker);
+    svg.appendChild(defs);
+    host.appendChild(svg);
+
+    // Chips container
+    const frag = document.createDocumentFragment();
+    const chipsWrap = document.createElement('div');
+    chipsWrap.setAttribute('class', 'flowchips');
+    chipsWrap.innerHTML = chips.join('');
+    frag.appendChild(chipsWrap);
+    host.appendChild(frag);
+
+    // Draw connecting arrows between chips (handles wrap across rows)
+    const drawArrows = () => {
+      // Clear old paths
+      while (svg.lastChild && svg.lastChild.nodeName.toLowerCase() !== 'defs') svg.removeChild(svg.lastChild);
+      const btns = Array.from(host.querySelectorAll('button.flow-step'));
+      if (btns.length < 2) return;
+      // Size SVG to container
+      const rect = host.getBoundingClientRect();
+      const scrollH = host.scrollHeight;
+      svg.setAttribute('width', String(rect.width));
+      svg.setAttribute('height', String(scrollH));
+      svg.setAttribute('viewBox', `0 0 ${rect.width} ${scrollH}`);
+      const hostTop = host.getBoundingClientRect().top + window.scrollY;
+      const hostLeft = host.getBoundingClientRect().left + window.scrollX;
+
+      const getCenter = (el) => {
+        const r = el.getBoundingClientRect();
+        const cx = r.left + window.scrollX - hostLeft + r.width; // right edge
+        const cy = r.top + window.scrollY - hostTop + r.height / 2; // middle vertically
+        const lx = r.left + window.scrollX - hostLeft; // left edge
+        return { r: { x: cx, y: cy }, l: { x: lx, y: cy }, box: r };
+      };
+
+      for (let i = 0; i < btns.length - 1; i++) {
+        const a = btns[i];
+        const b = btns[i + 1];
+        const ca = getCenter(a);
+        const cb = getCenter(b);
+        const sameRow = Math.abs(ca.r.y - cb.l.y) < 14; // rough row tolerance
+        const path = document.createElementNS('http://www.w3.org/2000/svg', 'path');
+        // Color by progress of source chip
+        const cls = a.classList.contains('chip--success') ? 'flow-path flow-path--success' : a.classList.contains('chip--warn') ? 'flow-path flow-path--warn' : 'flow-path';
+        path.setAttribute('class', cls);
+        path.setAttribute('marker-end', 'url(#flowArrow)');
+        if (sameRow && cb.l.x > ca.r.x) {
+          // Straight line to the next chip on the same row
+          const mx = ca.r.x + 6;
+          const my = ca.r.y;
+          const ex = cb.l.x - 6;
+          const ey = cb.l.y;
+          path.setAttribute('d', `M ${mx} ${my} L ${ex} ${ey}`);
+        } else {
+          // Wrapped to the next row: draw a smooth elbow
+          const startX = ca.r.x + 6;
+          const startY = ca.r.y;
+          const midX = startX + 18; // small horizontal lead
+          const downY = cb.l.y - 10; // approach above target
+          const endX = cb.l.x - 6;
+          const endY = cb.l.y;
+          const d = [
+            `M ${startX} ${startY}`,
+            `C ${midX} ${startY}, ${midX} ${downY}, ${endX} ${downY}`,
+            `L ${endX} ${endY}`
+          ].join(' ');
+          path.setAttribute('d', d);
+        }
+        svg.appendChild(path);
+      }
+    };
+
+    // Initial draw and on resize (debounced)
+    drawArrows();
+    let _flowRaf = null;
+    const onResize = () => { if (_flowRaf) cancelAnimationFrame(_flowRaf); _flowRaf = requestAnimationFrame(drawArrows); };
+    // Attach a temporary resize observer tied to this host
+    if (!this._flowResizeHandler) this._flowResizeHandler = onResize;
+    window.addEventListener('resize', this._flowResizeHandler, { passive: true });
     host.querySelectorAll('button[data-step]').forEach(btn => {
       btn.addEventListener('click', () => {
         const step = btn.getAttribute('data-step');
