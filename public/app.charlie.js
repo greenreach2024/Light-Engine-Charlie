@@ -4312,7 +4312,7 @@ class RoomWizard {
         const dd = (this.discoveredDevices && Array.isArray(this.discoveredDevices) ? this.discoveredDevices : (Array.isArray(this.data?.discoveredDevices) ? this.data.discoveredDevices : []));
         const anySwitchBot = dd.some(d => /switch\s*bot|switchbot/i.test(`${d.vendor||''} ${d.deviceName||''} ${d.model||''}`));
         if (intro) {
-          intro.textContent = anySwitchBot ? 'We found SwitchBot devices. Let’s sync with your SwitchBot hub.' : 'Is your local edge hub online?';
+          intro.textContent = anySwitchBot ? 'We found SwitchBot devices. Let’s sync with your SwitchBot hub.' : 'Is your local smart hub on-line?';
         }
       } catch {}
       // Auto-verify hub/forwarder in the background
