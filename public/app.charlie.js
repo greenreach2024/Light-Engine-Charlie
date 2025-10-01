@@ -4001,8 +4001,7 @@ class RoomWizard {
         });
       });
     }
-    $('#roomHubDetect')?.addEventListener('click', () => this.detectHub());
-    $('#roomHubVerify')?.addEventListener('click', () => this.verifyHub());
+  $('#roomHubDetect')?.addEventListener('click', () => this.detectHub());
     $('#roomDeviceScan')?.addEventListener('click', () => this.scanLocalDevices());
 
     $('#roomHubType')?.addEventListener('input', (e) => {
@@ -4304,9 +4303,20 @@ class RoomWizard {
       const viewerInput = document.getElementById('roomRoleViewer'); if (viewerInput) viewerInput.value = (roles.viewer || []).join(', ');
       const statusEl = document.getElementById('roomHubStatus');
       if (statusEl) {
-        if (hub.hasHub) statusEl.textContent = hub.hubIp ? `Hub recorded at ${hub.hubIp}. Verify Node-RED when ready.` : 'Hub recorded. Add IP to enable edge control.';
+        if (hub.hasHub) statusEl.textContent = hub.hubIp ? `Hub recorded at ${hub.hubIp}. Checking local services…` : 'Hub recorded. Add IP to enable edge control.';
         else statusEl.textContent = '';
       }
+      // Adaptive intro messaging based on discovery context
+      try {
+        const intro = document.getElementById('roomConnectivityIntro');
+        const dd = (this.discoveredDevices && Array.isArray(this.discoveredDevices) ? this.discoveredDevices : (Array.isArray(this.data?.discoveredDevices) ? this.data.discoveredDevices : []));
+        const anySwitchBot = dd.some(d => /switch\s*bot|switchbot/i.test(`${d.vendor||''} ${d.deviceName||''} ${d.model||''}`));
+        if (intro) {
+          intro.textContent = anySwitchBot ? 'We found SwitchBot devices. Let’s sync with your SwitchBot hub.' : 'Is your local edge hub online?';
+        }
+      } catch {}
+      // Auto-verify hub/forwarder in the background
+      this.verifyHub(true);
     }
     if (stepKey === 'energy') {
       document.querySelectorAll('#roomEnergy .chip-option').forEach(btn => {
@@ -4921,24 +4931,29 @@ class RoomWizard {
         if (status) status.textContent = 'Hub not detected automatically. Enter IP manually.';
       }
     } catch (err) {
-      if (status) status.textContent = 'Could not reach hub automatically. Enter the IP and tenant manually.';
+      if (status) status.textContent = 'Could not reach hub automatically. Enter the IP manually.';
     }
     this.updateSetupQueue();
+    // Attempt background verification after detection
+    try { await this.verifyHub(true); } catch {}
   }
 
-  async verifyHub() {
+  async verifyHub(silent = false) {
     const status = document.getElementById('roomHubStatus');
-    if (status) status.textContent = 'Verifying Node-RED…';
+    if (!silent && status) status.textContent = 'Checking local services…';
     try {
       const resp = await fetch('/forwarder/healthz');
       if (resp.ok) {
-        if (status) status.textContent = 'Forwarder healthy — confirm Node-RED flows are running on the hub for edge control.';
+        if (status) status.textContent = '✅ Edge forwarder is healthy. Local automations will run even during cloud outages.';
+        this.data.connectivity = this.data.connectivity || {};
+        if (this.data.connectivity.hasHub !== false) this.data.connectivity.hasHub = true;
       } else {
-        if (status) status.textContent = 'Forwarder returned an error. Ensure Node-RED is running on the local hub.';
+        if (status) status.textContent = '⚠️ Hub reachable but reported an error. Ensure Node-RED/bridges are running on the hub.';
       }
     } catch (err) {
-      if (status) status.textContent = 'Unable to reach the hub right now. Check local connectivity and Node-RED status.';
+      if (status) status.textContent = '⚠️ Unable to reach the hub right now. Enter the IP or check local connectivity.';
     }
+    this.updateSetupQueue();
   }
 
   async scanLocalDevices() {
@@ -5855,8 +5870,9 @@ class RoomWizard {
     try {
       // Use the existing device discovery from DeviceManagerWindow
       if (deviceManagerWindow) {
-        await deviceManagerWindow.runDiscovery();
-        this.discoveredDevices = deviceManagerWindow.devices || [];
+  await deviceManagerWindow.runDiscovery();
+  this.discoveredDevices = deviceManagerWindow.devices || [];
+  try { this.data.discoveredDevices = Array.isArray(this.discoveredDevices) ? this.discoveredDevices.slice() : []; } catch {}
         
           if (statusEl) statusEl.innerHTML = `<span style="color:#059669">✅ Found ${this.discoveredDevices.length} devices across all protocols</span>`;
         this.renderDiscoveredDevices();

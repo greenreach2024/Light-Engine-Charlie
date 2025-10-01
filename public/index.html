@@ -618,7 +618,7 @@
           </section>
 
           <section class="room-step" data-step="connectivity">
-            <p class="room-question">First, let's make sure the local hub is online.</p>
+            <p class="room-question" id="roomConnectivityIntro">Is your local edge hub online?</p>
             <div class="farm-step__stack">
               <div class="tiny">Hub presence</div>
               <div class="row" style="gap:8px;flex-wrap:wrap">
@@ -631,7 +631,6 @@
               </div>
               <div class="row" style="gap:8px;flex-wrap:wrap;margin-top:8px">
                 <button id="roomHubDetect" type="button" class="ghost">Detect hub</button>
-                <button id="roomHubVerify" type="button" class="ghost">Verify Node-RED</button>
               </div>
               <p class="tiny" id="roomHubStatus" aria-live="polite" style="color:#0f172a;margin-top:4px"></p>
               <div class="tiny" style="color:#475569;margin-top:6px">
