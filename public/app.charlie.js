@@ -5848,6 +5848,14 @@ class RoomWizard {
   }
 
   // Device Discovery Methods
+  // Tiny helper to flash a CSS class on a button for visual feedback
+  flashButton(btn, cls = 'btn-active', ms = 700) {
+    try {
+      if (!btn) return;
+      btn.classList.add(cls);
+      setTimeout(() => { try { btn.classList.remove(cls); } catch {} }, ms);
+    } catch {}
+  }
   async runDeviceDiscovery() {
     const statusEl = $('#roomDiscoveryStatus');
     const runBtn = $('#roomDiscoveryRun');
@@ -5858,11 +5866,8 @@ class RoomWizard {
       // Show enhanced scanning radar
       if (progressEl) progressEl.style.display = 'flex';
       if (statusEl) statusEl.innerHTML = '<span style="color:#0ea5e9">🔍 Multi-protocol scan in progress...</span>';
-      if (runBtn) {
-        runBtn.style.display = 'none';
-        runBtn.disabled = true;
-      }
-    if (stopBtn) stopBtn.style.display = 'inline-block';
+      if (runBtn) { this.flashButton(runBtn, 'btn-running', 1200); runBtn.style.display = 'none'; runBtn.disabled = true; }
+    if (stopBtn) { stopBtn.style.display = 'inline-block'; stopBtn.classList.add('btn-running'); }
     
     this.discoveryRunning = true;
     this.discoveredDevices = [];
@@ -5874,23 +5879,20 @@ class RoomWizard {
   this.discoveredDevices = deviceManagerWindow.devices || [];
   try { this.data.discoveredDevices = Array.isArray(this.discoveredDevices) ? this.discoveredDevices.slice() : []; } catch {}
         
-          if (statusEl) statusEl.innerHTML = `<span style="color:#059669">✅ Found ${this.discoveredDevices.length} devices across all protocols</span>`;
+          if (statusEl) statusEl.innerHTML = `<span style=\"color:#059669\">✅ Found ${this.discoveredDevices.length} devices across all protocols</span>`;
         this.renderDiscoveredDevices();
         if (resultsEl) resultsEl.style.display = 'block';
       }
     } catch (error) {
-        if (statusEl) statusEl.innerHTML = '<span style="color:#dc2626">❌ Multi-protocol discovery failed</span>';
+        if (statusEl) statusEl.innerHTML = '<span style=\"color:#dc2626\">❌ Multi-protocol discovery failed</span>';
       console.error('Device discovery failed:', error);
     }
     
       // Hide scanning radar
       if (progressEl) progressEl.style.display = 'none';
     this.discoveryRunning = false;
-      if (runBtn) {
-        runBtn.style.display = 'inline-block';
-        runBtn.disabled = false;
-      }
-    if (stopBtn) stopBtn.style.display = 'none';
+      if (runBtn) { runBtn.style.display = 'inline-block'; runBtn.disabled = false; this.flashButton(runBtn, 'btn-success', 750); }
+    if (stopBtn) { stopBtn.style.display = 'none'; stopBtn.classList.remove('btn-running'); }
   }
   
   stopDeviceDiscovery() {
@@ -5900,8 +5902,8 @@ class RoomWizard {
     const stopBtn = $('#roomDiscoveryStop');
     
     if (statusEl) statusEl.innerHTML = '<span style="color:#f59e0b">⏹️ Discovery stopped</span>';
-    if (runBtn) runBtn.style.display = 'inline-block';
-    if (stopBtn) stopBtn.style.display = 'none';
+    if (runBtn) { runBtn.style.display = 'inline-block'; this.flashButton(runBtn, 'btn-danger', 600); }
+    if (stopBtn) { stopBtn.style.display = 'none'; stopBtn.classList.remove('btn-running'); }
   }
   
   renderDiscoveredDevices() {
@@ -5920,22 +5922,25 @@ class RoomWizard {
     `).join('');
   }
   
-  selectAllDiscoveredDevices() {
+  selectAllDiscoveredDevices(ev) {
     const listEl = $('#roomDiscoveryDeviceList');
     if (!listEl) return;
     
     listEl.querySelectorAll('input[type="checkbox"]').forEach(cb => cb.checked = true);
+    try { const btn = document.getElementById('roomDiscoverySelectAll'); this.flashButton(btn, 'btn-active', 400); } catch {}
   }
   
-  selectNoDiscoveredDevices() {
+  selectNoDiscoveredDevices(ev) {
     const listEl = $('#roomDiscoveryDeviceList');
     if (!listEl) return;
     
     listEl.querySelectorAll('input[type="checkbox"]').forEach(cb => cb.checked = false);
+    try { const btn = document.getElementById('roomDiscoverySelectNone'); this.flashButton(btn, 'btn-active', 400); } catch {}
   }
   
   refreshDeviceDiscovery() {
     this.runDeviceDiscovery();
+    try { const btn = document.getElementById('roomDiscoveryRefresh'); this.flashButton(btn, 'btn-active', 400); } catch {}
   }
   
   getSelectedDiscoveredDevices() {

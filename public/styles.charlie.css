@@ -232,6 +232,33 @@ button:disabled {
   cursor: not-allowed;
 }
 
+/* Button state utilities for action feedback */
+.btn-running {
+  background: var(--accent-orange, #F97316) !important;
+  border-color: var(--accent-orange, #F97316) !important;
+  color: #fff !important;
+}
+.btn-success {
+  background: #059669 !important; /* emerald-600 */
+  border-color: #059669 !important;
+  color: #fff !important;
+}
+.btn-danger {
+  background: var(--accent-red, #EF4444) !important;
+  border-color: var(--accent-red, #EF4444) !important;
+  color: #fff !important;
+}
+.btn-active {
+  background: var(--gr-primary, #0D7D7D) !important;
+  border-color: var(--gr-primary, #0D7D7D) !important;
+  color: #fff !important;
+}
+.btn-flash-success {
+  background: #059669 !important;
+  color: #fff !important;
+  transition: background 0.3s ease, color 0.3s ease;
+}
+
 /* Device Cards */
 .device-card {
   position: relative;
