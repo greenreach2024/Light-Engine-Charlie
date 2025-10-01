@@ -12,7 +12,15 @@
       "serial": "22G12-001",
       "watts": 300,
       "spectrumMode": "dynamic",
-      "transport": "wifi"
+      "transport": "wifi",
+      "factorySpectrum": {
+        "cw": 45,
+        "ww": 45,
+        "bl": 0,
+        "rd": 100,
+        "fr": 0,
+        "uv": 0
+      }
     },
     "light-002": {
       "farm": "Test Farm",
@@ -26,7 +34,15 @@
       "serial": "22G12-002",
       "watts": 300,
       "spectrumMode": "dynamic",
-      "transport": "wifi"
+      "transport": "wifi",
+      "factorySpectrum": {
+        "cw": 45,
+        "ww": 45,
+        "bl": 0,
+        "rd": 100,
+        "fr": 0,
+        "uv": 0
+      }
     },
     "light-003": {
       "farm": "Test Farm",

@@ -13,14 +13,9 @@
   "dependencies": {
     "express": "^4.19.2",
     "http-proxy-middleware": "^2.0.6",
-    "nedb-promises": "^6.2.3",
-    "tplink-smarthome-api": "^5.0.0"
+    "nedb-promises": "^6.2.3"
   },
-  "keywords": [
-    "lighting",
-    "control",
-    "automation"
-  ],
+  "keywords": ["lighting", "control", "automation"],
   "author": "Peter Gilbert",
   "license": "MIT"
 }
