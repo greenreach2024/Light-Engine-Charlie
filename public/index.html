@@ -1,0 +1,104 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Light Engine Charlie — GROW3 TopLight MH 300W</title>
+    <link rel="stylesheet" href="./styles.charlie.css" />
+  </head>
+  <body>
+    <header class="hero">
+      <div class="hero__content">
+        <h1>Light Engine Charlie</h1>
+        <p>
+          Multi-control wizard for the <strong>GROW3 TopLight™ — MH Model, 300&nbsp;W</strong>.
+          The controller remains the source of truth for devices and HEX12 payloads.
+        </p>
+        <div class="badges">
+          <span class="badge">Bluetooth®</span>
+          <span class="badge">Wi-Fi</span>
+          <span class="badge">LYNX3™</span>
+          <span class="badge">SmarTune™</span>
+          <span class="badge">IP66</span>
+        </div>
+      </div>
+    </header>
+
+    <main class="layout">
+      <aside class="sidebar" aria-label="Wizard Steps">
+        <ol class="wizard-steps" id="wizard-steps">
+          <li data-step="connectivity" class="wizard-step">
+            <h2>1. Connectivity</h2>
+            <p>Validate LAN, proxy CORS and controller reachability.</p>
+            <button data-action="run-connectivity">Run checks</button>
+            <dl class="status-list" id="connectivity-status"></dl>
+          </li>
+          <li data-step="discovery" class="wizard-step">
+            <h2>2. Deep Search &amp; Smart Setup</h2>
+            <p>Discover RS-485, mDNS/IP, BLE via hub, and MQTT devices.</p>
+            <button data-action="run-discovery">Start discovery</button>
+            <div id="discovery-results" class="discovery-results"></div>
+          </li>
+          <li data-step="inventory" class="wizard-step">
+            <h2>3. Lighting Inventory</h2>
+            <p>Select light models to add to the farm inventory.</p>
+            <div id="inventory-panel"></div>
+          </li>
+          <li data-step="controls" class="wizard-step">
+            <h2>4. Control Profiles</h2>
+            <p>Create multiple profiles per model (0-10V, Wi-Fi, BLE, smart plug).</p>
+            <div id="control-profile-panel"></div>
+          </li>
+          <li data-step="groups" class="wizard-step">
+            <h2>5. Rooms, Zones &amp; Groups</h2>
+            <p>Assign devices to groups sharing a model and control profile.</p>
+            <div id="group-builder"></div>
+          </li>
+        </ol>
+      </aside>
+
+      <section class="content" aria-live="polite">
+        <section class="cards" id="group-cards" aria-label="Groups"></section>
+      </section>
+    </main>
+
+    <template id="model-card-template">
+      <div class="model-card">
+        <header>
+          <h3></h3>
+          <p class="model-card__subtitle"></p>
+        </header>
+        <dl class="model-card__specs"></dl>
+        <footer class="model-card__footer"></footer>
+      </div>
+    </template>
+
+    <template id="group-card-template">
+      <article class="group-card">
+        <div class="group-card__column">
+          <h3 class="group-card__title"></h3>
+          <section class="group-card__section">
+            <h4>Light Information</h4>
+            <p class="group-card__light-summary"></p>
+            <dl class="group-card__light-specs"></dl>
+            <p class="group-card__members"></p>
+          </section>
+        </div>
+        <div class="group-card__column">
+          <section class="group-card__section">
+            <h4>Grow Plan Information</h4>
+            <dl class="group-card__plan-specs"></dl>
+            <div class="group-card__hex"></div>
+            <div class="group-card__badges"></div>
+            <button class="group-card__apply" type="button">Apply to Group</button>
+          </section>
+        </div>
+      </article>
+    </template>
+
+    <script>
+      window.API_BASE = window.API_BASE || '';
+    </script>
+    <script type="module" src="./app.charlie.js"></script>
+  </body>
+</html>
