@@ -3530,7 +3530,8 @@ class RoomWizard {
     this.form = $('#roomWizardForm');
     // Auto-advance behavior: when a required field for a step is completed,
     // the wizard will advance automatically. Can be disabled if needed.
-    this.autoAdvance = true;
+    // Default to manual navigation so you can review each page without being blocked
+    this.autoAdvance = false;
     // equipment-first: begin with device discovery, then hardware categories before fixtures/control
     // Steps can be augmented dynamically based on selected hardware (e.g., hvac, dehumidifier, etc.)
     this.baseSteps = ['device-discovery','connectivity','devices','hardware','category-setup','sensors','room-name','location','layout','zones','fixtures','control','energy','grouping','review'];
@@ -5314,90 +5315,8 @@ class RoomWizard {
   }
 
   updateSetupQueue() {
-    const host = document.getElementById('roomSetupQueue');
-    if (!host) return;
-    const chips = [];
-    const progressStates = [];
-    const push = (step, label, status = 'todo', extra = {}) => {
-      if (step !== 'review') progressStates.push(status);
-      const emoji = status === 'done' ? '✅' : status === 'warn' ? '⚠️' : '•';
-      const attrs = [`data-step="${step}"`];
-      if (extra.cat) attrs.push(`data-cat="${extra.cat}"`);
-      const cls = status === 'done' ? 'chip chip--success tiny' : status === 'warn' ? 'chip chip--warn tiny' : 'chip tiny';
-      chips.push(`<button type="button" class="${cls}" ${attrs.join(' ')}>${emoji} ${escapeHtml(label)}</button>`);
-    };
-
-    // Step 1: Device Discovery - scan for all communication protocols
-    const discoveryStatus = (this.data.discoveredDevices || []).length ? 'done' : 'todo';
-    push('device-discovery', 'Discovery', discoveryStatus);
-
-    const conn = this.data.connectivity || {};
-    let connectivityStatus = 'todo';
-    if (conn.hasHub === true) connectivityStatus = 'done';
-    else if (conn.hasHub === false) connectivityStatus = (this.data.hardwareCats || []).includes('controllers') ? 'warn' : 'warn';
-    push('connectivity', 'Connectivity', connectivityStatus);
-
-  const smartControl = ['wifi', 'bluetooth', 'smart-plug', 'rs485', 'other'].includes(this.data.controlMethod);
-    const devicesStatus = (this.data.devices || []).length ? 'done' : (smartControl ? 'warn' : 'todo');
-    push('devices', 'Devices', devicesStatus);
-
-    const hardwareStatus = (this.data.hardwareCats || []).length ? 'done' : 'todo';
-    push('hardware', 'Hardware', hardwareStatus);
-    (this.categoryQueue || []).forEach(catId => {
-      const st = this.categoryProgress?.[catId]?.status || 'needs-info';
-      const status = st === 'complete' ? 'done' : st && st.startsWith('needs') ? 'warn' : 'todo';
-      push('category-setup', this.categoryLabel(catId), status, { cat: catId });
-    });
-    const fixtures = Array.isArray(this.data.fixtures) ? this.data.fixtures : [];
-    const needsLights = (this.data.hardwareCats || []).includes('grow-lights');
-    const needsSensors = ((this.data.hardwareCats || []).includes('sensors')) || fixtures.length > 0;
-    const sensorsStatus = (this.data.sensors?.categories || []).length ? 'done' : (needsSensors ? 'warn' : 'todo');
-    push('sensors', 'Sensors', sensorsStatus);
-
-    push('room-name', 'Room name', this.data.name ? 'done' : 'todo');
-    push('location', 'Location', this.data.location ? 'done' : 'todo');
-    const hasLayout = this.data.layout && this.data.layout.type;
-    push('layout', 'Layout', hasLayout ? 'done' : 'todo');
-    push('zones', 'Zones', Array.isArray(this.data.zones) && this.data.zones.length ? 'done' : 'warn');
-
-    const fixturesStatus = fixtures.length ? 'done' : (needsLights ? 'warn' : 'todo');
-    push('fixtures', 'Fixtures', fixturesStatus);
-    const controlStatus = this.data.controlMethod ? 'done' : (needsLights ? 'warn' : 'todo');
-    push('control', 'Control', controlStatus);
-
-    let energyStatus = this.data.energy ? 'done' : 'todo';
-    if (this.data.energy && this.data.energy !== 'none') {
-      const hrs = Number(this.data.energyHours);
-      if (!Number.isFinite(hrs) || hrs <= 0) energyStatus = 'warn';
-    }
-    push('energy', 'Energy', energyStatus);
-    const grouping = this.data.grouping || {};
-    const groupList = Array.isArray(grouping.groups) ? grouping.groups : [];
-    const groupingStatus = groupList.length ? 'done' : ((Array.isArray(this.data.zones) && this.data.zones.length) ? 'warn' : 'todo');
-    push('grouping', 'Groups', groupingStatus);
-    const hasTodo = progressStates.some(st => st === 'todo');
-    const hasWarn = progressStates.some(st => st === 'warn');
-    const reviewStatus = hasTodo ? 'todo' : hasWarn ? 'warn' : 'done';
-    push('review', 'Review', reviewStatus);
-
-    host.innerHTML = chips.join('');
-    host.querySelectorAll('button[data-step]').forEach(btn => {
-      btn.addEventListener('click', () => {
-        const step = btn.getAttribute('data-step');
-        if (step === 'category-setup') {
-          const cat = btn.getAttribute('data-cat');
-          if (cat) {
-            const idx = this.categoryQueue.indexOf(cat);
-            if (idx >= 0) {
-              this.categoryIndex = idx;
-              this.goToStep('category-setup');
-            }
-          }
-        } else {
-          this.goToStep(step);
-        }
-      });
-    });
+    // No-op: setup queue visualization removed. Keep function for compatibility.
+    return;
   }
 
   categoryLabel(id) {
@@ -5790,10 +5709,10 @@ class RoomWizard {
   }
 
   nextStep() {
-    if (this.validateCurrentStep()) {
-      this.currentStep++;
-      this.showStep(this.currentStep);
-    }
+    // Allow moving forward without completing pages. We'll still capture soft state
+    // when possible elsewhere and validate on save or explicit actions.
+    this.currentStep = Math.min(this.steps.length - 1, this.currentStep + 1);
+    this.showStep(this.currentStep);
   }
 
   prevStep() {

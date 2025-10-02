@@ -1460,6 +1460,17 @@ app.use("/api", createProxyMiddleware({
 // Static files
 app.use(express.static("./public"));
 
+// Favicon handler: map /favicon.ico to our SVG to avoid 404 noise
+app.get('/favicon.ico', (req, res) => {
+  try {
+    const file = path.resolve('./public/favicon.svg');
+    res.setHeader('Content-Type', 'image/svg+xml');
+    fs.createReadStream(file).pipe(res);
+  } catch {
+    res.status(204).end();
+  }
+});
+
 // IFTTT Webhook endpoints for device automation
 app.post('/webhooks/ifttt/:deviceId', async (req, res) => {
   try {
