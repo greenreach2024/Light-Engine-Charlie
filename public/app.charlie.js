@@ -4559,6 +4559,7 @@ class RoomWizard {
       return;
     }
     const titles = {
+      'grow-lights': 'Grow lights — summary',
       'hvac': 'HVAC setup',
       'dehumidifier': 'Dehumidifier setup',
       'fans': 'Fans setup',
@@ -4578,13 +4579,25 @@ class RoomWizard {
     };
     let html = '';
     if (catId === 'grow-lights') {
+      // Summary-only: Grow lights are configured in Fixtures, Control, and Energy steps.
+      const fixtures = Array.isArray(this.data.fixtures) ? this.data.fixtures : [];
+      const totalFixtures = fixtures.reduce((sum, f) => sum + (Number(f.count) || 0), 0);
+      const controlLabelMap = { 'wifi': 'Wi‑Fi / App', 'bluetooth': 'Bluetooth', 'smart-plug': 'Smart plug', '0-10v': '0‑10V / Analog', 'rs485': 'RS‑485 / Modbus', 'other': 'Other', '': '—' };
+      const cmLabel = controlLabelMap[this.data.controlMethod || ''] || '—';
+      const energyLabels = { 'ct-branch': 'CT / branch meters', 'smart-plugs': 'Smart plugs', 'built-in': 'Built-in meter', 'none': 'None' };
+      const energy = this.data.energy ? (energyLabels[this.data.energy] || this.data.energy) : '—';
       html = `
-        <div class="tiny">Grow lights</div>
-        <label class="tiny">How many fixtures connected to this control? <input type="number" id="cat-lights-count" min="0" value="${v(catData.count||0)}" style="width:110px"></label>
-        <div class="tiny" style="margin-top:6px">Control method</div>
-        ${chipRow('cat-lights-control', ['Wi‑Fi','Bluetooth','Smart plug','0-10V','RS-485','Other'], catData.control)}
-        <div class="tiny" style="margin-top:6px">Is Energy Monitored?</div>
-        ${chipRow('cat-lights-energy', ['Built-in','Smart plugs','CT/branch','None'], catData.energy)}
+        <div class="tiny" style="margin-bottom:6px">Grow lights — summary</div>
+        <ul class="tiny" style="margin:0 0 8px 16px; color:#475569">
+          <li>Fixtures: <strong>${totalFixtures || '—'}</strong></li>
+          <li>Control: <strong>${cmLabel}</strong></li>
+          <li>Energy: <strong>${escapeHtml(energy)}</strong></li>
+        </ul>
+        <div class="row" style="gap:6px;flex-wrap:wrap">
+          <button type="button" class="ghost" id="catLightsEditFixtures">Edit fixtures</button>
+          <button type="button" class="ghost" id="catLightsEditControl">Edit control</button>
+          <button type="button" class="ghost" id="catLightsEditEnergy">Edit energy</button>
+        </div>
       `;
     } else if (catId === 'hvac') {
       html = `
@@ -4638,7 +4651,7 @@ class RoomWizard {
       `;
     }
     body.innerHTML = html;
-    // Wire chip groups to update data
+    // Wire chip groups to update data (for categories that still use chips)
     body.querySelectorAll('.chip-row').forEach(row => {
       row.addEventListener('click', (e) => {
         const btn = e.target.closest('.chip-option'); if (!btn) return;
@@ -4646,8 +4659,7 @@ class RoomWizard {
         btn.classList.add('active');
         const val = btn.getAttribute('data-value');
         const id = row.getAttribute('id');
-        if (id === 'cat-lights-control') this.data.category['grow-lights'].control = val;
-        if (id === 'cat-lights-energy') this.data.category['grow-lights'].energy = val;
+        // Grow lights summary no longer uses chips here
         if (id === 'cat-hvac-control') this.data.category.hvac.control = val;
         if (id === 'cat-hvac-energy') this.data.category.hvac.energy = val;
         if (id === 'cat-dehu-control') this.data.category.dehumidifier.control = val;
@@ -4657,23 +4669,11 @@ class RoomWizard {
         if (id === 'cat-irr-control') this.data.category.irrigation.control = val;
       }, { once: false });
     });
-
-    // If Grow lights control picked, sync to overall Control step chips
+    // Wire Grow lights summary edit shortcuts
     if (catId === 'grow-lights') {
-      const container = document.getElementById('roomControlMethod');
-      const map = { 'Wi‑Fi': 'wifi', 'Bluetooth': 'bluetooth', 'Smart plug': 'smart-plug', '0-10V': '0-10v', 'RS-485': 'rs485', 'Other': 'other' };
-      const chosen = this.data.category['grow-lights']?.control || '';
-      const cm = map[chosen] || '';
-      if (cm) {
-        this.data.controlMethod = cm;
-        if (container) {
-          container.querySelectorAll('.chip-option').forEach(btn => {
-            if (btn.dataset.value === cm) btn.setAttribute('data-active',''); else btn.removeAttribute('data-active');
-          });
-        }
-        const details = document.getElementById('roomControlDetails');
-        if (details) details.textContent = this.controlHintFor(cm);
-      }
+      const e1 = document.getElementById('catLightsEditFixtures'); if (e1) e1.addEventListener('click', ()=> this.goToStep('fixtures'));
+      const e2 = document.getElementById('catLightsEditControl'); if (e2) e2.addEventListener('click', ()=> this.goToStep('control'));
+      const e3 = document.getElementById('catLightsEditEnergy'); if (e3) e3.addEventListener('click', ()=> this.goToStep('energy'));
     }
   }
 
@@ -4685,9 +4685,7 @@ class RoomWizard {
     const catData = (data[catId] || (data[catId] = {}));
     const getNum = (id) => { const el = document.getElementById(id); if (!el) return undefined; const n = Number(el.value||0); return Number.isFinite(n)? n: undefined; };
     const getStr = (id) => { const el = document.getElementById(id); return el ? (el.value||'').trim() : undefined; };
-    if (catId === 'grow-lights') {
-      catData.count = getNum('cat-lights-count') ?? catData.count;
-    }
+    // Grow lights summary does not capture fields here; fixtures/control/energy own the state
     if (catId === 'hvac') {
       catData.count = getNum('cat-hvac-count') ?? catData.count;
     }
@@ -4729,9 +4727,9 @@ class RoomWizard {
     else if (catId === 'sensors') canTest = true;     // show live sample
     else canTest = hasDevices;                        // other categories require devices present
     if (testBtn) {
-      // Per request: buttons on step 5 do not action by default. Keep disabled unless explicitly testable.
+      // Keep disabled unless explicitly testable. Grow lights are testable only when fixtures/hardware are paired.
       testBtn.disabled = true;
-      testBtn.title = 'Use Add device to pair hardware first';
+      testBtn.title = 'Pair hardware first (Add device) to enable testing';
     }
     if (!canTest && status) {
       const hint = 'Nothing to test yet — use Add device to pair hardware. You can still Mark complete & next.';
@@ -4788,7 +4786,8 @@ class RoomWizard {
     saveCont?.addEventListener('click', () => {
       this.captureCurrentCategoryForm();
       // Enforce: every device must have a control method when applicable
-  const requiresControl = ['grow-lights','hvac','dehumidifier','fans','vents','irrigation'].includes(catId);
+      // Grow lights are configured in dedicated Control step; do not require control here
+  const requiresControl = ['hvac','dehumidifier','fans','vents','irrigation'].includes(catId);
       if (requiresControl) {
         const d = this.data.category?.[catId];
         if (!d || !d.control) { alert('Select a control method before continuing.'); return; }
