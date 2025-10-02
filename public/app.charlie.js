@@ -3532,9 +3532,9 @@ class RoomWizard {
     // the wizard will advance automatically. Can be disabled if needed.
     // Default to manual navigation so you can review each page without being blocked
     this.autoAdvance = false;
-    // equipment-first: begin with device discovery, then hardware categories before fixtures/control
+    // equipment-first: begin with connectivity and hardware categories for room management
     // Steps can be augmented dynamically based on selected hardware (e.g., hvac, dehumidifier, etc.)
-    this.baseSteps = ['device-discovery','connectivity','devices','hardware','category-setup','sensors','room-name','location','layout','zones','fixtures','control','energy','grouping','review'];
+  this.baseSteps = ['connectivity','hardware','category-setup','room-name','layout','zones','grouping','review'];
     this.steps = this.baseSteps.slice();
     this.currentStep = 0;
     this.data = {
@@ -3545,18 +3545,11 @@ class RoomWizard {
       hardwareOrder: [],
       layout: { type: '', rows: 0, racks: 0, levels: 0 },
       zones: [],
-      fixtures: [],
-      controlMethod: null,
-      devices: [],
-      sensors: { categories: [], placements: {} },
-      energy: '',
-      energyHours: 0,
-      targetPpfd: 0,
-      photoperiod: 0,
+  energy: '',
+  energyHours: 0,
       connectivity: { hasHub: null, hubType: '', hubIp: '', cloudTenant: 'Azure' },
       roles: { admin: [], operator: [], viewer: [] },
-      grouping: { groups: [], planId: '', scheduleId: '', spectraSync: true },
-      seriesCount: 0
+  grouping: { groups: [], planId: '', scheduleId: '' }
     };
     this.hardwareSearchResults = [];
     // dynamic category setup state
@@ -3594,36 +3587,6 @@ class RoomWizard {
     $('#roomRacks')?.addEventListener('input', (e)=> { this.data.layout.racks = Number(e.target.value||0); this.updateSetupQueue(); });
     $('#roomLevels')?.addEventListener('input', (e)=> { this.data.layout.levels = Number(e.target.value||0); this.updateSetupQueue(); });
 
-    // Fixtures KB reuse
-    const fSearch = $('#roomKbSearch');
-    const fResults = $('#roomKbResults');
-    const fSelected = $('#roomKbSelected');
-    fSearch?.addEventListener('input', ()=> this.updateKbResults(fSearch.value.trim()));
-    // Series count wiring
-    const seriesInput = document.getElementById('roomSeriesCount');
-    if (seriesInput) {
-      seriesInput.addEventListener('input', (e)=> {
-        const n = Number(e.target.value || 0);
-        this.data.seriesCount = Number.isFinite(n) ? Math.max(0, n) : 0;
-        this.updateSetupQueue();
-      });
-    }
-    const targetInput = document.getElementById('roomTargetPpfd');
-    if (targetInput) {
-      targetInput.addEventListener('input', (e) => {
-        const v = Number(e.target.value || 0);
-        this.data.targetPpfd = Number.isFinite(v) ? Math.max(0, v) : 0;
-        this.updateSetupQueue();
-      });
-    }
-    const photoperiodInput = document.getElementById('roomPhotoperiod');
-    if (photoperiodInput) {
-      photoperiodInput.addEventListener('input', (e) => {
-        const v = Number(e.target.value || 0);
-        this.data.photoperiod = Number.isFinite(v) ? Math.max(0, v) : 0;
-        this.updateSetupQueue();
-      });
-    }
     const energyHoursInput = document.getElementById('roomEnergyHours');
     if (energyHoursInput) {
       energyHoursInput.addEventListener('input', (e) => {
@@ -3632,7 +3595,7 @@ class RoomWizard {
         this.updateSetupQueue();
       });
     }
-    // Auto-advance hooks: room name and location
+    // Auto-advance hooks: room name
     const roomNameInput = document.getElementById('roomName');
     if (roomNameInput) {
       roomNameInput.addEventListener('input', (e) => {
@@ -3642,14 +3605,7 @@ class RoomWizard {
         this.updateSetupQueue();
       });
     }
-    const roomLocationSelect = document.getElementById('roomLocationSelect');
-    if (roomLocationSelect) {
-      roomLocationSelect.addEventListener('change', (e) => {
-        this.data.location = (e.target.value || '').trim();
-        this.tryAutoAdvance();
-        this.updateSetupQueue();
-      });
-    }
+
     const zoneInput = document.getElementById('roomZoneInput');
     const zoneAdd = document.getElementById('roomZoneAdd');
     if (zoneAdd) zoneAdd.addEventListener('click', () => this.handleZoneAdd());
@@ -3667,84 +3623,7 @@ class RoomWizard {
         if (!Number.isNaN(idx)) this.removeZone(idx);
       });
     }
-  // Upload nameplate / datasheet to create unknown device placeholder
-    const uploadBtn = document.getElementById('roomKbUploadBtn');
-    const uploadInput = document.getElementById('roomKbUpload');
-    if (uploadBtn && uploadInput) {
-      uploadBtn.addEventListener('click', () => uploadInput.click());
-      uploadInput.addEventListener('change', async (e) => {
-        const file = e.target.files?.[0];
-        if (!file) return;
-        // Create a placeholder KB entry and mark as 'needs-research'
-        const placeholder = { vendor: 'Unknown', model: file.name, watts: null, control: null, tags: ['unknown'], confidence: 0, _uploaded: true };
-        // push into selected fixtures for this room
-        this.data.fixtures = this.data.fixtures || [];
-        this.data.fixtures.push({ ...placeholder, count: 1, note: 'Uploaded nameplate/datasheet - needs research' });
-        this.renderKbSelected();
-        showToast({ title: 'Uploaded', msg: `Added placeholder for ${file.name}. We can research this entry later.`, kind: 'info', icon: 'ℹ️' }, 5000);
-        this.updateSetupQueue();
-        // clear input
-        uploadInput.value = '';
-      });
-    }
-    fResults?.addEventListener('click', (e)=>{
-      const btn = e.target.closest('button[data-action]'); if (!btn) return;
-      const action = btn.dataset.action;
-      const idx = Number(btn.dataset.idx||-1);
-      const item = STATE.deviceKB.fixtures?.[idx]; if (!item) return;
-      if (action === 'add-kb') {
-        this.data.fixtures.push({ ...item, count: 1 });
-      } else if (action === 'add-unknown') {
-        // Create a placeholder variant of the KB item for later research
-        const placeholder = {
-          vendor: item.vendor || 'Unknown',
-          model: item.model || 'Unknown',
-          watts: item.watts || null,
-          control: item.control || null,
-          tags: Array.from(new Set([...(item.tags||[]), 'unknown'])),
-          confidence: 0,
-          _uploaded: true,
-          count: 1,
-          note: 'Added as unknown from KB - needs research'
-        };
-        this.data.fixtures.push(placeholder);
-      }
-      else if (action === 'add-research') {
-        // Create research queue placeholder and persist to ./data/research-queue.json
-        const placeholder = {
-          id: `rq-${Date.now().toString(36)}`,
-          vendor: item.vendor || 'Unknown',
-          model: item.model || 'Unknown',
-          watts: item.watts || null,
-          control: item.control || null,
-          tags: Array.from(new Set([...(item.tags||[]), 'research'])),
-          confidence: item.confidence || 0,
-          source: 'kb',
-          created_at: new Date().toISOString(),
-          note: 'Added to research queue from KB results'
-        };
-        // Append to in-memory research queue (for UI if needed)
-        window.RESEARCH_QUEUE = window.RESEARCH_QUEUE || [];
-        window.RESEARCH_QUEUE.push(placeholder);
-        // Persist via saveJSON to the server-side data folder
-        (async () => {
-          // Load existing queue if any
-          let current = await loadJSON('./data/research-queue.json') || { items: [] };
-          current.items = current.items || [];
-          current.items.push(placeholder);
-          const ok = await saveJSON('./data/research-queue.json', current);
-          if (ok) showToast({ title: 'Queued', msg: `${placeholder.vendor} ${placeholder.model} added to research queue`, kind: 'info', icon: '📝' }, 4000);
-          else showToast({ title: 'Queue save failed', msg: 'Could not persist research item; it will remain in memory for this session', kind: 'warn', icon: '⚠️' }, 6000);
-        })();
-      }
-      this.renderKbSelected();
-      fResults.innerHTML = ''; fSearch.value='';
-      // After adding fixtures, re-run inference
-      this.inferSensors();
-      this.updateSetupQueue();
-      // If auto-advance is enabled, attempt to progress when fixtures have been added
-      if (this.autoAdvance) setTimeout(()=> this.tryAutoAdvance(), 120);
-    });
+  // Upload nameplate / datasheet functionality removed - moved to Light Setup wizard
 
     const hwSearch = document.getElementById('roomDeviceSearch');
     const hwResults = document.getElementById('roomDeviceSearchResults');
@@ -3762,45 +3641,7 @@ class RoomWizard {
       });
     }
 
-    // Sensors (multi-select checkboxes). Keep labels visually in sync by toggling data-active on the parent label.
-    const roomSensorHost = $('#roomSensorCats');
-    if (roomSensorHost) {
-      roomSensorHost.addEventListener('change', () => {
-        const boxes = Array.from(roomSensorHost.querySelectorAll('input[type="checkbox"]'));
-        boxes.forEach(cb => {
-          const lbl = cb.closest('.chip-option') || cb.parentElement;
-          if (!lbl) return;
-          if (cb.checked) lbl.setAttribute('data-active',''); else lbl.removeAttribute('data-active');
-        });
-        const cats = boxes.filter(b=>b.checked).map(i=>i.value);
-        this.data.sensors.categories = cats;
-        this.updateSetupQueue();
-      });
-      // Also support clicking the label area to toggle the checkbox and update state visually
-      roomSensorHost.querySelectorAll('.chip-option').forEach(lbl => {
-        lbl.addEventListener('click', (e) => {
-          const cb = lbl.querySelector('input[type="checkbox"]');
-          if (!cb) return;
-          // allow native toggle to occur then sync on next tick
-          setTimeout(()=> {
-            if (cb.checked) lbl.setAttribute('data-active',''); else lbl.removeAttribute('data-active');
-            const cats = Array.from(roomSensorHost.querySelectorAll('input[type="checkbox"]:checked')).map(i=>i.value);
-            this.data.sensors.categories = cats;
-            this.updateSetupQueue();
-          }, 0);
-        });
-      });
-      roomSensorHost.querySelectorAll('.sensor-location').forEach(sel => {
-        sel.addEventListener('change', () => {
-          const key = sel.getAttribute('data-sensor');
-          if (!key) return;
-          this.data.sensors = this.data.sensors || { categories: [], placements: {} };
-          this.data.sensors.placements = this.data.sensors.placements || {};
-          this.data.sensors.placements[key] = sel.value || '';
-          this.updateSetupQueue();
-        });
-      });
-    }
+    // Sensors section removed - no longer part of room setup
 
     // Devices management (for smart devices / hubs)
     $('#roomAddDeviceBtn')?.addEventListener('click', () => {
@@ -4059,22 +3900,15 @@ class RoomWizard {
       });
     }
     $('#roomGroupPlan')?.addEventListener('change', (ev) => {
-      this.data.grouping = this.data.grouping || { groups: [], planId: '', scheduleId: '', spectraSync: true };
+      this.data.grouping = this.data.grouping || { groups: [], planId: '', scheduleId: '' };
       this.data.grouping.planId = ev.target.value || '';
       this.updateSetupQueue();
     });
     $('#roomGroupSchedule')?.addEventListener('change', (ev) => {
-      this.data.grouping = this.data.grouping || { groups: [], planId: '', scheduleId: '', spectraSync: true };
+      this.data.grouping = this.data.grouping || { groups: [], planId: '', scheduleId: '' };
       this.data.grouping.scheduleId = ev.target.value || '';
       this.updateSetupQueue();
     });
-    const spectraChk = document.getElementById('roomGroupSpectraSync');
-    if (spectraChk) {
-      spectraChk.addEventListener('change', (ev) => {
-        this.data.grouping = this.data.grouping || { groups: [], planId: '', scheduleId: '', spectraSync: true };
-        this.data.grouping.spectraSync = !!ev.target.checked;
-      });
-    }
 
     // Device Discovery step handlers
     $('#roomDiscoveryRun')?.addEventListener('click', () => this.runDeviceDiscovery());
@@ -4104,7 +3938,7 @@ class RoomWizard {
       photoperiod: 0,
       connectivity: { hasHub: null, hubType: '', hubIp: '', cloudTenant: 'Azure' },
       roles: { admin: [], operator: [], viewer: [] },
-      grouping: { groups: [], planId: '', scheduleId: '', spectraSync: true },
+      grouping: { groups: [], planId: '', scheduleId: '' },
       seriesCount: 0
     };
     if (room) {
@@ -4129,11 +3963,12 @@ class RoomWizard {
     this.categoryProgress = (this.data._categoryProgress && JSON.parse(JSON.stringify(this.data._categoryProgress))) || (()=>{ try { const s = JSON.parse(localStorage.getItem('gr.roomWizard.progress')||'null'); return s?.categoryProgress||{}; } catch { return {}; } })();
     // If categories were already chosen, build the dynamic steps and position to first incomplete category
     try { this.rebuildDynamicSteps(); } catch {}
-    this.showStep(0);
     this.modal.setAttribute('aria-hidden','false');
-    // Prefill lists
-    this.renderKbSelected();
-    this.populateLocationSelect();
+    // Use setTimeout to ensure DOM is ready
+    setTimeout(() => {
+      this.showStep(0);
+    }, 10);
+    // Prefill lists (fixtures rendering moved to Light Setup wizard)
     this.renderDevicesList();
     this.renderZoneList();
     this.renderGroupList();
@@ -4160,51 +3995,48 @@ class RoomWizard {
     const el = document.querySelector(`.room-step[data-step="${this.steps[index]}"]`);
     if (el) el.setAttribute('data-active', '');
     $('#roomModalProgress').textContent = `Step ${index + 1} of ${this.steps.length}`;
-    const prev = $('#roomPrev'); const next = $('#roomNext'); const save = $('#btnSaveRoom');
-    prev.style.display = index === 0 ? 'none' : 'inline-block';
-    if (index === this.steps.length - 1) { next.style.display = 'none'; save.style.display = 'inline-block'; this.updateReview(); }
-    else { next.style.display = 'inline-block'; save.style.display = 'none'; }
+    const prev = $('#roomPrev'); 
+    const next = $('#roomNext'); 
+    const save = $('#btnSaveRoom');
+    
+    // Ensure buttons exist before setting styles
+    if (prev) prev.style.display = index === 0 ? 'none' : 'inline-block';
+    
+    if (index === this.steps.length - 1) { 
+      if (next) next.style.display = 'none';
+      if (save) save.style.display = 'inline-block';
+      this.updateReview();
+      // Change title for final step
+      const titleEl = document.getElementById('roomModalTitle');
+      if (titleEl) titleEl.textContent = 'Done! Onward!';
+    }
+    else { 
+      if (next) {
+        next.style.display = 'inline-block';
+        next.style.visibility = 'visible';
+      }
+      if (save) save.style.display = 'none';
+      // Reset title for non-final steps
+      const titleEl = document.getElementById('roomModalTitle');
+      if (titleEl) titleEl.textContent = 'Set up a Grow Room';
+    }
 
     const stepKey = this.steps[index];
-    
-    // Handle transition from device-discovery to connectivity
-    if (stepKey === 'connectivity' && this.previousStep === 'device-discovery') {
-      const selectedDevices = this.getSelectedDiscoveredDevices();
-      if (selectedDevices.length > 0) {
-        // Auto-populate devices from discovery
-        this.data.devices = this.data.devices || [];
-        selectedDevices.forEach(device => {
-          const deviceEntry = {
-            name: device.deviceName || device.id || 'Discovered Device',
-            vendor: device.vendor || '',
-            model: device.model || '',
-            host: device.ip || device.host || '',
-            setup: this.inferSetupFromDevice(device),
-            source: 'discovery'
-          };
-          this.data.devices.push(deviceEntry);
-        });
-        this.renderDevicesList();
-        showToast({ 
-          title: 'Devices Added', 
-          msg: `${selectedDevices.length} discovered devices added to setup`, 
-          kind: 'success', 
-          icon: '✅' 
-        }, 3000);
-      }
-    }
     
     // Track previous step for transitions
     this.previousStep = stepKey;
     
     if (stepKey === 'room-name') {
       const nameInput = document.getElementById('roomName');
-      if (nameInput) nameInput.value = this.data.name || '';
+      if (nameInput) {
+        // Auto-populate from farm registration if available and room name is empty
+        if (!this.data.name && STATE.farm?.name) {
+          this.data.name = STATE.farm.name + ' - Room 1'; // Default naming pattern
+        }
+        nameInput.value = this.data.name || '';
+      }
     }
-    if (stepKey === 'location') {
-      const sel = document.getElementById('roomLocationSelect');
-      if (sel) sel.value = this.data.location || '';
-    }
+
     if (stepKey === 'layout') {
       const type = this.data.layout?.type || '';
       document.querySelectorAll('#roomLayoutType .chip-option').forEach(btn => {
@@ -4229,14 +4061,7 @@ class RoomWizard {
     if (stepKey === 'category-setup') {
       if (this.categoryIndex < 0) this.categoryIndex = 0;
       this.renderCurrentCategoryForm();
-      this.wireCategoryActions();
       this.updateCategoryNav();
-    }
-    if (stepKey === 'fixtures') {
-      const seriesInput = document.getElementById('roomSeriesCount');
-      if (seriesInput) seriesInput.value = String(this.data.seriesCount ?? 0);
-      const target = document.getElementById('roomTargetPpfd'); if (target) target.value = String(this.data.targetPpfd ?? 0);
-      const photo = document.getElementById('roomPhotoperiod'); if (photo) photo.value = String(this.data.photoperiod ?? 0);
     }
     if (stepKey === 'control') {
       const container = document.getElementById('roomControlMethod');
@@ -4251,9 +4076,6 @@ class RoomWizard {
           b.classList.add('active');
           document.getElementById('roomControlDetails').textContent = this.controlHintFor(v);
           this.inferSensors();
-          const smart = ['wifi', 'smart-plug', 'rs485', 'other'].includes(v);
-          const devicesStepEl = document.querySelector('.room-step[data-step="devices"]');
-          if (devicesStepEl) devicesStepEl.style.display = smart ? 'block' : 'none';
           if (this.autoAdvance) setTimeout(() => this.tryAutoAdvance(), 80);
         };
       });
@@ -4281,9 +4103,6 @@ class RoomWizard {
     }
     if (stepKey === 'devices') {
       const cm = this.data.controlMethod;
-      const smart = ['wifi', 'smart-plug', 'rs485', 'other'].includes(cm);
-      const devicesStepEl = document.querySelector('.room-step[data-step="devices"]');
-      if (devicesStepEl) devicesStepEl.style.display = smart ? 'block' : 'none';
       this.renderDevicesList();
     }
     if (stepKey === 'connectivity') {
@@ -4326,16 +4145,13 @@ class RoomWizard {
     switch(step){
       case 'room-name': {
         const v = ($('#roomName')?.value||'').trim(); return !!v; }
-      case 'location': {
-        const v = ($('#roomLocationSelect')?.value || '').trim(); return !!v; }
+
       case 'layout': return true;
       case 'zones': return Array.isArray(this.data.zones) && this.data.zones.length > 0;
       case 'hardware': return false; // multi-select; don't auto-advance here
       case 'category-setup': return true; // allow auto-advance if user clicks next; forms are optional counts
-      case 'fixtures': return (Array.isArray(this.data.fixtures) && this.data.fixtures.length>0);
       case 'control': return !!this.data.controlMethod;
       case 'devices': return false;
-      case 'sensors': return Array.isArray(this.data.sensors?.categories) && this.data.sensors.categories.length > 0;
       case 'connectivity': {
         const conn = this.data.connectivity || {};
         return conn.hasHub !== null;
@@ -4367,10 +4183,7 @@ class RoomWizard {
       case 'room-name': {
         const v = ($('#roomName')?.value||'').trim(); if (!v) { alert('Enter a room name'); return false; }
         this.data.name = v; break; }
-      case 'location': {
-        const v = ($('#roomLocationSelect')?.value || '').trim(); if (!v) { alert('Select a location'); return false; }
-        this.data.location = v; break;
-      }
+
       case 'layout': {
         // no strict validation
         break; }
@@ -4390,43 +4203,6 @@ class RoomWizard {
       case 'category-setup': {
         // Persist current category form values into this.data.
         this.captureCurrentCategoryForm();
-        // If no categories require setup, allow progression
-        const hasQueue = Array.isArray(this.categoryQueue) && this.categoryQueue.length > 0;
-        const catId = this.getCurrentCategoryId();
-        if (!hasQueue || !catId) { void this.persistProgress(); break; }
-
-        // Determine if testing is actually possible
-        const hasDevices = Array.isArray(this.data.devices) && this.data.devices.length > 0;
-        const hasLights = (STATE.devices||[]).some(d=>d.type==='light' || /light|fixture/i.test(d.deviceName||''));
-        let canTest = false;
-        if (catId === 'grow-lights') canTest = hasLights;
-        else if (catId === 'controllers') canTest = true; // hub probe
-        else if (catId === 'sensors') canTest = true;     // show live sample
-        else canTest = hasDevices;                        // other categories require devices present
-
-        const st = this.categoryProgress?.[catId]?.status;
-        if (st === 'complete') { void this.persistProgress(); break; }
-
-        // If cannot test, allow progression but mark follow-up
-        if (!canTest) {
-          const note = (catId === 'grow-lights' && !hasLights) ? 'Add or pair a light to enable testing' : 'No paired devices yet';
-          this.categoryProgress[catId] = this.categoryProgress[catId] || {};
-          if (!this.categoryProgress[catId].status || this.categoryProgress[catId].status === 'needs-info') {
-            this.categoryProgress[catId].status = 'needs-setup';
-            this.categoryProgress[catId].notes = note;
-          }
-          void this.persistProgress();
-          break;
-        }
-
-        // If test is possible but not completed, ask the user; allow proceed if they confirm, marking follow-up
-        const ok = confirm('Test control has not been confirmed for this category. Continue and mark for follow-up?');
-        if (!ok) return false;
-        this.categoryProgress[catId] = this.categoryProgress[catId] || {};
-        if (!this.categoryProgress[catId].status || this.categoryProgress[catId].status === 'needs-info') {
-          this.categoryProgress[catId].status = 'needs-setup';
-          this.categoryProgress[catId].notes = 'Test later';
-        }
         void this.persistProgress();
         break; }
       case 'fixtures': {
@@ -4451,13 +4227,6 @@ class RoomWizard {
           if (!ok) return false;
         }
         break; }
-      case 'sensors': {
-        const selected = Array.isArray(this.data.sensors?.categories) ? this.data.sensors.categories : [];
-        if (!selected.length) {
-          const ok = confirm('No sensor categories selected. Continue without sensors?');
-          if (!ok) return false;
-        }
-        break; }
       case 'connectivity': {
         const conn = this.data.connectivity || (this.data.connectivity = { hasHub: null, hubType: '', hubIp: '', cloudTenant: 'Azure' });
         const radios = document.querySelector('input[name="roomHubPresence"]:checked');
@@ -4478,13 +4247,11 @@ class RoomWizard {
         this.setRoleList('viewer', ($('#roomRoleViewer')?.value || ''));
         break; }
       case 'grouping': {
-        this.data.grouping = this.data.grouping || { groups: [], planId: '', scheduleId: '', spectraSync: true };
+        this.data.grouping = this.data.grouping || { groups: [], planId: '', scheduleId: '' };
         const planSel = document.getElementById('roomGroupPlan');
         const scheduleSel = document.getElementById('roomGroupSchedule');
-        const spectraChk = document.getElementById('roomGroupSpectraSync');
         if (planSel) this.data.grouping.planId = planSel.value || '';
         if (scheduleSel) this.data.grouping.scheduleId = scheduleSel.value || '';
-        if (spectraChk) this.data.grouping.spectraSync = !!spectraChk.checked;
         const groups = Array.isArray(this.data.grouping.groups) ? this.data.grouping.groups : [];
         if (!groups.length) {
           const needsGroups = (Array.isArray(this.data.zones) && this.data.zones.length) || (Array.isArray(this.data.devices) && this.data.devices.length);
@@ -4511,7 +4278,7 @@ class RoomWizard {
   rebuildDynamicSteps() {
     const selected = Array.isArray(this.data.hardwareCats) ? this.data.hardwareCats.slice() : [];
     // Define which categories have micro-forms; order them after hardware and before fixtures
-  const formCats = selected.filter(c => ['grow-lights','hvac','dehumidifier','fans','vents','irrigation','controllers','other'].includes(c));
+  const formCats = selected.filter(c => ['grow-lights','hvac','mini-split','dehumidifier','fans','vents','controllers','other'].includes(c));
     // Preserve user selection order using hardwareOrder we maintain on toggles
     const chipOrder = (Array.isArray(this.data.hardwareOrder) ? this.data.hardwareOrder : [])
       .filter(v => formCats.includes(v));
@@ -4559,13 +4326,13 @@ class RoomWizard {
       return;
     }
     const titles = {
-      'grow-lights': 'Grow lights — summary',
-      'hvac': 'HVAC setup',
+      'hvac': 'Central HVAC setup',
+      'mini-split': 'Mini Split setup',
       'dehumidifier': 'Dehumidifier setup',
       'fans': 'Fans setup',
       'vents': 'Vents setup',
-      'irrigation': 'Irrigation setup',
       'controllers': 'Controllers / hubs setup',
+      'energy-monitor': 'Energy Monitor setup',
       'other': 'Other equipment setup'
     };
     titleEl.textContent = titles[catId] || 'Category setup';
@@ -4578,103 +4345,171 @@ class RoomWizard {
       return `<div class="chip-row" id="${id}">` + values.map(opt => `<button type="button" class="chip-option${selected===opt? ' active':''}" data-value="${opt}">${opt}</button>`).join('') + `</div>`;
     };
     let html = '';
-    if (catId === 'grow-lights') {
-      // Summary-only: Grow lights are configured in Fixtures, Control, and Energy steps.
-      const fixtures = Array.isArray(this.data.fixtures) ? this.data.fixtures : [];
-      const totalFixtures = fixtures.reduce((sum, f) => sum + (Number(f.count) || 0), 0);
-      const controlLabelMap = { 'wifi': 'Wi‑Fi / App', 'bluetooth': 'Bluetooth', 'smart-plug': 'Smart plug', '0-10v': '0‑10V / Analog', 'rs485': 'RS‑485 / Modbus', 'other': 'Other', '': '—' };
-      const cmLabel = controlLabelMap[this.data.controlMethod || ''] || '—';
-      const energyLabels = { 'ct-branch': 'CT / branch meters', 'smart-plugs': 'Smart plugs', 'built-in': 'Built-in meter', 'none': 'None' };
-      const energy = this.data.energy ? (energyLabels[this.data.energy] || this.data.energy) : '—';
+    if (catId === 'hvac') {
       html = `
-        <div class="tiny" style="margin-bottom:6px">Grow lights — summary</div>
-        <ul class="tiny" style="margin:0 0 8px 16px; color:#475569">
-          <li>Fixtures: <strong>${totalFixtures || '—'}</strong></li>
-          <li>Control: <strong>${cmLabel}</strong></li>
-          <li>Energy: <strong>${escapeHtml(energy)}</strong></li>
-        </ul>
-        <div class="row" style="gap:6px;flex-wrap:wrap">
-          <button type="button" class="ghost" id="catLightsEditFixtures">Edit fixtures</button>
-          <button type="button" class="ghost" id="catLightsEditControl">Edit control</button>
-          <button type="button" class="ghost" id="catLightsEditEnergy">Edit energy</button>
-        </div>
-      `;
-    } else if (catId === 'hvac') {
-      html = `
-        <div class="tiny">HVAC units</div>
+        <div class="tiny">Central HVAC units</div>
         <label class="tiny">How many? <input type="number" id="cat-hvac-count" min="0" value="${v(catData.count||0)}" style="width:80px"></label>
         <div class="tiny" style="margin-top:6px">Control</div>
         ${chipRow('cat-hvac-control', ['Thermostat','Modbus/BACnet','Relay','Other'], catData.control)}
-        <div class="tiny" style="margin-top:6px">Energy</div>
-        ${chipRow('cat-hvac-energy', ['Built-in','CT/branch','None'], catData.energy)}
+      `;
+    } else if (catId === 'mini-split') {
+      html = `
+        <div class="tiny">Mini Split units</div>
+        <div class="equipment-selection">
+          <label class="tiny">Manufacturer
+            <input type="text" id="cat-mini-split-manufacturer" placeholder="Search manufacturer..." value="${v(catData.manufacturer||'')}" style="width:200px">
+          </label>
+        </div>
+        <label class="tiny">How many? <input type="number" id="cat-mini-split-count" min="0" value="${v(catData.count||0)}" style="width:80px"></label>
+        <div class="tiny" style="margin-top:6px">Control Options</div>
+        <div class="control-checkboxes">
+          <label class="tiny"><input type="checkbox" id="cat-mini-split-wifi" ${catData.wifi ? 'checked' : ''}> Wi-Fi Control</label>
+          <label class="tiny"><input type="checkbox" id="cat-mini-split-wired" ${catData.wired ? 'checked' : ''}> Wired Thermostat Control</label>
+        </div>
+        <div class="tiny" style="margin-top:6px">Additional Control</div>
+        ${chipRow('cat-mini-split-control', ['Modbus/BACnet','Relay','Other'], catData.control)}
       `;
     } else if (catId === 'dehumidifier') {
       html = `
         <div class="tiny">Dehumidifiers</div>
+        <div class="equipment-selection">
+          <label class="tiny">Manufacturer
+            <input type="text" id="cat-dehu-manufacturer" placeholder="Search manufacturer..." value="${v(catData.manufacturer||'')}" style="width:200px">
+          </label>
+          <label class="tiny">Model
+            <select id="cat-dehu-model" style="width:200px">
+              <option value="">Select model</option>
+            </select>
+          </label>
+        </div>
         <label class="tiny">How many? <input type="number" id="cat-dehu-count" min="0" value="${v(catData.count||0)}" style="width:80px"></label>
-        <div class="tiny" style="margin-top:6px">Control</div>
-        ${chipRow('cat-dehu-control', ['Smart plug','Relay','Other'], catData.control)}
-        <div class="tiny" style="margin-top:6px">Energy</div>
-        ${chipRow('cat-dehu-energy', ['Built-in','CT/branch','None'], catData.energy)}
+        <div class="tiny" style="margin-top:6px">Control Options</div>
+        <div class="control-checkboxes">
+          <label class="tiny"><input type="checkbox" id="cat-dehu-wifi" ${catData.wifi ? 'checked' : ''}> Wi-Fi Control</label>
+          <label class="tiny"><input type="checkbox" id="cat-dehu-wired" ${catData.wired ? 'checked' : ''}> Wired Thermostat Control</label>
+        </div>
       `;
     } else if (catId === 'fans') {
       html = `
         <div class="tiny">Fans</div>
+        <div class="equipment-selection">
+          <label class="tiny">Manufacturer
+            <input type="text" id="cat-fans-manufacturer" placeholder="Search manufacturer..." value="${v(catData.manufacturer||'')}" style="width:200px">
+          </label>
+        </div>
         <label class="tiny">How many? <input type="number" id="cat-fans-count" min="0" value="${v(catData.count||0)}" style="width:80px"></label>
-        <div class="tiny" style="margin-top:6px">Control</div>
-        ${chipRow('cat-fans-control', ['Smart plug','0-10V/VFD','Other'], catData.control)}
+        <div class="tiny" style="margin-top:6px">Control Options</div>
+        <div class="control-checkboxes">
+          <label class="tiny"><input type="checkbox" id="cat-fans-wifi" ${catData.wifi ? 'checked' : ''}> Wi-Fi Control</label>
+          <label class="tiny"><input type="checkbox" id="cat-fans-wired" ${catData.wired ? 'checked' : ''}> Wired Thermostat Control</label>
+        </div>
       `;
     } else if (catId === 'vents') {
       html = `
         <div class="tiny">Vents</div>
+        <div class="equipment-selection">
+          <label class="tiny">Manufacturer
+            <input type="text" id="cat-vents-manufacturer" placeholder="Search manufacturer..." value="${v(catData.manufacturer||'')}" style="width:200px">
+          </label>
+        </div>
         <label class="tiny">How many? <input type="number" id="cat-vents-count" min="0" value="${v(catData.count||0)}" style="width:80px"></label>
         <div class="tiny" style="margin-top:6px">Control</div>
         ${chipRow('cat-vents-control', ['Relay','0-10V','Other'], catData.control)}
       `;
-    } else if (catId === 'irrigation') {
-      html = `
-        <div class="tiny">Irrigation / pumps</div>
-        <label class="tiny">Zones <input type="number" id="cat-irr-zones" min="0" value="${v(catData.zones||0)}" style="width:100px"></label>
-        <div class="tiny" style="margin-top:6px">Control</div>
-        ${chipRow('cat-irr-control', ['Relay','Smart plug','Other'], catData.control)}
-      `;
     } else if (catId === 'controllers') {
       html = `
         <div class="tiny">Controllers / hubs</div>
-        <div class="tiny" style="color:#64748b;margin-bottom:4px">If fixtures require a hub, set it up first in the next Devices step.</div>
         <label class="tiny">How many hubs? <input type="number" id="cat-ctl-count" min="0" value="${v(catData.count||0)}" style="width:90px"></label>
+      `;
+    } else if (catId === 'energy-monitor') {
+      html = `
+        <div class="tiny">Energy Monitors</div>
+        <label class="tiny">How many? <input type="number" id="cat-energy-count" min="0" value="${v(catData.count||0)}" style="width:80px"></label>
+        <div class="tiny" style="margin-top:6px">Type</div>
+        ${chipRow('cat-energy-type', ['CT clamp','Smart meter','Built-in','Other'], catData.type)}
       `;
     } else {
       html = `
         <div class="tiny">Other equipment</div>
+        <div class="equipment-selection">
+          <label class="tiny">Manufacturer
+            <input type="text" id="cat-other-manufacturer" placeholder="Search manufacturer..." value="${v(catData.manufacturer||'')}" style="width:200px">
+          </label>
+        </div>
         <label class="tiny">Describe <input type="text" id="cat-other-notes" value="${v(catData.notes||'')}" placeholder="e.g., CO₂ burner" style="min-width:220px"></label>
       `;
     }
     body.innerHTML = html;
+    
     // Wire chip groups to update data (for categories that still use chips)
     body.querySelectorAll('.chip-row').forEach(row => {
       row.addEventListener('click', (e) => {
-        const btn = e.target.closest('.chip-option'); if (!btn) return;
+        const btn = e.target.closest('.chip-option'); 
+        if (!btn) return;
+        
+        // Remove active from all buttons in this row
         row.querySelectorAll('.chip-option').forEach(b => b.classList.remove('active'));
+        // Add active to clicked button
         btn.classList.add('active');
+        
         const val = btn.getAttribute('data-value');
         const id = row.getAttribute('id');
-        // Grow lights summary no longer uses chips here
-        if (id === 'cat-hvac-control') this.data.category.hvac.control = val;
-        if (id === 'cat-hvac-energy') this.data.category.hvac.energy = val;
-        if (id === 'cat-dehu-control') this.data.category.dehumidifier.control = val;
-        if (id === 'cat-dehu-energy') this.data.category.dehumidifier.energy = val;
-        if (id === 'cat-fans-control') this.data.category.fans.control = val;
-        if (id === 'cat-vents-control') this.data.category.vents.control = val;
-        if (id === 'cat-irr-control') this.data.category.irrigation.control = val;
-      }, { once: false });
+        
+        // Ensure category objects exist before setting properties
+        if (id === 'cat-hvac-control') {
+          this.data.category.hvac = this.data.category.hvac || {};
+          this.data.category.hvac.control = val;
+        }
+        if (id === 'cat-mini-split-control') {
+          this.data.category['mini-split'] = this.data.category['mini-split'] || {};
+          this.data.category['mini-split'].control = val;
+        }
+        if (id === 'cat-vents-control') {
+          this.data.category.vents = this.data.category.vents || {};
+          this.data.category.vents.control = val;
+        }
+        if (id === 'cat-energy-type') {
+          this.data.category['energy-monitor'] = this.data.category['energy-monitor'] || {};
+          this.data.category['energy-monitor'].type = val;
+        }
+      });
     });
-    // Wire Grow lights summary edit shortcuts
-    if (catId === 'grow-lights') {
-      const e1 = document.getElementById('catLightsEditFixtures'); if (e1) e1.addEventListener('click', ()=> this.goToStep('fixtures'));
-      const e2 = document.getElementById('catLightsEditControl'); if (e2) e2.addEventListener('click', ()=> this.goToStep('control'));
-      const e3 = document.getElementById('catLightsEditEnergy'); if (e3) e3.addEventListener('click', ()=> this.goToStep('energy'));
-    }
+
+    // Wire manufacturer search inputs for equipment types
+    ['dehu', 'fans', 'mini-split', 'vents', 'other'].forEach(prefix => {
+      const manufacturerInput = document.getElementById(`cat-${prefix}-manufacturer`);
+      const wifiCheckbox = document.getElementById(`cat-${prefix}-wifi`);
+      const wiredCheckbox = document.getElementById(`cat-${prefix}-wired`);
+      
+      if (manufacturerInput) {
+        manufacturerInput.addEventListener('input', (e) => {
+          const categoryName = prefix === 'dehu' ? 'dehumidifier' : 
+                              prefix === 'mini-split' ? 'mini-split' :
+                              prefix === 'vents' ? 'vents' :
+                              prefix === 'other' ? 'other' : 'fans';
+          this.data.category[categoryName] = this.data.category[categoryName] || {};
+          this.data.category[categoryName].manufacturer = e.target.value.trim();
+        });
+      }
+      
+      if (wifiCheckbox) {
+        wifiCheckbox.addEventListener('change', (e) => {
+          const categoryName = prefix === 'dehu' ? 'dehumidifier' : 
+                              prefix === 'mini-split' ? 'mini-split' : 'fans';
+          this.data.category[categoryName] = this.data.category[categoryName] || {};
+          this.data.category[categoryName].wifi = e.target.checked;
+        });
+      }
+      
+      if (wiredCheckbox) {
+        wiredCheckbox.addEventListener('change', (e) => {
+          const categoryName = prefix === 'dehu' ? 'dehumidifier' : 
+                              prefix === 'mini-split' ? 'mini-split' : 'fans';
+          this.data.category[categoryName] = this.data.category[categoryName] || {};
+          this.data.category[categoryName].wired = e.target.checked;
+        });
+      }
+    });
   }
 
   // Capture inputs for the current category
@@ -4685,152 +4520,46 @@ class RoomWizard {
     const catData = (data[catId] || (data[catId] = {}));
     const getNum = (id) => { const el = document.getElementById(id); if (!el) return undefined; const n = Number(el.value||0); return Number.isFinite(n)? n: undefined; };
     const getStr = (id) => { const el = document.getElementById(id); return el ? (el.value||'').trim() : undefined; };
-    // Grow lights summary does not capture fields here; fixtures/control/energy own the state
+    const getChecked = (id) => { const el = document.getElementById(id); return el ? el.checked : false; };
     if (catId === 'hvac') {
       catData.count = getNum('cat-hvac-count') ?? catData.count;
     }
+    if (catId === 'mini-split') {
+      catData.count = getNum('cat-mini-split-count') ?? catData.count;
+        catData.manufacturer = getStr('cat-mini-split-manufacturer') ?? catData.manufacturer;
+        catData.wifi = getChecked('cat-mini-split-wifi');
+        catData.wired = getChecked('cat-mini-split-wired');
+    }
     if (catId === 'dehumidifier') {
       catData.count = getNum('cat-dehu-count') ?? catData.count;
+      catData.manufacturer = getStr('cat-dehu-manufacturer') ?? catData.manufacturer;
+      catData.model = getStr('cat-dehu-model') ?? catData.model;
+      catData.wifi = getChecked('cat-dehu-wifi');
+      catData.wired = getChecked('cat-dehu-wired');
     }
     if (catId === 'fans') {
       catData.count = getNum('cat-fans-count') ?? catData.count;
+      catData.manufacturer = getStr('cat-fans-manufacturer') ?? catData.manufacturer;
+      catData.wifi = getChecked('cat-fans-wifi');
+      catData.wired = getChecked('cat-fans-wired');
     }
     if (catId === 'vents') {
       catData.count = getNum('cat-vents-count') ?? catData.count;
-    }
-    if (catId === 'irrigation') {
-      catData.zones = getNum('cat-irr-zones') ?? catData.zones;
+      catData.manufacturer = getStr('cat-vents-manufacturer') ?? catData.manufacturer;
     }
     if (catId === 'controllers') {
       catData.count = getNum('cat-ctl-count') ?? catData.count;
     }
+    if (catId === 'energy-monitor') {
+      catData.count = getNum('cat-energy-count') ?? catData.count;
+    }
     if (catId === 'other') {
       catData.notes = getStr('cat-other-notes') ?? catData.notes;
+      catData.manufacturer = getStr('cat-other-manufacturer') ?? catData.manufacturer;
     }
   }
 
-  // Wire per-category action buttons: Test Control, Save & Continue, Save Done, Skip
-  wireCategoryActions() {
-  const status = document.getElementById('catSetupStatus');
-  const statusLine = document.getElementById('catSetupStatusLine');
-  const testBtn = document.getElementById('catTestControl');
-  const saveCont = document.getElementById('catSaveContinue');
-  const skip = document.getElementById('catSkip');
-  const addNew = document.getElementById('catAddNew');
-    const catId = this.getCurrentCategoryId();
-    // Determine whether anything is actually testable for this category
-    const hasDevices = Array.isArray(this.data.devices) && this.data.devices.length > 0;
-    const hasLights = (STATE.devices||[]).some(d=>d.type==='light' || /light|fixture/i.test(d.deviceName||''));
-    let canTest = false;
-    if (catId === 'grow-lights') canTest = hasLights;
-    else if (catId === 'controllers') canTest = true; // hub probe
-    else if (catId === 'sensors') canTest = true;     // show live sample
-    else canTest = hasDevices;                        // other categories require devices present
-    if (testBtn) {
-      // Keep disabled unless explicitly testable. Grow lights are testable only when fixtures/hardware are paired.
-      testBtn.disabled = true;
-      testBtn.title = 'Pair hardware first (Add device) to enable testing';
-    }
-    if (!canTest && status) {
-      const hint = 'Nothing to test yet — use Add device to pair hardware. You can still Mark complete & next.';
-      status.textContent = status.textContent ? `${status.textContent} — ${hint}` : hint;
-    }
-    const mark = (st, note='', opts = {}) => {
-      this.categoryProgress[catId] = this.categoryProgress[catId] || {};
-      this.categoryProgress[catId].status = st;
-      this.categoryProgress[catId].notes = note;
-      if (status) status.textContent = this.categoryStatusMessage(st, note);
-      if (statusLine && catId) statusLine.textContent = `Configuring ${this.categoryLabel(catId)} (${this.categoryIndex + 1} of ${this.categoryQueue.length || 1})`;
-      this.updateCategoryNav();
-      this.updateSetupQueue();
-      if (opts.persist !== false) void this.persistProgress();
-    };
-    if (status) {
-      const st = this.categoryProgress[catId]?.status || 'not-started';
-      mark(st, this.categoryProgress[catId]?.notes || '', { persist: false });
-    }
-
-    testBtn?.addEventListener('click', async () => {
-      if (testBtn.disabled) return; // no-op when disabled
-      // Minimal test flow per category. If lights present, send 45% HEX12 then revert.
-      try {
-        if (catId === 'grow-lights') {
-          const lights = (STATE.devices||[]).filter(d=>d.type==='light' || /light|fixture/i.test(d.deviceName||''));
-          const ids = lights.slice(0, Math.max(1, Math.min(3, lights.length))).map(d=>d.id);
-          const onHex = buildHex12(45);
-          await Promise.all(ids.map(id => patch(id, { status: 'on', value: onHex })));
-          setTimeout(async ()=>{ try { await Promise.all(ids.map(id => patch(id, { status:'off' }))); } catch(e){} }, 1200);
-          mark('complete');
-        } else if (catId === 'sensors') {
-          // Show a live sample if available
-          mark('complete', 'Live values visible in Environment');
-        } else if (catId === 'controllers') {
-          // Probe forwarder health as a proxy for hub presence
-          try {
-            const r = await fetch('/forwarder/healthz');
-            if (r.ok) { mark('complete', 'Hub reachable'); }
-            else { mark('needs-hub', 'Hub not reachable'); }
-          } catch {
-            mark('needs-hub', 'Hub not reachable');
-          }
-        } else {
-          // For HVAC/Dehu/Fans/Vents/Irrigation/Controllers, we can only mark as needs-setup unless devices added
-          const hasDevices = Array.isArray(this.data.devices) && this.data.devices.length > 0;
-          mark(hasDevices ? 'complete' : 'needs-setup');
-        }
-      } catch (e) {
-        mark('needs-setup', e.message || String(e));
-      }
-    });
-
-    saveCont?.addEventListener('click', () => {
-      this.captureCurrentCategoryForm();
-      // Enforce: every device must have a control method when applicable
-      // Grow lights are configured in dedicated Control step; do not require control here
-  const requiresControl = ['hvac','dehumidifier','fans','vents','irrigation'].includes(catId);
-      if (requiresControl) {
-        const d = this.data.category?.[catId];
-        if (!d || !d.control) { alert('Select a control method before continuing.'); return; }
-      }
-      // If test isn't possible or hasn't been run, allow progression but mark follow-up
-      const st = this.categoryProgress[catId]?.status;
-      if (st === 'complete') {
-        this.nextStep();
-        return;
-      }
-      // No testable devices yet or user opted not to test — mark as needs-setup and proceed with guidance
-      const reason = canTest ? 'Test later' : 'No paired devices yet';
-      const note = catId === 'grow-lights' && !hasLights ? 'Add or pair a light to enable testing' : reason;
-      // Persist a warning status to reflect follow-up needed
-      const prior = this.categoryProgress[catId]?.status;
-      if (!prior || prior === 'needs-info') {
-        // only write when not previously set to a stronger state
-        this.categoryProgress[catId] = this.categoryProgress[catId] || {};
-        this.categoryProgress[catId].status = 'needs-setup';
-        this.categoryProgress[catId].notes = note;
-        void this.persistProgress();
-      }
-      this.updateCategoryNav();
-      this.updateSetupQueue();
-      showToast({ title:'Proceeding without test', msg:`${this.categoryLabel(catId)} marked for follow-up — ${note}.`, kind:'info', icon:'➡️' }, 4000);
-      this.nextStep();
-    });
-
-    // Removed Mark follow-up button per request
-
-    skip?.addEventListener('click', async () => {
-      // Move Skip for now into action panel; keep as a non-advancing mark only
-      mark('needs-setup');
-      showToast({ title:'Marked as skipped', msg:'This category is marked as Needs Setup.', kind:'warn', icon:'⚠️' }, 4000);
-    });
-
-    addNew?.addEventListener('click', () => {
-      // Shortcut to devices step to add hardware, then return
-      const targetIdx = this.steps.indexOf('devices');
-      if (targetIdx >= 0) { this.currentStep = targetIdx; this.showStep(targetIdx); }
-    });
-  }
-
+  // Wire per-category action buttons: Test Control
   async persistProgress() {
     try {
       const key = 'gr.roomWizard.progress';
@@ -4871,18 +4600,7 @@ class RoomWizard {
   host.innerHTML = res.map(({it, idx})=>`<li><div class="row" style="justify-content:space-between;align-items:center;gap:8px"><div>${it.vendor} <strong>${it.model}</strong> • ${it.watts} W • ${it.control || ''}</div><div style="display:flex;gap:6px"><button type="button" class="ghost" data-action="add-kb" data-idx="${idx}">Add</button><button type="button" class="ghost" data-action="add-unknown" data-idx="${idx}">Add unknown</button><button type="button" class="ghost" data-action="add-research" data-idx="${idx}">Add to research queue</button></div></div></li>`).join('');
   }
 
-  renderKbSelected(){
-    const ul = $('#roomKbSelected'); if (!ul) return;
-    ul.innerHTML = (this.data.fixtures||[]).map((it, idx)=>`
-      <li>
-        <div class="row" style="align-items:center;gap:6px">
-          <span>${it.vendor} <strong>${it.model}</strong> • ${it.watts} W</span>
-          <label class="tiny">x <input type="number" min="1" value="${it.count||1}" style="width:64px" onchange="roomWizard.updateFixtureCount(${idx}, this.value)"></label>
-          <button type="button" class="ghost" title="Remove" onclick="roomWizard.removeFixture(${idx})">×</button>
-        </div>
-      </li>
-    `).join('');
-  }
+  // renderKbSelected method moved to LightWizard
 
   renderDevicesList() {
     const ul = $('#roomDevicesList'); if (!ul) return;
@@ -4928,7 +4646,7 @@ class RoomWizard {
 
   addGroup(name) {
     if (!name) return;
-    this.data.grouping = this.data.grouping || { groups: [], planId: '', scheduleId: '', spectraSync: true };
+    this.data.grouping = this.data.grouping || { groups: [], planId: '', scheduleId: '' };
     const groups = Array.isArray(this.data.grouping.groups) ? this.data.grouping.groups : (this.data.grouping.groups = []);
     if (!groups.includes(name)) {
       groups.push(name);
@@ -4939,7 +4657,7 @@ class RoomWizard {
   }
 
   removeGroup(idx) {
-    this.data.grouping = this.data.grouping || { groups: [], planId: '', scheduleId: '', spectraSync: true };
+    this.data.grouping = this.data.grouping || { groups: [], planId: '', scheduleId: '' };
     const groups = Array.isArray(this.data.grouping.groups) ? this.data.grouping.groups : [];
     if (idx >= 0 && idx < groups.length) {
       groups.splice(idx, 1);
@@ -4991,8 +4709,6 @@ class RoomWizard {
       schedSel.innerHTML = ['<option value="">Select schedule…</option>', ...sched.map(s => `<option value="${escapeHtml(s.id || '')}">${escapeHtml(s.name || 'Schedule')}</option>`)].join('');
       schedSel.value = current || '';
     }
-    const spectraChk = document.getElementById('roomGroupSpectraSync');
-    if (spectraChk) spectraChk.checked = this.data.grouping?.spectraSync !== false;
     this.renderGroupList();
     this.updateGroupSuggestions();
   }
@@ -5136,7 +4852,7 @@ class RoomWizard {
     if (!host) return;
     this.hardwareSearchResults = [];
     if (!query) {
-      host.innerHTML = '<li class="tiny" style="color:#64748b">Search lights, hubs, smart plugs…</li>';
+      host.innerHTML = '<li class="tiny" style="color:#64748b">Search lights, hubs, equipment…</li>';
       return;
     }
     const q = query.toLowerCase();
@@ -5320,12 +5036,11 @@ class RoomWizard {
 
   categoryLabel(id) {
     const map = {
-      'grow-lights': 'Grow lights',
-      'hvac': 'HVAC',
+      'hvac': 'Central HVAC',
+      'mini-split': 'Mini Split',
       'dehumidifier': 'Dehumidifiers',
       'fans': 'Fans',
       'vents': 'Vents',
-      'irrigation': 'Irrigation',
       'controllers': 'Controllers',
       'sensors': 'Sensors',
       'other': 'Other'
@@ -5333,8 +5048,7 @@ class RoomWizard {
     return map[id] || id;
   }
 
-  removeFixture(idx){ this.data.fixtures.splice(idx,1); this.renderKbSelected(); this.inferSensors(); this.updateSetupQueue(); }
-  updateFixtureCount(idx, value){ const n=Math.max(1, Number(value||1)); if (this.data.fixtures[idx]) this.data.fixtures[idx].count=n; this.inferSensors(); this.updateSetupQueue(); }
+  // removeFixture and updateFixtureCount methods moved to LightWizard
 
   controlHintFor(v) {
     const map = {
@@ -5381,13 +5095,7 @@ class RoomWizard {
     this.updateSetupQueue();
   }
 
-  populateLocationSelect() {
-    const sel = $('#roomLocationSelect'); if (!sel) return;
-    const rooms = Array.isArray(STATE.farm?.rooms) ? STATE.farm.rooms : [];
-    sel.innerHTML = '<option value="">Select room...</option>' + rooms.map(r => `<option value="${escapeHtml(r.name)}" data-room-id="${escapeHtml(r.id)}">${escapeHtml(r.name)}</option>`).join('');
-    // If editing an existing room with location, preselect
-    if (this.data.location) sel.value = this.data.location;
-  }
+
 
   updateReview(){
     const host = $('#roomReview'); if (!host) return;
@@ -5458,16 +5166,12 @@ class RoomWizard {
     const groupHtml = groupList.length ? `<ul style="margin:6px 0 0 0; padding-left:18px">${groupList.map(g => `<li>${escape(g)}</li>`).join('')}</ul>` : '<span>—</span>';
     const planName = grouping.planId ? (STATE.plans || []).find(p => p.id === grouping.planId)?.name || grouping.planId : '—';
     const scheduleName = grouping.scheduleId ? (STATE.schedules || []).find(s => s.id === grouping.scheduleId)?.name || grouping.scheduleId : '—';
-    const spectraSyncLabel = grouping.spectraSync === false ? 'Off' : 'On';
     const energyLabels = { 'ct-branch': 'CT / branch meters', 'smart-plugs': 'Smart plugs', 'built-in': 'Built-in meter', 'none': 'None' };
     const energyLabel = this.data.energy ? escape(energyLabels[this.data.energy] || this.data.energy) : '—';
     const energyHours = Number(this.data.energyHours) || 0;
     const runtimeLabel = energyHours ? `${escape(String(energyHours))} hr/day` : '—';
     const totalWatts = fixtures.reduce((sum, f) => sum + (Number(f.watts) || 0) * (Number(f.count) || 1), 0);
     const estimatedKwh = totalWatts > 0 && energyHours > 0 ? `${((totalWatts / 1000) * energyHours).toFixed(2)} kWh/day` : '—';
-    const targetPpfd = Number(this.data.targetPpfd) || 0;
-    const photoperiod = Number(this.data.photoperiod) || 0;
-    const dli = targetPpfd > 0 && photoperiod > 0 ? ((targetPpfd * (3600 * photoperiod)) / 1_000_000).toFixed(1) : null;
     host.innerHTML = `
       <div><strong>Name:</strong> ${escape(this.data.name || '—')}</div>
       <div><strong>Location:</strong> ${escape(this.data.location || '—')}</div>
@@ -5481,11 +5185,10 @@ class RoomWizard {
       <div><strong>Control method:</strong> ${controlSummary}</div>
       <div><strong>Sensors:</strong> ${sensorHtml}</div>
       <div><strong>Groups:</strong> ${groupHtml}</div>
-      <div><strong>Plan &amp; Schedule:</strong> Plan ${escape(planName)} • Schedule ${escape(scheduleName)} • SpectraSync ${escape(spectraSyncLabel)}</div>
+      <div><strong>Plan &amp; Schedule:</strong> Plan ${escape(planName)} • Schedule ${escape(scheduleName)}</div>
       <div><strong>Connectivity:</strong> ${hubSummary} • Tenant ${tenant}</div>
       <div><strong>Roles:</strong> Admins ${formatRole('admin')} • Operators ${formatRole('operator')} • Viewers ${formatRole('viewer')}</div>
       <div><strong>Energy monitoring:</strong> ${energyLabel} • Runtime ${runtimeLabel} • Est. ${escape(estimatedKwh)}</div>
-      <div><strong>Target PPFD:</strong> ${targetPpfd ? escape(String(targetPpfd)) + ' µmol·m⁻²·s⁻¹' : '—'} • Photoperiod ${photoperiod ? escape(String(photoperiod)) + ' h' : '—'} • DLI ${dli ? escape(String(dli)) + ' mol·m⁻²·day⁻¹' : '—'}</div>
     `;
   }
 
@@ -5647,7 +5350,7 @@ class RoomWizard {
   setupLiveSwitchBotConfiguration() {
     // Set hardware categories for real farm equipment
     this.data.hardwareCats = this.data.hardwareCats || [];
-    const farmEquipment = ['grow-lights', 'hvac', 'dehumidifier', 'fans', 'irrigation', 'controllers'];
+    const farmEquipment = ['grow-lights', 'hvac', 'mini-split', 'dehumidifier', 'fans', 'controllers'];
     farmEquipment.forEach(cat => {
       if (!this.data.hardwareCats.includes(cat)) {
         this.data.hardwareCats.push(cat);
@@ -5695,16 +5398,6 @@ class RoomWizard {
       kind: 'success', 
       icon: '🌱' 
     });
-
-    // Auto-advance to next step if we're on devices step
-    if (this.steps[this.currentStep] === 'devices') {
-      setTimeout(() => {
-        if (this.validateCurrentStep()) {
-          this.currentStep++;
-          this.showStep(this.currentStep);
-        }
-      }, 1500);
-    }
   }
 
   nextStep() {
@@ -5830,55 +5523,6 @@ class RoomWizard {
   refreshDeviceDiscovery() {
     this.runDeviceDiscovery();
   }
-  
-  getSelectedDiscoveredDevices() {
-    const listEl = $('#roomDiscoveryDeviceList');
-    if (!listEl || !this.discoveredDevices) return [];
-    
-    const selected = [];
-    listEl.querySelectorAll('input[type="checkbox"]:checked').forEach(cb => {
-      const idx = parseInt(cb.dataset.deviceIdx);
-      if (!isNaN(idx) && this.discoveredDevices[idx]) {
-        selected.push(this.discoveredDevices[idx]);
-      }
-    });
-    
-    return selected;
-  }
-  
-  inferSetupFromDevice(device) {
-    // Infer device setup configuration based on device properties
-    const setup = {};
-    
-    if (device.ip || device.host) {
-      // Device has network connectivity - likely WiFi
-      setup.wifi = {
-        ssid: 'auto-discovered',
-        psk: null,
-        useStatic: !!device.ip,
-        staticIp: device.ip || null
-      };
-    }
-    
-    if (device.type) {
-      const type = device.type.toLowerCase();
-      if (type.includes('bluetooth') || type.includes('ble')) {
-        setup.bluetooth = {
-          name: device.deviceName || device.id,
-          pin: null
-        };
-      }
-      if (type.includes('modbus') || type.includes('rs485')) {
-        setup.rs485 = {
-          host: device.ip || device.host,
-          unitId: device.unitId || 1,
-          baud: 9600
-        };
-      }
-    }
-    
-    return setup;
-  }
 }
 
 // --- Data Loading and Initialization ---
@@ -5967,6 +5611,7 @@ async function loadAllData() {
     renderPlansPanel();
     renderEnvironment();
     renderRooms();
+    renderLightSetups();
     renderSwitchBotDevices();
     // Start background polling for environment telemetry
     startEnvPolling();
@@ -6136,7 +5781,7 @@ function renderRooms() {
         if (st === 'needs-hub' || st === 'needs-energy' || st === 'needs-setup') return '• Needs follow-up';
         return '';
       };
-      const orderedCats = ['hvac','grow-lights','dehumidifier','fans','vents','irrigation','controllers','sensors'];
+      const orderedCats = ['hvac','mini-split','dehumidifier','fans','vents','controllers','sensors'];
       const statusRow = orderedCats
         .filter(c => prog[c])
         .map(c => {
@@ -6146,12 +5791,6 @@ function renderRooms() {
           return `<span class="chip tiny" title="${label}">${label}: ${statusText}</span>`;
         })
         .join(' ');
-      const totalWatts = (r.fixtures||[]).reduce((sum, f) => sum + ((Number(f.watts)||0) * (Number(f.count)||1)), 0);
-      const energyHours = Number(r.energyHours) || 0;
-      const energyKwh = totalWatts > 0 && energyHours > 0 ? ((totalWatts/1000) * energyHours).toFixed(2) : '—';
-      const dli = (Number(r.targetPpfd) > 0 && Number(r.photoperiod) > 0)
-        ? ((Number(r.targetPpfd) * 3600 * Number(r.photoperiod)) / 1_000_000).toFixed(1)
-        : '—';
       const zones = (r.zones || []).map(z => escapeHtml(z)).join(', ') || '—';
       const connectivity = r.connectivity || {};
       const connSummary = connectivity.hasHub === null
@@ -6169,9 +5808,9 @@ function renderRooms() {
         <div class="row" style="justify-content:space-between;align-items:center">
           <div>
             <h3 style="margin:0">${name}</h3>
-            <div class="tiny" style="color:#475569">Layout: ${layoutType} • Zones: ${zones} • Fixtures: ${fixtures} • Control: ${control}</div>
+            <div class="tiny" style="color:#475569">Layout: ${layoutType} • Zones: ${zones} • Control: ${control}</div>
             <div class="tiny" style="color:#475569">Sensors: ${sensorCats} • Placement: ${sensorPlacements}</div>
-            <div class="tiny" style="color:#475569">DLI target: ${dli !== '—' ? `${dli} mol/m²/day` : '—'} • Energy (est.): ${energyKwh !== '—' ? `${energyKwh} kWh/day` : '—'} • ${connSummary}</div>
+            <div class="tiny" style="color:#475569">${connSummary}</div>
             ${statusRow ? `<div class="tiny" style="margin-top:4px">${statusRow}</div>` : ''}
           </div>
           <div class="row" style="gap:6px">
@@ -6199,6 +5838,47 @@ function renderRooms() {
       }
     });
   });
+}
+
+function renderLightSetups() {
+  const container = document.getElementById('lightSetupsContent');
+  if (!container) return;
+  
+  // For now, this is a placeholder - light setups would be stored separately from rooms
+  // In the future, this would load from a light-setups.json file
+  const lightSetups = []; // TODO: Load actual light setups
+  
+  if (lightSetups.length === 0) {
+    container.innerHTML = `
+      <div class="empty-state">
+        <h3>No Light Setups Configured</h3>
+        <p>Create your first light setup to manage fixtures, control methods, and energy settings.</p>
+        <button type="button" class="primary" id="btnLaunchLightSetup">
+          <span class="icon">💡</span>
+          Create Light Setup
+        </button>
+      </div>
+    `;
+    // Wire the button since it's dynamically created
+    document.getElementById('btnLaunchLightSetup')?.addEventListener('click', () => lightWizard.open());
+  } else {
+    container.innerHTML = lightSetups.map(setup => `
+      <div class="card">
+        <div class="card-header">
+          <h3>${setup.name}</h3>
+          <div class="actions">
+            <button type="button" class="ghost small" onclick="editLightSetup('${setup.id}')">Edit</button>
+            <button type="button" class="ghost small danger" onclick="deleteLightSetup('${setup.id}')">Delete</button>
+          </div>
+        </div>
+        <div class="card-body">
+          <p><strong>Fixtures:</strong> ${setup.fixtures?.length || 0}</p>
+          <p><strong>Control:</strong> ${setup.controlMethod || 'Not set'}</p>
+          <p><strong>Energy:</strong> ${setup.energy || 'Not set'}</p>
+        </div>
+      </div>
+    `).join('');
+  }
 }
 
 function renderSchedules() {
@@ -7579,6 +7259,330 @@ function populateVendorSelect(){
   });
 }
 
+// --- Light Setup Wizard ---
+class LightWizard {
+  constructor() {
+    this.modal = document.getElementById('lightModal');
+    if (!this.modal) return;
+    
+    this.baseSteps = ['fixtures', 'control', 'energy', 'mapping', 'review'];
+    this.steps = this.baseSteps.slice();
+    this.currentStep = 0;
+    this.data = {
+      id: '',
+      name: '',
+      room: '',
+      fixtures: [],
+      controlMethod: null,
+      energy: '',
+      energyHours: 0,
+      seriesCount: 0,
+      controllersCount: 0,
+      targetPpfd: 0,
+      photoperiod: 0,
+      devices: [],
+      mapping: { zones: [], groups: [] },
+      connectivity: { hasHub: null, hubType: '', hubIp: '', cloudTenant: 'Azure' }
+    };
+    
+    this.setupButtons();
+    this.setupEventListeners();
+  }
+
+  setupButtons() {
+    const prevBtn = this.modal.querySelector('.light-prev-btn');
+    const nextBtn = this.modal.querySelector('.light-next-btn');
+    const cancelBtn = this.modal.querySelector('.light-cancel-btn');
+    
+    if (prevBtn) prevBtn.addEventListener('click', () => this.prevStep());
+    if (nextBtn) nextBtn.addEventListener('click', () => this.nextStep());
+    if (cancelBtn) cancelBtn.addEventListener('click', () => this.close());
+  }
+
+  setupEventListeners() {
+    // Chip group helper function
+    const chipGroup = (sel, target, field) => {
+      const host = $(sel); if (!host) return;
+      host.addEventListener('click', (e) => {
+        const btn = e.target.closest('.chip-option'); if (!btn) return;
+        host.querySelectorAll('.chip-option').forEach(b=>b.removeAttribute('data-active'));
+        btn.setAttribute('data-active','');
+        target[field] = btn.dataset.value;
+      });
+    };
+    
+    // Fixtures KB search
+    const fSearch = $('#lightKbSearch');
+    const fResults = $('#lightKbResults');
+    fSearch?.addEventListener('input', () => this.updateKbResults(fSearch.value.trim()));
+    
+    // Series count and controllers
+    const seriesInput = document.getElementById('lightSeriesCount');
+    if (seriesInput) {
+      seriesInput.addEventListener('input', (e) => {
+        const n = Number(e.target.value || 0);
+        this.data.seriesCount = Number.isFinite(n) ? Math.max(0, n) : 0;
+      });
+    }
+    
+    const controllersInput = document.getElementById('lightControllersCount');
+    if (controllersInput) {
+      controllersInput.addEventListener('input', (e) => {
+        const n = Number(e.target.value || 0);
+        this.data.controllersCount = Number.isFinite(n) ? Math.max(0, n) : 0;
+      });
+    }
+    
+    const targetInput = document.getElementById('lightTargetPpfd');
+    if (targetInput) {
+      targetInput.addEventListener('input', (e) => {
+        const v = Number(e.target.value || 0);
+        this.data.targetPpfd = Number.isFinite(v) ? Math.max(0, v) : 0;
+      });
+    }
+    
+    const photoperiodInput = document.getElementById('lightPhotoperiod');
+    if (photoperiodInput) {
+      photoperiodInput.addEventListener('input', (e) => {
+        const v = Number(e.target.value || 0);
+        this.data.photoperiod = Number.isFinite(v) ? Math.max(0, v) : 0;
+      });
+    }
+    
+    const energyHoursInput = document.getElementById('lightEnergyHours');
+    if (energyHoursInput) {
+      energyHoursInput.addEventListener('input', (e) => {
+        const v = Number(e.target.value || 0);
+        this.data.energyHours = Number.isFinite(v) ? Math.max(0, Math.min(24, v)) : 0;
+      });
+    }
+
+    // Control method chips
+    chipGroup('#lightControlMethod', this.data, 'controlMethod');
+    chipGroup('#lightEnergy', this.data, 'energy');
+    
+    // Upload fixture datasheet
+    const uploadBtn = document.getElementById('lightKbUploadBtn');
+    const uploadInput = document.getElementById('lightKbUpload');
+    if (uploadBtn && uploadInput) {
+      uploadBtn.addEventListener('click', () => uploadInput.click());
+      uploadInput.addEventListener('change', async (e) => {
+        const file = e.target.files?.[0];
+        if (!file) return;
+        const placeholder = { vendor: 'Unknown', model: file.name, watts: null, control: null, tags: ['unknown'], confidence: 0, _uploaded: true };
+        this.data.fixtures = this.data.fixtures || [];
+        this.data.fixtures.push({ ...placeholder, count: 1, note: 'Uploaded nameplate/datasheet - needs research' });
+        this.renderKbSelected();
+        showToast({ title: 'Uploaded', msg: `Added placeholder for ${file.name}. We can research this entry later.`, kind: 'info', icon: 'ℹ️' }, 5000);
+        uploadInput.value = '';
+      });
+    }
+
+    // KB results event handler
+    const kbResults = document.getElementById('lightKbResults');
+    if (kbResults) {
+      kbResults.addEventListener('click', (e) => {
+        const btn = e.target.closest('button[data-action]');
+        if (!btn) return;
+        const action = btn.dataset.action;
+        const idx = Number(btn.dataset.idx || -1);
+        const item = STATE.deviceKB.fixtures?.[idx];
+        if (!item) return;
+        
+        if (action === 'add-kb') {
+          this.data.fixtures.push({ ...item, count: 1 });
+        } else if (action === 'add-unknown') {
+          const placeholder = {
+            vendor: item.vendor || 'Unknown',
+            model: item.model || 'Unknown',
+            watts: item.watts || null,
+            control: item.control || null,
+            tags: Array.from(new Set([...(item.tags||[]), 'unknown'])),
+            confidence: 0,
+            _uploaded: true,
+            count: 1,
+            note: 'Added as unknown from KB - needs research'
+          };
+          this.data.fixtures.push(placeholder);
+        }
+        
+        this.renderKbSelected();
+        kbResults.innerHTML = '';
+        document.getElementById('lightKbSearch').value = '';
+      });
+    }
+  }
+
+  open() {
+    if (!this.modal) return;
+    this.currentStep = 0;
+    this.renderStep();
+    this.modal.style.display = 'flex';
+    this.modal.setAttribute('aria-hidden', 'false');
+    
+    // Share discovery data if available from room wizard
+    if (window.roomWizard?.discoveredDevices) {
+      this.data.devices = [...(window.roomWizard.discoveredDevices || [])];
+    }
+  }
+
+  close() {
+    if (!this.modal) return;
+    this.modal.style.display = 'none';
+    this.modal.setAttribute('aria-hidden', 'true');
+  }
+
+  renderStep() {
+    const stepKey = this.steps[this.currentStep];
+    
+    // Hide all steps
+    this.modal.querySelectorAll('.light-step').forEach(step => {
+      step.style.display = 'none';
+    });
+    
+    // Show current step
+    const currentStepEl = this.modal.querySelector(`[data-step="${stepKey}"]`);
+    if (currentStepEl) {
+      currentStepEl.style.display = 'block';
+    }
+    
+    // Update navigation
+    this.updateNavigation();
+    
+    // Collect step-specific data
+    this.collectStepData(stepKey);
+  }
+
+  collectStepData(stepKey) {
+    if (stepKey === 'fixtures') {
+      const seriesInput = document.getElementById('lightSeriesCount');
+      if (seriesInput) seriesInput.value = String(this.data.seriesCount ?? 0);
+      
+      const controllersInput = document.getElementById('lightControllersCount'); 
+      if (controllersInput) controllersInput.value = String(this.data.controllersCount ?? 0);
+      
+      const target = document.getElementById('lightTargetPpfd');
+      if (target) target.value = String(this.data.targetPpfd ?? 0);
+      
+      const photo = document.getElementById('lightPhotoperiod'); 
+      if (photo) photo.value = String(this.data.photoperiod ?? 0);
+      
+      this.renderKbSelected();
+    }
+    
+    if (stepKey === 'energy') {
+      const energyHours = document.getElementById('lightEnergyHours');
+      if (energyHours) energyHours.value = String(this.data.energyHours ?? 0);
+    }
+  }
+
+  updateNavigation() {
+    const prevBtn = this.modal.querySelector('.light-prev-btn');
+    const nextBtn = this.modal.querySelector('.light-next-btn');
+    
+    if (prevBtn) {
+      prevBtn.disabled = this.currentStep === 0;
+    }
+    
+    if (nextBtn) {
+      nextBtn.disabled = !this.canAdvance();
+      nextBtn.textContent = this.currentStep === this.steps.length - 1 ? 'Complete' : 'Next';
+    }
+  }
+
+  canAdvance() {
+    const stepKey = this.steps[this.currentStep];
+    switch (stepKey) {
+      case 'fixtures': return Array.isArray(this.data.fixtures) && this.data.fixtures.length > 0;
+      case 'control': return !!this.data.controlMethod;
+      case 'energy': return !!this.data.energy;
+      case 'mapping': return true; // Optional step
+      case 'review': return true;
+      default: return true;
+    }
+  }
+
+  nextStep() {
+    if (this.currentStep < this.steps.length - 1) {
+      this.currentStep++;
+      this.renderStep();
+    } else {
+      this.complete();
+    }
+  }
+
+  prevStep() {
+    if (this.currentStep > 0) {
+      this.currentStep--;
+      this.renderStep();
+    }
+  }
+
+  complete() {
+    // Save light setup data
+    console.log('Completing light setup:', this.data);
+    showToast({ title: 'Light Setup Complete', msg: 'Light configuration has been saved successfully', kind: 'success', icon: '💡' }, 4000);
+    this.close();
+  }
+
+  updateKbResults(query) {
+    const host = $('#lightKbResults');
+    if (!host || !query) { 
+      if (host) host.innerHTML = ''; 
+      return; 
+    }
+    
+    const fixtures = STATE.deviceKB?.fixtures || [];
+    const filtered = fixtures.filter(f => 
+      (f.vendor + ' ' + f.model).toLowerCase().includes(query.toLowerCase())
+    );
+    
+    const res = filtered.slice(0, 8).map((it, localIdx) => {
+      const globalIdx = fixtures.indexOf(it);
+      return { it, idx: globalIdx };
+    });
+    
+    host.innerHTML = res.map(({it, idx}) => `
+      <li>
+        <div class="row" style="justify-content:space-between;align-items:center;gap:8px">
+          <div>${it.vendor} <strong>${it.model}</strong> • ${it.watts} W • ${it.control || ''}</div>
+          <div style="display:flex;gap:6px">
+            <button type="button" class="ghost" data-action="add-kb" data-idx="${idx}">Add</button>
+            <button type="button" class="ghost" data-action="add-unknown" data-idx="${idx}">Add unknown</button>
+          </div>
+        </div>
+      </li>
+    `).join('');
+  }
+
+  renderKbSelected() {
+    const ul = $('#lightKbSelected');
+    if (!ul) return;
+    
+    ul.innerHTML = (this.data.fixtures || []).map((it, idx) => `
+      <li>
+        <div class="row" style="align-items:center;gap:6px">
+          <span>${it.vendor} <strong>${it.model}</strong> • ${it.watts || '?'} W</span>
+          <label class="tiny">x <input type="number" min="1" value="${it.count||1}" style="width:64px" onchange="lightWizard.updateFixtureCount(${idx}, this.value)"></label>
+          <button type="button" class="ghost" title="Remove" onclick="lightWizard.removeFixture(${idx})">×</button>
+        </div>
+      </li>
+    `).join('');
+  }
+
+  removeFixture(idx) {
+    this.data.fixtures.splice(idx, 1);
+    this.renderKbSelected();
+  }
+
+  updateFixtureCount(idx, value) {
+    const n = Math.max(1, Number(value || 1));
+    if (this.data.fixtures[idx]) {
+      this.data.fixtures[idx].count = n;
+    }
+  }
+}
+
 function escapeHtml(s){ return (s+'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;'); }
 
 function toggleSetupFormsForModel(md){
@@ -7979,6 +7983,11 @@ document.addEventListener('DOMContentLoaded', async () => {
   window.deviceManagerWindow = deviceManagerWindow;
   // Initialize room wizard
   roomWizard = new RoomWizard();
+  // Initialize light wizard
+  lightWizard = new LightWizard();
+  window.lightWizard = lightWizard;
+  // Wire up light setup button
+  document.getElementById('btnLaunchLightSetup')?.addEventListener('click', () => lightWizard.open());
   // Wire pairing hook so Add Device opens the DevicePairWizard
   try { hookRoomDevicePairing(roomWizard); } catch (e) { console.warn('Failed to hook device pairing', e); }
   

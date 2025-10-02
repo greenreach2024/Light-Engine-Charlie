@@ -185,6 +185,21 @@
       <div id="roomsList" style="margin-top:12px"></div>
     </section>
 
+    <!-- Light Setup Panel -->
+    <section id="lightsPanel" class="card" style="border:1px solid #eee;border-radius:10px;padding:12px;margin-bottom:12px">
+      <div class="row" style="justify-content:space-between;align-items:center">
+        <h2 style="margin:0">
+          Light Setup
+          <span class="hint" tabindex="0" data-tip="Set up grow lights across rooms. We carry forward devices discovered in deep scans.">?</span>
+        </h2>
+        <div class="row" style="gap:6px">
+          <button id="btnLaunchLightSetup" type="button" class="primary">New Light Setup</button>
+        </div>
+      </div>
+      <p class="tiny" style="margin:8px 0 0;color:#475569">Create light configurations, assign control, and map to rooms and groups.</p>
+      <div id="lightSetupsList" style="margin-top:12px"></div>
+    </section>
+
     <!-- Plans (Grow recipes) Panel -->
     <section id="plansPanel" class="card">
       <div class="row" style="justify-content:space-between;align-items:center">
@@ -466,6 +481,107 @@
       <div id="calibrationRegistry" class="cal-registry"></div>
     </section>
   </main>
+  
+  <!-- Light Setup Modal -->
+  <div id="lightModal" class="room-modal" aria-hidden="true">
+    <div class="room-modal__backdrop" id="lightModalBackdrop"></div>
+    <div class="room-modal__dialog" role="dialog" aria-modal="true" aria-labelledby="lightModalTitle">
+      <button type="button" class="room-modal__close" id="lightModalClose" aria-label="Close">×</button>
+      <form id="lightWizardForm" novalidate>
+        <p class="tiny" id="lightModalProgress" aria-live="polite">Step 1 of 8</p>
+        <h2 id="lightModalTitle" style="margin:0 0 12px">Set up Grow Lights</h2>
+        <div id="lightSteps">
+          <section class="room-step" data-step="device-discovery">
+            <p class="room-question">Discover lights and related devices.</p>
+            <div class="farm-step__stack">
+              <div id="lightDiscoveryProgress" class="scanning-container" style="display:none">
+                <div class="scanning-radar"></div>
+                <div class="scanning-text">Scanning for fixtures</div>
+                <div class="scanning-status">Wi‑Fi • BLE • mDNS • network…</div>
+              </div>
+              <div class="row" style="gap:8px;align-items:center;flex-wrap:wrap;margin-top:12px">
+                <button id="lightDiscoveryRun" type="button" class="primary">Start Discovery</button>
+                <button id="lightDiscoveryStop" type="button" class="ghost" style="display:none">Stop</button>
+                <div class="discovery-status" id="lightDiscoveryStatus" style="margin-left:12px"></div>
+              </div>
+              <div id="lightDiscoveryResults" style="margin-top:16px;display:none">
+                <div class="tiny" style="margin-bottom:8px">Discovered devices</div>
+                <div id="lightDiscoveryDeviceList" class="discovery-device-list"></div>
+              </div>
+            </div>
+          </section>
+          <section class="room-step" data-step="fixtures">
+            <p class="room-question">Select fixtures and counts.</p>
+            <div class="farm-step__stack">
+              <div class="row" style="gap:8px;align-items:center;flex-wrap:wrap;margin-bottom:6px">
+                <label class="tiny">How many lights per controller?
+                  <input id="lightSeriesCount" type="number" min="0" value="0" style="width:120px;margin-left:6px">
+                </label>
+                <label class="tiny">Number of controllers
+                  <input id="lightControllersCount" type="number" min="0" value="0" style="width:120px;margin-left:6px">
+                </label>
+              </div>
+              <input id="lightKbSearch" type="text" placeholder="Search models (e.g., Gavita 1700e)" autocomplete="off">
+              <div class="tiny" style="color:#64748b">Results</div>
+              <ul id="lightKbResults" class="farm-kb-results" aria-live="polite"></ul>
+              <div class="tiny" style="color:#64748b">Selected</div>
+              <ul id="lightKbSelected" class="farm-kb-selected" aria-live="polite"></ul>
+            </div>
+          </section>
+          <section class="room-step" data-step="control">
+            <p class="room-question">How will the fixtures be controlled?</p>
+            <div class="farm-step__stack">
+              <div class="tiny">Control method</div>
+              <div id="lightControlMethod" class="chip-row" role="group" aria-label="Control method">
+                <button type="button" class="chip-option" data-value="wifi">Wi‑Fi / App</button>
+                <button type="button" class="chip-option" data-value="smart-plug">Smart plug</button>
+                <button type="button" class="chip-option" data-value="0-10v">0‑10V / Wired</button>
+                <button type="button" class="chip-option" data-value="rs485">RS‑485 / Modbus</button>
+                <button type="button" class="chip-option" data-value="other">Other</button>
+              </div>
+              <div id="lightControlDetails" style="margin-top:8px" class="tiny" aria-live="polite"></div>
+            </div>
+          </section>
+          <section class="room-step" data-step="energy">
+            <p class="room-question">How will you monitor energy?</p>
+            <div class="farm-step__stack">
+              <div class="chip-row" id="lightEnergy" role="group" aria-label="Energy monitoring">
+                <button type="button" class="chip-option" data-value="ct-branch">CT/branch meters</button>
+                <button type="button" class="chip-option" data-value="smart-plugs">Smart plugs</button>
+                <button type="button" class="chip-option" data-value="built-in">Built-in meter</button>
+                <button type="button" class="chip-option" data-value="none">None</button>
+              </div>
+              <label class="tiny" style="margin-top:8px">Daily runtime (hrs)
+                <input id="lightEnergyHours" type="number" min="0" max="24" value="18" style="width:120px;margin-left:6px">
+              </label>
+            </div>
+          </section>
+          <section class="room-step" data-step="mapping">
+            <p class="room-question">Map to rooms, zones, and groups.</p>
+            <div class="farm-step__stack">
+              <label class="tiny">Room
+                <select id="lightRoomSelect" style="min-width:220px"></select>
+              </label>
+              <label class="tiny" style="margin-top:8px">Group
+                <select id="lightGroupSelect" style="min-width:220px"></select>
+              </label>
+            </div>
+          </section>
+          <section class="room-step" data-step="review">
+            <p class="room-question">Review light setup</p>
+            <div id="lightReview" class="farm-review"></div>
+          </section>
+        </div>
+        <div class="row room-modal__footer" style="justify-content:space-between;margin-top:18px">
+          <button id="lightPrev" type="button" class="ghost">Back</button>
+          <div class="row" style="gap:8px">
+            <button id="lightNext" type="button" class="primary">Next</button>
+            <button id="btnSaveLight" type="submit" class="primary" style="display:none">Save Light Setup</button>
+          </div>
+        </div>
+      </form>
+    </div>
+  </div>
   <div id="envModal" class="env-modal" aria-hidden="true">
     <div class="env-modal__backdrop" id="envModalBackdrop"></div>
     <div class="env-modal__dialog" role="dialog" aria-modal="true" aria-labelledby="envModalTitle">
@@ -573,47 +689,13 @@
     <div class="room-modal__backdrop" id="roomModalBackdrop"></div>
     <div class="room-modal__dialog" role="dialog" aria-modal="true" aria-labelledby="roomModalTitle">
       <button type="button" class="room-modal__close" id="roomModalClose" aria-label="Close">×</button>
-      <form id="roomWizardForm" novalidate>
-        <p class="tiny" id="roomModalProgress" aria-live="polite">Step 1 of 9</p>
-        <h2 id="roomModalTitle" style="margin:0 0 12px">Set up a Grow Room</h2>
+      <form id="roomWizardForm" novalidate style="display:flex; flex-direction:column; height:100%; min-height:0;">
+        <div style="flex-shrink:0;">
+          <p class="tiny" id="roomModalProgress" aria-live="polite">Step 1 of 9</p>
+          <h2 id="roomModalTitle" style="margin:0 0 12px">Set up a Grow Room</h2>
+        </div>
         
-        <div id="roomSteps">
-          <section class="room-step" data-step="device-discovery">
-            <p class="room-question">Let's discover devices across all communication protocols.</p>
-            <div class="farm-step__stack">
-              <div class="tiny" style="color:#475569">This comprehensive scan will detect devices using multiple communication methods including Wi-Fi, Bluetooth Low Energy (BLE), Zigbee, Z-Wave, and other smart device protocols commonly used in grow room automation.</div>
-              
-              <!-- Discovery progress indicator -->
-              <div id="roomDiscoveryProgress" class="scanning-container" style="display: none;">
-                <div class="scanning-radar"></div>
-                <div class="scanning-text">Scanning All Protocols</div>
-                <div class="scanning-status">Detecting Wi-Fi • BLE • Zigbee • Z-Wave • mDNS • Network devices...</div>
-              </div>
-              
-              <div class="row" style="gap:8px;align-items:center;flex-wrap:wrap;margin-top:12px">
-                <button id="roomDiscoveryRun" type="button" class="primary">🔍 Start Multi-Protocol Discovery</button>
-                <button id="roomDiscoveryStop" type="button" class="ghost" style="display:none">Stop Discovery</button>
-                <div class="discovery-status" id="roomDiscoveryStatus" style="margin-left:12px"></div>
-              </div>
-              <div class="tiny" style="color:#64748b;margin-top:8px">Discovery scans multiple protocols simultaneously: Wi-Fi networks, Bluetooth devices, smart plugs, sensors, controllers, and IoT devices. This typically takes 30-90 seconds for complete coverage.</div>
-              
-              <!-- Discovery Results -->
-              <div id="roomDiscoveryResults" style="margin-top:16px;display:none">
-                <div class="tiny" style="margin-bottom:8px">Discovered devices</div>
-                <div id="roomDiscoveryDeviceList" class="discovery-device-list"></div>
-                <div class="row" style="gap:8px;margin-top:12px">
-                  <button id="roomDiscoverySelectAll" type="button" class="ghost">Select All</button>
-                  <button id="roomDiscoverySelectNone" type="button" class="ghost">Select None</button>
-                  <button id="roomDiscoveryRefresh" type="button" class="ghost">Refresh</button>
-                </div>
-              </div>
-              
-              <div class="tiny" style="color:#475569;margin-top:12px">
-                Selected devices will be automatically configured in the next steps. You can also manually add devices later if they weren't discovered.
-              </div>
-            </div>
-          </section>
-
+        <div id="roomSteps" style="flex:1; overflow-y:auto; min-height:0;">
           <section class="room-step" data-step="connectivity">
             <p class="room-question" id="roomConnectivityIntro">Is your local smart hub on-line?</p>
             <div class="farm-step__stack">
@@ -631,7 +713,7 @@
               </div>
               <p class="tiny" id="roomHubStatus" aria-live="polite" style="color:#0f172a;margin-top:4px"></p>
               <div class="tiny" style="color:#475569;margin-top:6px">
-                This Light Engine runs on an edge device. We'll check for a local hub and common vendor bridges (Node‑RED flows, Home Assistant add‑ons, or vendor hubs) so devices can be discovered and managed locally.
+                This control system runs on an edge device. We'll check for a local hub and common vendor bridges (Node‑RED flows, Home Assistant add‑ons, or vendor hubs) so devices can be discovered and managed locally.
                 We use the hub to securely push credentials to SwitchBot, Kasa, Shelly, and other devices. <a href="https://www.digi.com/blog/post/edge-computing-vs-cloud-computing" target="_blank" rel="noopener">Edge computing</a> keeps automations responsive even during cloud outages.
               </div>
               <!-- Cloud tenant is centrally managed by Head Office. Keep a hidden field for data binding. -->
@@ -652,114 +734,38 @@
             </div>
           </section>
 
-          <section class="room-step" data-step="devices">
-            <p class="room-question">Next, onboard the smart plugs, switches, or sensors already in the room.</p>
-            <div class="farm-step__stack">
-              <div class="tiny" style="color:#475569">Pick a vendor, follow the vendor app instructions, then drop in the token or IP so we can control it.</div>
-              <div class="row" style="gap:8px;align-items:center;flex-wrap:wrap;margin-top:8px">
-                <input id="roomDeviceName" type="text" placeholder="Device name (e.g., Dehu Plug)" style="min-width:180px">
-                <select id="roomDeviceVendor" style="min-width:140px">
-                  <option value="">Vendor</option>
-                </select>
-                <select id="roomDeviceModel" style="min-width:160px">
-                  <option value="">Model</option>
-                </select>
-                <input id="roomDeviceHost" type="text" placeholder="Token or IP" style="min-width:160px">
-                <button id="roomAddDeviceBtn" type="button" class="primary">Add device</button>
-                <button id="roomDeviceScan" type="button" class="ghost">Scan network</button>
-                <button id="roomDemoSwitchBot" type="button" class="ghost" style="background:#0ea5e9;color:white">Demo: Load Real SwitchBot Devices</button>
-              </div>
-              <div class="tiny" style="color:#475569;margin-top:8px">
-                <strong>SwitchBot:</strong> App → Profile → Preferences → tap App Version 5–15× to unlock Developer Options, then copy the token + secret.<br>
-                <strong>Kasa smart plugs:</strong> App → “+” → Smart Plug → follow Wi‑Fi onboarding, then note the device IP/name.<br>
-                <strong>Shelly / Sonoff:</strong> Power on, connect to the hotspot, place it on the grow network, and grab the IP/API key.
-              </div>
-              <div class="tiny" style="color:#64748b;margin-top:6px">One device per screen keeps things calm. Use the queue above to revisit anything left incomplete.</div>
-              <span id="roomDeviceInlineError" class="tiny" style="color:#EF4444;margin-top:6px" aria-live="polite"></span>
-              <div id="roomDeviceSetupForms" style="margin-top:8px">
-                <div id="deviceSetup-wifi" style="display:none;margin-top:8px">
-                  <div class="tiny">Wi‑Fi setup</div>
-                  <div class="row" style="gap:8px;margin-top:6px">
-                    <input id="deviceWifiSsid" type="text" placeholder="SSID" style="min-width:160px">
-                    <input id="deviceWifiPsk" type="password" placeholder="Wi‑Fi password (PSK)" style="min-width:160px">
-                    <label class="tiny" style="align-items:center;display:flex;gap:6px"><input id="deviceWifiStatic" type="checkbox"> Use static IP</label>
-                    <input id="deviceWifiStaticIp" type="text" placeholder="Static IP (optional)" style="min-width:140px;display:none">
-                  </div>
-                </div>
-                <div id="deviceSetup-bluetooth" style="display:none;margin-top:8px">
-                  <div class="tiny">Bluetooth pairing</div>
-                  <div class="row" style="gap:8px;margin-top:6px">
-                    <input id="deviceBtName" type="text" placeholder="Broadcast name" style="min-width:220px">
-                    <input id="deviceBtPin" type="text" placeholder="Pairing code (if any)" style="min-width:120px">
-                  </div>
-                </div>
-                <div id="deviceSetup-rs485" style="display:none;margin-top:8px">
-                  <div class="tiny">RS‑485 / Modbus settings</div>
-                  <div class="row" style="gap:8px;margin-top:6px">
-                    <input id="deviceRs485Host" type="text" placeholder="Gateway IP / host" style="min-width:160px">
-                    <input id="deviceRs485UnitId" type="number" placeholder="Modbus Unit ID" style="min-width:120px">
-                    <select id="deviceRs485Baud" style="min-width:120px"><option>9600</option><option>19200</option><option>38400</option><option>115200</option></select>
-                  </div>
-                  <div id="err-deviceRs485UnitId" class="field-error" style="display:none"></div>
-                </div>
-                <div id="deviceSetup-0-10v" style="display:none;margin-top:8px">
-                  <div class="tiny">0‑10V / Analog mapping</div>
-                  <div class="row" style="gap:8px;margin-top:6px">
-                    <input id="device0v10Channel" type="text" placeholder="Channel name / port" style="min-width:160px">
-                    <input id="device0v10Scale" type="text" placeholder="Scale/calibration (e.g., 0-10V → 0-100%)" style="min-width:220px">
-                  </div>
-                  <div id="err-device0v10Channel" class="field-error" style="display:none"></div>
-                  <div id="err-device0v10Scale" class="field-error" style="display:none"></div>
-                </div>
-              </div>
-              <div class="tiny" id="deviceOnboardingStatus" style="color:#0f172a;margin-top:6px" aria-live="polite"></div>
-              <ul id="roomDevicesList" class="farm-kb-selected" aria-live="polite" style="margin-top:8px"></ul>
-            </div>
-          </section>
+          
 
           <section class="room-step" data-step="hardware">
             <p class="room-question">Which equipment are you setting up in this room?</p>
             <div class="farm-step__stack">
               <div class="tiny">Select all that apply</div>
               <div id="roomHardwareCats" class="chip-row" role="group" aria-label="Hardware categories">
-                <button type="button" class="chip-option" data-value="grow-lights">Grow lights</button>
-                <button type="button" class="chip-option" data-value="hvac">HVAC / climate</button>
+                <button type="button" class="chip-option" data-value="hvac">Central HVAC</button>
+                <button type="button" class="chip-option" data-value="mini-split">Mini Split</button>
                 <button type="button" class="chip-option" data-value="dehumidifier">Dehumidifier</button>
                 <button type="button" class="chip-option" data-value="fans">Fans</button>
                 <button type="button" class="chip-option" data-value="vents">Vents</button>
-                <button type="button" class="chip-option" data-value="irrigation">Irrigation / pumps</button>
                 <button type="button" class="chip-option" data-value="controllers">Controllers / hubs</button>
+                <button type="button" class="chip-option" data-value="energy-monitor">Energy Monitor</button>
                 <button type="button" class="chip-option" data-value="other">Other</button>
               </div>
               <!-- Removed the hardware search UI here to reduce confusion; use Fixtures or Devices steps instead. -->
             </div>
           </section>
 
-          <!-- Dynamic per-category setup host (used for HVAC, dehumidifier, fans, irrigation, controllers, other) -->
+          <!-- Dynamic per-category setup host (used for HVAC, mini-split, dehumidifier, fans, vents, controllers, other) -->
           <section class="room-step" data-step="category-setup">
             <p class="room-question" id="catSetupTitle">Category setup</p>
             <p class="tiny" id="catSetupIntro" style="color:#475569">We’ll capture a quick count, control method, and energy metering for each device type.</p>
             <p class="tiny" id="catSetupStatusLine" aria-live="polite" style="color:#0f172a"></p>
             <div class="farm-step__stack" id="catSetupBody"></div>
-            <div id="catActionPanel" class="card action-panel" style="margin-top:12px">
-              <div class="tiny" style="margin-bottom:8px;color:#475569">Actions</div>
-              <div class="row" id="catSetupActions" style="gap:8px;flex-wrap:wrap;justify-content:space-between;align-items:center">
-                <div class="row" style="gap:8px;flex-wrap:wrap">
-                  <button type="button" class="ghost" id="catTestControl">Test control</button>
-                  <button type="button" class="ghost" id="catSkip">Skip for now</button>
-                  <button type="button" class="ghost" id="catAddNew">Add device</button>
-                </div>
-                <div class="row" style="margin-left:auto">
-                  <button type="button" class="primary" id="catSaveContinue">Mark complete &amp; next</button>
-                </div>
-              </div>
-            </div>
             <p class="tiny" id="catSetupStatus" aria-live="polite" style="color:#0f172a"></p>
-            <div class="row" id="catSetupNav" style="gap:8px;align-items:center;margin-top:8px;justify-content:space-between">
-              <button type="button" class="ghost" id="catPrevType">Previous type</button>
+            <div class="row" id="catSetupNav" style="gap:8px;align-items:center;margin-top:8px;justify-content:center">
+              <button type="button" class="ghost" id="catPrevType">Previous Equipment</button>
               <span class="tiny" id="catSetupProgress" style="color:#475569"></span>
-              <!-- Next type removed; use 'Mark complete & next' in the action panel -->
-              <span></span>
+              <button type="button" class="ghost" id="catNextType">Next Equipment</button>
+            </div>
             </div>
           </section>
 
@@ -881,63 +887,9 @@
             </div>
           </section>
 
-          <section class="room-step" data-step="fixtures">
-            <p class="room-question">Add the grow lights used here.</p>
-            <div class="farm-step__stack">
-              <div class="row" style="gap:8px;align-items:center;flex-wrap:wrap;margin-bottom:6px">
-                <label class="tiny">How many lights operate in series?
-                  <input id="roomSeriesCount" type="number" min="0" value="0" style="width:120px;margin-left:6px">
-                </label>
-                <label class="tiny">Target PPFD at canopy
-                  <input id="roomTargetPpfd" type="number" min="0" value="0" style="width:120px;margin-left:6px">
-                </label>
-                <label class="tiny">Photoperiod (hrs/day)
-                  <input id="roomPhotoperiod" type="number" min="0" max="24" value="18" style="width:120px;margin-left:6px">
-                </label>
-              </div>
-              <input id="roomKbSearch" type="text" placeholder="Search models (e.g., Gavita 1700e)" autocomplete="off">
-              <div style="margin-top:6px">
-                <button id="roomKbUploadBtn" type="button" class="ghost">Upload nameplate / datasheet</button>
-                <input id="roomKbUpload" type="file" accept="image/*,application/pdf" style="display:none">
-              </div>
-              <div class="tiny" style="color:#64748b">Results</div>
-              <ul id="roomKbResults" class="farm-kb-results" aria-live="polite"></ul>
-              <div class="tiny" style="color:#64748b">Selected</div>
-              <ul id="roomKbSelected" class="farm-kb-selected" aria-live="polite"></ul>
-              <p class="tiny" style="color:#64748b;margin-top:6px">We use target PPFD and photoperiod to calculate Daily Light Integral (DLI = PPFD × (3600 × hours) ÷ 1,000,000) for downstream analytics.</p>
-            </div>
-          </section>
+          
 
-          <section class="room-step" data-step="control">
-            <p class="room-question">How will the fixtures be controlled?</p>
-            <div class="farm-step__stack">
-              <div class="tiny">Control method</div>
-              <div id="roomControlMethod" class="chip-row" role="group" aria-label="Control method">
-                <button type="button" class="chip-option" data-value="wifi">Wi‑Fi / App</button>
-                <button type="button" class="chip-option" data-value="smart-plug">Smart plug</button>
-                <button type="button" class="chip-option" data-value="0-10v">0‑10V / Wired</button>
-                <button type="button" class="chip-option" data-value="rs485">RS‑485 / Modbus</button>
-                <button type="button" class="chip-option" data-value="other">Other</button>
-              </div>
-              <div id="roomControlDetails" style="margin-top:8px" class="tiny" aria-live="polite"></div>
-            </div>
-          </section>
-
-          <section class="room-step" data-step="energy">
-            <p class="room-question">How will you monitor energy?</p>
-            <div class="farm-step__stack">
-              <div class="chip-row" id="roomEnergy" role="group" aria-label="Energy monitoring">
-                <button type="button" class="chip-option" data-value="ct-branch">CT/branch meters</button>
-                <button type="button" class="chip-option" data-value="smart-plugs">Smart plugs</button>
-                <button type="button" class="chip-option" data-value="built-in">Built-in meter</button>
-                <button type="button" class="chip-option" data-value="none">None</button>
-              </div>
-              <label class="tiny" style="margin-top:8px">Daily runtime (hrs)
-                <input id="roomEnergyHours" type="number" min="0" max="24" value="18" style="width:120px;margin-left:6px">
-              </label>
-              <p class="tiny" style="color:#64748b">Energy consumption is estimated as wattage ÷ 1000 × runtime hours (<a href="https://bkvenergy.com/blog/how-to-calculate-kwh/" target="_blank" rel="noopener">BKV Energy</a>). Adjust runtime to line up with your lighting schedule.</p>
-            </div>
-          </section>
+          
 
           <section class="room-step" data-step="grouping">
             <p class="room-question">Group devices and assign plans so automations can start smart.</p>
@@ -956,8 +908,6 @@
               <label class="tiny" style="margin-top:12px">Schedule
                 <select id="roomGroupSchedule" style="min-width:220px"></select>
               </label>
-              <label class="chip-option" style="margin-top:12px"><input type="checkbox" id="roomGroupSpectraSync" checked><span>Enable SpectraSync (dynamic spectrum &amp; PPFD)</span></label>
-              <p class="tiny" style="color:#64748b;margin-top:6px">DLI = PPFD × (3600 × photoperiod) ÷ 1,000,000 (<a href="https://support.monnit.com/article/81-what-is-the-daily-light-integral-in-crop-monitoring/" target="_blank" rel="noopener">Monnit</a>). We store these details for time-series analysis, AI recipes, and energy forecasting.</p>
             </div>
           </section>
 
@@ -968,7 +918,7 @@
 
         </div>
 
-        <div class="row room-modal__footer" style="justify-content:space-between;margin-top:18px">
+        <div class="row room-modal__footer" style="justify-content:space-between;margin-top:18px;flex-shrink:0;position:sticky;bottom:0;background:white;border-top:1px solid #e5e7eb;padding-top:16px;">
           <button id="roomPrev" type="button" class="ghost">Back</button>
           <div class="row" style="gap:8px">
             <button id="roomNext" type="button" class="primary">Next</button>
