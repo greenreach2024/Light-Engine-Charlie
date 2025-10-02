@@ -4579,10 +4579,10 @@ class RoomWizard {
     if (catId === 'grow-lights') {
       html = `
         <div class="tiny">Grow lights</div>
-        <label class="tiny">How many fixtures? <input type="number" id="cat-lights-count" min="0" value="${v(catData.count||0)}" style="width:110px"></label>
+        <label class="tiny">How many fixtures connected to this control? <input type="number" id="cat-lights-count" min="0" value="${v(catData.count||0)}" style="width:110px"></label>
         <div class="tiny" style="margin-top:6px">Control method</div>
         ${chipRow('cat-lights-control', ['Wi‑Fi','Bluetooth','Smart plug','0-10V','RS-485','Other'], catData.control)}
-        <div class="tiny" style="margin-top:6px">Energy</div>
+        <div class="tiny" style="margin-top:6px">Is Energy Monitored?</div>
         ${chipRow('cat-lights-energy', ['Built-in','Smart plugs','CT/branch','None'], catData.energy)}
       `;
     } else if (catId === 'hvac') {
@@ -4712,13 +4712,12 @@ class RoomWizard {
 
   // Wire per-category action buttons: Test Control, Save & Continue, Save Done, Skip
   wireCategoryActions() {
-    const status = document.getElementById('catSetupStatus');
-    const statusLine = document.getElementById('catSetupStatusLine');
-    const testBtn = document.getElementById('catTestControl');
-    const saveCont = document.getElementById('catSaveContinue');
-    const saveDone = document.getElementById('catSaveDone');
-    const skip = document.getElementById('catSkip');
-    const addNew = document.getElementById('catAddNew');
+  const status = document.getElementById('catSetupStatus');
+  const statusLine = document.getElementById('catSetupStatusLine');
+  const testBtn = document.getElementById('catTestControl');
+  const saveCont = document.getElementById('catSaveContinue');
+  const skip = document.getElementById('catSkip');
+  const addNew = document.getElementById('catAddNew');
     const catId = this.getCurrentCategoryId();
     // Determine whether anything is actually testable for this category
     const hasDevices = Array.isArray(this.data.devices) && this.data.devices.length > 0;
@@ -4729,8 +4728,9 @@ class RoomWizard {
     else if (catId === 'sensors') canTest = true;     // show live sample
     else canTest = hasDevices;                        // other categories require devices present
     if (testBtn) {
-      testBtn.disabled = !canTest;
-      testBtn.title = canTest ? '' : 'Nothing to test yet — add or pair a device first';
+      // Per request: buttons on step 5 do not action by default. Keep disabled unless explicitly testable.
+      testBtn.disabled = true;
+      testBtn.title = 'Use Add device to pair hardware first';
     }
     if (!canTest && status) {
       const hint = 'Nothing to test yet — use Add device to pair hardware. You can still Mark complete & next.';
@@ -4752,6 +4752,7 @@ class RoomWizard {
     }
 
     testBtn?.addEventListener('click', async () => {
+      if (testBtn.disabled) return; // no-op when disabled
       // Minimal test flow per category. If lights present, send 45% HEX12 then revert.
       try {
         if (catId === 'grow-lights') {
@@ -4815,16 +4816,11 @@ class RoomWizard {
       this.nextStep();
     });
 
-    saveDone?.addEventListener('click', async () => {
-      this.captureCurrentCategoryForm();
-      mark(this.categoryProgress[catId]?.status || 'needs-setup');
-      this.close();
-      showToast({ title:'Saved progress', msg:'You can resume this setup later from Grow Rooms.', kind:'info', icon:'📝' }, 4000);
-    });
+    // Removed Mark follow-up button per request
 
     skip?.addEventListener('click', async () => {
+      // Move Skip for now into action panel; keep as a non-advancing mark only
       mark('needs-setup');
-      // Do not advance overall wizard step; allow user to proceed to next category only when they click Next
       showToast({ title:'Marked as skipped', msg:'This category is marked as Needs Setup.', kind:'warn', icon:'⚠️' }, 4000);
     });
 

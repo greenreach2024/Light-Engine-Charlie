@@ -742,21 +742,23 @@
             <div class="farm-step__stack" id="catSetupBody"></div>
             <div id="catActionPanel" class="card action-panel" style="margin-top:12px">
               <div class="tiny" style="margin-bottom:8px;color:#475569">Actions</div>
-              <div class="row" id="catSetupActions" style="gap:8px;flex-wrap:wrap">
-                <button type="button" class="ghost" id="catTestControl">Test control</button>
-                <button type="button" class="primary" id="catSaveContinue">Mark complete &amp; next</button>
-                <button type="button" class="ghost" id="catSaveDone">Mark follow-up</button>
+              <div class="row" id="catSetupActions" style="gap:8px;flex-wrap:wrap;justify-content:space-between;align-items:center">
+                <div class="row" style="gap:8px;flex-wrap:wrap">
+                  <button type="button" class="ghost" id="catTestControl">Test control</button>
+                  <button type="button" class="ghost" id="catSkip">Skip for now</button>
+                  <button type="button" class="ghost" id="catAddNew">Add device</button>
+                </div>
+                <div class="row" style="margin-left:auto">
+                  <button type="button" class="primary" id="catSaveContinue">Mark complete &amp; next</button>
+                </div>
               </div>
-            </div>
-            <div class="row" id="catSetupActionsSecondary" style="gap:8px;flex-wrap:wrap;margin-top:8px">
-              <button type="button" class="ghost" id="catSkip">Skip for now</button>
-              <button type="button" class="ghost" id="catAddNew">Add device</button>
             </div>
             <p class="tiny" id="catSetupStatus" aria-live="polite" style="color:#0f172a"></p>
             <div class="row" id="catSetupNav" style="gap:8px;align-items:center;margin-top:8px;justify-content:space-between">
               <button type="button" class="ghost" id="catPrevType">Previous type</button>
               <span class="tiny" id="catSetupProgress" style="color:#475569"></span>
-              <button type="button" class="ghost" id="catNextType">Next type</button>
+              <!-- Next type removed; use 'Mark complete & next' in the action panel -->
+              <span></span>
             </div>
           </section>
 
