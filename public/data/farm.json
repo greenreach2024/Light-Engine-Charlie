@@ -3,61 +3,66 @@
     {
       "id": "room-mg8e7meq-mqs2",
       "name": "Grow Room One",
-      "zones": []
+      "zones": [
+        "1"
+      ]
+    },
+    {
+      "id": "room-mg9n22nt-dfxs",
+      "name": "Test Room",
+      "zones": [
+        "11"
+      ]
     }
   ],
   "locations": [
-    "Grow Room One"
+    "Grow Room One",
+    "Test Room"
   ],
   "branding": {
     "palette": {
-      "primary": "#7a7a7a",
-      "accent": "#ee2128",
-      "background": "#eeeeee",
+      "primary": "#0077b5",
+      "accent": "#af9b62",
+      "background": "#ffffff",
       "surface": "#FFFFFF",
       "border": "#DCE5E5",
       "text": "#0b1220"
     },
-    "logo": "https://www.stlawrencecollege.ca/assets/icons/apple-touch-icon.png",
+    "logo": "https://static.licdn.com/sc/h/9lb1g1kp916tat669q9r5g2kz",
     "tagline": "Growing with technology",
-    "fontFamily": "Montserrat",
-    "fontCss": [
-      "https://fonts.googleapis.com/css2?family=Montserrat&display=swap"
-    ]
+    "fontFamily": "",
+    "fontCss": []
   },
-  "name": "Your Farm",
+  "name": "Light engine",
   "tagline": "Growing with technology",
-  "logo": "https://www.stlawrencecollege.ca/assets/icons/apple-touch-icon.png",
-  "farmName": "Your Farm",
-  "address": "St Lawrence Avenue",
-  "city": "Kingston",
+  "logo": "https://static.licdn.com/sc/h/9lb1g1kp916tat669q9r5g2kz",
+  "farmName": "",
+  "address": "King Street East",
+  "city": "Gananoque",
   "state": "Ontario",
-  "postalCode": "K7L 4V1",
+  "postalCode": "K7G 2Y5",
   "timezone": "America/Toronto",
   "coordinates": {
-    "lat": 44.25868570209543,
-    "lng": -76.3725050472803
+    "lat": 44.32786662684257,
+    "lng": -76.16349393296919
   },
   "contact": {
-    "name": "Pege",
-    "email": "info@greenreachfarms.com",
-    "phone": "6138881031",
-    "website": "https://www.stlawrencecollege.ca"
+    "name": "d",
+    "email": "d",
+    "phone": "d",
+    "website": "www.greenreachfarms.com"
   },
   "connection": {
     "type": "wifi",
     "wifi": {
-      "ssid": "greenreach",
+      "ssid": "Farm-IoT",
       "reuseDiscovery": true,
       "tested": true,
       "testResult": {
         "status": "connected",
         "ip": "192.168.1.120",
         "gateway": "192.168.1.1",
-        "subnet": "192.168.1.0/24",
-        "latencyMs": 32,
-        "testedAt": "2025-10-01T20:05:32.918Z",
-        "ssid": "greenreach"
+        "testedAt": "2025-10-03T17:57:32.718Z"
       }
     }
   },
@@ -65,7 +70,7 @@
     "subnet": "192.168.1.0/24",
     "gateway": "192.168.1.1",
     "reuseNetwork": true,
-    "ssid": "greenreach"
+    "ssid": "Farm-IoT"
   },
   "registered": "2025-10-01T19:42:13.578Z"
 }

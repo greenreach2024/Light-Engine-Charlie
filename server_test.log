@@ -1,0 +1,31 @@
+[automation] Registered rule: High Temperature → Exhaust Fans (high-temp-exhaust)
+[automation] Registered rule: Low Humidity → Activate Misters (low-humidity-misters)
+[automation] Registered rule: Motion Detection → Security Lights (motion-security-lights)
+[automation] Loaded 3 default automation rules
+[automation] Rules engine initialized with default farm automation rules
+[HPM] Proxy created: /  -> http://100.65.187.59:8089
+[HPM] Subscribed to http-proxy events: [ 'proxyReq', 'error', 'close' ]
+❌ Uncaught Exception: Error: listen EADDRINUSE: address already in use :::8091
+    at Server.setupListenHandle [as _listen2] (node:net:1940:16)
+    at listenInCluster (node:net:1997:12)
+    at Server.listen (node:net:2102:7)
+    at app.listen (/Users/petergilbert/Desktop/GreenReach/Light-Engine-Charlie/node_modules/express/lib/application.js:635:24)
+    at file:///Users/petergilbert/Desktop/GreenReach/Light-Engine-Charlie/server-charlie.js:4926:5
+    at ModuleJob.run (node:internal/modules/esm/module_job:371:25)
+    at async onImport.tracePromise.__proto__ (node:internal/modules/esm/loader:683:26)
+    at async asyncRunEntryPointWithESMLoader (node:internal/modules/run_main:101:5) {
+  code: 'EADDRINUSE',
+  errno: -48,
+  syscall: 'listen',
+  address: '::',
+  port: 8091
+}
+Stack: Error: listen EADDRINUSE: address already in use :::8091
+    at Server.setupListenHandle [as _listen2] (node:net:1940:16)
+    at listenInCluster (node:net:1997:12)
+    at Server.listen (node:net:2102:7)
+    at app.listen (/Users/petergilbert/Desktop/GreenReach/Light-Engine-Charlie/node_modules/express/lib/application.js:635:24)
+    at file:///Users/petergilbert/Desktop/GreenReach/Light-Engine-Charlie/server-charlie.js:4926:5
+    at ModuleJob.run (node:internal/modules/esm/module_job:371:25)
+    at async onImport.tracePromise.__proto__ (node:internal/modules/esm/loader:683:26)
+    at async asyncRunEntryPointWithESMLoader (node:internal/modules/run_main:101:5)

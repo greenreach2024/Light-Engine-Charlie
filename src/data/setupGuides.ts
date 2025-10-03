@@ -15,38 +15,46 @@ export const SETUP_GUIDES: Record<string, SetupGuide> = {
   "wifi-generic-vendor": {
     id: "wifi-generic-vendor",
     title: "Wi-Fi Setup (Vendor Guided)",
+    estimatedTime: "{{AI_ESTIMATED_TIME:wifi-generic}}",
+    difficulty: "{{AI_DIFFICULTY:wifi-generic}}",
+    aiSummary: "{{AI_SUMMARY:wifi-generic-vendor}}",
+    troubleshooting: "{{AI_TROUBLESHOOTING:wifi-generic}}",
     steps: [
       {
         title: "Sign in / Create vendor account",
-        bodyMd: "Open the vendor’s portal and sign in. After login, return here.",
+        bodyMd: "Open the vendor's portal and sign in. After login, return here.\n\n{{AI_STEP_TIPS:wifi-login}}",
         requiresExternalLogin: true,
         openUrl: "ABOUT:RESEARCH_REQUIRED"
       },
       {
         title: "Pair the device",
         bodyMd:
-          "Follow the vendor’s pairing instructions (AP mode or QR). Capture any **Device ID** or **Token** if presented. _This varies by manufacturer._"
+          "Follow the vendor's pairing instructions (AP mode or QR). Capture any **Device ID** or **Token** if presented. _This varies by manufacturer._\n\n{{AI_STEP_TIPS:wifi-pairing}}"
       },
       {
         title: "Join farm Wi-Fi",
         bodyMd:
-          "Using the vendor flow, connect the light to the farm SSID/password so it can reach the network."
+          "Using the vendor flow, connect the light to the farm SSID/password so it can reach the network.\n\n{{AI_STEP_TIPS:wifi-join}}"
       },
       {
         title: "Authorize Light Engine",
         bodyMd:
-          "Enter the **API Key / OAuth token** from the vendor portal into the field below to allow Light Engine to discover and control the device. _If the vendor provides local-LAN control, toggle **Local Control** and enter IP/Port._"
+          "Enter the **API Key / OAuth token** from the vendor portal into the field below to allow Light Engine to discover and control the device. _If the vendor provides local-LAN control, toggle **Local Control** and enter IP/Port._\n\n{{AI_STEP_TIPS:wifi-auth}}"
       },
       {
         title: "Discover & Name",
         bodyMd:
-          "Click **Discover**. Select your device from the list, then set **Name**, **Location**, **Zone**, **Group** and **Save**."
+          "Click **Discover**. Select your device from the list, then set **Name**, **Location**, **Zone**, **Group** and **Save**.\n\n{{AI_STEP_TIPS:wifi-discover}}"
       }
     ]
   },
   "analog-010v": {
     id: "analog-010v",
     title: "0–10 V Mapping",
+    estimatedTime: "{{AI_ESTIMATED_TIME:analog-010v}}",
+    difficulty: "{{AI_DIFFICULTY:analog-010v}}",
+    aiSummary: "{{AI_SUMMARY:analog-010v}}",
+    troubleshooting: "{{AI_TROUBLESHOOTING:analog-010v}}",
     steps: [
       {
         title: "Connect driver",
@@ -66,16 +74,20 @@ export const SETUP_GUIDES: Record<string, SetupGuide> = {
   "rs485-generic": {
     id: "rs485-generic",
     title: "RS-485 Integration",
+    estimatedTime: "{{AI_ESTIMATED_TIME:rs485-generic}}",
+    difficulty: "{{AI_DIFFICULTY:rs485-generic}}",
+    aiSummary: "{{AI_SUMMARY:rs485-generic}}",
+    troubleshooting: "{{AI_TROUBLESHOOTING:rs485-generic}}",
     steps: [
       {
         title: "Set bus parameters",
         bodyMd:
-          "Choose the RS-485 bus, set the device address, baud rate, parity and stop bits to match the fixture documentation."
+          "Choose the RS-485 bus, set the device address, baud rate, parity and stop bits to match the fixture documentation.\n\n{{AI_STEP_TIPS:rs485-parameters}}"
       },
       {
         title: "Ping the device",
         bodyMd:
-          "Use **Ping** to confirm the light responds on the bus before proceeding."
+          "Use **Ping** to confirm the light responds on the bus before proceeding.\n\n{{AI_STEP_TIPS:rs485-ping}}"
       },
       {
         title: "Map channels",

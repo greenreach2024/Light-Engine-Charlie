@@ -1,4 +1,4 @@
-import React, { useMemo, useState } from "react";
+import React, { useMemo, useState, ChangeEvent, FormEvent } from "react";
 import { Device, useDevices } from "../store/devices";
 
 const PROTOCOL_ORDER = ["kasa", "mqtt", "switchbot", "other"] as const;
@@ -39,9 +39,12 @@ const filterDevices = (devices: Device[], protocolFilter: string, search: string
 };
 
 export const DeviceManager: React.FC = () => {
-  const { devices, loading, error, refresh } = useDevices();
+  const { devices, loading, error, refresh, assignDevice, unassignDevice } = useDevices();
   const [protocolFilter, setProtocolFilter] = useState<string>("all");
   const [search, setSearch] = useState<string>("");
+  const [assigning, setAssigning] = useState<Record<string, boolean>>({});
+  // Track equipment input per device so multiple forms don't share a single value
+  const [equipmentById, setEquipmentById] = useState<Record<string, string>>({});
 
   const filteredDevices = useMemo(() => filterDevices(devices, protocolFilter, search), [devices, protocolFilter, search]);
 
@@ -50,18 +53,27 @@ export const DeviceManager: React.FC = () => {
       <header className="device-manager__header">
         <h2>Device Manager</h2>
         <div className="device-manager__controls">
-          <label>
+          <label htmlFor="protocolFilter">
             Filter by type
-            <select value={protocolFilter} onChange={(event) => setProtocolFilter(event.target.value)}>
+            <select
+              id="protocolFilter"
+              value={protocolFilter}
+              onChange={(event: ChangeEvent<HTMLSelectElement>) => setProtocolFilter(event.target.value)}
+            >
               <option value="all">All</option>
               <option value="kasa">Kasa</option>
               <option value="mqtt">MQTT</option>
               <option value="switchbot">SwitchBot</option>
             </select>
           </label>
-          <label>
+          <label htmlFor="deviceSearch">
             Search
-            <input value={search} onChange={(event) => setSearch(event.target.value)} placeholder="Name, ID or category" />
+            <input
+              id="deviceSearch"
+              value={search}
+              onChange={(event: ChangeEvent<HTMLInputElement>) => setSearch(event.target.value)}
+              placeholder="Name, ID or category"
+            />
           </label>
           <button type="button" onClick={refresh} disabled={loading}>
             Refresh
@@ -97,11 +109,11 @@ export const DeviceManager: React.FC = () => {
                 <dd>{device.device_id}</dd>
               </div>
             </dl>
-            {Object.keys(device.capabilities).length > 0 && (
+            {Object.keys(device.capabilities ?? {}).length > 0 && (
               <div className="device-card__capabilities">
                 <h4>Capabilities</h4>
                 <ul>
-                  {Object.entries(device.capabilities).map(([key, value]) => (
+                  {Object.entries(device.capabilities ?? {}).map(([key, value]) => (
                     <li key={key}>
                       <strong>{key}:</strong> {String(value)}
                     </li>
@@ -109,6 +121,57 @@ export const DeviceManager: React.FC = () => {
                 </ul>
               </div>
             )}
+            <div className="device-card__assignment">
+              {device.assignedEquipment ? (
+                <div className="assignment-row">
+                  <span className="assignment-chip">Assigned: {device.assignedEquipment}</span>
+                  <button
+                    type="button"
+                    className="tiny"
+                    disabled={!!assigning[device.device_id]}
+                    onClick={async () => {
+                      setAssigning((a) => ({ ...a, [device.device_id]: true }));
+                      try { await unassignDevice(device.device_id); } finally {
+                        setAssigning((a) => ({ ...a, [device.device_id]: false }));
+                      }
+                    }}
+                  >Unassign</button>
+                </div>
+              ) : (
+                <form
+                  className="device-manager__assign-form"
+                  onSubmit={async (e: FormEvent<HTMLFormElement>) => {
+                    e.preventDefault();
+                    const value = (equipmentById[device.device_id] ?? "").trim();
+                    if (!value) return;
+                    setAssigning((a: Record<string, boolean>) => ({ ...a, [device.device_id]: true }));
+                    try {
+                      await assignDevice(device.device_id, value);
+                      setEquipmentById((m: Record<string, string>) => ({ ...m, [device.device_id]: "" }));
+                    } finally {
+                      setAssigning((a: Record<string, boolean>) => ({ ...a, [device.device_id]: false }));
+                    }
+                  }}
+                >
+                  <label className="tiny" htmlFor={`equip-${device.device_id}`}>
+                    Equipment
+                    <input
+                      id={`equip-${device.device_id}`}
+                      value={equipmentById[device.device_id] ?? ""}
+                      onChange={(e: ChangeEvent<HTMLInputElement>) =>
+                        setEquipmentById((m: Record<string, string>) => ({ ...m, [device.device_id]: e.target.value }))
+                      }
+                      placeholder="e.g. rack-1-bay-2"
+                    />
+                  </label>
+                  <button
+                    type="submit"
+                    disabled={!!assigning[device.device_id] || !(equipmentById[device.device_id] ?? "").trim()}
+                    className="tiny primary"
+                  >Assign</button>
+                </form>
+              )}
+            </div>
           </article>
         ))}
       </div>

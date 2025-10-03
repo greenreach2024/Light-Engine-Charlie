@@ -1,0 +1,27 @@
+[automation] Registered rule: High Temperature → Exhaust Fans (high-temp-exhaust)
+[automation] Registered rule: Low Humidity → Activate Misters (low-humidity-misters)
+[automation] Registered rule: Motion Detection → Security Lights (motion-security-lights)
+[automation] Loaded 3 default automation rules
+[automation] Rules engine initialized with default farm automation rules
+[HPM] Proxy created: /  -> http://100.65.187.59:8089
+[HPM] Subscribed to http-proxy events: [ 'proxyReq', 'error', 'close' ]
+[charlie] running http://127.0.0.1:8091 → http://100.65.187.59:8089
+[HPM] Router new target: http://100.65.187.59:8089 -> "http://100.65.187.59:8089"
+[HPM] GET /api/status -> http://100.65.187.59:8089
+(node:20749) [DEP0060] DeprecationWarning: The `util._extend` API is deprecated. Please use Object.assign() instead.
+(Use `node --trace-deprecation ...` to show where the warning was created)
+[→] GET /api/status -> http://100.65.187.59:8089/api/status
+⚠️  404 Not Found: GET /apple-touch-icon-precomposed.png
+⚠️  404 Not Found: GET /apple-touch-icon.png
+⚠️  404 Not Found: GET /favicon.ico
+[HPM] Router new target: http://100.65.187.59:8089 -> "http://100.65.187.59:8089"
+[HPM] GET /api/lights/status -> http://100.65.187.59:8089
+[→] GET /api/lights/status -> http://100.65.187.59:8089/api/lights/status
+⚠️  404 Not Found: GET /apple-touch-icon-precomposed.png
+⚠️  404 Not Found: GET /apple-touch-icon.png
+⚠️  404 Not Found: GET /favicon.ico
+⚠️  404 Not Found: GET /favicon.ico
+[HPM] Router new target: http://100.65.187.59:8089 -> "http://100.65.187.59:8089"
+[HPM] GET /api/lights/status -> http://100.65.187.59:8089
+[→] GET /api/lights/status -> http://100.65.187.59:8089/api/lights/status
+🛑 Received SIGTERM, shutting down gracefully

@@ -1,0 +1,1440 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover" />
+  <title>SwitchBot Device Manager - Light Engine Charlie</title>
+  <link rel="stylesheet" href="./styles.charlie.css?v=charlie-0.5">
+  <style>
+    .switchbot-header {
+      background: linear-gradient(135deg, #3B82F6, #1E40AF);
+      color: white;
+      padding: 20px;
+      margin: -16px -16px 20px -16px;
+      border-radius: 8px 8px 0 0;
+    }
+    .device-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fill, minmax(350px, 1fr));
+      gap: 16px;
+      margin: 16px 0;
+    }
+    .device-card {
+      border: 1px solid #e2e8f0;
+      border-radius: 12px;
+      padding: 16px;
+      background: white;
+      box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+      transition: all 0.2s ease;
+      margin-bottom: 16px;
+      overflow: hidden;
+      min-height: 200px;
+    }
+    .device-card:hover {
+      box-shadow: 0 4px 12px rgba(0,0,0,0.15);
+      transform: translateY(-1px);
+    }
+    .device-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: flex-start;
+      margin-bottom: 16px;
+      min-height: 50px;
+    }
+    .device-info {
+      clear: both;
+      margin-top: 8px;
+    }
+    .device-controls {
+      display: flex;
+      gap: 8px;
+      margin-top: 12px;
+      flex-wrap: wrap;
+    }
+    .control-button {
+      padding: 8px 16px;
+      border: none;
+      border-radius: 6px;
+      cursor: pointer;
+      font-weight: 500;
+      font-size: 12px;
+      transition: all 0.2s ease;
+      min-width: 60px;
+    }
+    .control-button.on {
+      background: #10b981;
+      color: white;
+    }
+    .control-button.off {
+      background: #ef4444;
+      color: white;
+    }
+    .control-button:hover {
+      transform: scale(1.05);
+    }
+    .control-button:disabled {
+      opacity: 0.5;
+      cursor: not-allowed;
+      transform: none;
+    }
+    .device-status {
+      display: inline-block;
+      width: 10px;
+      height: 10px;
+      border-radius: 50%;
+      margin-right: 8px;
+    }
+    .status-online { background: #10b981; }
+    .status-offline { background: #ef4444; }
+    .reading-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(100px, 1fr));
+      gap: 8px;
+      margin: 12px 0;
+    }
+    .reading-item {
+      text-align: center;
+      padding: 8px;
+      background: #f8fafc;
+      border-radius: 6px;
+      border: 1px solid #e2e8f0;
+    }
+    .reading-value {
+      font-size: 18px;
+      font-weight: 600;
+      color: #1e40af;
+    }
+    .reading-label {
+      font-size: 11px;
+      color: #64748b;
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+    }
+    .sync-status {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      padding: 8px 12px;
+      background: #f1f5f9;
+      border-radius: 6px;
+      margin-bottom: 16px;
+    }
+    .sync-indicator {
+      width: 8px;
+      height: 8px;
+      border-radius: 50%;
+      background: #10b981;
+      animation: pulse 2s infinite;
+    }
+    @keyframes pulse {
+      0%, 100% { opacity: 1; }
+      50% { opacity: 0.5; }
+    }
+    .error-message {
+      background: #fef2f2;
+      border: 1px solid #fecaca;
+      color: #dc2626;
+      padding: 12px;
+      border-radius: 6px;
+      margin: 16px 0;
+    }
+    .info-message {
+      background: #eff6ff;
+      border: 1px solid #dbeafe;
+      color: #1e40af;
+      padding: 12px;
+      border-radius: 6px;
+      margin: 16px 0;
+    }
+    .loading {
+      text-align: center;
+      padding: 40px;
+      color: #64748b;
+    }
+      
+      /* Real device styling */
+      .device-type-badge.real-device {
+        background: linear-gradient(135deg, #28a745, #20c997);
+        color: white;
+        box-shadow: 0 2px 4px rgba(40, 167, 69, 0.3);
+      }
+      
+      .live-indicator {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        padding: 8px;
+        background: linear-gradient(135deg, #e8f5e8, #f0fff0);
+        border: 1px solid #28a745;
+        border-radius: 6px;
+        margin-bottom: 8px;
+      }
+      
+      .pulse-dot {
+        width: 8px;
+        height: 8px;
+        background: #28a745;
+        border-radius: 50%;
+        animation: pulse 2s infinite;
+      }
+      
+      @keyframes pulse {
+        0% { opacity: 1; }
+        50% { opacity: 0.5; }
+        100% { opacity: 1; }
+      }
+      
+      .device-status.online {
+        color: #28a745;
+        font-weight: 600;
+      }
+  </style>
+</head>
+<body>
+  <div style="padding: 16px; max-width: 1200px; margin: 0 auto;">
+    <div class="switchbot-header">
+      <h1 style="margin: 0; font-size: 24px;">🏠 SwitchBot Device Manager</h1>
+      <p style="margin: 8px 0 0; opacity: 0.9;">Live monitoring and control of SwitchBot devices with comprehensive data</p>
+      <details style="margin-top: 8px;">
+        <summary style="cursor: pointer; font-size: 12px; color: #64748b;">📊 Available Data Fields</summary>
+        <div style="margin-top: 8px; padding: 8px; background: #f8fafc; border-radius: 6px; font-size: 11px; color: #64748b;">
+          <strong>Environmental:</strong> Temperature, Humidity, CO₂, Light Level, Motion Detection<br>
+          <strong>Power:</strong> On/Off Status, Voltage, Current, Daily Usage, Power Consumption<br>
+          <strong>Device:</strong> Battery Level, Signal Strength, Firmware Version, Connection Type<br>
+          <strong>Management:</strong> Zone Assignment, Farm Location, Equipment Control
+        </div>
+      </details>
+    </div>
+
+    <div class="sync-status" id="syncStatus">
+      <div class="sync-indicator" id="syncIndicator"></div>
+      <span id="syncText">Loading environment data...</span>
+      <button id="btnRefresh" type="button" class="ghost" style="margin-left: auto;">Refresh</button>
+    </div>
+
+    <div class="row" style="justify-content: space-between; align-items: center; margin-bottom: 16px;">
+      <div>
+        <h2 style="margin: 0;">SwitchBot Devices</h2>
+        <p class="tiny" style="margin: 4px 0 0; color: #64748b;" id="deviceCount">Loading...</p>
+      </div>
+      <div class="row" style="gap: 8px;">
+        <button id="btnStartPolling" type="button" class="primary">Start Polling</button>
+        <button id="btnOpenMain" type="button" class="ghost">← Back to Dashboard</button>
+      </div>
+    </div>
+
+    <div id="errorContainer"></div>
+    <div id="infoContainer"></div>
+    <div id="loadingContainer" class="loading" style="display: none;">
+      <div>🔄 Loading devices...</div>
+    </div>
+    
+    <div id="devicesContainer" class="device-grid">
+      <!-- Devices will be loaded here -->
+    </div>
+  </div>
+
+  <script>
+    let devices = [];
+    let syncInterval = null;
+    let environmentData = [];
+
+    async function fetchEnvironmentData() {
+      try {
+        // Try multiple data sources for SwitchBot data
+        const dataSources = [
+          '/env',  // Local environment endpoint
+          '/api/azure/telemetry',  // Azure telemetry API
+          '/api/azure/iot-hub'     // Azure IoT Hub data
+        ];
+        
+        for (const source of dataSources) {
+          try {
+            const response = await fetch(source);
+            if (response.ok) {
+              const data = await response.json();
+              console.log(`Successfully fetched data from ${source}`);
+              return data.zones || data.devices || data || [];
+            }
+          } catch (error) {
+            console.warn(`Failed to fetch from ${source}:`, error.message);
+          }
+        }
+        
+        throw new Error('No data sources available');
+      } catch (error) {
+        console.error('Environment API Error:', error);
+        throw error;
+      }
+    }
+
+    async function fetchSwitchBotDevices() {
+      try {
+        // Fetch real SwitchBot devices from your farm
+        const response = await fetch('/api/switchbot/devices');
+        if (response.status === 429) {
+          throw new Error('SwitchBot API rate limit reached. Please wait before making more requests.');
+        }
+        
+        const data = await response.json();
+        
+        if (data.statusCode !== 100) {
+          throw new Error(`SwitchBot API Error: ${data.message || 'Unknown error'}`);
+        }
+        
+        return data.body?.deviceList || [];
+      } catch (error) {
+        console.error('SwitchBot API Error:', error);
+        throw error;
+      }
+    }
+
+    async function getDevices() {
+      // Try to get live devices from SwitchBot API (with rate limiting protection)
+      try {
+        return await fetchSwitchBotDevices();
+      } catch (error) {
+        console.warn('SwitchBot API failed, using environment data:', error.message);
+        // Fallback to environment data which includes SwitchBot readings
+        const envData = await fetchEnvironmentData();
+        return envData.filter(zone => zone.source === 'switchbot').map(zone => ({
+          deviceId: zone.name || zone.zoneId,
+          deviceName: zone.name || zone.zoneId,
+          deviceType: 'SwitchBot Sensor',
+          lastReading: zone
+        }));
+      }
+    }
+
+    async function getDeviceStatus(deviceId) {
+      // For devices from environment data, return cached readings
+      const envDevice = environmentData.find(zone => 
+        (zone.name === deviceId || zone.zoneId === deviceId) && zone.source === 'switchbot'
+      );
+      
+      if (envDevice) {
+        return {
+          statusCode: 100,
+          body: {
+            temperature: envDevice.temperature,
+            humidity: envDevice.humidity,
+            co2: envDevice.co2,
+            battery: envDevice.battery,
+            timestamp: envDevice.timestamp
+          }
+        };
+      }
+      
+      // Try SwitchBot API as fallback (with rate limiting protection)
+      try {
+        const response = await fetch(`/api/switchbot/devices/${deviceId}/status`);
+        if (response.status === 429) {
+          throw new Error('Rate limit reached');
+        }
+        return await response.json();
+      } catch (error) {
+        console.warn(`Status fetch failed for ${deviceId}:`, error.message);
+        return null;
+      }
+    }
+
+    async function sendCommand(deviceId, command, parameter = '', commandType = 'command') {
+      const response = await fetch(`/api/switchbot/devices/${deviceId}/commands`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({
+          command,
+          parameter,
+          commandType
+        })
+      });
+
+      const data = await response.json();
+      if (!response.ok || data.statusCode !== 100) {
+        const message = data?.message || `Command failed with status ${response.status}`;
+        const error = new Error(message);
+        error.data = data;
+        error.status = response.status;
+        throw error;
+      }
+      return data;
+    }
+
+    function showError(message) {
+      const container = document.getElementById('errorContainer');
+      container.innerHTML = `
+        <div class="error-message">
+          <strong>Error:</strong> ${message}
+        </div>
+      `;
+    }
+
+    function clearError() {
+      document.getElementById('errorContainer').innerHTML = '';
+    }
+
+    function updateSyncStatus(status, isError = false) {
+      const syncText = document.getElementById('syncText');
+      const syncIndicator = document.getElementById('syncIndicator');
+      
+      syncText.textContent = status;
+      
+      if (isError) {
+        syncIndicator.style.background = '#ef4444';
+        syncIndicator.style.animation = 'none';
+      } else {
+        syncIndicator.style.background = '#10b981';
+        syncIndicator.style.animation = 'pulse 2s infinite';
+      }
+    }
+
+    function formatReading(value, unit = '') {
+      if (value === null || value === undefined) return '--';
+      if (typeof value === 'boolean') return value ? 'Yes' : 'No';
+      return `${value}${unit}`;
+    }
+
+    function createDeviceCard(device, status = null) {
+      const isOnline = status && status.body;
+      const readings = status?.body || {};
+      
+      const batteryLevel = readings.battery !== undefined ? readings.battery : null;
+      const batteryIcon = batteryLevel !== null ? 
+        (batteryLevel > 70 ? '🔋' : batteryLevel > 30 ? '🪫' : '🔴') : '🔌';
+
+      // Enhanced device metadata
+      const deviceModel = device.deviceType || 'Unknown';
+      const firmwareVersion = readings.version?.BLE || device.version || '--';
+      const lastUpdate = readings.lastUpdate || new Date().toISOString();
+      const connectivity = readings.hubDeviceId ? '🌐 Hub Connected' : '📶 Direct';
+
+      return `
+        <div class="device-card">
+          <div class="row" style="justify-content: space-between; align-items: flex-start; margin-bottom: 12px;">
+            <div>
+              <div class="row" style="align-items: center; margin-bottom: 4px;">
+                <div class="device-status ${isOnline ? 'status-online' : 'status-offline'}"></div>
+                <h3 style="margin: 0; font-size: 16px;">${device.deviceName}</h3>
+              </div>
+              <p class="tiny" style="margin: 0; color: #64748b;">${deviceModel}</p>
+              <p class="tiny" style="margin: 2px 0 0; color: #64748b;">ID: ${device.deviceId}</p>
+              ${device.hubDeviceId ? `<p class="tiny" style="margin: 2px 0 0; color: #64748b;">Hub: ${device.hubDeviceId}</p>` : ''}
+              ${firmwareVersion !== '--' ? `<p class="tiny" style="margin: 2px 0 0; color: #64748b;">FW: ${firmwareVersion}</p>` : ''}
+            </div>
+            <div style="text-align: right;">
+              ${batteryLevel !== null ? 
+                `<div title="Battery: ${batteryLevel}%">${batteryIcon} ${batteryLevel}%</div>` : 
+                '<div title="Powered">🔌 AC</div>'
+              }
+              <div class="tiny" style="color: #64748b; margin-top: 2px;">${connectivity}</div>
+              <button class="ghost tiny" onclick="refreshDevice('${device.deviceId}')" style="margin-top: 4px;">🔄</button>
+            </div>
+          </div>
+          
+          ${createReadingsGrid(readings, device.deviceType)}
+          
+          <div class="row" style="justify-content: space-between; align-items: center; margin-top: 12px;">
+            <span class="tiny" style="color: #64748b;">
+              Last sync: ${new Date(lastUpdate).toLocaleTimeString()}
+            </span>
+            ${createDeviceControls(device)}
+          </div>
+        </div>
+      `;
+    }
+
+    function createReadingsGrid(readings, deviceType) {
+      const readingItems = [];
+      
+      // Temperature
+      if (readings.temperature !== undefined) {
+        const tempIcon = readings.temperature > 25 ? '🌡️' : readings.temperature < 18 ? '❄️' : '🌡️';
+        readingItems.push(`
+          <div class="reading-item">
+            <div class="reading-value">${tempIcon} ${formatReading(readings.temperature, '°C')}</div>
+            <div class="reading-label">Temperature</div>
+          </div>
+        `);
+      }
+      
+      // Humidity
+      if (readings.humidity !== undefined) {
+        const humidityIcon = readings.humidity > 70 ? '💧' : readings.humidity < 30 ? '🏜️' : '💨';
+        readingItems.push(`
+          <div class="reading-item">
+            <div class="reading-value">${humidityIcon} ${formatReading(readings.humidity, '%')}</div>
+            <div class="reading-label">Humidity</div>
+          </div>
+        `);
+      }
+      
+      // Power state for plugs
+      if (readings.power !== undefined) {
+        readingItems.push(`
+          <div class="reading-item">
+            <div class="reading-value">${readings.power === 'on' ? '🟢 ON' : '🔴 OFF'}</div>
+            <div class="reading-label">Power</div>
+          </div>
+        `);
+      }
+      
+      // Voltage (for plugs)
+      if (readings.voltage !== undefined) {
+        readingItems.push(`
+          <div class="reading-item">
+            <div class="reading-value">⚡ ${formatReading(readings.voltage, 'V')}</div>
+            <div class="reading-label">Voltage</div>
+          </div>
+        `);
+      }
+      
+      // Current (for plugs)
+      if (readings.electricCurrent !== undefined) {
+        readingItems.push(`
+          <div class="reading-item">
+            <div class="reading-value">🔌 ${formatReading(readings.electricCurrent, 'A')}</div>
+            <div class="reading-label">Current</div>
+          </div>
+        `);
+      }
+      
+      // Power consumption (for plugs)
+      if (readings.electricityOfDay !== undefined) {
+        readingItems.push(`
+          <div class="reading-item">
+            <div class="reading-value">💡 ${formatReading(readings.electricityOfDay, 'kWh')}</div>
+            <div class="reading-label">Daily Usage</div>
+          </div>
+        `);
+      }
+      
+      // Instant power consumption (for plugs)
+      if (readings.weight !== undefined) {
+        readingItems.push(`
+          <div class="reading-item">
+            <div class="reading-value">⚡ ${formatReading(readings.weight, 'W')}</div>
+            <div class="reading-label">Power</div>
+          </div>
+        `);
+      }
+      
+      // Motion detection
+      if (readings.moveDetected !== undefined) {
+        readingItems.push(`
+          <div class="reading-item">
+            <div class="reading-value">${readings.moveDetected ? '🏃 Detected' : '🚶 None'}</div>
+            <div class="reading-label">Motion</div>
+          </div>
+        `);
+      }
+      
+      // Light level/Brightness
+      if (readings.brightness !== undefined) {
+        const lightIcon = readings.brightness > 50 ? '☀️' : readings.brightness > 20 ? '🌤️' : '🌙';
+        readingItems.push(`
+          <div class="reading-item">
+            <div class="reading-value">${lightIcon} ${formatReading(readings.brightness, '%')}</div>
+            <div class="reading-label">Light Level</div>
+          </div>
+        `);
+      }
+      
+      // Illuminance (lux)
+      if (readings.lightLevel !== undefined) {
+        readingItems.push(`
+          <div class="reading-item">
+            <div class="reading-value">💡 ${formatReading(readings.lightLevel, 'lux')}</div>
+            <div class="reading-label">Illuminance</div>
+          </div>
+        `);
+      }
+      
+      // Contact sensor
+      if (readings.openState !== undefined) {
+        readingItems.push(`
+          <div class="reading-item">
+            <div class="reading-value">${readings.openState === 'open' ? '🚪 Open' : '🚪 Closed'}</div>
+            <div class="reading-label">Door/Window</div>
+          </div>
+        `);
+      }
+      
+      // RSSI (signal strength)
+      if (readings.version !== undefined && typeof readings.version === 'object' && readings.version.rssi) {
+        const rssiValue = readings.version.rssi;
+        const signalIcon = rssiValue > -50 ? '📶' : rssiValue > -70 ? '📶' : '📶';
+        readingItems.push(`
+          <div class="reading-item">
+            <div class="reading-value">${signalIcon} ${formatReading(rssiValue, 'dBm')}</div>
+            <div class="reading-label">Signal</div>
+          </div>
+        `);
+      }
+      
+      // Device version/firmware
+      if (readings.version !== undefined && typeof readings.version === 'object' && readings.version.BLE) {
+        readingItems.push(`
+          <div class="reading-item">
+            <div class="reading-value">📱 ${readings.version.BLE}</div>
+            <div class="reading-label">Firmware</div>
+          </div>
+        `);
+      }
+      
+      if (readingItems.length === 0) {
+        return '<p class="tiny" style="color: #64748b; text-align: center; margin: 12px 0;">No readings available</p>';
+      }
+      
+      return `<div class="reading-grid">${readingItems.join('')}</div>`;
+    }
+
+    function createDeviceControls(device) {
+      const deviceType = device.deviceType.toLowerCase();
+      
+      if (deviceType.includes('plug') || deviceType.includes('switch')) {
+        return `
+          <div class="row" style="gap: 4px;">
+            <button class="ghost tiny" onclick="sendDeviceCommand('${device.deviceId}', 'turnOn')">ON</button>
+            <button class="ghost tiny" onclick="sendDeviceCommand('${device.deviceId}', 'turnOff')">OFF</button>
+          </div>
+        `;
+      }
+      
+      if (deviceType.includes('bot')) {
+        return `
+          <button class="ghost tiny" onclick="sendDeviceCommand('${device.deviceId}', 'press')">Press</button>
+        `;
+      }
+      
+      return '<span class="tiny" style="color: #64748b;">Read-only</span>';
+    }
+
+    async function loadDevices() {
+      try {
+        clearError();
+        document.getElementById('loadingContainer').style.display = 'block';
+        updateSyncStatus('Checking SwitchBot connection...');
+        
+        // First try to get real SwitchBot devices from your farm
+        try {
+          const realDevices = await fetchSwitchBotDevices();
+          if (realDevices && realDevices.length > 0) {
+            updateSyncStatus(`� Connected to ${realDevices.length} real SwitchBot devices from your farm`);
+            devices = realDevices.map(device => ({
+              ...device,
+              isRealDevice: true,
+              lastReading: {
+                // Real devices get status separately via individual API calls
+                lastUpdate: new Date().toISOString(),
+                deviceType: device.deviceType,
+                battery: device.battery || null,
+                // Note: Temperature, humidity, etc. require separate status API calls
+                message: "Click refresh (🔄) to get current readings"
+              }
+            }));
+            renderDevicesFromAPI();
+            document.getElementById('deviceCount').textContent = `${devices.length} real devices`;
+            
+            // Auto-fetch initial status data for a few devices only to avoid API limits
+            setTimeout(() => {
+              // Only fetch status for first 3 devices to avoid overloading API
+              const devicesToFetch = devices.slice(0, 3);
+              devicesToFetch.forEach((device, index) => {
+                setTimeout(() => {
+                  refreshDeviceData(device.deviceId);
+                }, index * 2000); // Stagger requests by 2 seconds each
+              });
+            }, 2000); // Wait 2 seconds to avoid API rate limits
+            
+            return; // Success with real API
+          }
+        } catch (realApiError) {
+          console.warn('Real SwitchBot API failed, falling back to environment data:', realApiError);
+        }
+        
+        // Fallback to environment data
+        updateSyncStatus('Loading environment data...');
+        await fetchServerStatus();
+        
+        environmentData = await fetchEnvironmentData();
+        const switchbotEnvData = environmentData.filter(zone => 
+          zone.source === 'switchbot' || 
+          (zone.sensors && (zone.sensors.tempC || zone.sensors.rh || zone.sensors.co2))
+        );
+        
+        if (switchbotEnvData.length > 0) {
+          updateSyncStatus(`✅ Found ${switchbotEnvData.length} environmental devices`);
+          
+          devices = switchbotEnvData.map(zone => ({
+            deviceId: zone.id || zone.name || zone.zoneId,
+            deviceName: zone.name || zone.id || zone.zoneId,
+            deviceType: zone.source === 'switchbot' ? 'SwitchBot Environmental Sensor' : 'Environmental Sensor',
+            lastReading: zone.source === 'switchbot' ? zone : convertZoneToReading(zone)
+          }));
+          
+          renderDevicesFromEnvironment();
+          document.getElementById('deviceCount').textContent = `${devices.length} devices`;
+          
+        } else {
+          updateSyncStatus('⚠️ No environmental data found');
+          devices = [];
+          renderDevicesFromEnvironment();
+          document.getElementById('deviceCount').textContent = 'No devices found';
+          
+          showInfo('No environmental devices found. Configure Azure integration or start local polling to collect data.');
+        }
+        
+      } catch (error) {
+        console.error('Failed to load devices:', error);
+        showError(`Failed to load environment data: ${error.message}`);
+        updateSyncStatus('❌ Connection failed', true);
+      } finally {
+        document.getElementById('loadingContainer').style.display = 'none';
+      }
+    }
+
+    function convertZoneToReading(zone) {
+      // Convert zone format to reading format for consistency
+      const reading = {
+        timestamp: zone.meta?.lastUpdated || new Date().toISOString(),
+        battery: zone.meta?.battery,
+        rssi: zone.meta?.rssi
+      };
+      
+      if (zone.sensors?.tempC?.current !== undefined) {
+        reading.temperature = zone.sensors.tempC.current;
+      }
+      if (zone.sensors?.rh?.current !== undefined) {
+        reading.humidity = zone.sensors.rh.current;
+      }
+      if (zone.sensors?.co2?.current !== undefined) {
+        reading.co2 = zone.sensors.co2.current;
+      }
+      
+      return reading;
+    }
+
+    function renderDevicesFromEnvironment() {
+      const container = document.getElementById('devicesContainer');
+      
+      if (devices.length === 0) {
+        container.innerHTML = '<p style="text-align: center; color: #64748b; grid-column: 1 / -1;">No SwitchBot devices found in environment data</p>';
+        return;
+      }
+      
+      container.innerHTML = devices.map(device => {
+        const reading = device.lastReading;
+        const isOnline = reading && reading.timestamp && 
+          (Date.now() - new Date(reading.timestamp).getTime()) < 5 * 60 * 1000; // 5 minutes
+        
+        return createEnvironmentDeviceCard(device, reading, isOnline);
+      }).join('');
+    }
+
+    function createEnvironmentDeviceCard(device, reading, isOnline) {
+      const lastUpdate = reading?.timestamp ? new Date(reading.timestamp).toLocaleString() : 'Never';
+      
+      return `
+        <div class="device-card">
+          <div class="row" style="justify-content: space-between; align-items: flex-start; margin-bottom: 12px;">
+            <div>
+              <div class="row" style="align-items: center; margin-bottom: 4px;">
+                <div class="device-status ${isOnline ? 'status-online' : 'status-offline'}"></div>
+                <h3 style="margin: 0; font-size: 16px;">${device.deviceName}</h3>
+              </div>
+              <p class="tiny" style="margin: 0; color: #64748b;">${device.deviceType}</p>
+              <p class="tiny" style="margin: 2px 0 0; color: #64748b;">ID: ${device.deviceId}</p>
+            </div>
+            <div style="text-align: right;">
+              ${reading?.battery ? `<div title="Battery: ${reading.battery}%">🔋 ${reading.battery}%</div>` : '<div title="Powered">🔌</div>'}
+              <button class="ghost tiny" onclick="refreshEnvironmentData()" style="margin-top: 4px;">🔄</button>
+            </div>
+          </div>
+          
+          ${createEnvironmentReadingsGrid(reading)}
+          
+          <div class="row" style="justify-content: space-between; align-items: center; margin-top: 12px;">
+            <span class="tiny" style="color: #64748b;">
+              Last updated: ${lastUpdate}
+            </span>
+            <span class="tiny" style="color: #64748b;">Environment Data</span>
+          </div>
+        </div>
+      `;
+    }
+
+    function createEnvironmentReadingsGrid(reading) {
+      if (!reading) return '<p class="tiny" style="color: #64748b; text-align: center; margin: 12px 0;">No readings available</p>';
+      
+      const readingItems = [];
+      
+      // Temperature
+      if (reading.temperature !== undefined) {
+        readingItems.push(`
+          <div class="reading-item">
+            <div class="reading-value">${formatReading(reading.temperature, '°C')}</div>
+            <div class="reading-label">Temperature</div>
+          </div>
+        `);
+      }
+      
+      // Humidity
+      if (reading.humidity !== undefined) {
+        readingItems.push(`
+          <div class="reading-item">
+            <div class="reading-value">${formatReading(reading.humidity, '%')}</div>
+            <div class="reading-label">Humidity</div>
+          </div>
+        `);
+      }
+      
+      // CO2
+      if (reading.co2 !== undefined) {
+        readingItems.push(`
+          <div class="reading-item">
+            <div class="reading-value">${formatReading(reading.co2, ' ppm')}</div>
+            <div class="reading-label">CO₂</div>
+          </div>
+        `);
+      }
+      
+      // RSSI (signal strength)
+      if (reading.rssi !== undefined) {
+        readingItems.push(`
+          <div class="reading-item">
+            <div class="reading-value">${formatReading(reading.rssi, ' dBm')}</div>
+            <div class="reading-label">Signal</div>
+          </div>
+        `);
+      }
+      
+      if (readingItems.length === 0) {
+        return '<p class="tiny" style="color: #64748b; text-align: center; margin: 12px 0;">No sensor readings available</p>';
+      }
+      
+      return `<div class="reading-grid">${readingItems.join('')}</div>`;
+    }
+
+    function renderDevicesFromAPI() {
+      const container = document.getElementById('devicesContainer');
+      
+      if (devices.length === 0) {
+        container.innerHTML = '<p style="text-align: center; color: #64748b; grid-column: 1 / -1;">No SwitchBot devices found</p>';
+        return;
+      }
+      
+      container.innerHTML = devices.map(device => {
+        const reading = device.lastReading;
+        const isOnline = reading && reading.lastUpdate && 
+          (Date.now() - new Date(reading.lastUpdate).getTime()) < 5 * 60 * 1000; // 5 minutes
+        
+        return createAPIDeviceCard(device, reading, isOnline);
+      }).join('');
+    }
+
+    function createAPIDeviceCard(device, reading, isOnline) {
+      // Load any saved settings
+      const settings = loadDeviceSettings(device.deviceId);
+      device.displayName = settings.displayName || device.displayName || device.deviceName;
+      device.farmLocation = settings.farmLocation || device.farmLocation;
+      device.zone = settings.zone || device.zone;
+      device.managedEquipment = settings.managedEquipment || device.managedEquipment || '';
+      
+      const statusColor = isOnline ? '#10b981' : '#ef4444';
+      const statusText = isOnline ? 'ONLINE' : 'OFFLINE';
+      const lastUpdate = reading?.lastUpdate ? new Date(reading.lastUpdate).toLocaleString() : 'Never';
+      
+      // Get device icon and category
+      const deviceIcon = getDeviceIcon(device.deviceType);
+      const deviceCategory = getDeviceCategory(device.deviceType);
+      
+      // Check if this is a controllable plug
+      const isPlug = device.deviceType.toLowerCase().includes('plug');
+      const deviceState = reading?.power !== undefined ? (reading.power > 0 ? 'on' : 'off') : 'unknown';
+      
+      return `
+        <div class="device-card" style="border-left: 4px solid ${statusColor}; opacity: ${isOnline ? 1 : 0.7};">
+          <div class="device-header">
+            <div style="display: flex; align-items: flex-start; gap: 12px; flex: 1; min-width: 0;">
+              <div style="font-size: 28px; flex-shrink: 0;">${deviceIcon}</div>
+              <div style="flex: 1; min-width: 0; overflow: hidden;">
+                <h4 style="margin: 0 0 8px 0; color: #1e293b; font-size: 16px; font-weight: 600; cursor: pointer; line-height: 1.2; word-break: break-word;" 
+                    onclick="editDeviceName('${device.deviceId}')" 
+                    title="Click to edit device name">
+                  ${device.displayName}
+                </h4>
+                <div style="display: flex; flex-direction: column; gap: 4px;">
+                  <div style="display: flex; align-items: center; gap: 8px; flex-wrap: wrap;">
+                    <span style="color: ${statusColor}; font-weight: 600; font-size: 12px; white-space: nowrap;">
+                      ${statusText}
+                    </span>
+                    ${isPlug ? `<span style="color: ${deviceState === 'on' ? '#10b981' : '#64748b'}; font-weight: 600; font-size: 11px; white-space: nowrap;">
+                      ${deviceState.toUpperCase()}
+                    </span>` : ''}
+                  </div>
+                  <div style="color: #64748b; font-size: 11px; line-height: 1.3; word-break: break-word;">
+                    ${deviceCategory}
+                  </div>
+                </div>
+              </div>
+            </div>
+            <div style="display: flex; gap: 8px; flex-shrink: 0; margin-left: 8px;">
+              <button onclick="refreshDeviceData('${device.deviceId}')" 
+                      class="btn-small" 
+                      style="background: #0ea5e9; color: white; border: none; padding: 6px 10px; border-radius: 4px; cursor: pointer; font-size: 12px; white-space: nowrap;">
+                🔄
+              </button>
+            </div>
+          </div>
+          
+          ${isPlug ? `
+          <div class="device-controls" style="margin: 12px 0;">
+            <button onclick="controlDevice('${device.deviceId}', 'turnOn')" 
+                    class="control-button on" 
+                    ${deviceState === 'on' ? 'disabled' : ''}>
+              🔌 Turn ON
+            </button>
+            <button onclick="controlDevice('${device.deviceId}', 'turnOff')" 
+                    class="control-button off"
+                    ${deviceState === 'off' ? 'disabled' : ''}>
+              ⏻ Turn OFF
+            </button>
+          </div>
+          ` : ''}
+          
+          <div class="device-info">
+            <div style="margin-bottom: 12px;">
+              <div style="display: flex; gap: 12px; margin-bottom: 8px;">
+                <div style="flex: 1; min-width: 0;">
+                  <label class="tiny" style="color: #64748b; display: block; margin-bottom: 4px;">Zone Assignment:</label>
+                  <select onchange="updateDeviceZone('${device.deviceId}', this.value)" 
+                          style="width: 100%; padding: 4px 8px; border: 1px solid #d1d5db; border-radius: 4px; font-size: 12px;">
+                    <option value="" ${!device.zone ? 'selected' : ''}>Select Zone</option>
+                    <option value="Zone 1" ${device.zone === 'Zone 1' ? 'selected' : ''}>Zone 1</option>
+                    <option value="Zone 2" ${device.zone === 'Zone 2' ? 'selected' : ''}>Zone 2</option>
+                    <option value="Zone 3" ${device.zone === 'Zone 3' ? 'selected' : ''}>Zone 3</option>
+                    <option value="Zone 4" ${device.zone === 'Zone 4' ? 'selected' : ''}>Zone 4</option>
+                    <option value="Zone 5" ${device.zone === 'Zone 5' ? 'selected' : ''}>Zone 5</option>
+                  </select>
+                </div>
+                <div style="flex: 1; min-width: 0;">
+                  <label class="tiny" style="color: #64748b; display: block; margin-bottom: 4px;">Farm Location:</label>
+                  <select onchange="updateDeviceLocation('${device.deviceId}', this.value)" 
+                          style="width: 100%; padding: 4px 8px; border: 1px solid #d1d5db; border-radius: 4px; font-size: 12px;">
+                    <option value="" ${!device.farmLocation ? 'selected' : ''}>Select Location</option>
+                    <option value="Greenhouse A" ${device.farmLocation === 'Greenhouse A' ? 'selected' : ''}>Greenhouse A</option>
+                    <option value="Greenhouse B" ${device.farmLocation === 'Greenhouse B' ? 'selected' : ''}>Greenhouse B</option>
+                    <option value="Greenhouse C" ${device.farmLocation === 'Greenhouse C' ? 'selected' : ''}>Greenhouse C</option>
+                    <option value="Propagation House" ${device.farmLocation === 'Propagation House' ? 'selected' : ''}>Propagation House</option>
+                    <option value="Storage Room" ${device.farmLocation === 'Storage Room' ? 'selected' : ''}>Storage Room</option>
+                    <option value="Processing Area" ${device.farmLocation === 'Processing Area' ? 'selected' : ''}>Processing Area</option>
+                    <option value="Office" ${device.farmLocation === 'Office' ? 'selected' : ''}>Office</option>
+                    <option value="Outdoor Area" ${device.farmLocation === 'Outdoor Area' ? 'selected' : ''}>Outdoor Area</option>
+                  </select>
+                </div>
+              </div>
+              ${!isPlug ? '' : `
+              <div style="margin-bottom: 8px;">
+                <label class="tiny" style="color: #64748b; display: block; margin-bottom: 4px;">Managed Equipment:</label>
+                <input type="text" 
+                       value="${device.managedEquipment}" 
+                       onchange="updateManagedEquipment('${device.deviceId}', this.value)"
+                       placeholder="e.g., Heater, Fan, Lights"
+                       style="width: 100%; padding: 4px 8px; border: 1px solid #d1d5db; border-radius: 4px; font-size: 12px;">
+              </div>
+              `}
+            </div>
+            
+            <div class="device-meta" style="background: #f8fafc; border-radius: 6px; padding: 10px; margin-bottom: 12px;">
+              <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 8px; font-size: 11px;">
+                <div><strong>Device ID:</strong><br><span style="word-break: break-all; font-size: 10px;">${device.deviceId}</span></div>
+                <div><strong>Type:</strong><br><span style="font-size: 10px;">${device.deviceType}</span></div>
+                <div><strong>MAC:</strong><br><span style="font-size: 10px;">${device.macAddress || 'N/A'}</span></div>
+                <div><strong>Cloud:</strong><br><span style="font-size: 10px;">${device.cloudService || 'SwitchBot'}</span></div>
+              </div>
+            </div>
+            
+            ${createAPIReadingsGrid(reading)}
+          </div>
+          
+          <div style="display: flex; justify-content: space-between; align-items: center; margin-top: 12px; flex-wrap: wrap; gap: 8px; border-top: 1px solid #e2e8f0; padding-top: 8px;">
+            <span class="tiny" style="color: #64748b; font-size: 10px;">
+              Last updated: ${lastUpdate}
+            </span>
+            <span class="tiny" style="color: ${device.isRealDevice ? '#28a745' : '#0ea5e9'}; font-size: 10px;">
+              ${device.isRealDevice ? '🌱 Real Farm Device' : '🎮 Live Demo API'}
+            </span>
+          </div>
+        </div>
+      `;
+    }
+
+    function createAPIReadingsGrid(reading) {
+      if (!reading) return '<p class="tiny" style="color: #64748b; text-align: center; margin: 12px 0;">No readings available - click refresh to get data</p>';
+      
+      // Handle real device messages
+      if (reading.message) {
+        return `
+          <div style="background: linear-gradient(135deg, #e8f5e8, #f0fff0); border: 1px solid #28a745; border-radius: 6px; padding: 12px; margin: 8px 0;">
+            <div style="display: flex; align-items: center; gap: 8px;">
+              <span style="color: #28a745; font-size: 16px;">🌱</span>
+              <span style="color: #28a745; font-weight: 600;">${reading.message}</span>
+            </div>
+            <p class="tiny" style="margin: 4px 0 0; color: #155724;">
+              This is a real device from your farm. Click the refresh button (🔄) to get live sensor readings.
+            </p>
+          </div>
+        `;
+      }
+      
+      const readingItems = [];
+      
+      // Show all available data fields with enhanced formatting
+      Object.keys(reading).forEach(key => {
+        if (key === 'lastUpdate' || key === 'message' || key === 'deviceId') return;
+        
+        const value = reading[key];
+        if (value === undefined || value === null) return;
+        
+        let displayValue = value;
+        let unit = '';
+        let label = key;
+        let icon = '';
+        
+        // Format specific readings with icons and proper units
+        switch(key.toLowerCase()) {
+          case 'temperature':
+            icon = value > 25 ? '🌡️' : value < 18 ? '❄️ ' : '🌡️';
+            unit = '°C';
+            label = 'Temperature';
+            break;
+          case 'humidity':
+            icon = value > 70 ? '💧' : value < 30 ? '🏜️' : '💨';
+            unit = '%';
+            label = 'Humidity';
+            break;
+          case 'co2':
+            icon = '🌬️';
+            unit = ' ppm';
+            label = 'CO₂';
+            break;
+          case 'power':
+            icon = '⚡';
+            unit = value === 'on' ? '' : value === 'off' ? '' : 'W';
+            label = 'Power';
+            displayValue = value === 'on' ? 'ON' : value === 'off' ? 'OFF' : value;
+            break;
+          case 'voltage':
+            icon = '⚡';
+            unit = 'V';
+            label = 'Voltage';
+            break;
+          case 'electriccurrent':
+          case 'current':
+            icon = '🔌';
+            unit = 'A';
+            label = 'Current';
+            break;
+          case 'electricityofday':
+            icon = '💡';
+            unit = 'kWh';
+            label = 'Daily Usage';
+            break;
+          case 'weight':
+            icon = '⚡';
+            unit = 'W';
+            label = 'Power';
+            break;
+          case 'battery':
+            icon = value > 70 ? '🔋' : value > 30 ? '🪫' : '🔴';
+            unit = '%';
+            label = 'Battery';
+            break;
+          case 'position':
+            icon = '📏';
+            unit = '%';
+            label = 'Position';
+            break;
+          case 'version':
+            icon = '📱';
+            label = 'Firmware';
+            displayValue = typeof value === 'object' ? value.BLE || value.WiFi || JSON.stringify(value) : value;
+            break;
+          case 'openstate':
+            icon = value === 'open' ? '🚪' : '🚪';
+            label = 'Status';
+            displayValue = value === 'open' ? 'OPEN' : 'CLOSED';
+            break;
+          case 'movedetected':
+            icon = value ? '🏃' : '🚶';
+            label = 'Motion';
+            displayValue = value ? 'DETECTED' : 'NONE';
+            break;
+          case 'brightness':
+          case 'lightlevel':
+            icon = value > 50 ? '☀️' : value > 20 ? '🌤️' : '🌙';
+            label = key.toLowerCase() === 'brightness' ? 'Brightness' : 'Illuminance';
+            unit = key.toLowerCase() === 'brightness' ? '%' : 'lux';
+            break;
+          case 'volume':
+            icon = '📢';
+            unit = value > 1 ? 'dB' : '';
+            label = 'Volume';
+            break;
+          case 'lightintensity':
+            icon = '💡';
+            unit = 'lux';
+            label = 'Light Intensity';
+            break;
+          case 'scale':
+            icon = '⚖️';
+            unit = 'kg';
+            label = 'Weight';
+            break;
+          case 'doorstate':
+            icon = '🚪';
+            label = 'Door';
+            displayValue = value === 1 ? 'OPEN' : 'CLOSED';
+            break;
+          case 'calibration':
+            icon = '🎯';
+            label = 'Calibration';
+            displayValue = value ? 'YES' : 'NO';
+            break;
+          case 'lackpower':
+            icon = value ? '⚠️' : '✅';
+            label = 'Power Status';
+            displayValue = value ? 'LOW POWER' : 'OK';
+            break;
+          default:
+            icon = '📊';
+            label = key.charAt(0).toUpperCase() + key.slice(1).replace(/([A-Z])/g, ' $1');
+        }
+        
+        readingItems.push(`
+          <div class="reading-item">
+            <div class="reading-value">${icon} ${formatReading(displayValue, unit)}</div>
+            <div class="reading-label">${label}</div>
+          </div>
+        `);
+      });
+      
+      if (readingItems.length === 0) {
+        return '<p class="tiny" style="color: #64748b; text-align: center; margin: 12px 0;">No sensor data available - click refresh to get readings</p>';
+      }
+      
+      return `<div class="reading-grid">${readingItems.join('')}</div>`;
+    }
+
+    async function refreshEnvironmentData() {
+      try {
+        updateSyncStatus('Refreshing environment data...');
+        environmentData = await fetchEnvironmentData();
+        const switchbotData = environmentData.filter(zone => zone.source === 'switchbot');
+        
+        if (switchbotData.length > 0) {
+          devices = switchbotData.map(zone => ({
+            deviceId: zone.name || zone.zoneId,
+            deviceName: zone.name || zone.zoneId,
+            deviceType: 'SwitchBot Environmental Sensor',
+            lastReading: zone
+          }));
+          renderDevicesFromEnvironment();
+          updateSyncStatus(`✅ Refreshed ${devices.length} devices`);
+          document.getElementById('deviceCount').textContent = `${devices.length} devices from environment data`;
+        } else {
+          updateSyncStatus('⚠️ No SwitchBot data in environment');
+          devices = [];
+          renderDevicesFromEnvironment();
+          document.getElementById('deviceCount').textContent = 'No devices found';
+        }
+      } catch (error) {
+        console.error('Failed to refresh environment data:', error);
+        updateSyncStatus('❌ Refresh failed', true);
+      }
+    }
+
+    function startAutoRefresh() {
+      if (syncInterval) clearInterval(syncInterval);
+      syncInterval = setInterval(refreshEnvironmentData, 30000);
+    }
+
+    function stopAutoRefresh() {
+      if (syncInterval) {
+        clearInterval(syncInterval);
+        syncInterval = null;
+      }
+    }
+
+    function showInfo(message) {
+      const container = document.getElementById('infoContainer');
+      container.innerHTML = `<div class="info-message"><strong>Info:</strong> ${message}</div>`;
+    }
+
+    function clearError() {
+      document.getElementById('errorContainer').innerHTML = '';
+      document.getElementById('infoContainer').innerHTML = '';
+    }
+
+    function startSwitchBotPolling() {
+      const button = document.getElementById('btnStartPolling');
+      if (button.textContent === 'Start Polling') {
+        // Start polling
+        showInfo('<strong>🔄 Starting SwitchBot polling...</strong><br>Collecting device data from local mock API...');
+        button.textContent = 'Stop Polling';
+        button.style.backgroundColor = '#dc3545';
+        
+        // Start the polling interval
+        window.switchBotPollingInterval = setInterval(async () => {
+          try {
+            // Instead of loading all devices, just update the device list without fetching all statuses
+            const realDevices = await fetchSwitchBotDevices();
+            if (realDevices && realDevices.length > 0) {
+              devices = realDevices.map(device => ({
+                ...device,
+                isRealDevice: true,
+                lastReading: devices.find(d => d.deviceId === device.deviceId)?.lastReading || {
+                  lastUpdate: new Date().toISOString(),
+                  message: "Click refresh (🔄) to get current readings"
+                }
+              }));
+              renderDevicesFromAPI();
+              showInfo(`<strong>✅ Polling active</strong><br>Last update: ${new Date().toLocaleTimeString()}<br>Device list refreshed. Click refresh on cards for live data.`);
+            }
+          } catch (error) {
+            showError(`Polling error: ${error.message}`);
+          }
+        }, 30000); // Poll every 30 seconds instead of 10
+        
+        // Immediate first poll
+        loadDevices();
+        
+      } else {
+        // Stop polling
+        if (window.switchBotPollingInterval) {
+          clearInterval(window.switchBotPollingInterval);
+          window.switchBotPollingInterval = null;
+        }
+        button.textContent = 'Start Polling';
+        button.style.backgroundColor = '#007bff';
+        showInfo('<strong>⏹️ Polling stopped</strong><br>Click "Start Polling" to resume data collection.');
+      }
+    }
+
+    function getSwitchBotToken() {
+      return "4e6fc805b4a0dd7ed693af1dcf89d9731113d4706b2d796759aafe09cf8f07aed370d35bab4fb4799e1bda57d03c0aed";
+    }
+
+    function getSwitchBotSecret() {
+      return "141c0bc9906ab1f4f73dd9f0c298046b";
+    }
+
+    async function fetchServerStatus() {
+      try {
+        const response = await fetch('/status');
+        if (response.ok) {
+          const status = await response.json();
+          const configSpan = document.getElementById('currentConfig');
+          if (configSpan) {
+            configSpan.innerHTML = `
+              <strong>Environment Source:</strong> ${status.envSource || 'local'}<br>
+              ${status.azureLatestUrl ? `<strong>Azure URL:</strong> ${status.azureLatestUrl}<br>` : ''}
+              <strong>Server:</strong> ${status.controller || 'unknown'}
+            `;
+          }
+        }
+      } catch (error) {
+        console.error('Failed to fetch server status:', error);
+      }
+    }
+
+    // Global functions for onclick handlers
+    window.refreshEnvironmentData = refreshEnvironmentData;
+    window.startSwitchBotPolling = startSwitchBotPolling;
+
+    // Event listeners
+    document.addEventListener('DOMContentLoaded', () => {
+      document.getElementById('btnRefresh').addEventListener('click', refreshEnvironmentData);
+      document.getElementById('btnStartPolling').addEventListener('click', startSwitchBotPolling);
+      document.getElementById('btnOpenMain').addEventListener('click', () => {
+        window.open('/', '_blank');
+      });
+      
+      loadDevices();
+      // Disabled auto-refresh to prevent conflicts - use manual refresh instead
+      // startAutoRefresh();
+    });
+
+    window.addEventListener('beforeunload', () => {
+      stopAutoRefresh();
+      // Stop any polling intervals
+      if (window.switchBotPollingInterval) {
+        clearInterval(window.switchBotPollingInterval);
+      }
+    });
+
+    // Helper functions for device management
+    function getDeviceIcon(deviceType) {
+      const type = deviceType.toLowerCase();
+      if (type.includes('meter') || type.includes('sensor') || type.includes('monitor')) {
+        return '🌡️'; // Sensor/meter devices
+      } else if (type.includes('plug') || type.includes('switch')) {
+        return '🔌'; // Plug/switch devices
+      } else if (type.includes('bot')) {
+        return '🤖'; // Bot devices
+      } else if (type.includes('hub')) {
+        return '📡'; // Hub devices
+      } else if (type.includes('camera')) {
+        return '📹'; // Camera devices
+      } else if (type.includes('lock')) {
+        return '🔒'; // Lock devices
+      } else {
+        return '📱'; // Generic device
+      }
+    }
+
+    function getDeviceCategory(deviceType) {
+      const type = deviceType.toLowerCase();
+      if (type.includes('meter') || type.includes('sensor') || type.includes('monitor')) {
+        return 'Environmental Monitoring';
+      } else if (type.includes('plug') || type.includes('switch')) {
+        return 'Power Control';
+      } else if (type.includes('bot')) {
+        return 'Mechanical Control';
+      } else if (type.includes('hub')) {
+        return 'Central Hub';
+      } else {
+        return 'Smart Device';
+      }
+    }
+
+    // Device editing functions
+    function editDeviceName(deviceId) {
+      const device = devices.find(d => d.deviceId === deviceId);
+      if (!device) return;
+      
+      const newName = prompt('Enter new device name:', device.displayName || device.deviceName);
+      if (newName && newName !== device.deviceName) {
+        device.displayName = newName;
+        saveDeviceSettings(deviceId, { displayName: newName });
+        renderDevicesFromAPI(); // Re-render to show changes
+      }
+    }
+
+    function updateDeviceLocation(deviceId, location) {
+      const device = devices.find(d => d.deviceId === deviceId);
+      if (device) {
+        device.farmLocation = location;
+        saveDeviceSettings(deviceId, { farmLocation: location });
+        showInfo(`Updated location for ${device.deviceName} to: ${location}`);
+      }
+    }
+
+    function updateDeviceZone(deviceId, zone) {
+      const device = devices.find(d => d.deviceId === deviceId);
+      if (device) {
+        device.zone = zone;
+        saveDeviceSettings(deviceId, { zone: zone });
+        showInfo(`Assigned ${device.deviceName} to: ${zone}`);
+      }
+    }
+
+    function updateManagedEquipment(deviceId, equipment) {
+      const device = devices.find(d => d.deviceId === deviceId);
+      if (device) {
+        device.managedEquipment = equipment;
+        saveDeviceSettings(deviceId, { managedEquipment: equipment });
+        showInfo(`Updated managed equipment for ${device.deviceName}: ${equipment}`);
+      }
+    }
+
+    function saveDeviceSettings(deviceId, settings) {
+      // Save to localStorage for now (could be extended to server)
+      const storageKey = `switchbot_device_${deviceId}`;
+      const existingSettings = JSON.parse(localStorage.getItem(storageKey) || '{}');
+      const newSettings = { ...existingSettings, ...settings };
+      localStorage.setItem(storageKey, JSON.stringify(newSettings));
+    }
+
+    function loadDeviceSettings(deviceId) {
+      const storageKey = `switchbot_device_${deviceId}`;
+      return JSON.parse(localStorage.getItem(storageKey) || '{}');
+    }
+
+    // Rate limiting for API calls
+    const lastApiCall = {};
+    const API_RATE_LIMIT = 3000; // 3 seconds between calls per device
+
+    async function refreshDeviceData(deviceId) {
+      try {
+        // Check rate limiting
+        const now = Date.now();
+        if (lastApiCall[deviceId] && (now - lastApiCall[deviceId]) < API_RATE_LIMIT) {
+          showInfo(`⏳ Please wait ${Math.ceil((API_RATE_LIMIT - (now - lastApiCall[deviceId])) / 1000)} seconds before refreshing this device again`);
+          return;
+        }
+        
+        lastApiCall[deviceId] = now;
+        showInfo(`🔄 Refreshing data for device ${deviceId}...`);
+        
+        // Call SwitchBot status API for individual device
+        const response = await fetch(`/api/switchbot/devices/${deviceId}/status`);
+        const data = await response.json();
+        
+        if (data.statusCode === 100) {
+          // Update device with fresh data
+          const device = devices.find(d => d.deviceId === deviceId);
+          if (device) {
+            device.lastReading = {
+              ...device.lastReading,
+              ...data.body,
+              lastUpdate: new Date().toISOString()
+            };
+            renderDevicesFromAPI();
+            showInfo(`✅ Refreshed data for ${device.deviceName || device.displayName}`);
+          }
+        } else {
+          throw new Error(data.message || 'Failed to get device status');
+        }
+      } catch (error) {
+        console.error('Device refresh error:', error);
+        showError(`Failed to refresh device data: ${error.message}`);
+      }
+    }
+
+    async function controlDevice(deviceId, command) {
+      try {
+        const device = devices.find(d => d.deviceId === deviceId);
+        const deviceName = device ? device.displayName || device.deviceName : deviceId;
+        
+        showInfo(`🎮 Sending ${command} command to ${deviceName}...`);
+        
+        const response = await fetch(`/api/switchbot/devices/${deviceId}/commands`, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json'
+          },
+          body: JSON.stringify({
+            command: command,
+            parameter: 'default'
+          })
+        });
+        
+        const data = await response.json();
+        
+        if (data.statusCode === 100) {
+          showInfo(`✅ Successfully sent ${command} command to ${deviceName}`);
+          // Refresh device data after command
+          setTimeout(() => refreshDeviceData(deviceId), 2000);
+        } else {
+          throw new Error(data.message || 'Command failed');
+        }
+      } catch (error) {
+        showError(`Failed to control device: ${error.message}`);
+      }
+    }
+  </script>
+</body>
+</html>

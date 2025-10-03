@@ -1,0 +1,540 @@
+/* 
+IMPLEMENTATION GUIDE 4: Sidebar Layout Implementation
+==================================================
+
+File: public/index.html
+
+Key changes:
+1. Restructure layout with persistent sidebar for wizards
+2. Add responsive CSS utilities
+3. Implement collapsible sidebar
+4. Update existing wizard integration
+
+HTML Structure Changes:
+*/
+
+/*
+Add to <head> section before existing styles:
+*/
+
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<link rel="stylesheet" href="sidebar-layout.css">
+
+/*
+Replace existing <body> structure with:
+*/
+
+<body>
+  <div class="app-layout">
+    <!-- Main Navigation Header -->
+    <header class="app-header">
+      <div class="app-header__brand">
+        <h1>Light Engine Charlie V2</h1>
+      </div>
+      <div class="app-header__controls">
+        <button id="sidebar-toggle" class="sidebar-toggle" aria-label="Toggle Sidebar">
+          <span class="sidebar-toggle__icon">☰</span>
+        </button>
+      </div>
+    </header>
+
+    <!-- Sidebar for Wizards -->
+    <aside class="app-sidebar" id="app-sidebar">
+      <nav class="wizard-nav">
+        <h2 class="wizard-nav__title">Setup Wizards</h2>
+        
+        <div class="wizard-nav__section">
+          <h3 class="wizard-nav__section-title">Lighting</h3>
+          <ul class="wizard-nav__list">
+            <li>
+              <button class="wizard-nav__item" data-wizard="light-setup">
+                <span class="wizard-nav__icon">💡</span>
+                <span class="wizard-nav__label">Light Setup</span>
+              </button>
+            </li>
+          </ul>
+        </div>
+
+        <div class="wizard-nav__section">
+          <h3 class="wizard-nav__section-title">Climate Control</h3>
+          <ul class="wizard-nav__list">
+            <li>
+              <button class="wizard-nav__item" data-wizard="dehumidifier-setup">
+                <span class="wizard-nav__icon">💨</span>
+                <span class="wizard-nav__label">Dehumidifier Setup</span>
+              </button>
+            </li>
+            <li>
+              <button class="wizard-nav__item" data-wizard="minisplit-setup">
+                <span class="wizard-nav__icon">❄️</span>
+                <span class="wizard-nav__label">Mini-Split Setup</span>
+              </button>
+            </li>
+          </ul>
+        </div>
+
+        <div class="wizard-nav__section">
+          <h3 class="wizard-nav__section-title">Management</h3>
+          <ul class="wizard-nav__list">
+            <li>
+              <button class="wizard-nav__item" data-wizard="device-manager">
+                <span class="wizard-nav__icon">⚙️</span>
+                <span class="wizard-nav__label">Device Manager</span>
+              </button>
+            </li>
+          </ul>
+        </div>
+      </nav>
+    </aside>
+
+    <!-- Main Content Area -->
+    <main class="app-main">
+      <div class="wizard-container">
+        <!-- Existing wizard content will be moved here -->
+        
+        <!-- Light Setup Wizard -->
+        <div id="light-setup" class="wizard-panel" style="display: none;">
+          <!-- Move existing light setup content here -->
+        </div>
+
+        <!-- Dehumidifier Setup Wizard -->
+        <div id="dehumidifier-setup" class="wizard-panel" style="display: none;">
+          <!-- Move existing dehumidifier setup content here -->
+        </div>
+
+        <!-- Mini-Split Setup Wizard -->
+        <div id="minisplit-setup" class="wizard-panel" style="display: none;">
+          <!-- Move existing mini-split setup content here -->
+        </div>
+
+        <!-- Device Manager Panel -->
+        <div id="device-manager" class="wizard-panel" style="display: none;">
+          <div class="panel-header">
+            <h2>Device Manager</h2>
+            <p>Manage and assign devices to equipment</p>
+          </div>
+          <div id="device-manager-root"></div>
+        </div>
+
+        <!-- Welcome Screen -->
+        <div id="welcome-panel" class="wizard-panel wizard-panel--welcome">
+          <div class="welcome-content">
+            <h2>Welcome to Light Engine Charlie V2</h2>
+            <p>Select a wizard from the sidebar to get started with your equipment setup.</p>
+            
+            <div class="quick-actions">
+              <button class="quick-action" onclick="showWizard('light-setup')">
+                <span class="quick-action__icon">💡</span>
+                <span class="quick-action__title">Setup Lights</span>
+                <span class="quick-action__desc">Configure LED lighting systems</span>
+              </button>
+              
+              <button class="quick-action" onclick="showWizard('dehumidifier-setup')">
+                <span class="quick-action__icon">💨</span>
+                <span class="quick-action__title">Setup Dehumidifier</span>
+                <span class="quick-action__desc">Configure humidity control</span>
+              </button>
+              
+              <button class="quick-action" onclick="showWizard('minisplit-setup')">
+                <span class="quick-action__icon">❄️</span>
+                <span class="quick-action__title">Setup Mini-Split</span>
+                <span class="quick-action__desc">Configure HVAC systems</span>
+              </button>
+            </div>
+          </div>
+        </div>
+      </div>
+    </main>
+  </div>
+
+  <!-- Move existing scripts here -->
+  <script src="app.charlie.js"></script>
+  <script src="sidebar-layout.js"></script>
+</body>
+
+/*
+Create new file: public/sidebar-layout.css
+*/
+
+:root {
+  --sidebar-width: 280px;
+  --sidebar-width-collapsed: 60px;
+  --header-height: 60px;
+  --transition-speed: 0.3s;
+  --z-sidebar: 100;
+  --z-header: 110;
+  --shadow-sidebar: 2px 0 10px rgba(0, 0, 0, 0.1);
+}
+
+.app-layout {
+  display: grid;
+  grid-template-areas: 
+    "header header"
+    "sidebar main";
+  grid-template-columns: var(--sidebar-width) 1fr;
+  grid-template-rows: var(--header-height) 1fr;
+  height: 100vh;
+  overflow: hidden;
+}
+
+.app-header {
+  grid-area: header;
+  background: var(--bg-primary);
+  border-bottom: 1px solid var(--border);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0 1rem;
+  z-index: var(--z-header);
+  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+}
+
+.app-header__brand h1 {
+  margin: 0;
+  font-size: 1.25rem;
+  color: var(--text-primary);
+}
+
+.sidebar-toggle {
+  background: none;
+  border: none;
+  padding: 0.5rem;
+  border-radius: 4px;
+  cursor: pointer;
+  color: var(--text-secondary);
+  transition: all var(--transition-speed);
+}
+
+.sidebar-toggle:hover {
+  background: var(--bg-secondary);
+  color: var(--text-primary);
+}
+
+.sidebar-toggle__icon {
+  font-size: 1.25rem;
+  display: block;
+}
+
+.app-sidebar {
+  grid-area: sidebar;
+  background: var(--bg-secondary);
+  border-right: 1px solid var(--border);
+  overflow-y: auto;
+  transition: width var(--transition-speed);
+  z-index: var(--z-sidebar);
+  box-shadow: var(--shadow-sidebar);
+}
+
+.app-sidebar.collapsed {
+  width: var(--sidebar-width-collapsed);
+}
+
+.wizard-nav {
+  padding: 1rem 0;
+}
+
+.wizard-nav__title {
+  padding: 0 1rem;
+  margin: 0 0 1rem 0;
+  font-size: 1.125rem;
+  color: var(--text-primary);
+  font-weight: 600;
+}
+
+.wizard-nav__section {
+  margin-bottom: 1.5rem;
+}
+
+.wizard-nav__section-title {
+  padding: 0 1rem;
+  margin: 0 0 0.5rem 0;
+  font-size: 0.875rem;
+  color: var(--text-secondary);
+  font-weight: 500;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+
+.wizard-nav__list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.wizard-nav__item {
+  width: 100%;
+  background: none;
+  border: none;
+  padding: 0.75rem 1rem;
+  text-align: left;
+  cursor: pointer;
+  transition: all var(--transition-speed);
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  color: var(--text-primary);
+}
+
+.wizard-nav__item:hover {
+  background: var(--bg-hover);
+}
+
+.wizard-nav__item.active {
+  background: var(--accent-light);
+  color: var(--accent);
+  border-right: 3px solid var(--accent);
+}
+
+.wizard-nav__icon {
+  font-size: 1.25rem;
+  min-width: 1.25rem;
+}
+
+.wizard-nav__label {
+  font-weight: 500;
+  white-space: nowrap;
+  opacity: 1;
+  transition: opacity var(--transition-speed);
+}
+
+.app-sidebar.collapsed .wizard-nav__label,
+.app-sidebar.collapsed .wizard-nav__title,
+.app-sidebar.collapsed .wizard-nav__section-title {
+  opacity: 0;
+  overflow: hidden;
+}
+
+.app-main {
+  grid-area: main;
+  overflow-y: auto;
+  background: var(--bg-tertiary);
+}
+
+.wizard-container {
+  height: 100%;
+  position: relative;
+}
+
+.wizard-panel {
+  height: 100%;
+  padding: 2rem;
+  background: var(--bg-primary);
+  overflow-y: auto;
+}
+
+.wizard-panel--welcome {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.welcome-content {
+  text-align: center;
+  max-width: 600px;
+}
+
+.welcome-content h2 {
+  margin: 0 0 1rem 0;
+  color: var(--text-primary);
+}
+
+.welcome-content p {
+  margin: 0 0 2rem 0;
+  color: var(--text-secondary);
+  font-size: 1.125rem;
+}
+
+.quick-actions {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+  gap: 1rem;
+}
+
+.quick-action {
+  background: var(--bg-secondary);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 1.5rem;
+  cursor: pointer;
+  transition: all var(--transition-speed);
+  text-align: center;
+}
+
+.quick-action:hover {
+  background: var(--bg-hover);
+  border-color: var(--accent);
+  transform: translateY(-2px);
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1);
+}
+
+.quick-action__icon {
+  font-size: 2rem;
+  display: block;
+  margin-bottom: 0.5rem;
+}
+
+.quick-action__title {
+  display: block;
+  font-weight: 600;
+  color: var(--text-primary);
+  margin-bottom: 0.25rem;
+}
+
+.quick-action__desc {
+  display: block;
+  font-size: 0.875rem;
+  color: var(--text-secondary);
+}
+
+.panel-header {
+  margin-bottom: 2rem;
+  padding-bottom: 1rem;
+  border-bottom: 1px solid var(--border);
+}
+
+.panel-header h2 {
+  margin: 0 0 0.5rem 0;
+  color: var(--text-primary);
+}
+
+.panel-header p {
+  margin: 0;
+  color: var(--text-secondary);
+}
+
+/* Responsive Design */
+@media (max-width: 768px) {
+  .app-layout {
+    grid-template-areas: 
+      "header"
+      "main";
+    grid-template-columns: 1fr;
+  }
+  
+  .app-sidebar {
+    position: fixed;
+    top: var(--header-height);
+    left: 0;
+    height: calc(100vh - var(--header-height));
+    width: var(--sidebar-width);
+    transform: translateX(-100%);
+    transition: transform var(--transition-speed);
+    z-index: var(--z-sidebar);
+  }
+  
+  .app-sidebar.open {
+    transform: translateX(0);
+  }
+  
+  .quick-actions {
+    grid-template-columns: 1fr;
+  }
+}
+
+/*
+Create new file: public/sidebar-layout.js
+*/
+
+// Sidebar Layout Management for Light Engine Charlie V2
+
+class SidebarLayout {
+  constructor() {
+    this.sidebar = document.getElementById('app-sidebar');
+    this.sidebarToggle = document.getElementById('sidebar-toggle');
+    this.wizardButtons = document.querySelectorAll('[data-wizard]');
+    this.currentWizard = null;
+    
+    this.init();
+  }
+  
+  init() {
+    // Set up sidebar toggle
+    this.sidebarToggle?.addEventListener('click', () => {
+      this.toggleSidebar();
+    });
+    
+    // Set up wizard navigation
+    this.wizardButtons.forEach(button => {
+      button.addEventListener('click', () => {
+        const wizardId = button.dataset.wizard;
+        this.showWizard(wizardId);
+      });
+    });
+    
+    // Show welcome panel by default
+    this.showWizard('welcome-panel');
+    
+    // Handle responsive behavior
+    this.handleResize();
+    window.addEventListener('resize', () => this.handleResize());
+  }
+  
+  toggleSidebar() {
+    if (window.innerWidth <= 768) {
+      this.sidebar?.classList.toggle('open');
+    } else {
+      this.sidebar?.classList.toggle('collapsed');
+    }
+  }
+  
+  showWizard(wizardId) {
+    // Hide all wizard panels
+    const panels = document.querySelectorAll('.wizard-panel');
+    panels.forEach(panel => {
+      panel.style.display = 'none';
+    });
+    
+    // Show selected wizard panel
+    const targetPanel = document.getElementById(wizardId);
+    if (targetPanel) {
+      targetPanel.style.display = 'block';
+      this.currentWizard = wizardId;
+    }
+    
+    // Update navigation state
+    this.updateNavigationState(wizardId);
+    
+    // Close sidebar on mobile after selection
+    if (window.innerWidth <= 768) {
+      this.sidebar?.classList.remove('open');
+    }
+  }
+  
+  updateNavigationState(activeWizardId) {
+    this.wizardButtons.forEach(button => {
+      button.classList.remove('active');
+      if (button.dataset.wizard === activeWizardId) {
+        button.classList.add('active');
+      }
+    });
+  }
+  
+  handleResize() {
+    if (window.innerWidth > 768) {
+      // Desktop: remove mobile classes
+      this.sidebar?.classList.remove('open');
+    } else {
+      // Mobile: remove desktop classes
+      this.sidebar?.classList.remove('collapsed');
+    }
+  }
+}
+
+// Global function for backward compatibility
+window.showWizard = function(wizardId) {
+  window.sidebarLayout?.showWizard(wizardId);
+};
+
+// Initialize when DOM is ready
+document.addEventListener('DOMContentLoaded', () => {
+  window.sidebarLayout = new SidebarLayout();
+});
+
+/*
+Integration with existing wizards:
+
+1. Move existing wizard HTML into respective .wizard-panel divs
+2. Update wizard scripts to work within the new container structure
+3. Preserve existing functionality while adding sidebar navigation
+4. Update CSS selectors if needed to work within .wizard-panel containers
+*/

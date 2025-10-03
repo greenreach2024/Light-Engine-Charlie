@@ -1,0 +1,18 @@
+{
+	"version": "2.0.0",
+	"tasks": [
+		{
+			"label": "Run Jest tests",
+			"type": "shell",
+			"command": "npm",
+			"args": [
+				"test",
+				"--silent"
+			],
+			"problemMatcher": [
+				"$tsc"
+			],
+			"group": "build"
+		}
+	]
+}

@@ -1,0 +1,14 @@
+{
+  "testEnvironment": "node",
+  "transform": {},
+  "testMatch": [
+    "**/tests/**/*.test.js",
+    "**/tests/**/*.spec.js"
+  ],
+  "collectCoverageFrom": [
+    "server/**/*.js",
+    "!server/**/*.test.js",
+    "!server/**/*.spec.js"
+  ],
+  "setupFilesAfterEnv": ["<rootDir>/tests/setup.js"]
+}

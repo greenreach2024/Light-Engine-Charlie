@@ -1,0 +1,132 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Dropdown Test</title>
+    <style>
+        body { font-family: Arial, sans-serif; padding: 20px; }
+        .test-section { margin: 20px 0; padding: 20px; border: 1px solid #ccc; }
+        select { padding: 8px; margin: 10px; width: 200px; }
+        button { padding: 8px 16px; margin: 10px; }
+        pre { background: #f5f5f5; padding: 10px; margin: 10px 0; }
+    </style>
+</head>
+<body>
+    <h1>Light Setup Dropdown Test</h1>
+    
+    <div class="test-section">
+        <h2>1. Basic Dropdown Test</h2>
+        <select id="testSelect">
+            <option value="">Select an option</option>
+            <option value="test1">Test Option 1</option>
+            <option value="test2">Test Option 2</option>
+        </select>
+        <button onclick="testBasicDropdown()">Test Basic Dropdown</button>
+        <div id="basicResult"></div>
+    </div>
+
+    <div class="test-section">
+        <h2>2. Data Loading Test</h2>
+        <button onclick="testDataLoading()">Load and Show Room Data</button>
+        <pre id="dataResult"></pre>
+    </div>
+
+    <div class="test-section">
+        <h2>3. Light Setup Modal Test</h2>
+        <button onclick="testLightSetupModal()">Open Light Setup Modal</button>
+        <div id="modalResult"></div>
+    </div>
+
+    <div class="test-section">
+        <h2>4. Direct Room Dropdown Test</h2>
+        <select id="directRoomSelect">
+            <option value="">Select a room</option>
+        </select>
+        <button onclick="populateDirectRoomDropdown()">Populate Room Dropdown</button>
+        <div id="directResult"></div>
+    </div>
+
+    <script>
+        function testBasicDropdown() {
+            const select = document.getElementById('testSelect');
+            const result = document.getElementById('basicResult');
+            
+            select.addEventListener('change', (e) => {
+                result.innerHTML = `Selected: ${e.target.value}`;
+            });
+            
+            result.innerHTML = 'Basic dropdown test ready - try selecting an option';
+        }
+
+        async function testDataLoading() {
+            const result = document.getElementById('dataResult');
+            result.textContent = 'Loading data...';
+            
+            try {
+                // Load the same data that the main app loads
+                const farmResponse = await fetch('./data/farm.json');
+                const farmData = await farmResponse.json();
+                
+                const roomsResponse = await fetch('./data/rooms.json');
+                const roomsData = await roomsResponse.json();
+                
+                result.textContent = `FARM DATA:\n${JSON.stringify(farmData, null, 2)}\n\nROOMS DATA:\n${JSON.stringify(roomsData, null, 2)}`;
+            } catch (error) {
+                result.textContent = `Error loading data: ${error.message}`;
+            }
+        }
+
+        function testLightSetupModal() {
+            const result = document.getElementById('modalResult');
+            
+            // Try to access the main app's lightWizard
+            if (window.parent.lightWizard) {
+                result.innerHTML = 'Found lightWizard in parent window';
+                try {
+                    window.parent.lightWizard.open();
+                    result.innerHTML += '<br>Attempted to open lightWizard';
+                } catch (e) {
+                    result.innerHTML += `<br>Error opening lightWizard: ${e.message}`;
+                }
+            } else {
+                result.innerHTML = 'lightWizard not found in parent window';
+            }
+        }
+
+        async function populateDirectRoomDropdown() {
+            const select = document.getElementById('directRoomSelect');
+            const result = document.getElementById('directResult');
+            
+            try {
+                // Clear existing options
+                select.innerHTML = '<option value="">Select a room</option>';
+                
+                // Load farm data
+                const farmResponse = await fetch('./data/farm.json');
+                const farmData = await farmResponse.json();
+                
+                // Populate dropdown
+                if (farmData.rooms && Array.isArray(farmData.rooms)) {
+                    farmData.rooms.forEach(room => {
+                        const option = document.createElement('option');
+                        option.value = room.id || room.name;
+                        option.textContent = room.name || room.id;
+                        select.appendChild(option);
+                    });
+                    
+                    result.innerHTML = `Added ${farmData.rooms.length} rooms to dropdown`;
+                    
+                    // Add change handler
+                    select.addEventListener('change', (e) => {
+                        result.innerHTML += `<br>Selected room: ${e.target.value}`;
+                    });
+                } else {
+                    result.innerHTML = 'No rooms found in farm data';
+                }
+                
+            } catch (error) {
+                result.innerHTML = `Error: ${error.message}`;
+            }
+        }
+    </script>
+</body>
+</html>

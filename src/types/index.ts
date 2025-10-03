@@ -48,4 +48,8 @@ export interface SetupGuide {
   id: string;
   title: string;
   steps: SetupGuideStep[];
+  estimatedTime?: string;
+  difficulty?: string;
+  aiSummary?: string;
+  troubleshooting?: string;
 }

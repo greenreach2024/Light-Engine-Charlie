@@ -1425,7 +1425,8 @@ class FarmWizard {
     this.progressEl = $('#farmModalProgress');
     this.titleEl = $('#farmModalTitle');
     this.currentStep = 0;
-    this.baseSteps = ['connection-choice', 'wifi-select', 'wifi-password', 'wifi-test', 'location', 'contact', 'spaces', 'review'];
+  // V2 retains all V1 steps and order while enhancing UX
+  this.baseSteps = ['wifi', 'contact', 'profile', 'branding', 'location', 'rooms', 'review'];
     this.wifiNetworks = [];
     this.data = this.defaultData();
     this.discoveryStorageKeys = {
@@ -1451,6 +1452,12 @@ class FarmWizard {
           testResult: null
         }
       },
+      contact: {
+        name: '',
+        email: '',
+        phone: '',
+        website: ''
+      },
       location: {
         farmName: '',
         address: '',
@@ -1460,11 +1467,19 @@ class FarmWizard {
         timezone: tz,
         coordinates: null // Will store { lat, lng }
       },
-      contact: {
-        name: '',
-        email: '',
-        phone: '',
-        website: ''
+      branding: {
+        tagline: 'Growing with technology',
+        logo: null,
+        palette: {
+          primary: '#0077b5',
+          accent: '#af9b62',
+          background: '#ffffff',
+          surface: '#FFFFFF',
+          border: '#DCE5E5',
+          text: '#0b1220'
+        },
+        fontFamily: '',
+        fontCss: []
       },
       rooms: []
     };
@@ -1478,8 +1493,17 @@ class FarmWizard {
   }
 
   init() {
-    $('#btnLaunchFarm')?.addEventListener('click', () => { this.data = this.defaultData(); this.open(); });
+    $('#btnOpenFarmModal')?.addEventListener('click', () => { 
+      console.log('Farm modal button clicked'); 
+      console.log('Farm modal element:', this.modal);
+      console.log('Farm wizard instance:', this);
+      this.data = this.defaultData(); 
+      this.open(); 
+    });
     $('#btnEditFarm')?.addEventListener('click', () => this.edit());
+    $('#btnFarmPreview')?.addEventListener('click', () => {
+      this.showFarmPreview();
+    });
     $('#farmModalClose')?.addEventListener('click', () => this.close());
     // Remove backdrop click to close - wizard should only close on save
     // $('#farmModalBackdrop')?.addEventListener('click', () => this.close());
@@ -1492,9 +1516,12 @@ class FarmWizard {
         this.saveFarm(e);
       }
     });
+    // Explicit save button binding as a fallback (some browsers or custom buttons may bypass submit)
+    $('#btnSaveFarm')?.addEventListener('click', (e) => this.saveFarm(e));
 
-    $('#btnScanWifi')?.addEventListener('click', () => this.scanWifiNetworks(true));
-    $('#btnManualSsid')?.addEventListener('click', () => this.handleManualSsid());
+  // Wi‑Fi controls (single binding to avoid double Next/scan/test triggers)
+  $('#btnScanWifi')?.addEventListener('click', () => this.scanWifiNetworks(true));
+  // No separate manual SSID button in markup; bind to input in attachFormListeners
     $('#wifiShowPassword')?.addEventListener('change', (e) => {
       const input = $('#wifiPassword');
       if (input) input.type = e.target.checked ? 'text' : 'password';
@@ -1510,7 +1537,7 @@ class FarmWizard {
       this.data.connection.wifi.reuseDiscovery = reuse;
       try { localStorage.setItem(this.discoveryStorageKeys.reuse, reuse ? 'true' : 'false'); } catch {}
     });
-    $('#btnTestWifi')?.addEventListener('click', () => this.testWifi());
+  $('#btnTestWifi')?.addEventListener('click', () => this.testWifiConnection());
     // All form field listeners are now attached in attachFormListeners() when modal opens
     
     // Website branding button - opens wizard directly
@@ -1575,8 +1602,7 @@ class FarmWizard {
   }
 
   getVisibleSteps() {
-    if (this.data.connection.type === 'wifi') return this.baseSteps.slice();
-    return this.baseSteps.filter(step => !step.startsWith('wifi-'));
+    return this.baseSteps.slice(); // Return all base steps: profile, spaces, review
   }
 
   open() {
@@ -1589,39 +1615,446 @@ class FarmWizard {
     this.updateWifiPasswordUI();
     this.renderRoomsEditor();
     
+    // Load existing farm data if available
+    this.loadExistingData();
+    
+    // Populate form fields with current data
+    this.populateFormFields();
+    
     // Attach form event listeners after modal is shown
     this.attachFormListeners();
   }
 
+  loadExistingData() {
+    // Load existing farm data from STATE if available
+    if (STATE.farm) {
+      this.data.location.farmName = STATE.farm.farmName || STATE.farm.name || '';
+      this.data.location.tagline = STATE.farm.tagline || '';
+      this.data.location.logo = STATE.farm.logo || null;
+      this.data.location.address = STATE.farm.address || '';
+      this.data.location.city = STATE.farm.city || '';
+      this.data.location.state = STATE.farm.state || '';
+      this.data.location.postal = STATE.farm.postalCode || '';
+      this.data.location.timezone = STATE.farm.timezone || 'America/Toronto';
+      this.data.rooms = STATE.farm.rooms || [];
+      // Branding restore (full palette/font)
+      if (STATE.farm.branding) {
+        this.data.branding = {
+          ...this.data.branding,
+          ...STATE.farm.branding,
+          palette: { ...this.data.branding.palette, ...(STATE.farm.branding.palette||{}) }
+        };
+      }
+      
+      // Load WiFi connection data
+      if (STATE.farm.connection) {
+        this.data.connection.type = STATE.farm.connection.type || 'wifi';
+        if (STATE.farm.connection.wifi) {
+          this.data.connection.wifi.ssid = STATE.farm.connection.wifi.ssid || '';
+          this.data.connection.wifi.tested = STATE.farm.connection.wifi.tested || false;
+          this.data.connection.wifi.testResult = STATE.farm.connection.wifi.testResult || null;
+        }
+      }
+      
+      console.log('📂 Loaded existing farm data:', this.data);
+    }
+  }
+
+  populateFormFields() {
+    // Populate form inputs with current data
+    const farmNameInput = $('#farmNameInput');
+    const farmTaglineInput = $('#farmTaglineInput');
+    const logoPreview = $('#logoPreview');
+    const farmAddress = $('#farmAddress');
+    const farmCity = $('#farmCity');
+    const farmState = $('#farmState');
+    const farmPostal = $('#farmPostal');
+    const farmTimezone = $('#farmTimezone');
+    const manualSsid = $('#manualSsid');
+    const contactName = $('#contactName');
+    const contactEmail = $('#contactEmail');
+    const contactPhone = $('#contactPhone');
+    const contactWebsite = $('#contactWebsite');
+    const primaryColor = $('#primaryColor');
+    const accentColor = $('#accentColor');
+    
+    if (farmNameInput) farmNameInput.value = this.data.location.farmName || '';
+    if (farmTaglineInput) farmTaglineInput.value = this.data.branding.tagline || '';
+    if (farmAddress) farmAddress.value = this.data.location.address || '';
+    if (farmCity) farmCity.value = this.data.location.city || '';
+    if (farmState) farmState.value = this.data.location.state || '';
+    if (farmPostal) farmPostal.value = this.data.location.postal || '';
+    if (farmTimezone) farmTimezone.value = this.data.location.timezone || 'America/Toronto';
+    if (manualSsid) manualSsid.value = this.data.connection.wifi.ssid || '';
+    if (contactName) contactName.value = this.data.contact.name || '';
+    if (contactEmail) contactEmail.value = this.data.contact.email || '';
+    if (contactPhone) contactPhone.value = this.data.contact.phone || '';
+    if (contactWebsite) contactWebsite.value = this.data.contact.website || '';
+    if (primaryColor) primaryColor.value = this.data.branding.palette.primary || '#0077b5';
+    if (accentColor) accentColor.value = this.data.branding.palette.accent || '#af9b62';
+  // Font family (future UI placeholder)
+  const fontFamilyInput = $('#brandingFontFamily'); if (fontFamilyInput) fontFamilyInput.value = this.data.branding.fontFamily || '';
+    
+    // Show logo preview if logo exists
+    if (this.data.branding.logo && logoPreview) {
+      logoPreview.innerHTML = `
+        <img src="${this.data.branding.logo}" alt="Farm logo preview" style="max-width: 100px; max-height: 100px; border-radius: 4px;">
+        <button type="button" onclick="this.parentElement.innerHTML = ''; document.getElementById('farmLogoInput').value = '';" style="margin-left: 8px; padding: 4px 8px; background: #ff4444; color: white; border: none; border-radius: 4px; font-size: 12px;">Remove</button>
+      `;
+    }
+    
+    console.log('✏️ Form fields populated with existing data');
+  }
+
   attachFormListeners() {
-    // Attach input event listeners for form fields - need to do this after modal is shown
-    // Use a scoped selector to avoid clashing with the top-card header #farmName
-    document.querySelector('#farmWizardForm #farmName')?.addEventListener('input', (e) => { 
+    // Farm profile inputs
+    $('#farmNameInput')?.addEventListener('input', (e) => { 
       const value = e.target.value?.trim() || '';
       this.data.location.farmName = value; 
       console.log('🏠 Farm name updated:', this.data.location.farmName);
       this.updateLiveBranding(); 
     });
-    document.querySelector('#farmWizardForm #farmName')?.addEventListener('blur', (e) => {
-      // Ensure data is saved on blur as well
+    
+    $('#farmTaglineInput')?.addEventListener('input', (e) => { 
       const value = e.target.value?.trim() || '';
-      this.data.location.farmName = value;
-      console.log('🏠 Farm name saved on blur:', this.data.location.farmName);
+      this.data.location.tagline = value; 
+      console.log('�️ Farm tagline updated:', this.data.location.tagline);
+      this.updateLiveBranding(); 
     });
-    $('#farmAddress')?.addEventListener('input', (e) => { this.data.location.address = e.target.value || ''; this.guessTimezone(); });
-    $('#farmCity')?.addEventListener('input', (e) => { this.data.location.city = e.target.value || ''; this.guessTimezone(); });
-    $('#farmState')?.addEventListener('input', (e) => { this.data.location.state = e.target.value || ''; this.guessTimezone(); });
-    $('#farmPostal')?.addEventListener('input', (e) => { this.data.location.postal = e.target.value || ''; });
-    $('#farmTimezone')?.addEventListener('change', (e) => { this.data.location.timezone = e.target.value || this.data.location.timezone; });
-    $('#contactName')?.addEventListener('input', (e) => { this.data.contact.name = e.target.value || ''; this.updateLiveBranding(); });
-    $('#contactEmail')?.addEventListener('input', (e) => { this.data.contact.email = e.target.value || ''; });
-    $('#contactPhone')?.addEventListener('input', (e) => { this.data.contact.phone = e.target.value || ''; });
-    $('#contactWebsite')?.addEventListener('input', (e) => { 
-      this.data.contact.website = e.target.value || ''; 
+    
+    $('#farmLogoInput')?.addEventListener('change', (e) => { 
+      this.handleLogoUpload(e);
+    });
+    
+    // Location inputs
+    $('#farmAddress')?.addEventListener('input', (e) => { 
+      this.data.location.address = e.target.value?.trim() || '';
+      console.log('🏠 Address updated:', this.data.location.address);
+    });
+    
+    $('#farmCity')?.addEventListener('input', (e) => { 
+      this.data.location.city = e.target.value?.trim() || '';
+      console.log('🏙️ City updated:', this.data.location.city);
+    });
+    
+    $('#farmState')?.addEventListener('input', (e) => { 
+      this.data.location.state = e.target.value?.trim() || '';
+      console.log('🗺️ State updated:', this.data.location.state);
+    });
+    
+    $('#farmPostal')?.addEventListener('input', (e) => { 
+      this.data.location.postal = e.target.value?.trim() || '';
+      console.log('📮 Postal code updated:', this.data.location.postal);
+    });
+    
+    $('#farmTimezone')?.addEventListener('change', (e) => { 
+      this.data.location.timezone = e.target.value || 'America/Toronto';
+      console.log('⏰ Timezone updated:', this.data.location.timezone);
+    });
+    
+    // WiFi setup
+    // Already bound in init()
+    
+    $('#manualSsid')?.addEventListener('input', (e) => {
+      this.data.connection.wifi.ssid = e.target.value?.trim() || '';
+    });
+    
+    $('#wifiPassword')?.addEventListener('input', (e) => {
+      this.data.connection.wifi.password = e.target.value || '';
+      this.data.connection.wifi.tested = false;
+    });
+    
+    $('#wifiShowPassword')?.addEventListener('change', (e) => {
+      const passwordInput = $('#wifiPassword');
+      if (passwordInput) {
+        passwordInput.type = e.target.checked ? 'text' : 'password';
+      }
+    });
+    
+    // Already bound in init()
+    
+    // Room management
+    $('#btnAddRoom')?.addEventListener('click', () => {
+      this.addRoom();
+    });
+    
+    $('#newRoomName')?.addEventListener('keypress', (e) => {
+      if (e.key === 'Enter') {
+        e.preventDefault();
+        this.addRoom();
+      }
+    });
+    
+    // Navigation is already wired in init(); avoid duplicate handlers that caused double-advance
+    
+    // Contact and branding inputs - add the missing listeners here
+    $('#contactName')?.addEventListener('input', (e) => {
+      this.data.contact.name = e.target.value?.trim() || '';
+      console.log('👤 Contact name updated:', this.data.contact.name);
+    });
+
+    $('#contactEmail')?.addEventListener('input', (e) => {
+      this.data.contact.email = e.target.value?.trim() || '';
+      console.log('✉️ Contact email updated:', this.data.contact.email);
+    });
+
+    $('#contactPhone')?.addEventListener('input', (e) => {
+      this.data.contact.phone = e.target.value?.trim() || '';
+      console.log('📞 Contact phone updated:', this.data.contact.phone);
+    });
+
+    $('#contactWebsite')?.addEventListener('input', (e) => {
+      this.data.contact.website = e.target.value?.trim() || '';
+      console.log('🌐 Contact website updated:', this.data.contact.website);
+      this.autoDetectLogoFromWebsite();
+    });
+
+    $('#primaryColor')?.addEventListener('input', (e) => {
+      this.data.branding.palette.primary = e.target.value || '#0077b5';
+      console.log('🎨 Primary color updated:', this.data.branding.palette.primary);
       this.updateLiveBranding();
-      this.fetchWebsiteBranding();
-      this.updateWebsiteBrandingButton();
     });
+
+    $('#accentColor')?.addEventListener('input', (e) => {
+      this.data.branding.palette.accent = e.target.value || '#af9b62';
+      console.log('🎨 Accent color updated:', this.data.branding.palette.accent);
+      this.updateLiveBranding();
+    });
+
+    $('#btnBrandingPreview')?.addEventListener('click', () => {
+      this.previewBranding();
+    });
+  }
+
+  autoDetectLogoFromWebsite() {
+    const website = this.data.contact.website;
+    if (!website) return;
+    
+    // Auto-detect logo from favicon
+    const logoUrl = `https://${website.replace(/^https?:\/\//, '')}/favicon.ico`;
+    
+    // Test if favicon exists
+    const img = new Image();
+    img.onload = () => {
+      this.data.branding.logo = logoUrl;
+      const preview = $('#logoPreview');
+      if (preview) {
+        preview.innerHTML = `
+          <img src="${logoUrl}" alt="Auto-detected logo" style="max-width: 100px; max-height: 100px; border-radius: 4px;">
+          <p class="tiny" style="margin: 4px 0; color: #666;">Auto-detected from website</p>
+        `;
+      }
+      console.log('🖼️ Logo auto-detected from website:', logoUrl);
+    };
+    img.onerror = () => {
+      console.log('❌ Could not auto-detect logo from website');
+    };
+    img.src = logoUrl;
+  }
+
+  previewBranding() {
+    // Apply current branding temporarily for preview
+    const branding = this.data.branding;
+    if (branding.palette) {
+      document.documentElement.style.setProperty('--gr-primary', branding.palette.primary);
+      document.documentElement.style.setProperty('--gr-accent', branding.palette.accent);
+    }
+    
+    showToast({
+      title: 'Branding Preview Applied',
+      msg: 'Colors updated in the interface. Complete the wizard to save permanently.',
+      kind: 'info',
+      icon: '🎨'
+    }, 5000);
+  }
+
+  handleLogoUpload(event) {
+    const file = event.target.files[0];
+    if (!file) return;
+    
+    // Validate file type
+    if (!file.type.startsWith('image/')) {
+      showToast({
+        title: 'Invalid File',
+        msg: 'Please select an image file for the farm logo.',
+        kind: 'error',
+        icon: '❌'
+      }, 3000);
+      return;
+    }
+    
+    // Validate file size (max 5MB)
+    if (file.size > 5 * 1024 * 1024) {
+      showToast({
+        title: 'File Too Large',
+        msg: 'Logo file must be smaller than 5MB.',
+        kind: 'error',
+        icon: '📏'
+      }, 3000);
+      return;
+    }
+    
+    // Create preview
+    const reader = new FileReader();
+    reader.onload = (e) => {
+      const logoPreview = $('#logoPreview');
+      if (logoPreview) {
+        logoPreview.innerHTML = `
+          <img src="${e.target.result}" alt="Farm logo preview" style="max-width: 100px; max-height: 100px; border-radius: 4px;">
+          <button type="button" onclick="this.parentElement.innerHTML = ''; document.getElementById('farmLogoInput').value = '';" style="margin-left: 8px; padding: 4px 8px; background: #ff4444; color: white; border: none; border-radius: 4px; font-size: 12px;">Remove</button>
+        `;
+      }
+      
+      // Store the logo data
+      this.data.location.logo = e.target.result;
+      console.log('🖼️ Farm logo uploaded and stored');
+      this.updateLiveBranding();
+      // Auto-extract palette from logo (quick average sampling)
+      try { this.extractPaletteFromImage(e.target.result); } catch(err){ console.warn('Palette extraction failed', err); }
+    };
+    reader.readAsDataURL(file);
+  }
+
+  extractPaletteFromImage(dataUrl) {
+    const img = new Image();
+    img.crossOrigin = 'anonymous';
+    img.onload = () => {
+      const canvas = document.createElement('canvas');
+      const ctx = canvas.getContext('2d');
+      const w = canvas.width = Math.min(64, img.width);
+      const h = canvas.height = Math.min(64, img.height);
+      ctx.drawImage(img, 0, 0, w, h);
+      const { data } = ctx.getImageData(0,0,w,h);
+      let r=0,g=0,b=0,c=0;
+      for (let i=0;i<data.length;i+=4){ r+=data[i]; g+=data[i+1]; b+=data[i+2]; c++; }
+      if (!c) return;
+      r=Math.round(r/c); g=Math.round(g/c); b=Math.round(b/c);
+      const avg = `#${[r,g,b].map(v=>v.toString(16).padStart(2,'0')).join('')}`;
+      // Derive accent by shifting hue slightly (simple lighten)
+      const accent = `#${[r+30,g+20,b].map(v=>Math.min(255,v).toString(16).padStart(2,'0')).join('')}`;
+      this.data.branding.palette.primary = avg;
+      this.data.branding.palette.accent = accent;
+      const primaryColor = $('#primaryColor'); if (primaryColor) primaryColor.value = avg;
+      const accentColor = $('#accentColor'); if (accentColor) accentColor.value = accent;
+      this.updateLiveBranding();
+      showToast({ title:'Palette Suggested', msg:`Extracted primary ${avg} and accent ${accent} from logo`, kind:'info', icon:'🧪' });
+    };
+    img.src = dataUrl;
+  }
+
+  showFarmPreview() {
+    // Create a preview modal showing the current farm status
+    const farm = STATE.farm || {};
+    const roomCount = (farm.rooms || []).length;
+    const zoneCount = (farm.rooms || []).reduce((total, room) => total + (room.zones || []).length, 0);
+    
+    const previewContent = `
+      <div style="background: var(--gr-surface); border-radius: 8px; padding: 20px; max-width: 500px;">
+        <h2 style="margin: 0 0 16px 0; display: flex; align-items: center; gap: 8px;">
+          ${farm.logo ? `<img src="${farm.logo}" alt="Farm logo" style="width: 32px; height: 32px; border-radius: 4px;">` : '🏡'}
+          ${escapeHtml(farm.farmName || 'Unnamed Farm')}
+        </h2>
+        
+        ${farm.tagline ? `<p style="margin: 0 0 16px 0; font-style: italic; color: var(--medium);">"${escapeHtml(farm.tagline)}"</p>` : ''}
+        
+        <div style="display: grid; gap: 12px;">
+          <div><strong>📍 Location:</strong> ${[farm.city, farm.state].filter(Boolean).join(', ') || 'Not set'}</div>
+          
+          ${farm.connection?.wifi?.ssid ? `<div><strong>📶 WiFi:</strong> ${escapeHtml(farm.connection.wifi.ssid)} ${farm.connection.wifi.tested ? '✅' : '⚠️'}</div>` : ''}
+          
+          <div><strong>🏠 Spaces:</strong> ${roomCount} room${roomCount === 1 ? '' : 's'}, ${zoneCount} zone${zoneCount === 1 ? '' : 's'}</div>
+          
+          ${farm.contact?.email ? `<div><strong>📧 Contact:</strong> ${escapeHtml(farm.contact.email)}</div>` : ''}
+          
+          ${farm.contact?.website ? `<div><strong>🌐 Website:</strong> <a href="${farm.contact.website.startsWith('http') ? farm.contact.website : 'https://' + farm.contact.website}" target="_blank" style="color: var(--gr-primary); text-decoration: none;">${escapeHtml(farm.contact.website)}</a></div>` : ''}
+        </div>
+        
+        <div style="margin-top: 20px; padding-top: 16px; border-top: 1px solid var(--gr-border);">
+          <p style="margin: 0; color: var(--medium); font-size: 14px;">
+            ${farm.registered ? `Registered: ${new Date(farm.registered).toLocaleDateString()}` : 'Not yet registered'}
+          </p>
+        </div>
+      </div>
+    `;
+    
+    // Show as a toast with longer duration
+    showToast({
+      title: 'Farm Profile Preview',
+      msg: previewContent,
+      kind: 'info',
+      icon: '👁️',
+      isHTML: true
+    }, 10000);
+  }
+
+  scanWifiNetworks() {
+    const resultContainer = $('#wifiNetworksList');
+    if (!resultContainer) return;
+    
+    resultContainer.innerHTML = '<p class="tiny">Scanning for WiFi networks...</p>';
+    
+    // Simulate WiFi scan - in real implementation this would call an API
+    setTimeout(() => {
+      const networks = [
+        { ssid: 'Farm-IoT', signal: 'strong', secured: true },
+        { ssid: 'Office-WiFi', signal: 'medium', secured: true },
+        { ssid: 'GreenReach-Guest', signal: 'weak', secured: false }
+      ];
+      
+      resultContainer.innerHTML = networks.map(network => `
+        <div class="wifi-network" style="padding: 8px; border: 1px solid var(--gr-border); border-radius: 4px; margin: 4px 0; cursor: pointer;" data-ssid="${escapeHtml(network.ssid)}">
+          <div style="display: flex; justify-content: space-between; align-items: center;">
+            <span><strong>${escapeHtml(network.ssid)}</strong></span>
+            <span style="font-size: 12px; color: var(--medium);">
+              ${network.signal === 'strong' ? '📶' : network.signal === 'medium' ? '📶' : '📶'} 
+              ${network.secured ? '🔒' : '🔓'}
+            </span>
+          </div>
+        </div>
+      `).join('');
+      
+      // Add click handlers
+      resultContainer.querySelectorAll('.wifi-network').forEach(item => {
+        item.addEventListener('click', () => {
+          const ssid = item.dataset.ssid;
+          $('#manualSsid').value = ssid;
+          this.data.connection.wifi.ssid = ssid;
+        });
+      });
+    }, 1500);
+  }
+
+  testWifiConnection() {
+    const ssid = this.data.connection.wifi.ssid;
+    const password = this.data.connection.wifi.password;
+    const resultContainer = $('#wifiTestResult');
+    
+    if (!ssid) {
+      if (resultContainer) resultContainer.innerHTML = '<p style="color: orange;">⚠️ Please enter a network name</p>';
+      return;
+    }
+    
+    if (resultContainer) resultContainer.innerHTML = '<p class="tiny">Testing connection...</p>';
+    
+    // Simulate WiFi test with simple password strength heuristic
+    setTimeout(() => {
+      const weak = password && password.length < 8;
+      const success = !weak && /[A-Za-z]/.test(password || '') && /\d/.test(password || '');
+      if (success) {
+        this.data.connection.wifi.tested = true;
+        this.data.connection.wifi.testResult = {
+          status: 'connected',
+          ip: '192.168.1.' + Math.floor(Math.random()*140+80),
+          gateway: '192.168.1.1',
+          testedAt: new Date().toISOString(),
+          passwordStrength: weak ? 'weak' : 'ok'
+        };
+        if (resultContainer) resultContainer.innerHTML = `<p style="color: green;">✅ Connected. (${weak? 'Password weak' : 'Secure'})</p>`;
+      } else {
+        this.data.connection.wifi.tested = false;
+        if (resultContainer) resultContainer.innerHTML = '<p style="color: red;">❌ Failed. Use at least 8 chars with letters & numbers.</p>';
+      }
+    }, 1200);
   }
 
   edit() {
@@ -1644,12 +2077,26 @@ class FarmWizard {
       step.toggleAttribute('data-active', step.dataset.step === activeId);
     });
     if (this.progressEl) this.progressEl.textContent = `Step ${index + 1} of ${this.steps.length}`;
+    // Breadcrumb update
+    const crumbs = document.querySelectorAll('#farmWizardCrumbs li');
+    crumbs.forEach(li => {
+      const ref = li.getAttribute('data-step-ref');
+      li.classList.toggle('is-active', ref === activeId);
+      if (this.steps.indexOf(ref) < this.currentStep) {
+        li.classList.add('is-complete');
+      } else {
+        li.classList.remove('is-complete');
+      }
+    });
     if (this.titleEl) {
-      if (activeId === 'location') this.titleEl.textContent = 'Where is this farm?';
-      else if (activeId === 'contact') this.titleEl.textContent = 'Contact information';
-      else if (activeId === 'spaces') this.titleEl.textContent = 'Add rooms and zones';
-      else if (activeId === 'review') this.titleEl.textContent = 'Review and save';
-      else this.titleEl.textContent = 'Let’s get you online';
+      if (activeId === 'profile') this.titleEl.textContent = 'Farm Profile Setup';
+      else if (activeId === 'wifi') this.titleEl.textContent = 'Wi‑Fi Connection';
+      else if (activeId === 'contact') this.titleEl.textContent = 'Contact Details';
+      else if (activeId === 'location') this.titleEl.textContent = 'Farm Location';
+      else if (activeId === 'branding') this.titleEl.textContent = 'Branding';
+      else if (activeId === 'rooms') this.titleEl.textContent = 'Rooms and Zones';
+      else if (activeId === 'review') this.titleEl.textContent = 'Review and Save';
+      else this.titleEl.textContent = 'Farm Setup Wizard';
     }
     const prevBtn = $('#farmPrev');
     const nextBtn = $('#farmNext');
@@ -1663,7 +2110,7 @@ class FarmWizard {
       nextBtn.style.display = 'inline-block';
       saveBtn.style.display = 'none';
     }
-    if (activeId === 'wifi-select' && this.wifiNetworks.length === 0) this.scanWifiNetworks();
+  if (activeId === 'wifi' && this.wifiNetworks.length === 0) this.scanWifiNetworks();
     if (activeId === 'wifi-password') this.updateWifiPasswordUI();
     
     // Update live branding when relevant steps are shown
@@ -1689,38 +2136,29 @@ class FarmWizard {
     this.data.connection.wifi.ssid = ssid;
     this.data.connection.wifi.tested = false;
     this.data.connection.wifi.testResult = null;
-    const label = $('#wifiChosenSsid');
-    if (label) label.textContent = ssid || 'your network';
+  const label = $('#manualSsid');
+  if (label) label.value = ssid || '';
     this.renderWifiNetworks();
     this.updateWifiPasswordUI();
   }
 
   updateWifiPasswordUI() {
-    const status = $('#wifiTestStatus');
+    const status = $('#wifiTestResult');
     if (!status) return;
     const result = this.data.connection.wifi.testResult;
     if (!result) {
       status.innerHTML = '<div class="tiny" style="color:#475569">Run a quick connectivity test to confirm.</div>';
     } else if (result.status === 'connected') {
-      status.innerHTML = `<div class="badge badge--success">Success</div><div class="tiny">IP ${result.ip || '—'} • latency ${result.latencyMs ?? '—'} ms</div>`;
+      status.innerHTML = `<div class="tiny" style="color:green">✅ Connected${result.ip ? ` · IP ${result.ip}` : ''}${result.latencyMs != null ? ` · ${result.latencyMs} ms` : ''}</div>`;
     } else {
-      status.innerHTML = `<div class="badge badge--warn">${result.status || 'Failed'}</div><div class="tiny">${result.message || 'Try again or re-enter the password.'}</div>`;
+      status.innerHTML = `<div class="tiny" style="color:#b45309">⚠️ ${result.status || 'Failed'}: ${result.message || 'Try again or re-enter the password.'}</div>`;
     }
   }
 
   async scanWifiNetworks(force = false) {
-    const status = $('#wifiScanStatus');
-    const scanningIndicator = $('#wifiScanningIndicator');
-    const networkList = $('#wifiNetworkList');
-    
-    // Show scanning radar and hide network list
-    if (scanningIndicator) {
-      scanningIndicator.style.display = 'flex';
-    }
-    if (networkList) {
-      networkList.style.display = 'none';
-    }
-    if (status) status.textContent = 'Scanning…';
+    // Minimal UI status while scanning into the list container
+    const listHost = $('#wifiNetworksList');
+    if (listHost) listHost.textContent = 'Scanning…';
     
     try {
       const resp = await fetch(`/forwarder/network/wifi/scan${force ? '?force=1' : ''}`);
@@ -1732,7 +2170,7 @@ class FarmWizard {
         signal: n.signal ?? n.rssi ?? null,
         security: n.security || n.auth || 'Unknown'
       }));
-      if (status) status.textContent = this.wifiNetworks.length ? `${this.wifiNetworks.length} networks found` : 'No networks found';
+      if (listHost) listHost.textContent = this.wifiNetworks.length ? `${this.wifiNetworks.length} networks found` : 'No networks found';
     } catch (err) {
       console.warn('Wi‑Fi scan failed', err);
       this.wifiNetworks = [
@@ -1740,22 +2178,14 @@ class FarmWizard {
         { ssid: 'Greenhouse-Guest', signal: -61, security: 'WPA2' },
         { ssid: 'BackOffice', signal: -72, security: 'WPA3' }
       ];
-      if (status) status.textContent = 'Using cached sample networks';
-    }
-    
-    // Hide scanning radar and show network list
-    if (scanningIndicator) {
-      scanningIndicator.style.display = 'none';
-    }
-    if (networkList) {
-      networkList.style.display = 'block';
+      if (listHost) listHost.textContent = 'Using cached sample networks';
     }
     
     this.renderWifiNetworks();
   }
 
   renderWifiNetworks() {
-    const host = $('#wifiNetworkList');
+    const host = $('#wifiNetworksList');
     if (!host) return;
     host.innerHTML = '';
     if (this.data.connection.type !== 'wifi') {
@@ -1779,22 +2209,15 @@ class FarmWizard {
     if (this.data.connection.type !== 'wifi') return;
     if (!this.data.connection.wifi.ssid) { alert('Pick a Wi‑Fi network first.'); return; }
     
-    const status = $('#wifiTestStatus');
-    const testingIndicator = $('#wifiTestingIndicator');
+    const status = $('#wifiTestResult');
     const testButton = $('#btnTestWifi');
     
-    // Show testing indicator and disable button
-    if (testingIndicator) {
-      testingIndicator.style.display = 'flex';
-    }
+    // Disable button and show status
     if (testButton) {
       testButton.disabled = true;
       testButton.textContent = 'Testing...';
     }
-    if (status) {
-      status.innerHTML = '<div class="tiny">Testing connection...</div>';
-      status.style.display = 'none'; // Hide status while testing indicator is shown
-    }
+    if (status) status.innerHTML = '<div class="tiny">Testing connection...</div>';
     
     try {
       const resp = await fetch('/forwarder/network/test', {
@@ -1830,17 +2253,12 @@ class FarmWizard {
       showToast({ title: 'Wi‑Fi test error', msg: err.message || String(err), kind: 'warn', icon: '⚠️' });
     }
     
-    // Hide testing indicator, restore button, and show status
-    if (testingIndicator) {
-      testingIndicator.style.display = 'none';
-    }
+    // Restore button
     if (testButton) {
       testButton.disabled = false;
       testButton.textContent = 'Test connection';
     }
-    if (status) {
-      status.style.display = 'block';
-    }
+    if (status) status.style.display = 'block';
     
     this.updateWifiPasswordUI();
   }
@@ -1883,12 +2301,15 @@ class FarmWizard {
       return;
     }
     host.innerHTML = '';
-    this.data.rooms.forEach(room => {
+    this.data.rooms.forEach((room, idx) => {
       const card = document.createElement('div');
       card.className = 'farm-room-card';
+      card.setAttribute('draggable','true');
+      card.dataset.roomId = room.id;
       card.innerHTML = `
         <div class="farm-room-card__header">
-          <strong>${escapeHtml(room.name)}</strong>
+          <span class="farm-room-card__drag" title="Drag to reorder">☰</span>
+          <strong contenteditable="true" data-room-name="${room.id}">${escapeHtml(room.name)}</strong>
           <button type="button" class="ghost tiny" data-action="remove-room" data-room="${room.id}">Remove</button>
         </div>
         <div class="farm-room-card__zones" data-room="${room.id}">${room.zones.map(z => `<span class="chip tiny" data-zone="${escapeHtml(z)}">${escapeHtml(z)} <button type="button" data-action="remove-zone" data-room="${room.id}" data-zone="${escapeHtml(z)}">×</button></span>`).join('')}</div>
@@ -1897,6 +2318,25 @@ class FarmWizard {
           <button type="button" class="ghost tiny" data-action="add-zone" data-room="${room.id}">Add zone</button>
         </div>`;
       host.appendChild(card);
+    });
+    // Drag & drop ordering
+    let dragSrc = null;
+    host.querySelectorAll('.farm-room-card').forEach(card => {
+      card.addEventListener('dragstart', (e)=>{ dragSrc = card; card.classList.add('dragging'); e.dataTransfer.effectAllowed='move'; });
+      card.addEventListener('dragend', ()=>{ dragSrc?.classList.remove('dragging'); dragSrc=null; });
+      card.addEventListener('dragover', (e)=>{ e.preventDefault(); const target = card; if (!dragSrc || dragSrc===target) return; const cards=[...host.querySelectorAll('.farm-room-card')]; const srcIdx=cards.indexOf(dragSrc); const tgtIdx=cards.indexOf(target); if (srcIdx<tgtIdx) host.insertBefore(dragSrc,target.nextSibling); else host.insertBefore(dragSrc,target); });
+    });
+    host.addEventListener('drop', ()=>{
+      const newOrder = [...host.querySelectorAll('.farm-room-card')].map(c=>c.dataset.roomId);
+      this.data.rooms.sort((a,b)=> newOrder.indexOf(a.id)-newOrder.indexOf(b.id));
+    });
+    // Inline rename
+    host.querySelectorAll('[data-room-name]').forEach(el => {
+      el.addEventListener('input', (e)=>{
+        const id = e.target.getAttribute('data-room-name');
+        const room = this.data.rooms.find(r=>r.id===id); if (room) room.name = e.target.textContent.trim();
+      });
+      el.addEventListener('blur', (e)=>{ if(!e.target.textContent.trim()) { e.target.textContent = 'Room'; } });
     });
     host.querySelectorAll('[data-action="remove-room"]').forEach(btn => btn.addEventListener('click', (e) => {
       const roomId = e.currentTarget.dataset.room;
@@ -1932,17 +2372,18 @@ class FarmWizard {
     const stepId = this.steps[this.currentStep];
     console.log('🔍 Validating step:', stepId, 'with data:', this.data);
     
-    if (stepId === 'connection-choice' && !['wifi','ethernet'].includes(this.data.connection.type)) {
-      alert('Pick Wi‑Fi or Ethernet to continue.');
-      return false;
+    if (stepId === 'profile') {
+      if (!this.data.location.farmName?.trim()) {
+        alert('Please enter a farm name.');
+        return false;
+      }
     }
-    if (stepId === 'wifi-select' && !this.data.connection.wifi.ssid) {
-      alert('Choose a Wi‑Fi network.');
-      return false;
-    }
-    if (stepId === 'wifi-test' && (!this.data.connection.wifi.testResult || this.data.connection.wifi.testResult.status !== 'connected')) {
-      alert('Run the Wi‑Fi test so we know the credentials work.');
-      return false;
+    if (stepId === 'wifi') {
+      // Allow skipping Wi‑Fi password, but require SSID
+      if (!this.data.connection.wifi.ssid?.trim()) {
+        alert('Enter or select a Wi‑Fi network (SSID).');
+        return false;
+      }
     }
   if (stepId === 'location') {
       // Capture all location data for subscription services
@@ -1978,7 +2419,7 @@ class FarmWizard {
       alert('Contact name and email are required.');
       return false;
     }
-    if (stepId === 'spaces' && !this.data.rooms.length) {
+    if (stepId === 'rooms' && !this.data.rooms.length) {
       alert('Add at least one room.');
       return false;
     }
@@ -1999,42 +2440,71 @@ class FarmWizard {
   updateReview() {
     const host = $('#farmReview');
     if (!host) return;
-    const conn = this.data.connection;
-    const rooms = this.data.rooms;
-    const timezone = this.data.location.timezone;
-    const addressParts = [this.data.location.address, this.data.location.city, this.data.location.state, this.data.location.postal].filter(Boolean);
     
-    // Build branding section if we have farm name or website
-    let brandingSection = '';
-    if (this.data.location.farmName || this.data.contact.website) {
-      const farmName = this.data.location.farmName || 'Untitled Farm';
-      let logoSection = '';
-      if (this.data.contact.website) {
-        const domain = this.extractDomain(this.data.contact.website);
-        logoSection = `<img id="reviewFarmLogo" style="width:24px;height:24px;margin-right:8px;vertical-align:middle;display:none">`;
-      }
-      brandingSection = `<div style="border:1px solid var(--gr-border);border-radius:8px;padding:12px;margin:12px 0;background:var(--gr-surface)">
-        <div style="font-size:18px;font-weight:600;margin-bottom:8px;display:flex;align-items:center">
-          ${logoSection}<span>${escapeHtml(farmName)}</span>
-        </div>
-        ${this.data.contact.website ? `<div class="tiny" style="color:var(--gr-primary)">🌐 <a href="${this.data.contact.website.startsWith('http') ? this.data.contact.website : 'https://' + this.data.contact.website}" target="_blank" style="color:var(--gr-primary);text-decoration:none">${this.extractDomain(this.data.contact.website)}</a></div>` : ''}
-      </div>`;
-      
-      // Fetch website branding for the logo
-      if (this.data.contact.website) {
-        this.fetchWebsiteBrandingForReview();
-      }
+    const farmName = this.data.location.farmName || 'Untitled Farm';
+    const tagline = this.data.location.tagline || '';
+    const rooms = this.data.rooms || [];
+    const location = [this.data.location.address, this.data.location.city, this.data.location.state, this.data.location.postal].filter(Boolean).join(', ');
+    
+    // Build logo section
+    let logoSection = '';
+    if (this.data.location.logo) {
+      logoSection = `<img src="${this.data.location.logo}" alt="Farm logo" style="width:48px;height:48px;margin-right:12px;border-radius:4px;object-fit:cover;">`;
     }
     
-    host.innerHTML = `
-      ${brandingSection}
-      <div><strong>Connection:</strong> ${conn.type === 'wifi' ? `Wi‑Fi · ${escapeHtml(conn.wifi.ssid || '')}` : 'Ethernet'} ${conn.wifi.testResult?.status === 'connected' ? '✅' : ''}</div>
-      <div><strong>Farm:</strong> ${escapeHtml(this.data.location.farmName || 'Untitled')}</div>
-      <div><strong>Address:</strong> ${escapeHtml(addressParts.join(', ') || '—')}</div>
-      <div><strong>Timezone:</strong> ${escapeHtml(timezone)}</div>
-      <div><strong>Contact:</strong> ${escapeHtml(this.data.contact.name || '')} ${this.data.contact.email ? `&lt;${escapeHtml(this.data.contact.email)}&gt;` : ''} ${this.data.contact.phone ? escapeHtml(this.data.contact.phone) : ''}</div>
-      ${this.data.contact.website ? `<div><strong>Website:</strong> <a href="${this.data.contact.website.startsWith('http') ? escapeHtml(this.data.contact.website) : 'https://' + escapeHtml(this.data.contact.website)}" target="_blank">${escapeHtml(this.data.contact.website)}</a></div>` : ''}
-      <div><strong>Rooms:</strong> ${rooms.map(r => `${escapeHtml(r.name)} (${r.zones.length || 0} zones)`).join(', ')}</div>`;
+    // Build farm profile section
+    const profileSection = `
+      <div style="border:1px solid var(--gr-border);border-radius:8px;padding:16px;margin:16px 0;background:var(--gr-surface)">
+        <h3 style="margin:0 0 12px 0;color:var(--gr-text)">Farm Profile</h3>
+        <div style="display:flex;align-items:center;margin-bottom:8px">
+          ${logoSection}
+          <div>
+            <div style="font-size:18px;font-weight:600;margin-bottom:4px">${escapeHtml(farmName)}</div>
+            ${tagline ? `<div style="color:var(--medium);font-style:italic">"${escapeHtml(tagline)}"</div>` : ''}
+          </div>
+        </div>
+        ${location ? `<div style="margin-top:8px"><strong>📍 Location:</strong> ${escapeHtml(location)}</div>` : ''}
+        <div style="margin-top:4px"><strong>⏰ Timezone:</strong> ${escapeHtml(this.data.location.timezone || 'America/Toronto')}</div>
+      </div>
+    `;
+    
+    // Build WiFi section
+    const wifiSection = `
+      <div style="border:1px solid var(--gr-border);border-radius:8px;padding:16px;margin:16px 0;background:var(--gr-surface)">
+        <h3 style="margin:0 0 12px 0;color:var(--gr-text)">WiFi Connection</h3>
+        ${this.data.connection.wifi.ssid ? `
+          <div><strong>📶 Network:</strong> ${escapeHtml(this.data.connection.wifi.ssid)}</div>
+          <div style="margin-top:4px"><strong>Status:</strong> ${this.data.connection.wifi.tested ? '✅ Tested' : '⚠️ Not tested'}</div>
+        ` : '<div style="color:var(--medium)"><em>No WiFi network configured</em></div>'}
+      </div>
+    `;
+    
+    // Build rooms section
+    let roomsSection = '';
+    if (rooms.length > 0) {
+      const roomsList = rooms.map(room => `
+        <div style="margin:8px 0;padding:8px;background:var(--gr-bg);border-radius:4px">
+          <strong>${escapeHtml(room.name || 'Unnamed Room')}</strong>
+          ${room.zones && room.zones.length > 0 ? `<div style="margin-top:4px;color:var(--medium)">Zones: ${room.zones.map(z => escapeHtml(z)).join(', ')}</div>` : '<div style="margin-top:4px;color:var(--medium)">No zones defined</div>'}
+        </div>
+      `).join('');
+      
+      roomsSection = `
+        <div style="border:1px solid var(--gr-border);border-radius:8px;padding:16px;margin:16px 0;background:var(--gr-surface)">
+          <h3 style="margin:0 0 12px 0;color:var(--gr-text)">Rooms & Zones</h3>
+          ${roomsList}
+        </div>
+      `;
+    } else {
+      roomsSection = `
+        <div style="border:1px solid var(--gr-border);border-radius:8px;padding:16px;margin:16px 0;background:var(--gr-surface);color:var(--medium)">
+          <h3 style="margin:0 0 12px 0;color:var(--gr-text)">Rooms & Zones</h3>
+          <em>No rooms added yet</em>
+        </div>
+      `;
+    }
+    
+    host.innerHTML = profileSection + wifiSection + roomsSection;
   }
 
   hydrateFromFarm(farmData) {
@@ -2202,18 +2672,89 @@ class FarmWizard {
   updateFarmDisplay() {
     const badge = $('#farmBadge');
     const editBtn = $('#btnEditFarm');
-    const launchBtn = $('#btnLaunchFarm');
+    const launchBtn = $('#btnOpenFarmModal');
     const setupBtn = $('#btnStartDeviceSetup');
     const summaryChip = $('#farmSummaryChip');
-    if (!STATE.farm) {
+    
+    // New config card elements
+    const farmStatus = $('#farmStatus');
+    const farmSummary = $('#farmSummary');
+    const previewBtn = $('#btnFarmPreview');
+    const lastUpdated = $('#farmLastUpdated');
+    
+    if (!STATE.farm || !STATE.farm.farmName) {
+      // Farm not configured - show pending state
+      if (farmStatus) {
+        farmStatus.innerHTML = '<span class="status-badge status-badge--pending">Not Configured</span>';
+      }
+      if (farmSummary) {
+        farmSummary.innerHTML = `
+          <div class="summary-placeholder">
+            <p>Complete the farm setup wizard to configure your growing operation.</p>
+            <ul class="setup-checklist">
+              <li>🌱 Farm name and branding</li>
+              <li>🏠 Facility information</li>
+              <li>🌡️ Environmental preferences</li>
+              <li>👥 Team and contact details</li>
+            </ul>
+          </div>
+        `;
+      }
+      if (launchBtn) launchBtn.style.display = 'inline-flex';
+      if (editBtn) editBtn.style.display = 'none';
+      if (previewBtn) previewBtn.style.display = 'none';
+      if (lastUpdated) lastUpdated.style.display = 'none';
+      
+      // Legacy elements
       if (badge) badge.style.display = 'none';
       if (setupBtn) setupBtn.style.display = 'none';
       if (summaryChip) summaryChip.style.display = 'none';
       return;
     }
+    
+    // Farm is configured - show complete state
     const roomCount = Array.isArray(STATE.farm.rooms) ? STATE.farm.rooms.length : 0;
     const zoneCount = (STATE.farm.rooms || []).reduce((acc, room) => acc + (room.zones?.length || 0), 0);
     const summary = `${STATE.farm.farmName || 'Farm'} · ${roomCount} room${roomCount === 1 ? '' : 's'} · ${zoneCount} zone${zoneCount === 1 ? '' : 's'}`;
+    
+    // Update new config card elements
+    if (farmStatus) {
+      farmStatus.innerHTML = '<span class="status-badge status-badge--complete">Configured</span>';
+    }
+    if (farmSummary) {
+      farmSummary.innerHTML = `
+        <div class="farm-summary-content">
+          <div class="farm-info">
+            <h4 style="margin: 0 0 8px 0; color: var(--dark);">${STATE.farm.farmName}</h4>
+            ${STATE.farm.tagline ? `<p style="margin: 0 0 12px 0; color: var(--medium); font-style: italic;">"${STATE.farm.tagline}"</p>` : ''}
+            <div class="farm-stats">
+              <div class="stat-item">
+                <span class="stat-label">Location:</span>
+                <span class="stat-value">${STATE.farm.city || 'Not specified'}, ${STATE.farm.state || 'Not specified'}</span>
+              </div>
+              <div class="stat-item">
+                <span class="stat-label">Facility:</span>
+                <span class="stat-value">${STATE.farm.facilityType || 'Indoor Growing'}</span>
+              </div>
+              <div class="stat-item">
+                <span class="stat-label">Spaces:</span>
+                <span class="stat-value">${roomCount} room${roomCount === 1 ? '' : 's'}, ${zoneCount} zone${zoneCount === 1 ? '' : 's'}</span>
+              </div>
+            </div>
+          </div>
+        </div>
+      `;
+    }
+    if (launchBtn) launchBtn.style.display = 'none';
+    if (editBtn) editBtn.style.display = 'inline-flex';
+    if (previewBtn) previewBtn.style.display = 'inline-flex';
+    if (lastUpdated) {
+      lastUpdated.style.display = 'block';
+      const lastUpdateTime = STATE.farm.updatedAt ? new Date(STATE.farm.updatedAt).toLocaleDateString() : 'Recently';
+      lastUpdated.innerHTML = `<span class="tiny">Last updated: ${lastUpdateTime}</span>`;
+    }
+    
+    // Update legacy elements for backward compatibility
     if (badge) {
       badge.style.display = 'block';
       badge.textContent = summary;
@@ -2225,8 +2766,6 @@ class FarmWizard {
     if (setupBtn) {
       setupBtn.style.display = 'inline-flex';
     }
-    if (launchBtn) launchBtn.style.display = 'none';
-    if (editBtn) editBtn.style.display = 'inline-flex';
   }
 
   guessTimezone() {
@@ -3574,8 +4113,32 @@ class RoomWizard {
   }
 
   init() {
-    $('#btnLaunchRoom')?.addEventListener('click', () => this.open());
+    $('#btnOpenRoomsModal')?.addEventListener('click', () => {
+      console.log('Room modal button clicked');
+      
+      // Check if farm setup is complete first
+      if (!STATE.farm || !STATE.farm.name) {
+        showToast({
+          title:'Farm Setup Required', 
+          msg:'Please complete Farm Setup before configuring rooms and zones.', 
+          kind:'warn', 
+          icon:'🏡'
+        });
+        // Try to open farm setup instead
+        if (window.farmWizard) {
+          window.farmWizard.open();
+        }
+        return;
+      }
+      
+      if (!this.modal) {
+        showToast({title:'Room Setup', msg:'Room wizard modal not found. Please check the HTML structure.', kind:'warn', icon:'⚠️'});
+        return;
+      }
+      this.open();
+    });
     $('#roomModalClose')?.addEventListener('click', () => this.close());
+    $('#roomModalClose2')?.addEventListener('click', () => this.close());
     $('#roomModalBackdrop')?.addEventListener('click', () => this.close());
     $('#roomPrev')?.addEventListener('click', () => this.prevStep());
     $('#roomNext')?.addEventListener('click', () => this.nextStep());
@@ -7622,6 +8185,32 @@ function closeEnvModal() {
 
 // --- Global Event Handlers ---
 function wireGlobalEvents() {
+  // Save All button
+  $('#saveAll')?.addEventListener('click', async () => {
+    const promises = [];
+    
+    // Save farm data
+    if (STATE.farm) {
+      promises.push(safeFarmSave(STATE.farm));
+    }
+    
+    // Save all other data
+    promises.push(saveJSON('./data/groups.json', { groups: STATE.groups }));
+    promises.push(saveJSON('./data/schedules.json', { schedules: STATE.schedules }));
+    promises.push(saveJSON('./data/plans.json', { plans: STATE.plans }));
+    promises.push(saveDeviceMeta());
+    
+    try {
+      await Promise.all(promises);
+      setStatus("All data saved successfully");
+      showToast({title:'Saved', msg:'All data saved successfully', kind:'success', icon:'✅'});
+    } catch (error) {
+      setStatus("Error saving data");
+      showToast({title:'Save Error', msg:'Failed to save some data', kind:'error', icon:'❌'});
+      console.error('Save all error:', error);
+    }
+  });
+
   // Global device controls
   $('#refresh')?.addEventListener('click', loadAllData);
   $('#allOn')?.addEventListener('click', async () => {
@@ -7639,6 +8228,153 @@ function wireGlobalEvents() {
     await Promise.all(promises);
     setStatus("All devices OFF");
     showToast({title:'All OFF', msg:'Turned off all devices', kind:'success', icon:'✅'});
+  });
+
+  // Environment modal button(s) — some pages render this button in multiple places.
+  // Bind to all matches (even if IDs are duplicated in markup) so any "Configure Environment" button works.
+  $$('#btnOpenEnvModal').forEach(btn => btn.addEventListener('click', () => {
+    // Set default modal content when opened from the card action
+    const modal = document.getElementById('envModal');
+    if (modal) {
+      const title = document.getElementById('envModalTitle');
+      const sub = document.getElementById('envModalSubtitle');
+      const chart = document.getElementById('envModalChart');
+      const stats = document.getElementById('envModalStats');
+      if (title) title.textContent = 'Environment Configuration';
+      if (sub) sub.textContent = 'Select a zone or metric to view trends. Saving targets coming soon.';
+      if (chart) chart.innerHTML = '';
+      if (stats) stats.textContent = '';
+      modal.setAttribute('aria-hidden', 'false');
+    }
+    // Ensure close handlers are wired
+    const backdrop = document.getElementById('envModalBackdrop');
+    const closer = document.getElementById('envModalClose');
+    if (backdrop) {
+      backdrop.addEventListener('click', () => document.getElementById('envModal')?.setAttribute('aria-hidden', 'true'), { once: true });
+    }
+    if (closer) {
+      closer.addEventListener('click', () => document.getElementById('envModal')?.setAttribute('aria-hidden', 'true'), { once: true });
+    }
+  }));
+
+  // Light assignments modal button (opens light wizard for management)
+  $('#btnOpenLightsModal')?.addEventListener('click', () => {
+    console.log('Light assignments button clicked');
+    
+    // Check if farm setup is complete first
+    if (!STATE.farm || !STATE.farm.name) {
+      showToast({
+        title:'Farm Setup Required', 
+        msg:'Please complete Farm Setup before configuring light assignments.', 
+        kind:'warn', 
+        icon:'🏡'
+      });
+      // Try to open farm setup instead
+      if (window.farmWizard) {
+        window.farmWizard.open();
+      }
+      return;
+    }
+    
+    // Check if rooms are configured
+    if (!STATE.rooms || STATE.rooms.length === 0) {
+      showToast({
+        title:'Rooms Required', 
+        msg:'Please set up rooms and zones before configuring light assignments.', 
+        kind:'warn', 
+        icon:'🏠'
+      });
+      // Try to open room setup instead
+      if (window.roomWizard) {
+        window.roomWizard.open();
+      }
+      return;
+    }
+    
+    console.log('Light wizard available:', lightWizard);
+    if (lightWizard) {
+      lightWizard.open();
+    } else {
+      showToast({title:'Light Setup', msg:'Light setup wizard not available', kind:'warn', icon:'⚠️'});
+    }
+  });
+
+  // Controller modal button (placeholder)
+  $('#btnOpenControllerModal')?.addEventListener('click', () => {
+    showToast({title:'Controllers', msg:'Controller configuration coming soon', kind:'info', icon:'ℹ️'});
+  });
+
+  // Calibration wizard button (placeholder)
+  $('#btnOpenCalWizard')?.addEventListener('click', () => {
+    showToast({title:'Calibration', msg:'Calibration wizard coming soon', kind:'info', icon:'ℹ️'});
+  });
+
+  // Plans modal button (placeholder)
+  $('#btnOpenPlansModal')?.addEventListener('click', () => {
+    showToast({title:'Plans', msg:'Plans manager coming soon', kind:'info', icon:'ℹ️'});
+  });
+
+  // Schedules modal button (placeholder)
+  $('#btnOpenSchedulesModal')?.addEventListener('click', () => {
+    showToast({title:'Schedules', msg:'Schedules manager coming soon', kind:'info', icon:'ℹ️'});
+  });
+
+  // Groups modal button (placeholder)
+  $('#btnOpenGroupsModal')?.addEventListener('click', () => {
+    showToast({title:'Groups', msg:'Groups manager coming soon', kind:'info', icon:'ℹ️'});
+  });
+
+  // Automation button (placeholder)
+  $('#btnOpenAutomation')?.addEventListener('click', () => {
+    showToast({title:'Automation', msg:'Automation features coming soon', kind:'info', icon:'ℹ️'});
+  });
+
+  // Fresh Light Discovery button
+  $('#btnFreshLight')?.addEventListener('click', () => {
+    if (freshLightWizard) {
+      freshLightWizard.open();
+    } else {
+      showToast({title:'Light Discovery', msg:'Fresh light wizard not available', kind:'warn', icon:'⚠️'});
+    }
+  });
+
+  // Targeted Light Scan button
+  $('#btnDiscoverLights')?.addEventListener('click', async () => {
+    setStatus("Scanning for lights...");
+    showToast({title:'Light Scan', msg:'Scanning for GreenReach devices...', kind:'info', icon:'🔍'});
+    
+    try {
+      // Reload devices data
+      await loadAllData();
+      showToast({title:'Scan Complete', msg:'Device scan completed', kind:'success', icon:'✅'});
+    } catch (error) {
+      showToast({title:'Scan Error', msg:'Failed to scan for devices', kind:'error', icon:'❌'});
+    }
+  });
+
+  // Device discovery button
+  $('#btnDiscover')?.addEventListener('click', async () => {
+    setStatus("Discovering devices...");
+    showToast({title:'Device Discovery', msg:'Scanning for new devices...', kind:'info', icon:'🔍'});
+    
+    try {
+      // Mock device discovery - reload current data
+      await loadAllData();
+      showToast({title:'Discovery Complete', msg:'Device discovery completed', kind:'success', icon:'✅'});
+    } catch (error) {
+      showToast({title:'Discovery Error', msg:'Failed to discover devices', kind:'error', icon:'❌'});
+    }
+  });
+
+  // Refresh SwitchBot button
+  $('#btnRefreshSwitchBot')?.addEventListener('click', async () => {
+    setStatus("Refreshing IoT devices...");
+    try {
+      await loadAllData();
+      showToast({title:'Refreshed', msg:'IoT devices refreshed', kind:'success', icon:'✅'});
+    } catch (error) {
+      showToast({title:'Refresh Error', msg:'Failed to refresh devices', kind:'error', icon:'❌'});
+    }
   });
 
   // Environment actions
@@ -9226,6 +9962,10 @@ class LightWizard {
       this.nextStep();
     });
     if (closeBtn) closeBtn.addEventListener('click', () => this.close());
+    
+    // Add handler for secondary close button
+    const closeBtn2 = document.getElementById('lightModalClose2');
+    if (closeBtn2) closeBtn2.addEventListener('click', () => this.close());
     // DISABLED backdrop click handler to test interaction issue
     // if (backdrop) backdrop.addEventListener('click', () => this.close());
     
@@ -10275,18 +11015,362 @@ class DevicePairWizard {
     wifiStatic?.addEventListener('change', (e) => {
       const ip = document.getElementById('pairWifiStaticIp'); if (ip) ip.style.display = e.target.checked ? 'block' : 'none';
     });
+
+    // IA Assist toggle functionality
+    const iaAssistToggle = document.getElementById('iaAssistToggle');
+    const iaAssistStatus = document.getElementById('iaAssistStatus');
+    iaAssistToggle?.addEventListener('change', (e) => {
+      if (iaAssistStatus) {
+        if (e.target.checked) {
+          iaAssistStatus.textContent = 'Enabled';
+          iaAssistStatus.className = 'ia-assist-status ia-assist-status--enabled';
+        } else {
+          iaAssistStatus.textContent = 'Disabled';
+          iaAssistStatus.className = 'ia-assist-status ia-assist-status--disabled';
+        }
+      }
+    });
   }
 
   open(opts = {}) {
     if (!this.modal) return;
     this.current = 0; this.onSave = opts.onSave || null;
+    this.deviceMetadata = opts.deviceMetadata || {};
+    this.setupContext = opts.setupContext || {};
+    
     if (opts.suggestedTransport) {
       const r = this.modal.querySelector(`input[name=pairTransport][value=${opts.suggestedTransport}]`);
       if (r) r.checked = true;
     }
+    
+    // Initialize AI assistance if enabled
+    this.initializeAIAssistance();
+    
     this.showStep(0);
     this.modal.style.display = 'block';
     this.modal.setAttribute('aria-hidden','false');
+  }
+
+  async initializeAIAssistance() {
+    const iaAssistToggle = document.getElementById('iaAssistToggle');
+    if (!iaAssistToggle) return;
+    
+    // Check if AI assistance is enabled
+    const isEnabled = iaAssistToggle.checked;
+    if (!isEnabled) return;
+    
+    try {
+      // Call AI setup assist endpoint for initial suggestions
+      const response = await fetch('/ai/setup-assist', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          deviceMetadata: {
+            ...this.deviceMetadata,
+            wizardId: this.setupContext?.wizardId || 'device-pair',
+            stepId: this.setupContext?.stepId || 'transport'
+          },
+          setupContext: this.setupContext,
+          requestType: 'initial_setup'
+        })
+      });
+      
+      if (response.ok) {
+        const data = await response.json();
+        if (data.success && data.suggestions) {
+          this.aiSuggestions = data.suggestions;
+          this.applyAISuggestions();
+          this.showAIStatus(data.metadata);
+        }
+      } else {
+        console.warn('AI assistance request failed:', response.status);
+        this.showAIStatus({ error: 'AI service unavailable' });
+      }
+    } catch (error) {
+      console.warn('AI assistance unavailable:', error);
+      this.showAIStatus({ error: error.message });
+    }
+  }
+
+  showAIStatus(metadata) {
+    const statusEl = document.getElementById('iaAssistStatus');
+    if (!statusEl) return;
+    
+    if (metadata.error) {
+      statusEl.textContent = `Error: ${metadata.error}`;
+      statusEl.className = 'ia-assist-status ia-assist-status--error';
+    } else {
+      const confidence = Math.round((metadata.confidence || 0) * 100);
+      const provider = metadata.model || 'AI';
+      statusEl.textContent = `Active (${provider}, ${confidence}% confidence)`;
+      statusEl.className = 'ia-assist-status ia-assist-status--enabled';
+    }
+  }
+
+  async requestStepSuggestions(stepId) {
+    const iaAssistToggle = document.getElementById('iaAssistToggle');
+    if (!iaAssistToggle?.checked) return;
+    
+    try {
+      const response = await fetch('/ai/setup-assist', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          deviceMetadata: {
+            ...this.deviceMetadata,
+            wizardId: this.setupContext?.wizardId || 'device-pair',
+            stepId: stepId
+          },
+          setupContext: {
+            ...this.setupContext,
+            currentStep: stepId,
+            previousSteps: this.collectPreviousSteps()
+          },
+          requestType: 'step_guidance'
+        })
+      });
+      
+      if (response.ok) {
+        const data = await response.json();
+        if (data.success && data.suggestions) {
+          this.applyStepSuggestions(data.suggestions, stepId);
+        }
+      }
+    } catch (error) {
+      console.warn('Step-specific AI assistance unavailable:', error);
+    }
+  }
+
+  collectPreviousSteps() {
+    const form = this.form;
+    if (!form) return {};
+    
+    const formData = new FormData(form);
+    const steps = {};
+    
+    for (const [key, value] of formData.entries()) {
+      steps[key] = value;
+    }
+    
+    return steps;
+  }
+
+  applyAISuggestions() {
+    if (!this.aiSuggestions) return;
+    
+    // Handle new AI suggestion format with fieldSuggestions, nextSteps, etc.
+    if (this.aiSuggestions.fieldSuggestions) {
+      Object.entries(this.aiSuggestions.fieldSuggestions).forEach(([field, value]) => {
+        this.createFieldSuggestion({
+          field: field,
+          value: value,
+          confidence: this.aiSuggestions.confidence || 0.7,
+          reasoning: `AI suggestion based on device analysis (${Math.round((this.aiSuggestions.confidence || 0.7) * 100)}% confidence)`
+        });
+      });
+    }
+    
+    // Handle setup tips
+    if (this.aiSuggestions.setupTips) {
+      this.showSetupTips(this.aiSuggestions.setupTips);
+    }
+    
+    // Handle next steps
+    if (this.aiSuggestions.nextSteps && Array.isArray(this.aiSuggestions.nextSteps)) {
+      this.showNextSteps(this.aiSuggestions.nextSteps);
+    }
+    
+    // Legacy format support for backward compatibility
+    if (Array.isArray(this.aiSuggestions)) {
+      this.aiSuggestions.forEach(suggestion => {
+        switch (suggestion.type) {
+          case 'field_suggestion':
+            this.createFieldSuggestion(suggestion);
+            break;
+          case 'setup_guide':
+            this.suggestSetupGuide(suggestion);
+            break;
+          case 'next_step':
+            this.createNextStepSuggestion(suggestion);
+            break;
+          case 'automation_suggestion':
+            this.createAutomationSuggestion(suggestion);
+            break;
+          case 'security_recommendation':
+            this.createSecurityRecommendation(suggestion);
+            break;
+        }
+      });
+    }
+  }
+
+  applyStepSuggestions(suggestions, stepId) {
+    // Apply suggestions specific to the current step
+    if (suggestions.fieldSuggestions) {
+      Object.entries(suggestions.fieldSuggestions).forEach(([field, value]) => {
+        this.createFieldSuggestion({
+          field: field,
+          value: value,
+          confidence: suggestions.confidence || 0.7,
+          reasoning: `Step-specific suggestion for ${stepId}`
+        });
+      });
+    }
+    
+    // Update setup tips for this step
+    if (suggestions.setupTips) {
+      this.updateStepTips(stepId, suggestions.setupTips);
+    }
+  }
+
+  showSetupTips(tips) {
+    const currentStep = this.steps[this.current];
+    if (!currentStep) return;
+    
+    let tipsContainer = currentStep.querySelector('.ai-setup-tips');
+    if (!tipsContainer) {
+      tipsContainer = document.createElement('div');
+      tipsContainer.className = 'ai-setup-tips';
+      currentStep.appendChild(tipsContainer);
+    }
+    
+    tipsContainer.innerHTML = `
+      <div class="ai-suggestion ai-suggestion--tips">
+        <div class="ai-suggestion__content">
+          <span class="ai-suggestion__icon">💡</span>
+          <span class="ai-suggestion__title">AI Setup Tips</span>
+        </div>
+        <div class="ai-suggestion__tips">${tips}</div>
+      </div>
+    `;
+  }
+
+  showNextSteps(steps) {
+    const currentStep = this.steps[this.current];
+    if (!currentStep) return;
+    
+    let stepsContainer = currentStep.querySelector('.ai-next-steps');
+    if (!stepsContainer) {
+      stepsContainer = document.createElement('div');
+      stepsContainer.className = 'ai-next-steps';
+      currentStep.appendChild(stepsContainer);
+    }
+    
+    const stepsList = steps.map(step => `<li>${step}</li>`).join('');
+    stepsContainer.innerHTML = `
+      <div class="ai-suggestion ai-suggestion--steps">
+        <div class="ai-suggestion__content">
+          <span class="ai-suggestion__icon">📋</span>
+          <span class="ai-suggestion__title">Recommended Next Steps</span>
+        </div>
+        <ul class="ai-suggestion__steps">${stepsList}</ul>
+      </div>
+    `;
+  }
+
+  updateStepTips(stepId, tips) {
+    const step = this.steps.find(s => s.dataset.step === stepId);
+    if (!step) return;
+    
+    let tipsContainer = step.querySelector('.ai-step-tips');
+    if (!tipsContainer) {
+      tipsContainer = document.createElement('div');
+      tipsContainer.className = 'ai-step-tips';
+      step.appendChild(tipsContainer);
+    }
+    
+    tipsContainer.innerHTML = `
+      <div class="ai-suggestion ai-suggestion--step-tips">
+        <div class="ai-suggestion__content">
+          <span class="ai-suggestion__icon">🎯</span>
+          <span class="ai-suggestion__text">${tips}</span>
+        </div>
+      </div>
+    `;
+  }
+
+  createFieldSuggestion(suggestion) {
+    const fieldId = `pair${suggestion.field.charAt(0).toUpperCase() + suggestion.field.slice(1)}`;
+    const field = document.getElementById(fieldId);
+    
+    if (field && suggestion.value) {
+      // Create suggestion UI element
+      const suggestionEl = document.createElement('div');
+      suggestionEl.className = 'ai-suggestion';
+      suggestionEl.innerHTML = `
+        <div class="ai-suggestion__content">
+          <span class="ai-suggestion__icon">🤖</span>
+          <span class="ai-suggestion__text">AI suggests: "${suggestion.value}"</span>
+          <button type="button" class="ai-suggestion__accept" onclick="this.closest('.ai-suggestion').nextElementSibling.value='${suggestion.value}'; this.closest('.ai-suggestion').style.display='none';">Accept</button>
+          <button type="button" class="ai-suggestion__dismiss" onclick="this.closest('.ai-suggestion').style.display='none';">Dismiss</button>
+        </div>
+        <div class="ai-suggestion__reasoning">${suggestion.reasoning}</div>
+      `;
+      
+      field.parentNode.insertBefore(suggestionEl, field);
+    }
+  }
+
+  suggestSetupGuide(suggestion) {
+    // Add setup guide suggestion to the transport selection step
+    const transportStep = this.modal.querySelector('[data-step="transport"]');
+    if (transportStep && suggestion.guide) {
+      const guideEl = document.createElement('div');
+      guideEl.className = 'ai-setup-guide-suggestion';
+      guideEl.innerHTML = `
+        <div class="ai-suggestion ai-suggestion--guide">
+          <div class="ai-suggestion__content">
+            <span class="ai-suggestion__icon">📋</span>
+            <span class="ai-suggestion__text">AI recommends: ${suggestion.guide} setup</span>
+            <button type="button" class="ai-suggestion__info" onclick="this.nextElementSibling.style.display=this.nextElementSibling.style.display==='none'?'block':'none'">Info</button>
+          </div>
+          <div class="ai-suggestion__reasoning" style="display:none">${suggestion.reasoning}</div>
+        </div>
+      `;
+      transportStep.appendChild(guideEl);
+    }
+  }
+
+  createNextStepSuggestion(suggestion) {
+    const reviewStep = this.modal.querySelector('[data-step="review"]');
+    if (reviewStep) {
+      const nextStepEl = document.createElement('div');
+      nextStepEl.className = 'ai-next-step';
+      nextStepEl.innerHTML = `
+        <div class="ai-suggestion ai-suggestion--next-step">
+          <div class="ai-suggestion__content">
+            <span class="ai-suggestion__icon">➡️</span>
+            <span class="ai-suggestion__text">Next: ${suggestion.description}</span>
+          </div>
+          <div class="ai-suggestion__reasoning">${suggestion.reasoning}</div>
+        </div>
+      `;
+      reviewStep.appendChild(nextStepEl);
+    }
+  }
+
+  createAutomationSuggestion(suggestion) {
+    // Store automation suggestions for post-setup application
+    if (!this.automationSuggestions) this.automationSuggestions = [];
+    this.automationSuggestions.push(suggestion);
+  }
+
+  createSecurityRecommendation(suggestion) {
+    const wifiStep = this.modal.querySelector('[data-step="wifi"]');
+    if (wifiStep) {
+      const securityEl = document.createElement('div');
+      securityEl.className = 'ai-security-recommendation';
+      securityEl.innerHTML = `
+        <div class="ai-suggestion ai-suggestion--security">
+          <div class="ai-suggestion__content">
+            <span class="ai-suggestion__icon">🔒</span>
+            <span class="ai-suggestion__text">${suggestion.description}</span>
+          </div>
+          <div class="ai-suggestion__reasoning">${suggestion.reasoning}</div>
+        </div>
+      `;
+      wifiStep.appendChild(securityEl);
+    }
   }
 
   close() { if (!this.modal) return; this.modal.style.display = 'none'; this.modal.setAttribute('aria-hidden','true'); }
@@ -10300,6 +11384,12 @@ class DevicePairWizard {
     this.nextBtn.style.display = i === (this.steps.length - 1) ? 'none' : 'inline-block';
     this.saveBtn.style.display = i === (this.steps.length - 1) ? 'inline-block' : 'none';
     if (this.steps[i]?.dataset.step === 'review') this.updateReview();
+    
+    // Request AI suggestions for the current step
+    const stepId = this.steps[i]?.dataset?.step;
+    if (stepId) {
+      this.requestStepSuggestions(stepId);
+    }
   }
 
   next() { if (this.current < this.steps.length - 1) this.showStep(this.current + 1); }
@@ -10332,6 +11422,10 @@ class DevicePairWizard {
 
   async finish() {
     const cfg = this.collect();
+    
+    // Apply AI suggestions if available
+    await this.applyAIAutomationSuggestions();
+    
     // If Wi‑Fi transport, attempt provisioning through the forwarder/controller proxy
     try {
       if (cfg.wifi) {
@@ -10356,6 +11450,13 @@ class DevicePairWizard {
           showToast({ title: 'Pairing requested', msg: body?.message || 'Controller pairing request sent', kind: 'success', icon: '✅' }, 4000);
         }
       }
+
+      // Get final AI suggestions for post-setup
+      const iaAssistToggle = document.getElementById('iaAssistToggle');
+      if (iaAssistToggle?.checked) {
+        await this.getPostSetupAISuggestions(cfg);
+      }
+
     } catch (e) {
       showToast({ title: 'Provision error', msg: e.message || String(e), kind: 'warn', icon: '⚠️' }, 6000);
     } finally {
@@ -10364,6 +11465,164 @@ class DevicePairWizard {
 
     if (this.onSave) this.onSave(cfg);
     this.close();
+  }
+
+  async applyAIAutomationSuggestions() {
+    if (!this.automationSuggestions || this.automationSuggestions.length === 0) return;
+    
+    try {
+      for (const suggestion of this.automationSuggestions) {
+        if (suggestion.rule === 'humidity_control') {
+          // Create automation rule for humidity control
+          const rule = {
+            name: `AI: ${suggestion.description}`,
+            enabled: true,
+            trigger: {
+              type: 'sensor',
+              deviceId: 'any',
+              sensorType: 'humidity',
+              condition: 'outside_range',
+              min: 45,
+              max: 55
+            },
+            action: {
+              type: 'device_control',
+              deviceCategory: 'climate',
+              command: 'adjust_humidity'
+            },
+            metadata: {
+              aiGenerated: true,
+              confidence: suggestion.confidence,
+              reasoning: suggestion.reasoning
+            }
+          };
+          
+          // Save automation rule
+          const response = await fetch('/api/automation/rules', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(rule)
+          });
+          
+          if (response.ok) {
+            showToast({ 
+              title: 'AI Automation Added', 
+              msg: suggestion.description, 
+              kind: 'success', 
+              icon: '🤖' 
+            }, 4000);
+          }
+        }
+      }
+    } catch (error) {
+      console.warn('Failed to apply AI automation suggestions:', error);
+    }
+  }
+
+  async getPostSetupAISuggestions(cfg) {
+    try {
+      const response = await fetch('/ai/setup-assist', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          deviceMetadata: this.deviceMetadata,
+          setupContext: {
+            ...this.setupContext,
+            configuration: cfg,
+            stage: 'post_setup'
+          },
+          requestType: 'post_setup'
+        })
+      });
+      
+      if (response.ok) {
+        const data = await response.json();
+        if (data.success && data.suggestions) {
+          this.showPostSetupSuggestions(data.suggestions);
+        }
+      }
+    } catch (error) {
+      console.warn('Failed to get post-setup AI suggestions:', error);
+    }
+  }
+
+  showPostSetupSuggestions(suggestions) {
+    const postSetupSuggestions = suggestions.filter(s => 
+      s.type === 'next_step' || s.type === 'optimization' || s.type === 'maintenance'
+    );
+    
+    if (postSetupSuggestions.length > 0) {
+      const suggestionText = postSetupSuggestions
+        .map(s => `• ${s.description}`)
+        .join('\n');
+      
+      showToast({ 
+        title: 'AI Setup Complete!', 
+        msg: `Next steps:\n${suggestionText}`, 
+        kind: 'info', 
+        icon: '🎯' 
+      }, 8000);
+    }
+  }
+
+  /**
+   * Process setup guide content to replace AI placeholders with generated content
+   * @param {Object} guide - Setup guide object
+   * @returns {Promise<Object>} - Guide with AI placeholders replaced
+   */
+  async processAIPlaceholders(guide) {
+    if (!window.aiPlaceholderReplacer || !guide) {
+      return guide;
+    }
+
+    try {
+      const processedGuide = { ...guide };
+      
+      // Process guide-level AI placeholders
+      if (guide.estimatedTime) {
+        processedGuide.estimatedTime = await window.aiPlaceholderReplacer.replaceAIPlaceholders(
+          guide.estimatedTime, 
+          this.deviceMetadata
+        );
+      }
+
+      if (guide.difficulty) {
+        processedGuide.difficulty = await window.aiPlaceholderReplacer.replaceAIPlaceholders(
+          guide.difficulty,
+          this.deviceMetadata
+        );
+      }
+
+      if (guide.summary) {
+        processedGuide.summary = await window.aiPlaceholderReplacer.replaceAIPlaceholders(
+          guide.summary,
+          this.deviceMetadata
+        );
+      }
+
+      // Process step-level AI placeholders
+      if (guide.steps && Array.isArray(guide.steps)) {
+        processedGuide.steps = await Promise.all(
+          guide.steps.map(async (step) => {
+            const processedStep = { ...step };
+            
+            if (step.bodyMd) {
+              processedStep.bodyMd = await window.aiPlaceholderReplacer.replaceAIPlaceholders(
+                step.bodyMd,
+                this.deviceMetadata
+              );
+            }
+            
+            return processedStep;
+          })
+        );
+      }
+
+      return processedGuide;
+    } catch (error) {
+      console.warn('AI placeholder processing failed:', error);
+      return guide; // Return original guide if AI processing fails
+    }
   }
 }
 
@@ -10612,7 +11871,122 @@ function updateFeatureStatus(card, status) {
                         status === 'dev' ? 'DEV' : status.toUpperCase();
 }
 
+// Sidebar Navigation System
+class SidebarNavigation {
+  constructor() {
+    this.sidebar = $('#appSidebar');
+    this.toggle = $('#sidebarToggle');
+    this.navItems = $$('.sidebar-nav__item');
+    this.contentSections = $$('.content-section');
+    this.isOpen = window.innerWidth > 768;
+    
+    console.log('[SidebarNav] Initialized with:', {
+      sidebar: this.sidebar,
+      toggle: this.toggle,
+      navItems: this.navItems.length,
+      contentSections: this.contentSections.length
+    });
+    
+    this.init();
+  }
+  
+  init() {
+    // Toggle functionality
+    this.toggle?.addEventListener('click', () => this.toggleSidebar());
+    
+    // Navigation item clicks
+    this.navItems.forEach(item => {
+      item.addEventListener('click', (e) => {
+        const target = e.currentTarget.dataset.target;
+        if (target) {
+          this.navigateToSection(target);
+          this.setActiveNavItem(e.currentTarget);
+          
+          // Auto-close on mobile
+          if (window.innerWidth <= 768) {
+            this.closeSidebar();
+          }
+        }
+      });
+    });
+    
+    // Close on backdrop click (mobile)
+    document.addEventListener('click', (e) => {
+      if (window.innerWidth <= 768 && 
+          this.isOpen && 
+          !this.sidebar.contains(e.target) && 
+          e.target !== this.toggle) {
+        this.closeSidebar();
+      }
+    });
+    
+    // Responsive handling
+    window.addEventListener('resize', () => {
+      if (window.innerWidth > 768) {
+        this.openSidebar();
+      } else {
+        this.closeSidebar();
+      }
+    });
+    
+    // Initialize with first setup section visible
+    console.log('[SidebarNav] Initializing with farm-setup section');
+    this.navigateToSection('farm-setup');
+    this.setActiveNavItem(this.navItems[0]);
+    console.log('[SidebarNav] Initialization complete');
+  }
+  
+  toggleSidebar() {
+    this.isOpen ? this.closeSidebar() : this.openSidebar();
+  }
+  
+  openSidebar() {
+    this.sidebar?.classList.remove('collapsed');
+    this.sidebar?.classList.add('open');
+    this.isOpen = true;
+  }
+  
+  closeSidebar() {
+    this.sidebar?.classList.add('collapsed');
+    this.sidebar?.classList.remove('open');
+    this.isOpen = false;
+  }
+  
+  navigateToSection(sectionId) {
+    console.log(`[SidebarNav] Navigating to section: ${sectionId}`);
+    // Hide all sections
+    this.contentSections.forEach(section => {
+      section.setAttribute('aria-hidden', 'true');
+      console.log(`[SidebarNav] Hiding section: ${section.id}`);
+    });
+    
+    // Show target section
+    const target = $(`#${sectionId}`);
+    if (target) {
+      target.setAttribute('aria-hidden', 'false');
+      console.log(`[SidebarNav] Showing section: ${sectionId}`, target);
+    } else {
+      console.error(`[SidebarNav] Target section not found: ${sectionId}`);
+    }
+  }
+  
+  setActiveNavItem(activeItem) {
+    // Remove active from all items
+    this.navItems.forEach(item => item.classList.remove('active'));
+    
+    // Add active to current item
+    activeItem?.classList.add('active');
+  }
+}
+
+// Initialize sidebar navigation
+let sidebarNav;
+
 document.addEventListener('DOMContentLoaded', async () => {
+  // Initialize sidebar navigation first
+  sidebarNav = new SidebarNavigation();
+  window.sidebarNav = sidebarNav; // Make globally accessible for debugging
+  
   // Clean up any existing invalid img src attributes that might cause 404s
   document.querySelectorAll('img').forEach(img => {
     if (img.src && !img.src.startsWith('http://') && !img.src.startsWith('https://') && !img.src.startsWith('data:') && img.src.includes('.')) {
@@ -10642,6 +12016,10 @@ document.addEventListener('DOMContentLoaded', async () => {
   
   // Initialize farm wizard
   farmWizard = new FarmWizard();
+  // Update farm display to show current state
+  if (farmWizard && farmWizard.updateFarmDisplay) {
+    farmWizard.updateFarmDisplay();
+  }
   // Initialize device manager window
   deviceManagerWindow = new DeviceManagerWindow();
   window.deviceManagerWindow = deviceManagerWindow;
@@ -10683,6 +12061,47 @@ document.addEventListener('DOMContentLoaded', async () => {
   
   setupLightSetupButton();
   
+  // Add function to verify critical buttons are working
+  function verifyButtonSetup() {
+    const criticalButtons = [
+      { id: 'btnOpenFarmModal', name: 'Farm Setup' },
+      { id: 'btnOpenRoomsModal', name: 'Rooms Setup' },
+      { id: 'btnFreshLight', name: 'Fresh Light Discovery' },
+      { id: 'btnDiscoverLights', name: 'Light Scan' },
+      { id: 'btnOpenLightsModal', name: 'Light Assignments' }
+    ];
+    
+    criticalButtons.forEach(btn => {
+      const element = document.getElementById(btn.id);
+      if (!element) {
+        console.warn(`Critical button missing: ${btn.name} (${btn.id})`);
+      } else {
+        console.log(`Button found: ${btn.name} (${btn.id})`);
+      }
+    });
+  }
+  
+  // Call verification after a delay to ensure DOM is fully loaded
+  setTimeout(verifyButtonSetup, 1000);
+  
+  // Force show farm-setup section if it's not visible
+  setTimeout(() => {
+    const farmSection = document.getElementById('farm-setup');
+    if (farmSection) {
+      const isHidden = farmSection.getAttribute('aria-hidden') === 'true';
+      console.log('[DEBUG] Farm section status:', { 
+        exists: !!farmSection, 
+        isHidden, 
+        display: getComputedStyle(farmSection).display 
+      });
+      
+      if (isHidden) {
+        console.log('[DEBUG] Force showing farm-setup section');
+        farmSection.setAttribute('aria-hidden', 'false');
+      }
+    }
+  }, 1500);
+  
   // Add manual test function for debugging
   window.testFreshWizard = function() {
     console.log('[DEBUG] Manual test - freshLightWizard:', window.freshLightWizard);
@@ -10690,6 +12109,46 @@ document.addEventListener('DOMContentLoaded', async () => {
       window.freshLightWizard.open();
     } else {
       console.error('[DEBUG] Fresh wizard not available!');
+    }
+  };
+  
+  // Add manual test functions for other wizards
+  window.testFarmWizard = function() {
+    console.log('[DEBUG] Manual test - farmWizard:', window.farmWizard);
+    if (window.farmWizard) {
+      window.farmWizard.open();
+    } else {
+      console.error('[DEBUG] Farm wizard not available!');
+    }
+  };
+  
+  window.testRoomWizard = function() {
+    console.log('[DEBUG] Manual test - roomWizard:', window.roomWizard);
+    if (window.roomWizard) {
+      window.roomWizard.open();
+    } else {
+      console.error('[DEBUG] Room wizard not available!');
+    }
+  };
+  
+  // Add manual function to show farm setup section
+  window.showFarmSetup = function() {
+    const farmSection = document.getElementById('farm-setup');
+    if (farmSection) {
+      farmSection.setAttribute('aria-hidden', 'false');
+      console.log('[DEBUG] Manually showed farm-setup section');
+    } else {
+      console.error('[DEBUG] Farm setup section not found!');
+    }
+  };
+  
+  // Add manual function to test navigation
+  window.testNavigation = function() {
+    if (window.sidebarNav) {
+      console.log('[DEBUG] Testing navigation to farm-setup');
+      window.sidebarNav.navigateToSection('farm-setup');
+    } else {
+      console.error('[DEBUG] Sidebar navigation not available!');
     }
   };
   

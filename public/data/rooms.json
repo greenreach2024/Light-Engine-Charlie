@@ -1,3 +1,106 @@
 {
-  "rooms": []
+  "rooms": [
+    {
+      "id": "room-mg8e7meq-mqs2",
+      "name": "Grow Room One",
+      "location": "",
+      "hardwareCats": [],
+      "hardwareOrder": [],
+      "layout": {
+        "type": "",
+        "rows": 0,
+        "racks": 0,
+        "levels": 0
+      },
+      "zones": [
+        "1"
+      ],
+      "fixtures": [],
+      "controlMethod": null,
+      "devices": [],
+      "sensors": {
+        "categories": [],
+        "placements": {}
+      },
+      "energy": "",
+      "energyHours": 0,
+      "targetPpfd": 0,
+      "photoperiod": 0,
+      "connectivity": {
+        "hasHub": null,
+        "hubType": "",
+        "hubIp": "",
+        "cloudTenant": "Azure"
+      },
+      "roles": {
+        "admin": [],
+        "operator": [],
+        "viewer": []
+      },
+      "grouping": {
+        "groups": [],
+        "planId": "",
+        "scheduleId": ""
+      },
+      "seriesCount": 0,
+      "category": {
+        "dehumidifier": {
+          "manufacturer": "quest",
+          "wifi": true
+        }
+      },
+      "_categoryProgress": {}
+    },
+    {
+      "id": "room-mg9n22nt-dfxs",
+      "name": "Test Room",
+      "location": "",
+      "hardwareCats": [],
+      "hardwareOrder": [],
+      "layout": {
+        "type": "",
+        "rows": 0,
+        "racks": 0,
+        "levels": 0
+      },
+      "zones": [
+        "11"
+      ],
+      "fixtures": [],
+      "controlMethod": null,
+      "devices": [],
+      "sensors": {
+        "categories": [],
+        "placements": {}
+      },
+      "energy": "",
+      "energyHours": 0,
+      "targetPpfd": 0,
+      "photoperiod": 0,
+      "connectivity": {
+        "hasHub": null,
+        "hubType": "",
+        "hubIp": "",
+        "cloudTenant": "Azure"
+      },
+      "roles": {
+        "admin": [],
+        "operator": [],
+        "viewer": []
+      },
+      "grouping": {
+        "groups": [],
+        "planId": "",
+        "scheduleId": ""
+      },
+      "seriesCount": 0,
+      "category": {
+        "dehumidifier": {
+          "manufacturer": "quest",
+          "wifi": true
+        }
+      },
+      "_categoryProgress": {}
+    }
+  ]
 }

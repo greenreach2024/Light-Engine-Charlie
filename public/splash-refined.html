@@ -1,0 +1,344 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Light Engine Charlie • Splash</title>
+<style>
+  :root{
+    --beam-time: 1600ms;
+    --burst-time: 900ms;
+    --hold-time: 800ms;     /* how long we keep the final frame before auto-hide */
+    --out-time: 500ms;      /* fade-out to app */
+    --beam-thickness: 8vmin;
+    --spectrum-width: 56vmin;
+  }
+  *{box-sizing:border-box}
+  html,body{height:100%;margin:0;background:transparent}
+  body{
+    display:grid; place-items:center;
+    font-family: system-ui, -apple-system, Segoe UI, Roboto, "Helvetica Neue", Arial, sans-serif;
+    overflow:hidden;
+    background: radial-gradient(ellipse at center, rgba(15, 25, 35, 0.9) 0%, rgba(5, 10, 15, 0.95) 100%);
+  }
+
+  /* Splash container */
+  .splash{
+    position:relative;
+    width:min(92vmin, 820px);
+    aspect-ratio:1/1;   /* square stage */
+    isolation:isolate;
+  }
+
+  /* The artwork - using our local gear system */
+  .art{
+    position:absolute; inset:0;
+    filter: drop-shadow(0 6px 18px rgba(0,0,0,.25));
+    z-index:3;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+  }
+
+  /* Gear System Container */
+  .gear-system {
+    position: relative;
+    width: 100%;
+    height: 100%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+  }
+
+  /* Individual Gears */
+  .gear {
+    position: absolute;
+    opacity: 0.85;
+    filter: drop-shadow(0 0 15px rgba(100, 200, 255, 0.4));
+    transition: transform 0.3s ease;
+  }
+
+  .gear::before {
+    content: '';
+    position: absolute;
+    top: 50%;
+    left: 50%;
+    transform: translate(-50%, -50%);
+    background: rgba(20, 30, 40, 0.9);
+    border: 2px solid rgba(100, 200, 255, 0.6);
+    border-radius: 50%;
+  }
+
+  /* Large center gear */
+  .gear-large {
+    width: 120px;
+    height: 120px;
+    background: radial-gradient(circle, 
+      rgba(140, 190, 250, 0.9) 0%, 
+      rgba(100, 160, 220, 0.8) 40%,
+      rgba(80, 140, 200, 0.7) 70%,
+      rgba(60, 120, 180, 0.6) 100%
+    );
+    clip-path: polygon(
+      50% 0%, 58% 8%, 66% 0%, 74% 8%, 82% 0%, 90% 8%, 98% 0%, 
+      100% 8%, 92% 16%, 100% 24%, 92% 32%, 100% 40%, 92% 48%, 
+      100% 56%, 92% 64%, 100% 72%, 92% 80%, 100% 88%, 92% 96%, 
+      100% 100%, 82% 92%, 74% 100%, 66% 92%, 58% 100%, 50% 92%, 
+      42% 100%, 34% 92%, 26% 100%, 18% 92%, 10% 100%, 8% 92%, 
+      0% 100%, 8% 88%, 0% 80%, 8% 72%, 0% 64%, 8% 56%, 0% 48%, 
+      8% 40%, 0% 32%, 8% 24%, 0% 16%, 8% 8%, 0% 0%, 18% 8%, 
+      26% 0%, 34% 8%, 42% 0%
+    );
+  }
+
+  .gear-large::before {
+    width: 45px;
+    height: 45px;
+  }
+
+  /* Medium gear */
+  .gear-medium {
+    width: 80px;
+    height: 80px;
+    background: radial-gradient(circle, 
+      rgba(120, 180, 240, 0.8) 0%, 
+      rgba(90, 150, 210, 0.7) 50%,
+      rgba(70, 130, 190, 0.6) 100%
+    );
+    clip-path: polygon(
+      50% 0%, 62% 10%, 74% 0%, 86% 10%, 98% 0%, 100% 12%, 
+      88% 24%, 100% 36%, 88% 48%, 100% 60%, 88% 72%, 100% 84%, 
+      88% 96%, 100% 100%, 74% 88%, 62% 100%, 50% 88%, 38% 100%, 
+      26% 88%, 14% 100%, 0% 88%, 12% 76%, 0% 64%, 12% 52%, 
+      0% 40%, 12% 28%, 0% 16%, 12% 4%, 0% 0%, 26% 12%, 38% 0%
+    );
+    top: -15%;
+    right: 15%;
+  }
+
+  .gear-medium::before {
+    width: 30px;
+    height: 30px;
+  }
+
+  /* Small gear */
+  .gear-small {
+    width: 60px;
+    height: 60px;
+    background: radial-gradient(circle, 
+      rgba(110, 170, 230, 0.8) 0%, 
+      rgba(80, 140, 200, 0.7) 60%,
+      rgba(60, 120, 180, 0.6) 100%
+    );
+    clip-path: polygon(
+      50% 0%, 67% 15%, 82% 0%, 97% 15%, 100% 32%, 85% 47%, 
+      100% 62%, 85% 77%, 100% 100%, 67% 85%, 50% 100%, 
+      33% 85%, 0% 100%, 15% 77%, 0% 62%, 15% 47%, 0% 32%, 
+      3% 15%, 18% 0%, 33% 15%
+    );
+    bottom: 5%;
+    left: 15%;
+  }
+
+  .gear-small::before {
+    width: 22px;
+    height: 22px;
+  }
+
+  /* Tiny gear */
+  .gear-tiny {
+    width: 40px;
+    height: 40px;
+    background: radial-gradient(circle, 
+      rgba(100, 160, 220, 0.8) 0%, 
+      rgba(70, 130, 190, 0.7) 70%,
+      rgba(50, 110, 170, 0.6) 100%
+    );
+    clip-path: polygon(
+      50% 0%, 71% 21%, 92% 0%, 100% 29%, 79% 50%, 100% 71%, 
+      71% 92%, 50% 100%, 29% 79%, 0% 100%, 21% 71%, 0% 50%, 
+      21% 29%, 0% 0%, 29% 21%
+    );
+    top: -5%;
+    left: 30%;
+  }
+
+  .gear-tiny::before {
+    width: 15px;
+    height: 15px;
+  }
+
+  /* Beam (white) coming from the lower-left to the center gear */
+  .beam{
+    position:absolute;
+    width:140%;
+    height:var(--beam-thickness);
+    left:-60%; bottom:22%;
+    background:linear-gradient(90deg, 
+      rgba(255,255,255,0) 0%, 
+      rgba(200,230,255,0.3) 15%,
+      rgba(100,200,255,0.8) 25%,
+      rgba(255,255,255,0.95) 40%, 
+      rgba(255,255,255,0.95) 60%, 
+      rgba(100,200,255,0.8) 75%,
+      rgba(200,230,255,0.3) 85%,
+      rgba(255,255,255,0) 100%
+    );
+    filter: blur(2px) drop-shadow(0 0 20px rgba(100, 200, 255, 0.8));
+    transform-origin:left center;
+    transform: rotate(12deg) translateX(-40%);
+    opacity:0;
+    z-index:2;
+    mix-blend-mode: screen;
+  }
+
+  /* Grow Light Spectrum burst out to the right */
+  .spectrum{
+    position:absolute;
+    left:40%; top:44%;
+    width:var(--spectrum-width); height:10vmin; 
+    transform: translate(-10%, -20%) rotate(6deg) scaleX(.1);
+    transform-origin:left center;
+    opacity:0;
+    z-index:1;
+    /* Horticultural spectrum - scientifically accurate */
+    background: linear-gradient(90deg,
+      /* UV (280-400nm) - Purple/Violet */
+      #8B2BE2 0%, #9400D3 8%,
+      /* Blue (400-500nm) - Critical for vegetative growth */
+      #4B0082 16%, #0000FF 24%, #0064FF 32%,
+      /* Green (500-600nm) - Penetration and efficiency */
+      #00FF7F 40%, #32FF32 48%,
+      /* Yellow-Orange (580-620nm) - Flowering support */
+      #FFFF00 56%, #FFA500 64%,
+      /* Red (620-700nm) - Flowering and fruiting */
+      #FF4500 72%, #FF0000 80%,
+      /* Far Red (700-800nm) - Stem elongation */
+      #8B0000 88%, #640000 100%
+    );
+    filter: blur(1px) saturate(160%) drop-shadow(0 0 30px rgba(255, 255, 255, 0.6));
+    border-radius:9vmin;
+    mask-image: radial-gradient(150% 180% at 0% 50%, rgba(0,0,0,1) 40%, rgba(0,0,0,.5) 70%, rgba(0,0,0,0) 100%);
+    mix-blend-mode: screen;
+  }
+
+  /* Hit glow on the center gear */
+  .glow{
+    position:absolute; left:50%; top:50%;
+    width:18vmin; height:18vmin; transform:translate(-50%,-50%);
+    background: radial-gradient(circle, 
+      rgba(255,255,255,.95) 0%, 
+      rgba(200,240,255,0.8) 20%,
+      rgba(150,220,255,0.6) 40%,
+      rgba(100,200,255,0.4) 60%,
+      rgba(100,200,255,0.2) 80%,
+      rgba(255,255,255,0) 100%
+    );
+    filter: blur(6px);
+    opacity:0;
+    z-index:2;
+    pointer-events:none;
+    mix-blend-mode: screen;
+  }
+
+  /* Animation states */
+  .play .beam{ animation: beamIn var(--beam-time) ease-out forwards; }
+  .play .glow{ animation: glowPop var(--beam-time) cubic-bezier(.11,.75,.18,1) forwards; animation-delay: calc(var(--beam-time) * .56); }
+  .play .spectrum{ animation: specOut var(--burst-time) cubic-bezier(.16,.7,.16,1) forwards; animation-delay: var(--beam-time); }
+
+  /* Final static hold before we optionally hide splash */
+  .play.hold .beam,
+  .play.hold .spectrum,
+  .play.hold .glow{ animation: none !important; opacity:1 !important; }
+
+  /* Auto fade-out when ready to show app */
+  .autohide{ animation: fadeOut var(--out-time) ease-in forwards; }
+
+  @keyframes beamIn{
+    0%   {opacity:0; transform: rotate(12deg) translateX(-50%); filter: blur(6px) drop-shadow(0 0 10px rgba(100, 200, 255, 0.4));}
+    60%  {opacity:.95;}
+    100% {opacity:.95; transform: rotate(12deg) translateX(6%); filter: blur(2px) drop-shadow(0 0 20px rgba(100, 200, 255, 0.8));}
+  }
+  @keyframes glowPop{
+    0%{opacity:0; transform:translate(-50%,-50%) scale(.6);}
+    36%{opacity:1; transform:translate(-50%,-50%) scale(1.12);}
+    100%{opacity:.9; transform:translate(-50%,-50%) scale(1);}
+  }
+  @keyframes specOut{
+    0%{opacity:0; transform: translate(-10%,-20%) rotate(6deg) scaleX(.05);}
+    38%{opacity:1; transform: translate(-4%,-22%) rotate(6deg) scaleX(1.06);}
+    100%{opacity:1; transform: translate(0%,-24%) rotate(6deg) scaleX(1.0);}
+  }
+  @keyframes fadeOut{ to{ opacity:0; visibility:hidden } }
+
+  /* Respect users who prefer reduced motion */
+  @media (prefers-reduced-motion: reduce){
+    .beam,.spectrum,.glow{ animation: none !important; opacity:1 !important; }
+    .spectrum{ transform: translate(0%,-24%) rotate(6deg) scaleX(1.0); }
+  }
+
+  /* Optional "Loading…" caption (kept subtle) */
+  .caption{
+    position:absolute; inset:auto 0 -2.25rem 0; text-align:center;
+    font-size:.9rem; letter-spacing:.06em; color:#aab2c0; user-select:none;
+  }
+
+  /* Responsive adjustments */
+  @media (max-width: 768px) {
+    .gear-large { width: 80px; height: 80px; }
+    .gear-large::before { width: 30px; height: 30px; }
+    .gear-medium { width: 60px; height: 60px; }
+    .gear-medium::before { width: 22px; height: 22px; }
+    .gear-small { width: 45px; height: 45px; }
+    .gear-small::before { width: 16px; height: 16px; }
+    .gear-tiny { width: 30px; height: 30px; }
+    .gear-tiny::before { width: 12px; height: 12px; }
+  }
+</style>
+</head>
+<body>
+  <div id="splash" class="splash play">
+    <div class="art" aria-hidden="true">
+      <div class="gear-system">
+        <div class="gear gear-large"></div>
+        <div class="gear gear-medium"></div>
+        <div class="gear gear-small"></div>
+        <div class="gear gear-tiny"></div>
+      </div>
+    </div>
+    <div class="beam" aria-hidden="true"></div>
+    <div class="spectrum" aria-hidden="true"></div>
+    <div class="glow" aria-hidden="true"></div>
+    <div class="caption" role="status" aria-live="polite">Starting Light&nbsp;Engine…</div>
+  </div>
+
+<script>
+  // After animations finish, hold the final frame, then signal "ready"
+  const splash = document.getElementById('splash');
+  const total = parseFloat(getComputedStyle(document.documentElement).getPropertyValue('--beam-time')) +
+                parseFloat(getComputedStyle(document.documentElement).getPropertyValue('--burst-time'));
+
+  // 1) Lock final state
+  setTimeout(() => {
+    splash.classList.add('hold');
+    // Dispatch a custom event so your app boot code can listen for it.
+    window.dispatchEvent(new CustomEvent('splash:ready'));
+  }, total + 40);
+
+  // 2) Optionally auto-hide the splash after a short hold
+  const hold = parseFloat(getComputedStyle(document.documentElement).getPropertyValue('--hold-time'));
+  setTimeout(() => {
+    splash.classList.add('autohide');
+    // Signal that we're ready to show the main app
+    if (window.onSplashComplete) {
+      window.onSplashComplete();
+    }
+  }, total + hold);
+
+  // Example: show how your app could listen and reveal UI
+  window.addEventListener('splash:ready', () => { 
+    console.log('Light Engine Charlie - Splash animation ready');
+  });
+</script>
+</body>
+</html>

@@ -1,0 +1,128 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Debug Room Wizard</title>
+    <style>
+        .room-step { display: none; border: 1px solid red; padding: 10px; margin: 10px; }
+        .room-step[data-active] { display: block; background: yellow; }
+        button { margin: 5px; padding: 5px 10px; }
+    </style>
+</head>
+<body>
+    <h1>Room Wizard Debug</h1>
+    
+    <div id="roomModal">
+        <div>
+            <p id="roomModalProgress">Step 1 of 8</p>
+            <h2 id="roomModalTitle">Set up a Grow Room</h2>
+        </div>
+        
+        <div id="roomSteps">
+            <section class="room-step" data-step="connectivity">
+                <h3>Step 1: Connectivity</h3>
+                <p>Is your local smart hub on-line?</p>
+            </section>
+            
+            <section class="room-step" data-step="hardware">
+                <h3>Step 2: Hardware</h3>
+                <p>Which equipment are you setting up in this room?</p>
+            </section>
+            
+            <section class="room-step" data-step="category-setup">
+                <h3>Step 3: Category Setup</h3>
+                <p>Category setup</p>
+            </section>
+        </div>
+        
+        <div>
+            <button id="roomPrev" type="button">Back</button>
+            <button id="roomNext" type="button">Next</button>
+            <button id="btnSaveRoom" type="button" style="display:none">Save Room</button>
+        </div>
+    </div>
+
+    <script>
+        const $ = (s, r=document)=>r.querySelector(s);
+        
+        // Simplified RoomWizard for testing
+        const testWizard = {
+            steps: ['connectivity','hardware','category-setup'],
+            currentStep: 0,
+            
+            showStep(index) {
+                console.log('showStep called with index:', index);
+                console.log('steps array:', this.steps);
+                console.log('looking for step:', this.steps[index]);
+                
+                // Clear all active steps
+                document.querySelectorAll('.room-step').forEach(step => {
+                    step.removeAttribute('data-active');
+                    console.log('cleared step:', step.dataset.step);
+                });
+                
+                // Find the target step
+                const stepName = this.steps[index];
+                const el = document.querySelector(`.room-step[data-step="${stepName}"]`);
+                console.log('found element:', el);
+                
+                if (el) {
+                    el.setAttribute('data-active', '');
+                    console.log('set active on:', stepName);
+                } else {
+                    console.error('Could not find step element for:', stepName);
+                }
+                
+                // Update progress
+                $('#roomModalProgress').textContent = `Step ${index + 1} of ${this.steps.length}`;
+                
+                // Update buttons
+                const prev = $('#roomPrev'); 
+                const next = $('#roomNext'); 
+                const save = $('#btnSaveRoom');
+                
+                prev.style.display = index === 0 ? 'none' : 'inline-block';
+                
+                if (index === this.steps.length - 1) { 
+                    next.style.display = 'none'; 
+                    save.style.display = 'inline-block'; 
+                } else { 
+                    next.style.display = 'inline-block'; 
+                    save.style.display = 'none'; 
+                }
+                
+                console.log('Button visibility - prev:', prev.style.display, 'next:', next.style.display, 'save:', save.style.display);
+            },
+            
+            nextStep() {
+                this.currentStep = Math.min(this.steps.length - 1, this.currentStep + 1);
+                this.showStep(this.currentStep);
+            },
+            
+            prevStep() {
+                this.currentStep = Math.max(0, this.currentStep - 1);
+                this.showStep(this.currentStep);
+            }
+        };
+        
+        // Set up event listeners
+        $('#roomNext')?.addEventListener('click', () => testWizard.nextStep());
+        $('#roomPrev')?.addEventListener('click', () => testWizard.prevStep());
+        
+        // Test the wizard
+        console.log('Starting test...');
+        testWizard.showStep(0);
+        
+        // Add test buttons
+        document.body.innerHTML += `
+            <div style="margin-top: 20px; border-top: 1px solid black; padding-top: 10px;">
+                <h3>Debug Controls</h3>
+                <button onclick="testWizard.showStep(0)">Show Step 0</button>
+                <button onclick="testWizard.showStep(1)">Show Step 1</button>
+                <button onclick="testWizard.showStep(2)">Show Step 2</button>
+                <button onclick="console.log('Next button element:', document.getElementById('roomNext'))">Check Next Button</button>
+                <button onclick="console.log('Active steps:', document.querySelectorAll('.room-step[data-active]'))">Check Active Steps</button>
+            </div>
+        `;
+    </script>
+</body>
+</html>

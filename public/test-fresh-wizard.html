@@ -1,0 +1,322 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Fresh Wizard Test</title>
+    <link rel="stylesheet" href="styles.charlie.css">
+    <style>
+        body { font-family: Arial, sans-serif; padding: 20px; }
+        .test-button { 
+            padding: 10px 20px; 
+            font-size: 16px; 
+            background: #0066cc; 
+            color: white; 
+            border: none; 
+            border-radius: 4px; 
+            cursor: pointer; 
+        }
+    </style>
+</head>
+<body>
+    <h1>Fresh Light Wizard Test</h1>
+    <button class="test-button" onclick="testFreshWizard()">Test Fresh Wizard</button>
+    
+    <!-- Fresh Light Setup Modal (copied from main page) -->
+    <div id="freshLightModal" class="fresh-light-modal" aria-hidden="true">
+        <div class="fresh-light-modal__backdrop"></div>
+        <div class="fresh-light-modal__dialog">
+            <div class="fresh-light-modal__header">
+                <h2>Light Setup Wizard</h2>
+                <button type="button" class="fresh-light-modal__close" id="freshLightClose">×</button>
+            </div>
+            
+            <div class="fresh-light-modal__content">
+                <div class="fresh-light-step" id="freshStep1" data-active>
+                    <h3>Select Room and Zone</h3>
+                    
+                    <div style="margin-bottom: 20px;">
+                        <label style="display: block; margin-bottom: 8px;">Room:</label>
+                        <select id="freshRoomSelect" style="width: 100%; padding: 8px; font-size: 14px;">
+                            <option value="">Select a room</option>
+                        </select>
+                    </div>
+                    
+                    <div style="margin-bottom: 20px;">
+                        <label style="display: block; margin-bottom: 8px;">Zone:</label>
+                        <select id="freshZoneSelect" style="width: 100%; padding: 8px; font-size: 14px;">
+                            <option value="">Select a zone</option>
+                        </select>
+                    </div>
+                </div>
+                
+                <div class="fresh-light-step" id="freshStep2">
+                    <h3>Select Fixtures</h3>
+                    <p>Fixture selection will go here...</p>
+                </div>
+                
+                <div class="fresh-light-step" id="freshStep3">
+                    <h3>Control Setup</h3>
+                    <p>Control setup will go here...</p>
+                </div>
+            </div>
+            
+            <div class="fresh-light-modal__footer">
+                <button type="button" id="freshPrev" style="display: none;">Previous</button>
+                <button type="button" id="freshNext" disabled>Next</button>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        // Minimal STATE for testing
+        window.STATE = {
+            farm: {
+                rooms: [
+                    { id: 'room1', name: 'Test Room 1', zones: ['Zone A', 'Zone B'] },
+                    { id: 'room2', name: 'Test Room 2', zones: ['Zone 1', 'Zone 2'] }
+                ]
+            },
+            rooms: []
+        };
+
+        // Fresh Light Setup Wizard - Clean Implementation
+        class FreshLightWizard {
+            constructor() {
+                console.log('[FreshLightWizard] Initializing fresh light setup wizard');
+                
+                this.modal = document.getElementById('freshLightModal');
+                console.log('[FreshLightWizard] Modal element found:', this.modal);
+                
+                this.currentStep = 1;
+                this.totalSteps = 3;
+                this.data = {
+                    room: '',
+                    zone: '',
+                    fixtures: [],
+                    controlMethod: ''
+                };
+                
+                if (this.modal) {
+                    this.setupEventListeners();
+                    console.log('[FreshLightWizard] Fresh wizard initialized successfully');
+                } else {
+                    console.error('[FreshLightWizard] Could not find freshLightModal element!');
+                }
+            }
+            
+            setupEventListeners() {
+                // Close button
+                const closeBtn = document.getElementById('freshLightClose');
+                if (closeBtn) {
+                    closeBtn.addEventListener('click', () => this.close());
+                }
+                
+                // Navigation buttons
+                const nextBtn = document.getElementById('freshNext');
+                const prevBtn = document.getElementById('freshPrev');
+                
+                if (nextBtn) {
+                    nextBtn.addEventListener('click', () => this.nextStep());
+                }
+                
+                if (prevBtn) {
+                    prevBtn.addEventListener('click', () => this.prevStep());
+                }
+                
+                // Backdrop click to close
+                const backdrop = this.modal.querySelector('.fresh-light-modal__backdrop');
+                if (backdrop) {
+                    backdrop.addEventListener('click', () => this.close());
+                }
+                
+                // Room and zone dropdowns
+                this.setupRoomZoneDropdowns();
+            }
+            
+            setupRoomZoneDropdowns() {
+                console.log('[FreshLightWizard] Setting up room/zone dropdowns');
+                
+                const roomSelect = document.getElementById('freshRoomSelect');
+                const zoneSelect = document.getElementById('freshZoneSelect');
+                
+                if (!roomSelect || !zoneSelect) {
+                    console.error('[FreshLightWizard] Dropdowns not found');
+                    return;
+                }
+                
+                // Simple, clean event listeners
+                roomSelect.addEventListener('change', (e) => {
+                    console.log('[FreshLightWizard] Room selected:', e.target.value);
+                    this.data.room = e.target.value;
+                    this.updateZoneDropdown(e.target.value);
+                    this.updateNavigation();
+                });
+                
+                zoneSelect.addEventListener('change', (e) => {
+                    console.log('[FreshLightWizard] Zone selected:', e.target.value);
+                    this.data.zone = e.target.value;
+                    this.updateNavigation();
+                });
+                
+                // Populate with room data
+                this.populateRooms();
+            }
+            
+            populateRooms() {
+                console.log('[FreshLightWizard] Populating rooms');
+                
+                const roomSelect = document.getElementById('freshRoomSelect');
+                if (!roomSelect) return;
+                
+                // Clear existing options
+                roomSelect.innerHTML = '<option value="">Select a room</option>';
+                
+                // Get room data from STATE
+                const farmRooms = Array.isArray(STATE.farm?.rooms) ? STATE.farm.rooms : [];
+                
+                console.log('[FreshLightWizard] Available rooms:', farmRooms.length);
+                
+                // Populate dropdown
+                farmRooms.forEach(room => {
+                    const option = document.createElement('option');
+                    option.value = room.id || room.name;
+                    option.textContent = room.name || room.id;
+                    roomSelect.appendChild(option);
+                });
+                
+                console.log('[FreshLightWizard] Populated', farmRooms.length, 'rooms');
+            }
+            
+            updateZoneDropdown(roomId) {
+                console.log('[FreshLightWizard] Updating zones for room:', roomId);
+                
+                const zoneSelect = document.getElementById('freshZoneSelect');
+                if (!zoneSelect) return;
+                
+                // Clear zones
+                zoneSelect.innerHTML = '<option value="">Select a zone</option>';
+                
+                if (!roomId) return;
+                
+                // Find the selected room
+                const farmRooms = Array.isArray(STATE.farm?.rooms) ? STATE.farm.rooms : [];
+                const selectedRoom = farmRooms.find(room => (room.id || room.name) === roomId);
+                
+                if (selectedRoom && selectedRoom.zones) {
+                    selectedRoom.zones.forEach(zone => {
+                        const option = document.createElement('option');
+                        option.value = zone;
+                        option.textContent = zone;
+                        zoneSelect.appendChild(option);
+                    });
+                }
+            }
+            
+            updateNavigation() {
+                const nextBtn = document.getElementById('freshNext');
+                const prevBtn = document.getElementById('freshPrev');
+                
+                if (prevBtn) {
+                    prevBtn.style.display = this.currentStep > 1 ? 'block' : 'none';
+                }
+                
+                if (nextBtn) {
+                    const canAdvance = this.canAdvance();
+                    nextBtn.disabled = !canAdvance;
+                    nextBtn.textContent = this.currentStep === this.totalSteps ? 'Save' : 'Next';
+                }
+            }
+            
+            canAdvance() {
+                switch (this.currentStep) {
+                    case 1: // Room/Zone selection
+                        return this.data.room && this.data.zone;
+                    case 2: // Fixtures
+                        return true; // For now, always allow
+                    case 3: // Control
+                        return true;
+                    default:
+                        return false;
+                }
+            }
+            
+            nextStep() {
+                if (!this.canAdvance()) return;
+                
+                if (this.currentStep < this.totalSteps) {
+                    this.currentStep++;
+                    this.showStep();
+                } else {
+                    this.save();
+                }
+            }
+            
+            prevStep() {
+                if (this.currentStep > 1) {
+                    this.currentStep--;
+                    this.showStep();
+                }
+            }
+            
+            showStep() {
+                // Hide all steps
+                document.querySelectorAll('.fresh-light-step').forEach(step => {
+                    step.removeAttribute('data-active');
+                });
+                
+                // Show current step
+                const currentStepEl = document.getElementById(`freshStep${this.currentStep}`);
+                if (currentStepEl) {
+                    currentStepEl.setAttribute('data-active', '');
+                }
+                
+                this.updateNavigation();
+                console.log('[FreshLightWizard] Showing step', this.currentStep);
+            }
+            
+            open() {
+                console.log('[FreshLightWizard] Opening wizard');
+                console.log('[FreshLightWizard] Modal element:', this.modal);
+                if (this.modal) {
+                    this.modal.setAttribute('aria-hidden', 'false');
+                    this.currentStep = 1;
+                    this.showStep();
+                    this.populateRooms();
+                    console.log('[FreshLightWizard] Wizard should now be visible');
+                } else {
+                    console.error('[FreshLightWizard] Cannot open - modal element not found!');
+                }
+            }
+            
+            close() {
+                console.log('[FreshLightWizard] Closing wizard');
+                if (this.modal) {
+                    this.modal.setAttribute('aria-hidden', 'true');
+                }
+            }
+            
+            save() {
+                console.log('[FreshLightWizard] Saving light setup:', this.data);
+                alert('Light setup saved! (This is a demo)');
+                this.close();
+            }
+        }
+
+        // Initialize wizard
+        let freshLightWizard;
+        document.addEventListener('DOMContentLoaded', () => {
+            freshLightWizard = new FreshLightWizard();
+        });
+
+        function testFreshWizard() {
+            console.log('Testing fresh wizard...');
+            if (freshLightWizard) {
+                freshLightWizard.open();
+            } else {
+                console.error('Fresh wizard not initialized!');
+            }
+        }
+    </script>
+</body>
+</html>
