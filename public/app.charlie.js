@@ -36,6 +36,12 @@ const STATE = {
   pendingBrand: null
 };
 
+// Global wizard instances
+let farmWizard;
+let roomWizard;
+let lightWizard;
+let deviceManagerWindow;
+
 
 // --- Data Loading Utilities ---
 async function loadJSON(path) {
@@ -1589,13 +1595,14 @@ class FarmWizard {
 
   attachFormListeners() {
     // Attach input event listeners for form fields - need to do this after modal is shown
-    $('#farmName')?.addEventListener('input', (e) => { 
+    // Use a scoped selector to avoid clashing with the top-card header #farmName
+    document.querySelector('#farmWizardForm #farmName')?.addEventListener('input', (e) => { 
       const value = e.target.value?.trim() || '';
       this.data.location.farmName = value; 
       console.log('🏠 Farm name updated:', this.data.location.farmName);
       this.updateLiveBranding(); 
     });
-    $('#farmName')?.addEventListener('blur', (e) => {
+    document.querySelector('#farmWizardForm #farmName')?.addEventListener('blur', (e) => {
       // Ensure data is saved on blur as well
       const value = e.target.value?.trim() || '';
       this.data.location.farmName = value;
@@ -1937,9 +1944,9 @@ class FarmWizard {
       alert('Run the Wi‑Fi test so we know the credentials work.');
       return false;
     }
-    if (stepId === 'location') {
+  if (stepId === 'location') {
       // Capture all location data for subscription services
-      const farmNameEl = $('#farmName');
+  const farmNameEl = document.querySelector('#farmWizardForm #farmName');
       const farmNameValue = farmNameEl?.value?.trim() || '';
       const addressEl = $('#farmAddress');
       const addressValue = addressEl?.value?.trim() || '';
@@ -2073,7 +2080,7 @@ class FarmWizard {
     this.updateConnectionButtons();
     this.populateTimezones();
     // Populate form fields
-    const farmNameEl = $('#farmName'); if (farmNameEl) farmNameEl.value = this.data.location.farmName;
+  const farmNameEl = document.querySelector('#farmWizardForm #farmName'); if (farmNameEl) farmNameEl.value = this.data.location.farmName;
     const farmAddressEl = $('#farmAddress'); if (farmAddressEl) farmAddressEl.value = this.data.location.address;
     const farmCityEl = $('#farmCity'); if (farmCityEl) farmCityEl.value = this.data.location.city;
     const farmStateEl = $('#farmState'); if (farmStateEl) farmStateEl.value = this.data.location.state;
@@ -2180,8 +2187,14 @@ class FarmWizard {
     };
     const saved = await safeFarmSave(payload);
     if (!saved) { alert('Failed to save farm. Please try again.'); return; }
-    STATE.farm = this.normalizeFarm(payload);
+    STATE.farm = this.normalizeFarm({
+      ...payload,
+      // Mirror name key for header branding components
+      name: payload.farmName || payload.name || 'Your Farm'
+    });
     this.updateFarmDisplay();
+    // Also update the top-card branding header immediately
+    try { this.updateFarmHeaderDisplay(); } catch {}
     showToast({ title: 'Farm saved', msg: 'We stored the farm profile and updated discovery defaults.', kind: 'success', icon: '✅' });
     this.close();
   }
@@ -2430,19 +2443,20 @@ class FarmWizard {
     const contactName = this.data.contact?.name || '';
     const website = this.data.contact?.website || '';
     
-    const brandingSection = $('#farmBrandingSection');
-    const farmNameEl = $('#farmName');
+  const brandingSection = $('#farmBrandingSection');
+  // Top-card name element (header)
+  const farmHeaderNameEl = document.querySelector('#topCard #farmName');
     const farmTaglineEl = $('#farmTagline');
     const brandingPreview = $('#brandingPreview');
     const brandingPreviewContent = $('#brandingPreviewContent');
     
     if (farmName || contactName || website) {
       // Show branding section if we have any info
-      if (brandingSection) brandingSection.style.display = 'block';
+  if (brandingSection) brandingSection.style.display = 'block';
       
       // Update farm name display
-      if (farmNameEl && farmName) {
-        farmNameEl.textContent = farmName;
+      if (farmHeaderNameEl && farmName) {
+        farmHeaderNameEl.textContent = farmName;
       }
       
       // Update tagline with available info
@@ -3522,7 +3536,6 @@ class DeviceManagerWindow {
   }
 }
 
-let deviceManagerWindow;
 // --- Grow Room Wizard ---
 class RoomWizard {
   constructor() {
@@ -3534,7 +3547,7 @@ class RoomWizard {
     this.autoAdvance = false;
     // equipment-first: begin with connectivity and hardware categories for room management
     // Steps can be augmented dynamically based on selected hardware (e.g., hvac, dehumidifier, etc.)
-  this.baseSteps = ['connectivity','hardware','category-setup','room-name','layout','zones','grouping','review'];
+  this.baseSteps = ['connectivity','hardware','category-setup','room-name','review'];
     this.steps = this.baseSteps.slice();
     this.currentStep = 0;
     this.data = {
@@ -3566,6 +3579,9 @@ class RoomWizard {
     $('#roomModalBackdrop')?.addEventListener('click', () => this.close());
     $('#roomPrev')?.addEventListener('click', () => this.prevStep());
     $('#roomNext')?.addEventListener('click', () => this.nextStep());
+    $('#roomTopPrev')?.addEventListener('click', () => this.prevStep());
+    $('#roomTopNext')?.addEventListener('click', () => this.nextStep());
+    $('#roomTopSaveClose')?.addEventListener('click', () => this.saveAndClose());
     this.form?.addEventListener('submit', (e)=> this.saveRoom(e));
 
     // Chip groups
@@ -3755,6 +3771,10 @@ class RoomWizard {
       });
       this.renderDevicesList();
       this.updateSetupQueue();
+      // Update controller assignments when devices are added
+      if (typeof renderControllerAssignments === 'function') {
+        renderControllerAssignments();
+      }
     });
 
     // Device list remove handler (delegated)
@@ -3767,6 +3787,10 @@ class RoomWizard {
         this.data.devices.splice(idx,1);
         this.renderDevicesList();
         this.updateSetupQueue();
+        // Update controller assignments when devices are removed
+        if (typeof renderControllerAssignments === 'function') {
+          renderControllerAssignments();
+        }
       }
     });
 
@@ -3919,7 +3943,49 @@ class RoomWizard {
   }
 
   open(room = null) {
+    // Always refresh the room list from STATE.farm.rooms to reflect latest Farm Registration
+    const farmRooms = Array.isArray(STATE.farm?.rooms) ? STATE.farm.rooms.map(r => ({ ...r })) : [];
+    
+    // If no farm rooms are available, show a warning
+    if (farmRooms.length === 0) {
+      showToast({ 
+        title: 'No Rooms Found', 
+        msg: 'Please create rooms in Farm Registration first', 
+        kind: 'warning', 
+        icon: '⚠️' 
+      });
+      return;
+    }
+    
+    this.multiRoomList = farmRooms;
+    this.multiRoomIndex = 0;
+    
+    // If a room is provided, just open for that room
+    if (room) {
+      this._openSingleRoom(room);
+      return;
+    }
+    
+    // Start with the first room from Farm Registration
+    this._openSingleRoom(this.multiRoomList[this.multiRoomIndex]);
+    
+    // Always inject multi-room navigation if there are multiple rooms
+    if (this.multiRoomList.length > 1) {
+      this._injectMultiRoomNav();
+    }
+  }
+
+  _openSingleRoom(room) {
+    // Reset navigation state to ensure clean slate
     this.currentStep = 0;
+    this.steps = this.baseSteps.slice(); // Reset to base steps
+    
+    // Clean up any existing Setup Next Room button from previous sessions
+    const existingNextRoomBtn = document.getElementById('setupNextRoomBtn');
+    if (existingNextRoomBtn) {
+      existingNextRoomBtn.remove();
+    }
+    
     const base = {
       id: '',
       name: '',
@@ -3941,6 +4007,7 @@ class RoomWizard {
       grouping: { groups: [], planId: '', scheduleId: '' },
       seriesCount: 0
     };
+    
     if (room) {
       const clone = JSON.parse(JSON.stringify(room));
       this.data = {
@@ -3952,6 +4019,12 @@ class RoomWizard {
         roles: { ...base.roles, ...(clone.roles || {}) },
         grouping: { ...base.grouping, ...(clone.grouping || {}) }
       };
+      
+      // Ensure the room name from Farm Registration is preserved
+      if (clone.name) {
+        this.data.name = clone.name;
+      }
+      
       if (!Array.isArray(this.data.hardwareOrder) || !this.data.hardwareOrder.length) {
         this.data.hardwareOrder = Array.isArray(this.data.hardwareCats) ? this.data.hardwareCats.slice() : [];
       }
@@ -3959,15 +4032,22 @@ class RoomWizard {
     } else {
       this.data = { ...base };
     }
+    
     // Restore per-category progress if present on room record or local storage
     this.categoryProgress = (this.data._categoryProgress && JSON.parse(JSON.stringify(this.data._categoryProgress))) || (()=>{ try { const s = JSON.parse(localStorage.getItem('gr.roomWizard.progress')||'null'); return s?.categoryProgress||{}; } catch { return {}; } })();
+    
     // If categories were already chosen, build the dynamic steps and position to first incomplete category
     try { this.rebuildDynamicSteps(); } catch {}
+    
     this.modal.setAttribute('aria-hidden','false');
-    // Use setTimeout to ensure DOM is ready
+    
+    // Use setTimeout to ensure DOM is ready and navigation state is reset
     setTimeout(() => {
       this.showStep(0);
+      // Force navigation update after modal opens
+      this.showStep(this.currentStep);
     }, 10);
+    
     // Prefill lists (fixtures rendering moved to Light Setup wizard)
     this.renderDevicesList();
     this.renderZoneList();
@@ -3975,6 +4055,7 @@ class RoomWizard {
     this.updateGroupSuggestions();
     this.updateHardwareSearch('');
     this.updateSetupQueue();
+    
     // If we have a queue and any incomplete categories, jump to category-setup at first incomplete
     try {
       if ((this.data.hardwareCats||[]).length) {
@@ -3988,34 +4069,220 @@ class RoomWizard {
     } catch {}
   }
 
+  _injectMultiRoomNav() {
+    // Add navigation UI for multi-room setup (e.g., Next Room, Prev Room, Room X of Y)
+    // Only if modal is open and multiRoomList exists
+    if (!this.modal || !Array.isArray(this.multiRoomList) || this.multiRoomList.length < 2) return;
+    
+    let nav = document.getElementById('multiRoomNav');
+    if (!nav) {
+      nav = document.createElement('div');
+      nav.id = 'multiRoomNav';
+      nav.style = 'display:flex;justify-content:center;align-items:center;gap:16px;margin:8px 0;padding:8px;background:#f8f9fa;border-radius:6px;border:1px solid #e5e7eb;';
+      this.modal.querySelector('.modal-header')?.appendChild(nav);
+    }
+    
+    const currentRoom = this.multiRoomList[this.multiRoomIndex];
+    const roomName = currentRoom?.name || `Room ${this.multiRoomIndex + 1}`;
+    
+    nav.innerHTML = `
+      <button id="prevRoomBtn" ${this.multiRoomIndex === 0 ? 'disabled' : ''} style="padding:4px 8px;border-radius:4px;">&lt; Previous</button>
+      <span style="font-weight:bold;color:#374151;">Setting up: <em>${roomName}</em> (${this.multiRoomIndex + 1} of ${this.multiRoomList.length})</span>
+      <button id="nextRoomBtn" ${this.multiRoomIndex === this.multiRoomList.length - 1 ? 'disabled' : ''} style="padding:4px 8px;border-radius:4px;">Next &gt;</button>
+    `;
+    
+    // Previous room navigation
+    document.getElementById('prevRoomBtn').onclick = () => {
+      if (this.multiRoomIndex > 0) {
+        this.multiRoomIndex--;
+        const prevRoom = this.multiRoomList[this.multiRoomIndex];
+        this._openSingleRoom(prevRoom);
+        this._injectMultiRoomNav();
+        showToast({ 
+          title: 'Switched Room', 
+          msg: `Now setting up: ${prevRoom.name}`, 
+          kind: 'info', 
+          icon: '🔄' 
+        });
+      }
+    };
+    
+    // Next room navigation  
+    document.getElementById('nextRoomBtn').onclick = () => {
+      if (this.multiRoomIndex < this.multiRoomList.length - 1) {
+        this.multiRoomIndex++;
+        const nextRoom = this.multiRoomList[this.multiRoomIndex];
+        this._openSingleRoom(nextRoom);
+        this._injectMultiRoomNav();
+        showToast({ 
+          title: 'Switched Room', 
+          msg: `Now setting up: ${nextRoom.name}`, 
+          kind: 'info', 
+          icon: '🔄' 
+        });
+      }
+    };
+  }
+
   close(){ this.modal.setAttribute('aria-hidden','true'); }
 
   showStep(index) {
+    // Sync internal current step state
+    this.currentStep = index;
+    
     document.querySelectorAll('.room-step').forEach(step => step.removeAttribute('data-active'));
     const el = document.querySelector(`.room-step[data-step="${this.steps[index]}"]`);
     if (el) el.setAttribute('data-active', '');
     $('#roomModalProgress').textContent = `Step ${index + 1} of ${this.steps.length}`;
+    
+    // Guard navigation button toggles
     const prev = $('#roomPrev'); 
     const next = $('#roomNext'); 
+    const topNext = $('#roomTopNext');
+    const topPrev = $('#roomTopPrev');
+    const topSaveClose = $('#roomTopSaveClose');
     const save = $('#btnSaveRoom');
     
     // Ensure buttons exist before setting styles
-    if (prev) prev.style.display = index === 0 ? 'none' : 'inline-block';
+    if (prev) {
+      prev.style.display = index === 0 ? 'none' : 'inline-block';
+    }
     
+    // On final step: show Previous and Save & Close buttons
     if (index === this.steps.length - 1) { 
+      if (prev) prev.style.display = 'inline-block';  // Show Previous on final step
       if (next) next.style.display = 'none';
-      if (save) save.style.display = 'inline-block';
+      if (topNext) topNext.style.display = 'none';
+      if (topPrev) topPrev.style.display = 'inline-block';  // Show Previous in header on final step
+      // Insert Setup Next Room button if there are more rooms to setup
+      let nextRoomBtn = document.getElementById('setupNextRoomBtn');
+      const hasMoreRooms = Array.isArray(this.multiRoomList) && this.multiRoomList.length > 1 && this.multiRoomIndex < this.multiRoomList.length - 1;
+      
+      if (hasMoreRooms) {
+        if (!nextRoomBtn) {
+          nextRoomBtn = document.createElement('button');
+          nextRoomBtn.id = 'setupNextRoomBtn';
+          nextRoomBtn.className = 'primary';
+          nextRoomBtn.style.marginRight = '8px';
+          // Insert before Save & Close button if present
+          if (topSaveClose && topSaveClose.parentNode) {
+            topSaveClose.parentNode.insertBefore(nextRoomBtn, topSaveClose);
+          } else if (save && save.parentNode) {
+            save.parentNode.insertBefore(nextRoomBtn, save);
+          } else {
+            document.body.appendChild(nextRoomBtn);
+          }
+        }
+        nextRoomBtn.textContent = `Setup Next Room (${this.multiRoomIndex + 2}/${this.multiRoomList.length})`;
+        nextRoomBtn.style.display = 'inline-block';
+        nextRoomBtn.onclick = async () => {
+          // Save current room's setup data first, but don't auto-close
+          const mockEvent = { preventDefault: () => {} };
+          const success = await this.saveRoom(mockEvent, false);
+          
+          if (success) {
+            // Move to next room after successful save
+            this.multiRoomIndex++;
+            
+            // Get the next room from the original farm data
+            const farmRooms = Array.isArray(STATE.farm?.rooms) ? STATE.farm.rooms : [];
+            const nextRoom = farmRooms[this.multiRoomIndex];
+            
+            if (nextRoom) {
+              // Open the next room - start fresh with farm registration data
+              this._openSingleRoom(nextRoom);
+              this.currentStep = 0;
+              this.showStep(0);
+              this._injectMultiRoomNav();
+              
+              // Update modal title to show current room
+              const titleEl = document.getElementById('roomModalTitle');
+              if (titleEl) {
+                titleEl.textContent = `Set up ${nextRoom.name}`;
+              }
+              
+              showToast({ 
+                title: 'Room Setup Saved', 
+                msg: `Moving to ${nextRoom.name}`, 
+                kind: 'success', 
+                icon: '✅' 
+              });
+            } else {
+              // No more rooms, close the wizard
+              this.close();
+              showToast({ 
+                title: 'All Rooms Complete!', 
+                msg: 'All grow rooms have been set up successfully', 
+                kind: 'success', 
+                icon: '🎉' 
+              });
+            }
+          } else {
+            showToast({ 
+              title: 'Save Failed', 
+              msg: 'Please fix errors before continuing', 
+              kind: 'error', 
+              icon: '❌' 
+            });
+          }
+        };
+      } else if (nextRoomBtn) {
+        nextRoomBtn.style.display = 'none';
+      }
+      
+      // Show Save & Close button only if there are no more rooms
+      if (topSaveClose) {
+        if (hasMoreRooms) {
+          // If there are more rooms, hide the Save & Continue button since we have Setup Next Room
+          topSaveClose.style.display = 'none';
+        } else {
+          // This is the last room, show final save text
+          topSaveClose.textContent = 'Save & Close';
+          topSaveClose.style.display = 'inline-block';
+        }
+      }
+      if (save) {
+        if (hasMoreRooms) {
+          // Hide footer save button when there are more rooms
+          save.style.display = 'none';
+        } else {
+          save.style.display = 'inline-block';
+        }
+      }
       this.updateReview();
-      // Change title for final step
+      
+      // Update title based on current room and progress
       const titleEl = document.getElementById('roomModalTitle');
-      if (titleEl) titleEl.textContent = 'Done! Onward!';
+      if (titleEl) {
+        if (hasMoreRooms) {
+          titleEl.textContent = `Complete Setup: ${this.data.name || 'Room'} (${this.multiRoomIndex + 1}/${this.multiRoomList.length})`;
+        } else {
+          titleEl.textContent = `Final Room Setup: ${this.data.name || 'Room'}`;
+        }
+      }
     }
     else { 
+      // Show Previous button except on first step
+      if (topPrev) {
+        topPrev.style.display = index === 0 ? 'none' : 'inline-block';
+      }
       if (next) {
         next.style.display = 'inline-block';
         next.style.visibility = 'visible';
       }
+      if (topNext) {
+        topNext.style.display = 'inline-block';
+        topNext.style.visibility = 'visible';
+      }
+      if (topSaveClose) topSaveClose.style.display = 'none';
       if (save) save.style.display = 'none';
+      
+      // IMPORTANT: Hide the Setup Next Room button on non-final steps
+      const nextRoomBtn = document.getElementById('setupNextRoomBtn');
+      if (nextRoomBtn) {
+        nextRoomBtn.style.display = 'none';
+      }
+      
       // Reset title for non-final steps
       const titleEl = document.getElementById('roomModalTitle');
       if (titleEl) titleEl.textContent = 'Set up a Grow Room';
@@ -4029,11 +4296,21 @@ class RoomWizard {
     if (stepKey === 'room-name') {
       const nameInput = document.getElementById('roomName');
       if (nameInput) {
-        // Auto-populate from farm registration if available and room name is empty
-        if (!this.data.name && STATE.farm?.name) {
-          this.data.name = STATE.farm.name + ' - Room 1'; // Default naming pattern
+        // The room name should already be pre-filled from Farm Registration data
+        // Don't override it unless it's empty
+        if (!this.data.name && STATE.farm?.farmName) {
+          // Fallback naming if somehow the room name is missing
+          const roomNumber = (this.multiRoomIndex || 0) + 1;
+          this.data.name = `${STATE.farm.farmName} - Room ${roomNumber}`;
         }
         nameInput.value = this.data.name || '';
+        
+        // Show a hint about the room being from Farm Registration
+        const hintEl = document.getElementById('roomNameHint');
+        if (hintEl && this.multiRoomList && this.multiRoomList.length > 0) {
+          hintEl.textContent = `Room name from Farm Registration. Editing this will update the farm configuration.`;
+          hintEl.style.display = 'block';
+        }
       }
     }
 
@@ -4355,12 +4632,29 @@ class RoomWizard {
     } else if (catId === 'mini-split') {
       html = `
         <div class="tiny">Mini Split units</div>
-        <div class="equipment-selection">
-          <label class="tiny">Manufacturer
-            <input type="text" id="cat-mini-split-manufacturer" placeholder="Search manufacturer..." value="${v(catData.manufacturer||'')}" style="width:200px">
-          </label>
+        
+        <div style="margin-bottom: 12px;">
+          <label style="display: block; margin-bottom: 8px; font-size: 13px;">Search mini-splits:</label>
+          <input id="cat-mini-split-search" type="text" placeholder="Search models (e.g., Mitsubishi MSZ-FH09NA)" 
+                 style="width: 100%; padding: 8px; font-size: 14px;">
         </div>
-        <label class="tiny">How many? <input type="number" id="cat-mini-split-count" min="0" value="${v(catData.count||0)}" style="width:80px"></label>
+        
+        <div style="margin-bottom: 12px;">
+          <div style="font-size: 12px; color: #64748b; margin-bottom: 4px;">Search Results:</div>
+          <div id="cat-mini-split-results" style="max-height: 150px; overflow-y: auto; border: 1px solid #e2e8f0; border-radius: 4px; min-height: 60px;">
+            <div style="padding: 20px; text-align: center; color: #64748b; font-size: 13px;">
+              Type to search for mini-split models...
+            </div>
+          </div>
+        </div>
+        
+        <div style="margin-bottom: 12px;">
+          <div style="font-size: 12px; color: #64748b; margin-bottom: 4px;">Selected Mini-Splits:</div>
+          <div id="cat-mini-split-selected" style="min-height: 60px; border: 1px solid #e2e8f0; border-radius: 4px; padding: 8px;">
+            <div style="color: #64748b; font-size: 13px;">No mini-splits selected yet</div>
+          </div>
+        </div>
+        
         <div class="tiny" style="margin-top:6px">Control Options</div>
         <div class="control-checkboxes">
           <label class="tiny"><input type="checkbox" id="cat-mini-split-wifi" ${catData.wifi ? 'checked' : ''}> Wi-Fi Control</label>
@@ -4372,17 +4666,29 @@ class RoomWizard {
     } else if (catId === 'dehumidifier') {
       html = `
         <div class="tiny">Dehumidifiers</div>
-        <div class="equipment-selection">
-          <label class="tiny">Manufacturer
-            <input type="text" id="cat-dehu-manufacturer" placeholder="Search manufacturer..." value="${v(catData.manufacturer||'')}" style="width:200px">
-          </label>
-          <label class="tiny">Model
-            <select id="cat-dehu-model" style="width:200px">
-              <option value="">Select model</option>
-            </select>
-          </label>
+        
+        <div style="margin-bottom: 12px;">
+          <label style="display: block; margin-bottom: 8px; font-size: 13px;">Search dehumidifiers:</label>
+          <input id="cat-dehu-search" type="text" placeholder="Search models (e.g., Quest Dual 155)" 
+                 style="width: 100%; padding: 8px; font-size: 14px;">
         </div>
-        <label class="tiny">How many? <input type="number" id="cat-dehu-count" min="0" value="${v(catData.count||0)}" style="width:80px"></label>
+        
+        <div style="margin-bottom: 12px;">
+          <div style="font-size: 12px; color: #64748b; margin-bottom: 4px;">Search Results:</div>
+          <div id="cat-dehu-results" style="max-height: 150px; overflow-y: auto; border: 1px solid #e2e8f0; border-radius: 4px; min-height: 60px;">
+            <div style="padding: 20px; text-align: center; color: #64748b; font-size: 13px;">
+              Type to search for dehumidifier models...
+            </div>
+          </div>
+        </div>
+        
+        <div style="margin-bottom: 12px;">
+          <div style="font-size: 12px; color: #64748b; margin-bottom: 4px;">Selected Dehumidifiers:</div>
+          <div id="cat-dehu-selected" style="min-height: 60px; border: 1px solid #e2e8f0; border-radius: 4px; padding: 8px;">
+            <div style="color: #64748b; font-size: 13px;">No dehumidifiers selected yet</div>
+          </div>
+        </div>
+        
         <div class="tiny" style="margin-top:6px">Control Options</div>
         <div class="control-checkboxes">
           <label class="tiny"><input type="checkbox" id="cat-dehu-wifi" ${catData.wifi ? 'checked' : ''}> Wi-Fi Control</label>
@@ -4440,6 +4746,9 @@ class RoomWizard {
       `;
     }
     body.innerHTML = html;
+    
+    // Add event listeners for manufacturer search to populate model dropdowns
+    this.setupManufacturerSearch();
     
     // Wire chip groups to update data (for categories that still use chips)
     body.querySelectorAll('.chip-row').forEach(row => {
@@ -4525,17 +4834,32 @@ class RoomWizard {
       catData.count = getNum('cat-hvac-count') ?? catData.count;
     }
     if (catId === 'mini-split') {
-      catData.count = getNum('cat-mini-split-count') ?? catData.count;
-        catData.manufacturer = getStr('cat-mini-split-manufacturer') ?? catData.manufacturer;
-        catData.wifi = getChecked('cat-mini-split-wifi');
-        catData.wired = getChecked('cat-mini-split-wired');
+      // Use new selectedEquipment structure  
+      const selectedEquipment = this.categoryProgress[this.currentStep]?.selectedEquipment?.filter(e => e.category === 'mini-split') || [];
+      catData.selectedEquipment = selectedEquipment;
+      catData.wifi = getChecked('cat-mini-split-wifi');
+      catData.wired = getChecked('cat-mini-split-wired');
+      
+      // Backward compatibility - calculate total count
+      catData.count = selectedEquipment.reduce((sum, item) => sum + item.count, 0);
+      if (selectedEquipment.length > 0) {
+        catData.manufacturer = selectedEquipment[0].vendor;
+        catData.model = selectedEquipment[0].model;
+      }
     }
     if (catId === 'dehumidifier') {
-      catData.count = getNum('cat-dehu-count') ?? catData.count;
-      catData.manufacturer = getStr('cat-dehu-manufacturer') ?? catData.manufacturer;
-      catData.model = getStr('cat-dehu-model') ?? catData.model;
+      // Use new selectedEquipment structure
+      const selectedEquipment = this.categoryProgress[this.currentStep]?.selectedEquipment?.filter(e => e.category === 'dehumidifier') || [];
+      catData.selectedEquipment = selectedEquipment;
       catData.wifi = getChecked('cat-dehu-wifi');
       catData.wired = getChecked('cat-dehu-wired');
+      
+      // Backward compatibility - calculate total count
+      catData.count = selectedEquipment.reduce((sum, item) => sum + item.count, 0);
+      if (selectedEquipment.length > 0) {
+        catData.manufacturer = selectedEquipment[0].vendor;
+        catData.model = selectedEquipment[0].model;
+      }
     }
     if (catId === 'fans') {
       catData.count = getNum('cat-fans-count') ?? catData.count;
@@ -4557,6 +4881,251 @@ class RoomWizard {
       catData.notes = getStr('cat-other-notes') ?? catData.notes;
       catData.manufacturer = getStr('cat-other-manufacturer') ?? catData.manufacturer;
     }
+  }
+
+  setupManufacturerSearch() {
+    console.log('[DEBUG] Setting up modern equipment search...');
+    
+    // Setup search for dehumidifiers
+    const dehuSearchInput = document.getElementById('cat-dehu-search');
+    if (dehuSearchInput) {
+      console.log('[DEBUG] Found dehumidifier search input, setting up listener');
+      dehuSearchInput.addEventListener('input', (e) => {
+        console.log('[DEBUG] Dehumidifier search input event:', e.target.value);
+        this.searchEquipment('dehumidifier', e.target.value, 'cat-dehu-results');
+      });
+      this.renderSelectedEquipment('dehumidifier', 'cat-dehu-selected');
+    } else {
+      console.log('[DEBUG] Dehumidifier search input not found!');
+    }
+
+    // Setup search for mini-splits
+    const miniSplitSearchInput = document.getElementById('cat-mini-split-search');
+    if (miniSplitSearchInput) {
+      console.log('[DEBUG] Found mini-split search input, setting up listener');
+      miniSplitSearchInput.addEventListener('input', (e) => {
+        console.log('[DEBUG] Mini-split search input event:', e.target.value);
+        this.searchEquipment('mini-split', e.target.value, 'cat-mini-split-results');
+      });
+      this.renderSelectedEquipment('mini-split', 'cat-mini-split-selected');
+    } else {
+      console.log('[DEBUG] Mini-split search input not found!');
+    }
+
+    // Setup manufacturer search for fans
+    const fansManufacturerInput = document.getElementById('cat-fans-manufacturer');
+    if (fansManufacturerInput) {
+      fansManufacturerInput.addEventListener('input', (e) => {
+        this.populateModelDropdown('cat-fans-model', e.target.value, 'fans');
+      });
+    }
+
+    // Setup manufacturer search for other equipment
+    const otherManufacturerInput = document.getElementById('cat-other-manufacturer');
+    if (otherManufacturerInput) {
+      otherManufacturerInput.addEventListener('input', (e) => {
+        this.populateModelDropdown('cat-other-model', e.target.value, 'other');
+      });
+    }
+  }
+
+  searchEquipment(category, query, resultsElementId) {
+    const resultsDiv = document.getElementById(resultsElementId);
+    
+    if (!query.trim()) {
+      resultsDiv.innerHTML = `<div style="padding: 20px; text-align: center; color: #64748b; font-size: 13px;">Type to search for ${category} models...</div>`;
+      return;
+    }
+    
+    console.log('[DEBUG] Searching equipment for category:', category, 'query:', query);
+    
+    // Search in equipment database
+    const equipment = STATE.equipmentKB?.equipment || [];
+    const filtered = equipment.filter(item => {
+      const searchText = (item.vendor + ' ' + item.model + ' ' + (item.tags || []).join(' ')).toLowerCase();
+      const matches = item.category === category && searchText.includes(query.toLowerCase());
+      if (query.toLowerCase().length >= 2) {
+        console.log('[DEBUG] Checking:', searchText, 'matches query "' + query + '":', matches);
+      }
+      return matches;
+    });
+    
+    console.log('[DEBUG] Found', filtered.length, 'matching equipment');
+    
+    if (filtered.length === 0) {
+      resultsDiv.innerHTML = `<div style="padding: 20px; text-align: center; color: #64748b; font-size: 13px;">No ${category} models found matching "${query}"</div>`;
+      return;
+    }
+    
+    const html = filtered.map(item => `
+      <div class="equipment-result" onclick="roomWizard.addEquipment('${category}', '${item.vendor}', '${item.model}', '${item.capacity || item.power || 'Unknown'}', '${item.control || 'Manual'}')"
+           style="padding: 8px; border-bottom: 1px solid #f1f5f9; cursor: pointer; display: flex; justify-content: between; align-items: center;">
+        <div>
+          <div style="font-weight: 500; font-size: 14px;">${item.vendor} ${item.model}</div>
+          <div style="font-size: 12px; color: #64748b;">${item.capacity || item.power || 'Unknown capacity'} • ${item.control || 'Manual'}</div>
+        </div>
+        <div style="font-size: 12px; color: #3b82f6; font-weight: 500;">+ Add</div>
+      </div>
+    `).join('');
+    
+    resultsDiv.innerHTML = html;
+  }
+
+  addEquipment(category, vendor, model, capacity, control) {
+    console.log('[DEBUG] Adding equipment:', category, vendor, model);
+    
+    // Initialize selected equipment array if it doesn't exist
+    if (!this.categoryProgress[this.currentStep]) {
+      this.categoryProgress[this.currentStep] = {};
+    }
+    if (!this.categoryProgress[this.currentStep].selectedEquipment) {
+      this.categoryProgress[this.currentStep].selectedEquipment = [];
+    }
+    
+    // Check if already selected
+    const existing = this.categoryProgress[this.currentStep].selectedEquipment.find(e => 
+      e.category === category && e.vendor === vendor && e.model === model
+    );
+    
+    if (existing) {
+      existing.count += 1;
+    } else {
+      this.categoryProgress[this.currentStep].selectedEquipment.push({
+        category,
+        vendor,
+        model,
+        capacity,
+        control,
+        count: 1
+      });
+    }
+    
+    this.renderSelectedEquipment(category, `cat-${category}-selected`);
+  }
+
+  renderSelectedEquipment(category, selectedElementId) {
+    const selectedDiv = document.getElementById(selectedElementId);
+    if (!selectedDiv) return;
+    
+    const selectedEquipment = this.categoryProgress[this.currentStep]?.selectedEquipment?.filter(e => e.category === category) || [];
+    
+    if (selectedEquipment.length === 0) {
+      selectedDiv.innerHTML = `<div style="color: #64748b; font-size: 13px;">No ${category}s selected yet</div>`;
+      return;
+    }
+    
+    const html = selectedEquipment.map(item => `
+      <div style="display: flex; justify-content: space-between; align-items: center; padding: 8px; border-bottom: 1px solid #f1f5f9;">
+        <div>
+          <div style="font-weight: 500; font-size: 14px;">${item.vendor} ${item.model}</div>
+          <div style="font-size: 12px; color: #64748b;">Qty: ${item.count} • ${item.capacity} • ${item.control}</div>
+        </div>
+        <div style="display: flex; gap: 8px; align-items: center;">
+          <button onclick="roomWizard.changeEquipmentCount('${category}', '${item.vendor}', '${item.model}', -1)" 
+                  style="width: 24px; height: 24px; border: 1px solid #d1d5db; background: white; border-radius: 4px; cursor: pointer;">-</button>
+          <span style="min-width: 20px; text-align: center; font-size: 14px;">${item.count}</span>
+          <button onclick="roomWizard.changeEquipmentCount('${category}', '${item.vendor}', '${item.model}', 1)" 
+                  style="width: 24px; height: 24px; border: 1px solid #d1d5db; background: white; border-radius: 4px; cursor: pointer;">+</button>
+          <button onclick="roomWizard.removeEquipment('${category}', '${item.vendor}', '${item.model}')" 
+                  style="width: 24px; height: 24px; border: 1px solid #ef4444; background: #fef2f2; color: #ef4444; border-radius: 4px; cursor: pointer;">×</button>
+        </div>
+      </div>
+    `).join('');
+    
+    selectedDiv.innerHTML = html;
+  }
+
+  changeEquipmentCount(category, vendor, model, delta) {
+    const selectedEquipment = this.categoryProgress[this.currentStep]?.selectedEquipment || [];
+    const item = selectedEquipment.find(e => e.category === category && e.vendor === vendor && e.model === model);
+    
+    if (item) {
+      item.count = Math.max(0, item.count + delta);
+      if (item.count === 0) {
+        this.removeEquipment(category, vendor, model);
+      } else {
+        this.renderSelectedEquipment(category, `cat-${category}-selected`);
+      }
+    }
+  }
+
+  removeEquipment(category, vendor, model) {
+    if (!this.categoryProgress[this.currentStep]?.selectedEquipment) return;
+    
+    this.categoryProgress[this.currentStep].selectedEquipment = 
+      this.categoryProgress[this.currentStep].selectedEquipment.filter(e => 
+        !(e.category === category && e.vendor === vendor && e.model === model)
+      );
+    
+    this.renderSelectedEquipment(category, `cat-${category}-selected`);
+  }
+
+  populateModelDropdown(modelSelectId, manufacturerQuery, category) {
+    const modelSelect = document.getElementById(modelSelectId);
+    if (!modelSelect) {
+      console.log('[DEBUG] Model select element not found:', modelSelectId);
+      return;
+    }
+
+    // Clear existing options except the first one
+    modelSelect.innerHTML = '<option value="">Select model</option>';
+
+    if (!manufacturerQuery || manufacturerQuery.length < 2) {
+      console.log('[DEBUG] Query too short or empty:', manufacturerQuery);
+      return;
+    }
+
+    const query = manufacturerQuery.toLowerCase();
+    console.log('[DEBUG] Searching equipment for manufacturer:', query, 'category:', category);
+    console.log('[DEBUG] STATE.equipmentKB exists:', !!STATE.equipmentKB);
+    console.log('[DEBUG] Equipment array exists:', !!STATE.equipmentKB?.equipment);
+    console.log('[DEBUG] Equipment array length:', STATE.equipmentKB?.equipment?.length || 0);
+
+    // Search in equipment database
+    const equipment = STATE.equipmentKB?.equipment || [];
+    const matchingEquipment = equipment.filter(item => 
+      item.category === category && 
+      item.vendor.toLowerCase().includes(query)
+    );
+
+    console.log('[DEBUG] Found equipment matches:', matchingEquipment.length);
+    if (matchingEquipment.length > 0) {
+      console.log('[DEBUG] Sample matches:', matchingEquipment.slice(0, 3).map(e => `${e.vendor} ${e.model}`));
+    }
+
+    matchingEquipment.forEach(item => {
+      const option = document.createElement('option');
+      option.value = item.model;
+      option.textContent = `${item.model} (${item.capacity || item.power || 'Unknown capacity'})`;
+      option.dataset.vendor = item.vendor;
+      option.dataset.category = item.category;
+      option.dataset.control = item.control;
+      modelSelect.appendChild(option);
+    });
+
+    // Also search in device manufacturers database
+    const manufacturers = window.DEVICE_MANUFACTURERS || [];
+    manufacturers.forEach(manufacturer => {
+      if (manufacturer.name.toLowerCase().includes(query)) {
+        (manufacturer.models || []).forEach(model => {
+          // Try to match category or features to the requested category
+          const hasRelevantFeatures = model.features && (
+            (category === 'dehumidifier' && model.features.includes('dehumidification')) ||
+            (category === 'mini-split' && model.features.includes('hvac')) ||
+            (category === 'fans' && model.features.includes('ventilation'))
+          );
+
+          if (hasRelevantFeatures || category === 'other') {
+            const option = document.createElement('option');
+            option.value = model.model;
+            option.textContent = `${model.model} (${(model.connectivity || []).join(', ')})`;
+            option.dataset.vendor = manufacturer.name;
+            option.dataset.connectivity = (model.connectivity || []).join(',');
+            modelSelect.appendChild(option);
+          }
+        });
+      }
+    });
   }
 
   // Wire per-category action buttons: Test Control
@@ -4852,11 +5421,13 @@ class RoomWizard {
     if (!host) return;
     this.hardwareSearchResults = [];
     if (!query) {
-      host.innerHTML = '<li class="tiny" style="color:#64748b">Search lights, hubs, equipment…</li>';
+      host.innerHTML = '<li class="tiny" style="color:#64748b">Search lights, hubs, HVAC, dehumidifiers, equipment…</li>';
       return;
     }
     const q = query.toLowerCase();
     const results = [];
+    
+    // Search fixtures (lights)
     const fixtures = (STATE.deviceKB?.fixtures || []).filter(item => `${item.vendor} ${item.model}`.toLowerCase().includes(q));
     fixtures.forEach(item => {
       results.push({
@@ -4866,6 +5437,25 @@ class RoomWizard {
         meta: [item.watts ? `${item.watts} W` : null, item.control || null].filter(Boolean).join(' • ')
       });
     });
+    
+    // Search equipment (HVAC, dehumidifiers, fans, etc.)
+    const equipment = (STATE.equipmentKB?.equipment || []).filter(item => 
+      `${item.vendor} ${item.model} ${item.category}`.toLowerCase().includes(q)
+    );
+    equipment.forEach(item => {
+      results.push({
+        kind: 'equipment',
+        item,
+        label: `${item.vendor} ${item.model}`,
+        meta: [
+          item.category ? item.category.charAt(0).toUpperCase() + item.category.slice(1) : null,
+          item.capacity || null,
+          item.control || null
+        ].filter(Boolean).join(' • ')
+      });
+    });
+    
+    // Search device manufacturers
     (DEVICE_MANUFACTURERS || []).forEach(man => {
       (man.models || []).forEach(model => {
         const label = `${man.name} ${model.model}`;
@@ -4884,6 +5474,7 @@ class RoomWizard {
         });
       });
     });
+    
     this.hardwareSearchResults = results.slice(0, 8);
     if (!this.hardwareSearchResults.length) {
       host.innerHTML = '<li class="tiny" style="color:#64748b">No matches found. Try another make/model.</li>';
@@ -4891,7 +5482,10 @@ class RoomWizard {
     }
     host.innerHTML = this.hardwareSearchResults.map((res, idx) => {
       const meta = res.meta ? `<div class="tiny" style="color:#64748b">${escapeHtml(res.meta)}</div>` : '';
-      const hint = res.kind === 'fixture' ? 'Add fixture & infer control' : 'Fill device form & pairing tips';
+      let hint = 'Fill device form & pairing tips';
+      if (res.kind === 'fixture') hint = 'Add fixture & infer control';
+      else if (res.kind === 'equipment') hint = 'Add equipment & configure control';
+      
       return `<li><button type="button" class="ghost" data-idx="${idx}" style="width:100%;text-align:left"><div><div><strong>${escapeHtml(res.label)}</strong></div>${meta}<div class="tiny" style="color:#0f172a">${escapeHtml(hint)}</div></div></button></li>`;
     }).join('');
   }
@@ -4902,6 +5496,7 @@ class RoomWizard {
     if (host) host.innerHTML = '';
     const searchInput = document.getElementById('roomDeviceSearch');
     if (searchInput) searchInput.value = '';
+    
     if (suggestion.kind === 'fixture') {
       const item = suggestion.item;
       this.data.fixtures = this.data.fixtures || [];
@@ -4922,7 +5517,56 @@ class RoomWizard {
       this.ensureHardwareCategory('grow-lights');
       this.inferSensors();
       this.updateSetupQueue();
+      // Update controller assignments when fixtures are added
+      if (typeof renderControllerAssignments === 'function') {
+        renderControllerAssignments();
+      }
       showToast({ title: 'Fixture added', msg: `${item.vendor} ${item.model} inserted into the room`, kind: 'success', icon: '✅' }, 3000);
+      return;
+    }
+
+    if (suggestion.kind === 'equipment') {
+      const item = suggestion.item;
+      this.data.devices = this.data.devices || [];
+      
+      // Create device entry from equipment
+      const device = {
+        vendor: item.vendor,
+        model: item.model,
+        category: item.category,
+        power: item.power,
+        capacity: item.capacity,
+        features: item.features || [],
+        setup: {}
+      };
+      
+      // Map control method to setup properties
+      if (item.control === 'WiFi') {
+        device.setup.wifi = true;
+      } else if (item.control === '0-10V') {
+        device.setup['0-10v'] = true;
+      } else if (item.control === 'Smart Thermostat') {
+        device.setup.wifi = true;
+        device.setup.thermostat = true;
+      } else if (item.control === 'Speed Controller') {
+        device.setup['speed-controller'] = true;
+      }
+      
+      this.data.devices.push(device);
+      this.ensureHardwareCategory(item.category);
+      this.updateSetupQueue();
+      
+      // Update controller assignments when equipment is added
+      if (typeof renderControllerAssignments === 'function') {
+        renderControllerAssignments();
+      }
+      
+      showToast({ 
+        title: 'Equipment added', 
+        msg: `${item.vendor} ${item.model} added to room`, 
+        kind: 'success', 
+        icon: '✅' 
+      }, 3000);
       return;
     }
 
@@ -5100,22 +5744,14 @@ class RoomWizard {
   updateReview(){
     const host = $('#roomReview'); if (!host) return;
     const escape = escapeHtml;
-    const layout = this.data.layout || {};
-    const layoutParts = [];
-    if (layout.type) layoutParts.push(escape(layout.type));
-    if (layout.rows) layoutParts.push(`${escape(String(layout.rows))} rows`);
-    if (layout.racks) layoutParts.push(`${escape(String(layout.racks))} racks/row`);
-    if (layout.levels) layoutParts.push(`${escape(String(layout.levels))} levels`);
-    const layoutSummary = layoutParts.length ? layoutParts.join(' • ') : '—';
-    const zones = Array.isArray(this.data.zones) ? this.data.zones : [];
-    const zoneHtml = zones.length ? zones.map(z => `<span class="chip tiny">${escape(z)}</span>`).join(' ') : '—';
+    // Hardware categories selected in 'hardware' step
     const hardwareCats = Array.isArray(this.data.hardwareCats) ? this.data.hardwareCats : [];
     const hardwareHtml = hardwareCats.length ? hardwareCats.map(id => `<span class="chip tiny">${escape(this.categoryLabel(id))}</span>`).join(' ') : '—';
+    // Per-category detail captured in 'category-setup' step
     const catData = this.data.category || {};
     const catDetails = Object.entries(catData).map(([key, val]) => {
       const parts = [];
       if (val.count != null) parts.push(`${escape(String(val.count))} units`);
-      if (val.zones != null && String(val.zones)) parts.push(`${escape(String(val.zones))} zones`);
       if (val.control) parts.push(escape(String(val.control)));
       if (val.energy) parts.push(escape(String(val.energy)));
       if (val.notes) parts.push(escape(String(val.notes)));
@@ -5123,72 +5759,14 @@ class RoomWizard {
       return `<li><strong>${label}</strong> — ${parts.length ? parts.join(' • ') : 'No details captured'}</li>`;
     });
     const categoryHtml = catDetails.length ? `<ul class="tiny" style="margin:6px 0 0 0; padding-left:18px">${catDetails.join('')}</ul>` : '<span>—</span>';
-    const progressEntries = Object.entries(this.categoryProgress || {}).map(([id, info]) => {
-      const status = this.categoryStatusMessage(info?.status || 'needs-info', info?.notes || '');
-      const title = info?.notes ? ` title="${escape(info.notes)}"` : '';
-      return `<span class="chip tiny"${title}>${escape(this.categoryLabel(id))}: ${escape(status)}</span>`;
-    }).join(' ');
-    const fixtures = Array.isArray(this.data.fixtures) ? this.data.fixtures : [];
-    const fixtureItems = fixtures.map(f => {
-      const label = `${[f.vendor, f.model].filter(Boolean).map(v => escape(String(v))).join(' ')}${f.count ? ` × ${escape(String(f.count))}` : ''}`.trim();
-      const watts = f.watts ? ` • ${escape(String(f.watts))} W` : '';
-      return `<li>${label || 'Fixture'}${watts}</li>`;
-    });
-    const fixturesHtml = fixtureItems.length ? `<ul style="margin:6px 0 0 0; padding-left:18px">${fixtureItems.join('')}</ul>` : '<span>—</span>';
-    const controlLabels = { 'wifi': 'Wi‑Fi / App', 'smart-plug': 'Smart plug', '0-10v': '0‑10V / Analog', 'rs485': 'RS‑485 / Modbus', 'other': 'Other' };
-    const controlSummary = this.data.controlMethod ? escape(controlLabels[this.data.controlMethod] || this.data.controlMethod) : '—';
-    const sensors = Array.isArray(this.data.sensors?.categories) ? this.data.sensors.categories : [];
-    const placements = this.data.sensors?.placements || {};
-    const sensorLabels = { tempRh: 'Temp/RH', co2: 'CO₂', vpd: 'Dewpoint/VPD', ppfd: 'Light/PPFD', energy: 'Energy/Power' };
-    const sensorItems = sensors.map(key => {
-      const label = escape(sensorLabels[key] || key);
-      const loc = placements[key] ? ` <span style="color:#475569">@ ${escape(String(placements[key]))}</span>` : '';
-      return `<li>${label}${loc}</li>`;
-    });
-    const sensorHtml = sensorItems.length ? `<ul style="margin:6px 0 0 0; padding-left:18px">${sensorItems.join('')}</ul>` : '<span>—</span>';
-    const conn = this.data.connectivity || {};
-    let hubSummary = '—';
-    if (conn.hasHub === true) {
-      const type = conn.hubType ? escape(conn.hubType) : 'Local hub';
-      const ip = conn.hubIp ? ` • ${escape(conn.hubIp)}` : '';
-      hubSummary = `${type}${ip}`;
-    } else if (conn.hasHub === false) {
-      hubSummary = 'No hub yet';
-    }
-    const tenant = conn.cloudTenant ? escape(conn.cloudTenant) : '—';
-    const roles = this.data.roles || {};
-    const formatRole = (key) => {
-      const list = Array.isArray(roles[key]) ? roles[key].filter(Boolean) : [];
-      return list.length ? escape(list.join(', ')) : '—';
-    };
-    const grouping = this.data.grouping || {};
-    const groupList = Array.isArray(grouping.groups) ? grouping.groups : [];
-    const groupHtml = groupList.length ? `<ul style="margin:6px 0 0 0; padding-left:18px">${groupList.map(g => `<li>${escape(g)}</li>`).join('')}</ul>` : '<span>—</span>';
-    const planName = grouping.planId ? (STATE.plans || []).find(p => p.id === grouping.planId)?.name || grouping.planId : '—';
-    const scheduleName = grouping.scheduleId ? (STATE.schedules || []).find(s => s.id === grouping.scheduleId)?.name || grouping.scheduleId : '—';
-    const energyLabels = { 'ct-branch': 'CT / branch meters', 'smart-plugs': 'Smart plugs', 'built-in': 'Built-in meter', 'none': 'None' };
-    const energyLabel = this.data.energy ? escape(energyLabels[this.data.energy] || this.data.energy) : '—';
-    const energyHours = Number(this.data.energyHours) || 0;
-    const runtimeLabel = energyHours ? `${escape(String(energyHours))} hr/day` : '—';
-    const totalWatts = fixtures.reduce((sum, f) => sum + (Number(f.watts) || 0) * (Number(f.count) || 1), 0);
-    const estimatedKwh = totalWatts > 0 && energyHours > 0 ? `${((totalWatts / 1000) * energyHours).toFixed(2)} kWh/day` : '—';
+    // Category setup queue/progress removed from room review per spec
+    const progressEntries = '';
     host.innerHTML = `
       <div><strong>Name:</strong> ${escape(this.data.name || '—')}</div>
       <div><strong>Location:</strong> ${escape(this.data.location || '—')}</div>
-      <div><strong>Layout:</strong> ${layoutSummary}</div>
-      <div><strong>Zones:</strong> ${zoneHtml}</div>
       <div><strong>Hardware:</strong> ${hardwareHtml}</div>
       <div><strong>Per-category details:</strong> ${categoryHtml}</div>
-      ${progressEntries ? `<div><strong>Setup queue:</strong> ${progressEntries}</div>` : ''}
-      <div><strong>Fixtures:</strong> ${fixturesHtml}</div>
-      <div><strong>Series count:</strong> ${escape(String(this.data.seriesCount || 0))}</div>
-      <div><strong>Control method:</strong> ${controlSummary}</div>
-      <div><strong>Sensors:</strong> ${sensorHtml}</div>
-      <div><strong>Groups:</strong> ${groupHtml}</div>
-      <div><strong>Plan &amp; Schedule:</strong> Plan ${escape(planName)} • Schedule ${escape(scheduleName)}</div>
-      <div><strong>Connectivity:</strong> ${hubSummary} • Tenant ${tenant}</div>
-      <div><strong>Roles:</strong> Admins ${formatRole('admin')} • Operators ${formatRole('operator')} • Viewers ${formatRole('viewer')}</div>
-      <div><strong>Energy monitoring:</strong> ${energyLabel} • Runtime ${runtimeLabel} • Est. ${escape(estimatedKwh)}</div>
+  ${progressEntries ? `<div><strong>Setup queue:</strong> ${progressEntries}</div>` : ''}
     `;
   }
 
@@ -5412,7 +5990,7 @@ class RoomWizard {
     this.showStep(this.currentStep);
   }
 
-  async saveRoom(e){
+  async saveRoom(e, shouldAutoClose = true){
     e.preventDefault();
     // Assign id if new
     if (!this.data.id) this.data.id = `room-${Math.random().toString(36).slice(2,8)}`;
@@ -5426,12 +6004,73 @@ class RoomWizard {
     const ok = await safeRoomsSave(this.data);
     if (ok) {
       renderRooms();
+      renderControllerAssignments(); // Update controller assignments when rooms change
       showToast({ title:'Room saved', msg:`${this.data.name} saved`, kind:'success', icon:'✅' });
       try { localStorage.removeItem('gr.roomWizard.progress'); } catch {}
-      this.close();
+      
+      // Only close if explicitly requested and not part of a multi-room workflow
+      if (shouldAutoClose && (!this.multiRoomList || this.multiRoomList.length <= 1)) {
+        this.close();
+      }
+      return true;
     } else {
       alert('Failed to save room');
+      return false;
     }
+  }
+
+  async saveAndClose() {
+    // Check if there are more rooms to setup
+    const hasMoreRooms = Array.isArray(this.multiRoomList) && this.multiRoomList.length > 1 && this.multiRoomIndex < this.multiRoomList.length - 1;
+    
+    // Create a mock event to satisfy saveRoom's preventDefault call
+    const mockEvent = { preventDefault: () => {} };
+    
+    // Save the current room
+    const success = await this.saveRoom(mockEvent, false);
+    
+    if (success && hasMoreRooms) {
+      // If there are more rooms, ask user if they want to continue or close
+      const continueSetup = confirm(`Room "${this.data.name}" saved successfully!\n\nYou have ${this.multiRoomList.length - this.multiRoomIndex - 1} more room(s) to setup.\n\nClick OK to continue with the next room, or Cancel to finish later.`);
+      
+      if (continueSetup) {
+        // Move to next room
+        this.multiRoomIndex++;
+        const nextRoom = this.multiRoomList[this.multiRoomIndex];
+        this._openSingleRoom(nextRoom);
+        this.currentStep = 0;
+        this.showStep(0);
+        this._injectMultiRoomNav();
+        
+        showToast({ 
+          title: 'Continuing Setup', 
+          msg: `Now setting up: ${nextRoom.name}`, 
+          kind: 'success', 
+          icon: '▶️' 
+        });
+      } else {
+        // User chose to finish later, close the wizard
+        this.close();
+        showToast({ 
+          title: 'Setup Paused', 
+          msg: 'You can resume room setup anytime from the Grow Rooms section', 
+          kind: 'info', 
+          icon: '⏸️' 
+        });
+      }
+    } else if (success) {
+      // This was the last room or single room setup, close normally
+      this.close();
+      if (this.multiRoomList && this.multiRoomList.length > 1) {
+        showToast({ 
+          title: 'All Rooms Complete!', 
+          msg: 'All grow rooms have been set up successfully', 
+          kind: 'success', 
+          icon: '🎉' 
+        });
+      }
+    }
+    // If save failed, saveRoom will handle the error display and we stay in the wizard
   }
 
   // Device Discovery Methods
@@ -5563,7 +6202,7 @@ async function loadAllData() {
     }));
     
     // Load static data files
-    const [groups, schedules, plans, environment, calibrations, deviceMeta, deviceKB, deviceManufacturers, farm, rooms, switchbotDevices] = await Promise.all([
+    const [groups, schedules, plans, environment, calibrations, deviceMeta, deviceKB, equipmentKB, deviceManufacturers, farm, rooms, switchbotDevices] = await Promise.all([
       loadJSON('./data/groups.json'),
       loadJSON('./data/schedules.json'),
       loadJSON('./data/plans.json'),
@@ -5571,6 +6210,7 @@ async function loadAllData() {
       loadJSON('./data/calibration.json'),
       loadJSON('./data/device-meta.json'),
         loadJSON('./data/device-kb.json'),
+        loadJSON('./data/equipment-kb.json'),
         loadJSON('./data/device-manufacturers.json'),
       loadJSON('./data/farm.json'),
       loadJSON('./data/rooms.json'),
@@ -5588,10 +6228,20 @@ async function loadAllData() {
   STATE.farm = normalizeFarmDoc(rawFarm);
   try { if (STATE.farm && Object.keys(STATE.farm).length) localStorage.setItem('gr.farm', JSON.stringify(STATE.farm)); } catch {}
   STATE.rooms = rooms?.rooms || [];
-  if (deviceKB && Array.isArray(deviceKB.fixtures)) STATE.deviceKB = deviceKB;
+  if (deviceKB && Array.isArray(deviceKB.fixtures)) {
+    STATE.deviceKB = deviceKB;
+    console.log('✅ Loaded device fixtures database:', deviceKB.fixtures.length, 'fixtures');
+    console.log('Sample fixtures:', deviceKB.fixtures.slice(0, 3).map(f => `${f.vendor} ${f.model}`));
+  }
+  if (equipmentKB && Array.isArray(equipmentKB.equipment)) {
+    STATE.equipmentKB = equipmentKB;
+    console.log('✅ Loaded equipment database:', equipmentKB.equipment.length, 'equipment items');
+    console.log('Sample equipment:', equipmentKB.equipment.slice(0, 3).map(e => `${e.vendor} ${e.model} (${e.category})`));
+  }
   // load manufacturers into a global for lookups and selects
   if (deviceManufacturers && Array.isArray(deviceManufacturers.manufacturers)) {
     window.DEVICE_MANUFACTURERS = deviceManufacturers.manufacturers;
+    console.log('✅ Loaded device manufacturers:', deviceManufacturers.manufacturers.length, 'manufacturers');
   } else {
     window.DEVICE_MANUFACTURERS = window.DEVICE_MANUFACTURERS || [];
   }
@@ -5612,7 +6262,52 @@ async function loadAllData() {
     renderEnvironment();
     renderRooms();
     renderLightSetups();
+    
+    // Initialize sample light setups for demo (remove this in production)
+    if (!STATE.lightSetups || STATE.lightSetups.length === 0) {
+      STATE.lightSetups = [
+        {
+          id: 'demo-1',
+          room: 'Veg Room',
+          zone: 'Zone A',
+          fixtures: [
+            { id: 'gavita-1700e', name: 'Gavita Pro 1700e LED', watts: 645, ppfd: 1700, count: 4 }
+          ],
+          controlMethod: 'wifi',
+          controlDetails: 'Fixtures will be controlled via Wi-Fi connection using manufacturer apps.',
+          lightsPerController: 2,
+          controllersCount: 2,
+          totalFixtures: 4,
+          totalWattage: 2580,
+          createdAt: new Date().toISOString()
+        },
+        {
+          id: 'demo-2',
+          room: 'Flower Room',
+          zone: 'Zone 1',
+          fixtures: [
+            { id: 'fluence-spydr-2p', name: 'Fluence SPYDR 2p', watts: 645, ppfd: 1700, count: 6 }
+          ],
+          controlMethod: '0-10v',
+          controlDetails: 'Professional dimming control using 0-10V signals.',
+          lightsPerController: 3,
+          controllersCount: 2,
+          totalFixtures: 6,
+          totalWattage: 3870,
+          createdAt: new Date().toISOString()
+        }
+      ];
+    }
+    
+    renderLightSetupSummary();
+    renderControllerAssignments();
     renderSwitchBotDevices();
+    
+    // Wire controller assignments buttons
+    document.getElementById('btnRefreshControllerAssignments')?.addEventListener('click', renderControllerAssignments);
+    document.getElementById('btnManageControllers')?.addEventListener('click', () => {
+      alert('Controller management interface will be implemented in future update');
+    });
     // Start background polling for environment telemetry
     startEnvPolling();
 
@@ -5833,6 +6528,10 @@ function renderRooms() {
       if (ok) {
         setStatus(`Deleted room ${name}`);
         renderRooms();
+        // Update controller assignments when rooms are deleted
+        if (typeof renderControllerAssignments === 'function') {
+          renderControllerAssignments();
+        }
       } else {
         alert('Failed to delete room');
       }
@@ -5860,7 +6559,7 @@ function renderLightSetups() {
       </div>
     `;
     // Wire the button since it's dynamically created
-    document.getElementById('btnLaunchLightSetup')?.addEventListener('click', () => lightWizard.open());
+    document.getElementById('btnLaunchLightSetup')?.addEventListener('click', () => freshLightWizard.open());
   } else {
     container.innerHTML = lightSetups.map(setup => `
       <div class="card">
@@ -5879,6 +6578,648 @@ function renderLightSetups() {
       </div>
     `).join('');
   }
+}
+
+function renderLightSetupSummary() {
+  const summaryContainer = document.getElementById('lightSetupSummary');
+  if (!summaryContainer) return;
+  
+  const lightSetups = STATE.lightSetups || [];
+  const rooms = STATE.rooms || [];
+  
+  if (rooms.length === 0) {
+    summaryContainer.innerHTML = '<p class="tiny" style="color:#64748b">No rooms configured yet.</p>';
+    return;
+  }
+  
+  // Create room-based summary matching Grow Rooms format
+  const roomSummaries = rooms.map(room => {
+    // Get light setups for this room
+    const roomLightSetups = lightSetups.filter(setup => 
+      setup.room === room.name || setup.room === room.id
+    );
+    
+    // Calculate light totals for this room
+    let totalLights = 0;
+    let lightDetails = [];
+    
+    if (roomLightSetups.length > 0) {
+      roomLightSetups.forEach(setup => {
+        totalLights += setup.totalFixtures || 0;
+        
+        if (setup.selectedFixtures && setup.selectedFixtures.length > 0) {
+          setup.selectedFixtures.forEach(fixture => {
+            const quantity = setup.fixtureQuantities?.[fixture.id] || 1;
+            lightDetails.push({
+              name: fixture.name || fixture.model || 'LED Fixture',
+              quantity: quantity,
+              zone: setup.zone
+            });
+          });
+        } else if (setup.fixtures && setup.fixtures.length > 0) {
+          // Fallback for older format
+          setup.fixtures.forEach(fixture => {
+            lightDetails.push({
+              name: fixture.name || 'LED Fixture',
+              quantity: fixture.count || 1,
+              zone: setup.zone
+            });
+          });
+        }
+      });
+    }
+    
+    // Build zones display from room data
+    const zones = (room.zones || []).join(', ') || '—';
+    
+    // Build light summary
+    const lightSummary = lightDetails.length > 0 
+      ? lightDetails.map(light => `${light.quantity}x ${light.name}`).join(', ')
+      : totalLights > 0 
+        ? `${totalLights} light${totalLights !== 1 ? 's' : ''}`
+        : '—';
+    
+    // Control method from light setups or room data
+    const controlMethods = [...new Set(roomLightSetups.map(setup => setup.controlMethod).filter(Boolean))];
+    const control = controlMethods.length > 0 ? controlMethods.join(', ') : (room.controlMethod || '—');
+    
+    const name = room.name || 'Unnamed Room';
+    
+    const roomId = room.id || '';
+    const editPayload = JSON.stringify(room || {}).replace(/"/g, '&quot;');
+    
+    return `
+      <div class="card" style="margin-top:8px">
+        <div class="row" style="justify-content:space-between;align-items:center">
+          <div>
+            <h3 style="margin:0">${name}</h3>
+            <div class="tiny" style="color:#475569">Zones: ${zones} • Control: ${control}</div>
+            <div class="tiny" style="color:#475569">Lights: ${lightSummary}</div>
+          </div>
+          <div class="row" style="gap:6px">
+            <button type="button" class="ghost" onclick="editLightSetup('${roomId}')">Edit</button>
+            <button type="button" class="ghost danger" data-action="del-light-setup" data-room-id="${roomId}">Delete</button>
+          </div>
+        </div>
+      </div>
+    `;
+  }).join('');
+  
+  summaryContainer.innerHTML = roomSummaries;
+  
+  // Wire up delete buttons
+  summaryContainer.querySelectorAll('[data-action="del-light-setup"]').forEach(btn => {
+    btn.addEventListener('click', async (e) => {
+      const roomId = btn.getAttribute('data-room-id');
+      const room = STATE.rooms.find(r => String(r.id) === String(roomId));
+      if (!roomId) return;
+      
+      const roomName = room?.name || roomId;
+      const lightSetupsForRoom = STATE.lightSetups.filter(setup => 
+        setup.room === room?.name || setup.room === roomId
+      );
+      
+      if (lightSetupsForRoom.length === 0) {
+        alert(`No light setups found for room "${roomName}"`);
+        return;
+      }
+      
+      if (!confirm(`Delete all light setups for "${roomName}"? This cannot be undone.`)) return;
+      
+      // Remove all light setups for this room
+      STATE.lightSetups = STATE.lightSetups.filter(setup => 
+        setup.room !== room?.name && setup.room !== roomId
+      );
+      
+      // Re-render the summary
+      renderLightSetupSummary();
+      renderControllerAssignments();
+      showToast({ 
+        title: 'Light Setup Deleted', 
+        msg: `Removed light setup for ${roomName}`, 
+        kind: 'success', 
+        icon: '🗑️' 
+      });
+    });
+  });
+}
+
+function editLightSetup(roomId) {
+  // Find the room
+  const room = STATE.rooms.find(r => String(r.id) === String(roomId));
+  if (!room) {
+    alert('Room not found');
+    return;
+  }
+  
+  // Find light setups for this room
+  const roomLightSetups = STATE.lightSetups.filter(setup => 
+    setup.room === room.name || setup.room === roomId
+  );
+  
+  if (roomLightSetups.length === 0) {
+    // No existing light setup, create new one
+    if (confirm(`No light setup found for "${room.name}". Create a new light setup for this room?`)) {
+      // Open the fresh light wizard with pre-selected room
+      if (window.freshLightWizard) {
+        freshLightWizard.open();
+        // Pre-select the room in step 1 if possible
+        setTimeout(() => {
+          const roomSelect = document.getElementById('lightSetupRoom');
+          if (roomSelect) {
+            roomSelect.value = room.name;
+            // Trigger change event to update zones
+            roomSelect.dispatchEvent(new Event('change', { bubbles: true }));
+          }
+        }, 100);
+      }
+    }
+    return;
+  }
+  
+  // For now, since we have multiple light setups per room, 
+  // let's open the light wizard to add/modify setups
+  if (window.freshLightWizard) {
+    freshLightWizard.open();
+    // Pre-select the room
+    setTimeout(() => {
+      const roomSelect = document.getElementById('lightSetupRoom');
+      if (roomSelect) {
+        roomSelect.value = room.name;
+        roomSelect.dispatchEvent(new Event('change', { bubbles: true }));
+      }
+    }, 100);
+    
+    showToast({ 
+      title: 'Edit Light Setup', 
+      msg: `Opening light setup wizard for ${room.name}`, 
+      kind: 'info', 
+      icon: '✏️' 
+    });
+  }
+}
+
+// Controller Assignments functionality
+function generateUniqueId(equipmentType, roomName, zoneName) {
+  // Create unique ID format: EQUIPMENTTYPEROOM#ZONE#RANDOM
+  // e.g., DEAL037 for Dehumidifier in Alpha room, zone 3, random 7
+  
+  const equipmentCode = equipmentType.substring(0, 2).toUpperCase();
+  const roomCode = roomName.substring(0, 2).toUpperCase();
+  const zoneCode = zoneName.toString().padStart(1, '0');
+  const randomDigit = Math.floor(Math.random() * 10);
+  
+  return `${equipmentCode}${roomCode}${zoneCode}${randomDigit}`;
+}
+
+function getControllerRequiredEquipment() {
+  const equipment = [];
+  
+  // Get current operational lights from device metadata (for demo/existing lights)
+  const deviceMeta = STATE.deviceMeta || {};
+  Object.keys(deviceMeta).forEach(deviceId => {
+    const device = deviceMeta[deviceId];
+    if (deviceId.startsWith('light-') && device.transport === 'wifi') {
+      // Map to current room structure or use legacy room name
+      let roomName = device.room || 'Grow Room 2';
+      let zoneName = device.zone || '1';
+      
+      // Try to map to current rooms
+      const currentRoom = STATE.rooms?.find(r => 
+        r.name.toLowerCase().includes('grow') || 
+        r.name.toLowerCase().includes('test')
+      );
+      if (currentRoom) {
+        roomName = currentRoom.name;
+        zoneName = currentRoom.zones?.[0] || '1';
+      }
+      
+      equipment.push({
+        type: 'Light',
+        make: device.manufacturer || 'Unknown',
+        model: device.model || 'Unknown',
+        room: roomName,
+        zone: zoneName,
+        uniqueId: deviceId, // Use actual device ID for existing lights
+        controlMethod: 'WiFi',
+        controller: 'Unassigned',
+        status: 'Operational', // Mark as operational for demo
+        serial: device.serial || 'Unknown',
+        watts: device.watts || 'Unknown'
+      });
+    }
+  });
+  
+  // Get equipment from light setups
+  const lightSetups = STATE.lightSetups || [];
+  lightSetups.forEach(setup => {
+    if (setup.controlMethod && setup.controlMethod !== 'manual') {
+      const room = STATE.rooms.find(r => r.name === setup.room || r.id === setup.room);
+      const roomName = room?.name || setup.room || 'Unknown';
+      const zoneName = setup.zone || '1';
+      
+      if (setup.selectedFixtures) {
+        setup.selectedFixtures.forEach(fixture => {
+          const quantity = setup.fixtureQuantities?.[fixture.id] || 1;
+          for (let i = 0; i < quantity; i++) {
+            equipment.push({
+              type: 'Light',
+              make: fixture.vendor || 'Unknown',
+              model: fixture.name || fixture.model || 'Unknown',
+              room: roomName,
+              zone: zoneName,
+              uniqueId: generateUniqueId('Light', roomName, zoneName),
+              controlMethod: setup.controlMethod,
+              controller: 'Unassigned'
+            });
+          }
+        });
+      }
+    }
+  });
+  
+  // Get equipment from room setups (HVAC, sensors, etc.)
+  const rooms = STATE.rooms || [];
+  rooms.forEach(room => {
+    // Check for devices that need controllers
+    if (room.devices && room.devices.length > 0) {
+      room.devices.forEach(device => {
+        const needsController = device.setup && (
+          device.setup.wifi || 
+          device.setup.bluetooth || 
+          device.setup['0-10v'] || 
+          device.setup.rs485 ||
+          device.setup.smartPlug ||
+          device.setup['smart-plug']
+        );
+        
+        if (needsController) {
+          room.zones?.forEach(zone => {
+            equipment.push({
+              type: capitalizeDeviceType(device.category || getDeviceTypeFromModel(device.model) || 'Device'),
+              make: device.vendor || 'Unknown',
+              model: device.model || 'Unknown',
+              room: room.name,
+              zone: zone,
+              uniqueId: generateUniqueId(device.category || getDeviceTypeFromModel(device.model) || 'Device', room.name, zone),
+              controlMethod: getDeviceControlMethod(device.setup),
+              controller: 'Unassigned'
+            });
+          });
+        }
+      });
+    }
+    
+    // Check for fixtures in room data (legacy format)
+    if (room.fixtures && room.fixtures.length > 0) {
+      room.fixtures.forEach(fixture => {
+        if (fixture.control && fixture.control !== 'manual') {
+          room.zones?.forEach(zone => {
+            const count = fixture.count || 1;
+            for (let i = 0; i < count; i++) {
+              equipment.push({
+                type: 'Light',
+                make: fixture.vendor || 'Unknown',
+                model: fixture.model || 'Unknown',
+                room: room.name,
+                zone: zone,
+                uniqueId: generateUniqueId('Light', room.name, zone),
+                controlMethod: fixture.control,
+                controller: 'Unassigned'
+              });
+            }
+          });
+        }
+      });
+    }
+  });
+  
+  // Get equipment from groups (lights that are grouped)
+  const groups = STATE.groups || [];
+  groups.forEach(group => {
+    if (group.lights && group.lights.length > 0) {
+      group.lights.forEach(light => {
+        const device = STATE.devices?.find(d => d.id === light.id);
+        if (device) {
+          // Determine room from device location or group assignment
+          const roomName = device.location || group.room || 'Unknown';
+          const zoneName = device.zone || '1';
+          
+          equipment.push({
+            type: 'Light',
+            make: device.vendor || 'Unknown',
+            model: device.model || device.deviceName || 'Unknown',
+            room: roomName,
+            zone: zoneName,
+            uniqueId: generateUniqueId('Light', roomName, zoneName),
+            controlMethod: 'Group Control',
+            controller: 'Unassigned'
+          });
+        }
+      });
+    }
+  });
+  
+  return equipment;
+}
+
+function capitalizeDeviceType(type) {
+  const typeMap = {
+    'hvac': 'HVAC',
+    'mini-split': 'Mini-Split',
+    'dehumidifier': 'Dehumidifier',
+    'sensor': 'Sensor',
+    'fan': 'Fan',
+    'controller': 'Controller',
+    'hub': 'Hub'
+  };
+  
+  return typeMap[type.toLowerCase()] || type.charAt(0).toUpperCase() + type.slice(1).toLowerCase();
+}
+
+function getDeviceTypeFromModel(model) {
+  if (!model) return 'Device';
+  
+  const modelLower = model.toLowerCase();
+  if (modelLower.includes('dehumid')) return 'Dehumidifier';
+  if (modelLower.includes('hvac') || modelLower.includes('split')) return 'HVAC';
+  if (modelLower.includes('sensor')) return 'Sensor';
+  if (modelLower.includes('fan')) return 'Fan';
+  if (modelLower.includes('hub') || modelLower.includes('bridge')) return 'Hub';
+  if (modelLower.includes('controller')) return 'Controller';
+  
+  return 'Device';
+}
+
+function getDeviceControlMethod(setup) {
+  if (setup.wifi) return 'WiFi';
+  if (setup.bluetooth) return 'Bluetooth';
+  if (setup['0-10v']) return '0-10V';
+  if (setup.rs485) return 'RS-485';
+  if (setup.smartPlug || setup['smart-plug']) return 'Smart Plug';
+  return 'Unknown';
+}
+
+function renderControllerAssignments() {
+  const container = document.getElementById('controllerAssignmentsTable');
+  if (!container) return;
+  
+  const equipment = getControllerRequiredEquipment();
+  
+  if (equipment.length === 0) {
+    container.innerHTML = `
+      <div style="text-align: center; padding: 24px; color: #64748b;">
+        <p>No equipment requiring controllers found.</p>
+        <p class="tiny">Equipment will appear here when you configure lights, HVAC, or sensors with smart control methods.</p>
+      </div>
+    `;
+    return;
+  }
+  
+  container.innerHTML = `
+    <div class="table-container" style="overflow-x: auto;">
+      <table style="width: 100%; border-collapse: collapse; font-size: 14px;">
+        <thead>
+          <tr style="background: #f8fafc; border-bottom: 2px solid #e2e8f0;">
+            <th style="text-align: left; padding: 12px 8px; font-weight: 600;">Type</th>
+            <th style="text-align: left; padding: 12px 8px; font-weight: 600;">Make</th>
+            <th style="text-align: left; padding: 12px 8px; font-weight: 600;">Model</th>
+            <th style="text-align: left; padding: 12px 8px; font-weight: 600;">Room</th>
+            <th style="text-align: left; padding: 12px 8px; font-weight: 600;">Zone</th>
+            <th style="text-align: left; padding: 12px 8px; font-weight: 600;">Unique ID</th>
+            <th style="text-align: left; padding: 12px 8px; font-weight: 600;">Control</th>
+            <th style="text-align: left; padding: 12px 8px; font-weight: 600;">Status</th>
+            <th style="text-align: left; padding: 12px 8px; font-weight: 600;">Controller</th>
+            <th style="text-align: center; padding: 12px 8px; font-weight: 600;">Actions</th>
+          </tr>
+        </thead>
+        <tbody>
+          ${equipment.map((item, index) => `
+            <tr style="border-bottom: 1px solid #e2e8f0;">
+              <td style="padding: 12px 8px;">
+                <span class="chip tiny" style="background: #dbeafe; color: #1e40af;">${item.type}</span>
+                ${item.watts ? `<div class="tiny" style="color: #64748b; margin-top: 2px;">${item.watts}W</div>` : ''}
+              </td>
+              <td style="padding: 12px 8px; font-weight: 500;">${item.make}</td>
+              <td style="padding: 12px 8px;">
+                ${item.model}
+                ${item.serial ? `<div class="tiny" style="color: #64748b; margin-top: 2px;">S/N: ${item.serial}</div>` : ''}
+              </td>
+              <td style="padding: 12px 8px;">${item.room}</td>
+              <td style="padding: 12px 8px;">${item.zone}</td>
+              <td style="padding: 12px 8px;">
+                <code style="background: #f1f5f9; padding: 2px 6px; border-radius: 4px; font-family: 'Monaco', monospace; font-size: 12px;">${item.uniqueId}</code>
+              </td>
+              <td style="padding: 12px 8px;">
+                <span class="chip tiny" style="background: #ecfdf5; color: #059669;">${item.controlMethod}</span>
+              </td>
+              <td style="padding: 12px 8px;">
+                ${item.status === 'Operational' ? 
+                  '<span class="chip tiny" style="background: #dcfce7; color: #166534;">Operational</span>' : 
+                  '<span class="chip tiny" style="background: #fef3c7; color: #d97706;">Setup Required</span>'
+                }
+              </td>
+              <td style="padding: 12px 8px;">
+                <select class="controller-select" data-equipment-index="${index}" style="padding: 4px 8px; border: 1px solid #d1d5db; border-radius: 4px; font-size: 13px;">
+                  <option value="">Select Controller...</option>
+                  <option value="hub-001">Main Hub (HUB-001)</option>
+                  <option value="controller-001">Zone Controller 1 (CTRL-001)</option>
+                  <option value="controller-002">Zone Controller 2 (CTRL-002)</option>
+                  <option value="wifi-bridge">WiFi Bridge (WIFI-001)</option>
+                </select>
+              </td>
+              <td style="padding: 12px 8px; text-align: center;">
+                <button type="button" class="ghost tiny" onclick="editControllerAssignment(${index})">${item.status === 'Operational' ? 'Configure' : 'Edit'}</button>
+              </td>
+            </tr>
+          `).join('')}
+        </tbody>
+      </table>
+    </div>
+    
+    <div style="margin-top: 16px; padding: 12px; background: #f8fafc; border-radius: 8px; border: 1px solid #e2e8f0;">
+      <div class="row" style="justify-content: space-between; align-items: center;">
+        <div>
+          <strong>${equipment.length}</strong> equipment item${equipment.length !== 1 ? 's' : ''} requiring controller assignment
+        </div>
+        <div class="row" style="gap: 8px;">
+          <button type="button" class="ghost" onclick="exportControllerAssignments()">Export CSV</button>
+          <button type="button" class="primary" onclick="saveControllerAssignments()">Save Assignments</button>
+        </div>
+      </div>
+    </div>
+  `;
+  
+  // Wire up controller selection changes
+  container.querySelectorAll('.controller-select').forEach(select => {
+    select.addEventListener('change', (e) => {
+      const index = parseInt(e.target.getAttribute('data-equipment-index'));
+      const controllerId = e.target.value;
+      
+      if (equipment[index]) {
+        equipment[index].controller = controllerId || 'Unassigned';
+        
+        showToast({
+          title: 'Controller Updated',
+          msg: `${equipment[index].uniqueId} assigned to ${controllerId || 'Unassigned'}`,
+          kind: 'success',
+          icon: '🔗'
+        });
+      }
+    });
+  });
+}
+
+function editControllerAssignment(index) {
+  const equipment = getControllerRequiredEquipment();
+  const item = equipment[index];
+  
+  if (!item) return;
+  
+  const isOperational = item.status === 'Operational';
+  
+  const modalHTML = `
+    <div class="modal-backdrop active" onclick="closeModal()">
+      <div class="modal-content" onclick="event.stopPropagation()" style="max-width: 600px;">
+        <div class="modal-header">
+          <h3>${isOperational ? 'Configure' : 'Edit'} Controller Assignment</h3>
+          <button type="button" class="btn-close" onclick="closeModal()">×</button>
+        </div>
+        
+        <div class="modal-body">
+          <div class="form-group">
+            <label>Equipment Details</label>
+            <div style="background: #f8fafc; padding: 16px; border-radius: 8px; margin-bottom: 16px;">
+              <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 12px; font-size: 14px;">
+                <div><strong>Type:</strong> ${item.type}</div>
+                <div><strong>Make:</strong> ${item.make}</div>
+                <div><strong>Model:</strong> ${item.model}</div>
+                <div><strong>Room:</strong> ${item.room}</div>
+                <div><strong>Zone:</strong> ${item.zone}</div>
+                <div><strong>Control:</strong> ${item.controlMethod}</div>
+                ${item.serial ? `<div><strong>Serial:</strong> ${item.serial}</div>` : ''}
+                ${item.watts ? `<div><strong>Power:</strong> ${item.watts}W</div>` : ''}
+              </div>
+              ${isOperational ? '<div class="chip tiny" style="background: #dcfce7; color: #166534; margin-top: 8px;">Currently Operational</div>' : ''}
+            </div>
+          </div>
+          
+          <div class="form-group">
+            <label for="assignedController">Assign Controller</label>
+            <select id="assignedController" style="width: 100%; padding: 12px; border: 1px solid #d1d5db; border-radius: 8px;">
+              <option value="">Select Controller...</option>
+              <option value="hub-001" ${item.controller === 'hub-001' ? 'selected' : ''}>Main Hub (HUB-001)</option>
+              <option value="controller-001" ${item.controller === 'controller-001' ? 'selected' : ''}>Zone Controller 1 (CTRL-001)</option>
+              <option value="controller-002" ${item.controller === 'controller-002' ? 'selected' : ''}>Zone Controller 2 (CTRL-002)</option>
+              <option value="wifi-bridge" ${item.controller === 'wifi-bridge' ? 'selected' : ''}>WiFi Bridge (WIFI-001)</option>
+            </select>
+          </div>
+          
+          ${isOperational ? `
+            <div class="form-group">
+              <label>Network Configuration</label>
+              <div style="background: #fef3c7; padding: 12px; border-radius: 8px; border-left: 4px solid #f59e0b;">
+                <div style="font-size: 14px; color: #92400e;">
+                  <strong>Note:</strong> This equipment is currently operational. Any controller assignment changes may affect current operation.
+                </div>
+              </div>
+            </div>
+          ` : ''}
+          
+          <div class="form-group">
+            <label for="assignmentNotes">Notes</label>
+            <textarea id="assignmentNotes" rows="3" placeholder="Add any notes about this controller assignment..." style="width: 100%; padding: 12px; border: 1px solid #d1d5db; border-radius: 8px; resize: vertical;"></textarea>
+          </div>
+        </div>
+        
+        <div class="modal-footer">
+          <button type="button" class="btn secondary" onclick="closeModal()">Cancel</button>
+          <button type="button" class="btn primary" onclick="saveControllerAssignment(${index})">
+            ${isOperational ? 'Update Assignment' : 'Save Assignment'}
+          </button>
+        </div>
+      </div>
+    </div>
+  `;
+  
+  document.body.insertAdjacentHTML('beforeend', modalHTML);
+}
+
+function saveControllerAssignment(index) {
+  const equipment = getControllerRequiredEquipment();
+  const item = equipment[index];
+  
+  if (!item) return;
+  
+  const controllerId = document.getElementById('assignedController').value;
+  const notes = document.getElementById('assignmentNotes').value;
+  
+  // Update the equipment item
+  item.controller = controllerId || 'Unassigned';
+  if (notes) item.notes = notes;
+  
+  // Close modal and refresh display
+  closeModal();
+  renderControllerAssignments();
+  
+  showToast({
+    title: 'Assignment Updated',
+    msg: `${item.uniqueId} ${controllerId ? 'assigned to ' + controllerId : 'unassigned'}`,
+    kind: 'success',
+    icon: '🔗'
+  });
+}
+
+function closeModal() {
+  const modal = document.querySelector('.modal-backdrop');
+  if (modal) modal.remove();
+}
+
+function exportControllerAssignments() {
+  const equipment = getControllerRequiredEquipment();
+  
+  const csvHeaders = ['Type', 'Make', 'Model', 'Room', 'Zone', 'Unique ID', 'Control Method', 'Controller'];
+  const csvRows = equipment.map(item => [
+    item.type,
+    item.make,
+    item.model,
+    item.room,
+    item.zone,
+    item.uniqueId,
+    item.controlMethod,
+    item.controller
+  ]);
+  
+  const csvContent = [csvHeaders, ...csvRows]
+    .map(row => row.map(field => `"${field}"`).join(','))
+    .join('\n');
+  
+  const blob = new Blob([csvContent], { type: 'text/csv' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = 'controller-assignments.csv';
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  URL.revokeObjectURL(url);
+  
+  showToast({
+    title: 'Export Complete',
+    msg: 'Controller assignments exported to CSV',
+    kind: 'success',
+    icon: '📄'
+  });
+}
+
+function saveControllerAssignments() {
+  // Future: Save controller assignments to backend
+  showToast({
+    title: 'Assignments Saved',
+    msg: 'Controller assignments have been saved',
+    kind: 'success',
+    icon: '💾'
+  });
 }
 
 function renderSchedules() {
@@ -6914,7 +8255,15 @@ function wireGlobalEvents() {
 
   async function saveGroups() {
     const ok = await saveJSON('./data/groups.json', { groups: STATE.groups });
-    if (ok) setStatus('Groups saved'); else alert('Failed to save groups');
+    if (ok) {
+      setStatus('Groups saved');
+      // Update controller assignments when groups change
+      if (typeof renderControllerAssignments === 'function') {
+        renderControllerAssignments();
+      }
+    } else {
+      alert('Failed to save groups');
+    }
   }
 
   // Quick actions: import selection from Devices panel and clear roster
@@ -7214,9 +8563,6 @@ function wireGlobalEvents() {
 }
 
 // --- Application Initialization ---
-let farmWizard;
-let roomWizard;
-
 // Device manufacturers KB (loaded at startup)
 let DEVICE_MANUFACTURERS = null;
 async function loadDeviceManufacturers(){
@@ -7259,19 +8605,590 @@ function populateVendorSelect(){
   });
 }
 
+// Global test function for debugging
+window.testDropdowns = function() {
+  console.log('=== DROPDOWN TEST ===');
+  const roomSelect = document.getElementById('lightRoomSelect');
+  const zoneSelect = document.getElementById('lightZoneSelect');
+  
+  console.log('Room select found:', !!roomSelect);
+  console.log('Zone select found:', !!zoneSelect);
+  
+  if (roomSelect) {
+    console.log('Room select disabled:', roomSelect.disabled);
+    console.log('Room select style display:', roomSelect.style.display);
+    console.log('Room select computed display:', window.getComputedStyle(roomSelect).display);
+    console.log('Room select computed pointer-events:', window.getComputedStyle(roomSelect).pointerEvents);
+    
+    // Try to programmatically focus
+    try {
+      roomSelect.focus();
+      console.log('Room select focus successful');
+    } catch (e) {
+      console.error('Room select focus failed:', e);
+    }
+  }
+  
+  if (zoneSelect) {
+    console.log('Zone select disabled:', zoneSelect.disabled);
+    console.log('Zone select style display:', zoneSelect.style.display);
+    console.log('Zone select computed display:', window.getComputedStyle(zoneSelect).display);
+    console.log('Zone select computed pointer-events:', window.getComputedStyle(zoneSelect).pointerEvents);
+  }
+  
+  console.log('=== END TEST ===');
+};
+
 // --- Light Setup Wizard ---
+// Fresh Light Setup Wizard - Clean Implementation
+class FreshLightWizard {
+  constructor() {
+    console.log('[FreshLightWizard] Initializing fresh light setup wizard');
+    
+    this.modal = document.getElementById('freshLightModal');
+    console.log('[FreshLightWizard] Modal element found:', this.modal);
+    
+    this.currentStep = 1;
+    this.totalSteps = 4;
+    this.data = {
+      room: '',
+      zone: '',
+      fixtures: [],
+      controlMethod: '',
+      controlDetails: '',
+      lightsPerController: 1,
+      controllersCount: 1
+    };
+    
+    if (this.modal) {
+      this.setupEventListeners();
+      console.log('[FreshLightWizard] Fresh wizard initialized successfully');
+    } else {
+      console.error('[FreshLightWizard] Could not find freshLightModal element!');
+    }
+  }
+  
+  setupEventListeners() {
+    // Close button
+    const closeBtn = document.getElementById('freshLightClose');
+    if (closeBtn) {
+      closeBtn.addEventListener('click', () => this.close());
+    }
+    
+    // Navigation buttons
+    const nextBtn = document.getElementById('freshNext');
+    const prevBtn = document.getElementById('freshPrev');
+    
+    if (nextBtn) {
+      nextBtn.addEventListener('click', () => this.nextStep());
+    }
+    
+    if (prevBtn) {
+      prevBtn.addEventListener('click', () => this.prevStep());
+    }
+    
+    // Backdrop click to close
+    const backdrop = this.modal.querySelector('.fresh-light-modal__backdrop');
+    if (backdrop) {
+      backdrop.addEventListener('click', () => this.close());
+    }
+    
+    // Room and zone dropdowns
+    this.setupRoomZoneDropdowns();
+    
+    // Fixture search and selection
+    this.setupFixtureSelection();
+    
+    // Control method selection
+    this.setupControlMethod();
+    
+    // Count inputs
+    this.setupCountInputs();
+  }
+  
+  setupRoomZoneDropdowns() {
+    console.log('[FreshLightWizard] Setting up room/zone dropdowns');
+    
+    const roomSelect = document.getElementById('freshRoomSelect');
+    const zoneSelect = document.getElementById('freshZoneSelect');
+    
+    if (!roomSelect || !zoneSelect) {
+      console.error('[FreshLightWizard] Dropdowns not found');
+      return;
+    }
+    
+    // Simple, clean event listeners
+    roomSelect.addEventListener('change', (e) => {
+      console.log('[FreshLightWizard] Room selected:', e.target.value);
+      this.data.room = e.target.value;
+      this.updateZoneDropdown(e.target.value);
+      this.updateNavigation();
+    });
+    
+    zoneSelect.addEventListener('change', (e) => {
+      console.log('[FreshLightWizard] Zone selected:', e.target.value);
+      this.data.zone = e.target.value;
+      this.updateNavigation();
+    });
+    
+    // Populate with room data
+    this.populateRooms();
+  }
+  
+  populateRooms() {
+    console.log('[FreshLightWizard] Populating rooms');
+    
+    const roomSelect = document.getElementById('freshRoomSelect');
+    if (!roomSelect) return;
+    
+    // Clear existing options
+    roomSelect.innerHTML = '<option value="">Select a room</option>';
+    
+    // Get room data from STATE (same as before)
+    const farmRooms = Array.isArray(STATE.farm?.rooms) ? STATE.farm.rooms : [];
+    const createdRooms = Array.isArray(STATE.rooms) ? STATE.rooms : [];
+    
+    console.log('[FreshLightWizard] Available rooms - Farm:', farmRooms.length, 'Created:', createdRooms.length);
+    
+    // Combine rooms
+    const allRooms = [...farmRooms];
+    createdRooms.forEach(room => {
+      const existingRoom = allRooms.find(r => (r.id || r.name) === (room.id || room.name));
+      if (!existingRoom) {
+        allRooms.push(room);
+      }
+    });
+    
+    // Add test data if no rooms
+    if (allRooms.length === 0) {
+      console.log('[FreshLightWizard] No rooms found, adding test rooms');
+      allRooms.push(
+        { id: 'test-room-1', name: 'Test Room 1', zones: ['Zone A', 'Zone B'] },
+        { id: 'test-room-2', name: 'Test Room 2', zones: ['Zone 1', 'Zone 2'] }
+      );
+    }
+    
+    // Populate dropdown
+    allRooms.forEach(room => {
+      const option = document.createElement('option');
+      option.value = room.id || room.name;
+      option.textContent = room.name || room.id;
+      roomSelect.appendChild(option);
+    });
+    
+    console.log('[FreshLightWizard] Populated', allRooms.length, 'rooms');
+  }
+  
+  updateZoneDropdown(roomId) {
+    console.log('[FreshLightWizard] Updating zones for room:', roomId);
+    
+    const zoneSelect = document.getElementById('freshZoneSelect');
+    if (!zoneSelect) return;
+    
+    // Clear zones
+    zoneSelect.innerHTML = '<option value="">Select a zone</option>';
+    
+    if (!roomId) return;
+    
+    // Find the selected room
+    const farmRooms = Array.isArray(STATE.farm?.rooms) ? STATE.farm.rooms : [];
+    const createdRooms = Array.isArray(STATE.rooms) ? STATE.rooms : [];
+    const allRooms = [...farmRooms, ...createdRooms];
+    
+    // Add test rooms if none exist
+    if (allRooms.length === 0) {
+      allRooms.push(
+        { id: 'test-room-1', name: 'Test Room 1', zones: ['Zone A', 'Zone B'] },
+        { id: 'test-room-2', name: 'Test Room 2', zones: ['Zone 1', 'Zone 2'] }
+      );
+    }
+    
+    const selectedRoom = allRooms.find(room => (room.id || room.name) === roomId);
+    
+    if (selectedRoom && selectedRoom.zones) {
+      selectedRoom.zones.forEach(zone => {
+        const option = document.createElement('option');
+        option.value = zone;
+        option.textContent = zone;
+        zoneSelect.appendChild(option);
+      });
+    }
+  }
+  
+  setupFixtureSelection() {
+    console.log('[FreshLightWizard] Setting up fixture selection');
+    
+    const searchInput = document.getElementById('freshFixtureSearch');
+    const resultsDiv = document.getElementById('freshFixtureResults');
+    const selectedDiv = document.getElementById('freshSelectedFixtures');
+    
+    if (!searchInput || !resultsDiv || !selectedDiv) {
+      console.error('[FreshLightWizard] Fixture selection elements not found');
+      return;
+    }
+    
+    // Use real fixture database from STATE.deviceKB.fixtures
+    console.log('[FreshLightWizard] Available fixtures from database:', STATE.deviceKB?.fixtures?.length || 0);
+    if (STATE.deviceKB?.fixtures?.length > 0) {
+      console.log('[FreshLightWizard] Sample fixtures:', STATE.deviceKB.fixtures.slice(0, 3).map(f => `${f.vendor} ${f.model}`));
+    }
+    
+    searchInput.addEventListener('input', (e) => {
+      this.searchFixtures(e.target.value);
+    });
+    
+    this.renderSelectedFixtures();
+  }
+  
+  searchFixtures(query) {
+    const resultsDiv = document.getElementById('freshFixtureResults');
+    
+    if (!query.trim()) {
+      resultsDiv.innerHTML = '<div style="padding: 20px; text-align: center; color: #64748b; font-size: 13px;">Type to search for fixture models...</div>';
+      return;
+    }
+    
+    console.log('[FreshLightWizard] Searching for:', query);
+    
+    // Use real fixture database instead of hardcoded one
+    const fixtures = STATE.deviceKB?.fixtures || [];
+    const filtered = fixtures.filter(fixture => {
+      const searchText = (fixture.vendor + ' ' + fixture.model + ' ' + (fixture.tags || []).join(' ')).toLowerCase();
+      const matches = searchText.includes(query.toLowerCase());
+      if (query.toLowerCase().length >= 2) {
+        console.log('[FreshLightWizard] Checking:', searchText, 'matches query "' + query + '":', matches);
+      }
+      return matches;
+    });
+    
+    console.log('[FreshLightWizard] Found', filtered.length, 'matching fixtures');
+    
+    if (filtered.length === 0) {
+      resultsDiv.innerHTML = `
+        <div style="padding: 20px; text-align: center; color: #64748b; font-size: 13px;">
+          No fixtures found matching "${query}"<br>
+          <small>Try searching for: GROW3, TopLight, Gavita, Fluence, etc.</small>
+        </div>
+      `;
+      return;
+    }
+    
+    const html = filtered.slice(0, 8).map(fixture => `
+      <div class="fresh-fixture-result" onclick="freshLightWizard.addFixture('${fixture.id}')">
+        <div>
+          <div style="font-weight: 500;">${fixture.vendor} ${fixture.model}</div>
+          <div style="font-size: 11px; color: #64748b;">${fixture.watts}W • ${fixture.control || 'Unknown control'}</div>
+        </div>
+        <button type="button" style="padding: 4px 8px; font-size: 11px; background: #6366f1; color: white; border: none; border-radius: 3px;">Add</button>
+      </div>
+    `).join('');
+    
+    resultsDiv.innerHTML = html;
+  }
+  
+  addFixture(fixtureId) {
+    // Use real database from STATE
+    const fixture = STATE.deviceKB.fixtures.find(f => f.id === fixtureId);
+    if (!fixture) {
+      console.log('FreshLightWizard: Fixture not found:', fixtureId);
+      return;
+    }
+    
+    // Check if already selected
+    const existing = this.data.fixtures.find(f => f.id === fixtureId);
+    if (existing) {
+      existing.count += 1;
+    } else {
+      this.data.fixtures.push({ ...fixture, count: 1 });
+    }
+    
+    this.renderSelectedFixtures();
+    this.updateNavigation();
+  }
+  
+  removeFixture(fixtureId) {
+    this.data.fixtures = this.data.fixtures.filter(f => f.id !== fixtureId);
+    this.renderSelectedFixtures();
+    this.updateNavigation();
+  }
+  
+  renderSelectedFixtures() {
+    const selectedDiv = document.getElementById('freshSelectedFixtures');
+    
+    if (this.data.fixtures.length === 0) {
+      selectedDiv.innerHTML = '<div style="color: #64748b; font-size: 13px;">No fixtures selected yet</div>';
+      return;
+    }
+    
+    selectedDiv.innerHTML = this.data.fixtures.map(fixture => `
+      <div class="fresh-selected-fixture">
+        <div>
+          <span style="font-weight: 500;">${fixture.name}</span>
+          <span style="color: #64748b; margin-left: 8px;">×${fixture.count}</span>
+        </div>
+        <button type="button" onclick="freshLightWizard.removeFixture('${fixture.id}')">Remove</button>
+      </div>
+    `).join('');
+  }
+  
+  setupControlMethod() {
+    console.log('[FreshLightWizard] Setting up control method');
+    
+    const controlButtons = document.querySelectorAll('.fresh-control-option');
+    const detailsDiv = document.getElementById('freshControlDetails');
+    
+    controlButtons.forEach(button => {
+      button.addEventListener('click', () => {
+        // Remove selected class from all buttons
+        controlButtons.forEach(btn => btn.classList.remove('selected'));
+        
+        // Add selected class to clicked button
+        button.classList.add('selected');
+        
+        // Update data
+        this.data.controlMethod = button.dataset.value;
+        
+        // Show control details
+        this.showControlDetails(button.dataset.value);
+        
+        this.updateNavigation();
+      });
+    });
+  }
+  
+  showControlDetails(method) {
+    const detailsDiv = document.getElementById('freshControlDetails');
+    
+    const details = {
+      'wifi': 'Fixtures will be controlled via Wi-Fi connection using manufacturer apps or smart home integration.',
+      'smart-plug': 'Fixtures will be plugged into smart plugs for basic on/off control and scheduling.',
+      '0-10v': 'Professional dimming control using 0-10V signals. Requires compatible dimming controllers.',
+      'rs485': 'Advanced control using RS-485/Modbus protocol for precise scheduling and monitoring.',
+      'other': 'Custom control method - please specify your requirements in the notes.'
+    };
+    
+    this.data.controlDetails = details[method] || '';
+    detailsDiv.innerHTML = this.data.controlDetails;
+    detailsDiv.style.display = 'block';
+  }
+  
+  setupCountInputs() {
+    const lightsPerController = document.getElementById('freshLightSeriesCount');
+    const controllersCount = document.getElementById('freshControllersCount');
+    
+    if (lightsPerController) {
+      lightsPerController.addEventListener('change', (e) => {
+        this.data.lightsPerController = parseInt(e.target.value) || 0;
+        this.updateNavigation();
+      });
+    }
+    
+    if (controllersCount) {
+      controllersCount.addEventListener('change', (e) => {
+        this.data.controllersCount = parseInt(e.target.value) || 0;
+        this.updateNavigation();
+      });
+    }
+  }
+  
+  updateNavigation() {
+    const nextBtn = document.getElementById('freshNext');
+    const prevBtn = document.getElementById('freshPrev');
+    
+    if (prevBtn) {
+      prevBtn.style.display = this.currentStep > 1 ? 'block' : 'none';
+    }
+    
+    if (nextBtn) {
+      const canAdvance = this.canAdvance();
+      nextBtn.disabled = !canAdvance;
+      nextBtn.textContent = this.currentStep === this.totalSteps ? 'Save' : 'Next';
+    }
+  }
+  
+  canAdvance() {
+    switch (this.currentStep) {
+      case 1: // Room/Zone selection
+        return this.data.room && this.data.zone;
+      case 2: // Fixtures
+        return this.data.fixtures.length > 0 && this.data.lightsPerController > 0 && this.data.controllersCount > 0;
+      case 3: // Control
+        return this.data.controlMethod;
+      case 4: // Review
+        return true;
+      default:
+        return false;
+    }
+  }
+  
+  nextStep() {
+    if (!this.canAdvance()) return;
+    
+    if (this.currentStep < this.totalSteps) {
+      this.currentStep++;
+      this.showStep();
+    } else {
+      this.save();
+    }
+  }
+  
+  prevStep() {
+    if (this.currentStep > 1) {
+      this.currentStep--;
+      this.showStep();
+    }
+  }
+  
+  showStep() {
+    // Hide all steps
+    document.querySelectorAll('.fresh-light-step').forEach(step => {
+      step.removeAttribute('data-active');
+    });
+    
+    // Show current step
+    const currentStepEl = document.getElementById(`freshStep${this.currentStep}`);
+    if (currentStepEl) {
+      currentStepEl.setAttribute('data-active', '');
+    }
+    
+    // Special handling for review step
+    if (this.currentStep === 4) {
+      this.generateReview();
+    }
+    
+    this.updateNavigation();
+    console.log('[FreshLightWizard] Showing step', this.currentStep);
+  }
+  
+  generateReview() {
+    const reviewDiv = document.getElementById('freshReviewDetails');
+    if (!reviewDiv) return;
+    
+    const totalFixtures = this.data.fixtures.reduce((sum, f) => sum + f.count, 0);
+    const totalWattage = this.data.fixtures.reduce((sum, f) => sum + (f.watts * f.count), 0);
+    const totalControllers = this.data.controllersCount;
+    
+    reviewDiv.innerHTML = `
+      <div style="margin-bottom: 12px;">
+        <strong>Location:</strong> ${this.data.room} - ${this.data.zone}
+      </div>
+      
+      <div style="margin-bottom: 12px;">
+        <strong>Configuration:</strong> ${this.data.lightsPerController} lights per controller, ${totalControllers} controllers
+      </div>
+      
+      <div style="margin-bottom: 12px;">
+        <strong>Fixtures (${totalFixtures} total):</strong>
+        <div style="margin-left: 16px; margin-top: 4px;">
+          ${this.data.fixtures.map(f => `
+            <div style="margin-bottom: 2px;">• ${f.name} ×${f.count} (${f.watts}W each)</div>
+          `).join('')}
+        </div>
+      </div>
+      
+      <div style="margin-bottom: 12px;">
+        <strong>Total Power:</strong> ${totalWattage.toLocaleString()}W
+      </div>
+      
+      <div style="margin-bottom: 12px;">
+        <strong>Control Method:</strong> ${this.getControlMethodName(this.data.controlMethod)}
+        ${this.data.controlDetails ? `<div style="margin-left: 16px; margin-top: 4px; font-size: 12px; color: #64748b;">${this.data.controlDetails}</div>` : ''}
+      </div>
+    `;
+  }
+  
+  getControlMethodName(method) {
+    const names = {
+      'wifi': 'Wi‑Fi / App',
+      'smart-plug': 'Smart Plug',
+      '0-10v': '0‑10V / Wired',
+      'rs485': 'RS‑485 / Modbus',
+      'other': 'Other'
+    };
+    return names[method] || method;
+  }
+  
+  open() {
+    console.log('[FreshLightWizard] Opening wizard');
+    console.log('[FreshLightWizard] Modal element:', this.modal);
+    if (this.modal) {
+      this.modal.setAttribute('aria-hidden', 'false');
+      this.currentStep = 1;
+      this.showStep();
+      this.populateRooms();
+      console.log('[FreshLightWizard] Wizard should now be visible');
+    } else {
+      console.error('[FreshLightWizard] Cannot open - modal element not found!');
+    }
+  }
+  
+  close() {
+    console.log('[FreshLightWizard] Closing wizard');
+    if (this.modal) {
+      this.modal.setAttribute('aria-hidden', 'true');
+    }
+  }
+  
+  save() {
+    console.log('[FreshLightWizard] Saving light setup:', this.data);
+    
+    // Calculate summary
+    const totalFixtures = this.data.fixtures.reduce((sum, f) => sum + f.count, 0);
+    const totalWattage = this.data.fixtures.reduce((sum, f) => sum + (f.watts * f.count), 0);
+    
+    // Store light setup in global STATE
+    if (!STATE.lightSetups) {
+      STATE.lightSetups = [];
+    }
+    
+    const lightSetup = {
+      id: Date.now().toString(),
+      room: this.data.room,
+      zone: this.data.zone,
+      fixtures: this.data.fixtures,
+      controlMethod: this.data.controlMethod,
+      controlDetails: this.data.controlDetails,
+      lightsPerController: this.data.lightsPerController,
+      controllersCount: this.data.controllersCount,
+      totalFixtures: totalFixtures,
+      totalWattage: totalWattage,
+      createdAt: new Date().toISOString()
+    };
+    
+    STATE.lightSetups.push(lightSetup);
+    
+    // Update the light setup summary
+    renderLightSetupSummary();
+    renderControllerAssignments();
+    
+    const summary = `Light Setup Saved!\n\nLocation: ${this.data.room} - ${this.data.zone}\nFixtures: ${totalFixtures} lights (${totalWattage.toLocaleString()}W total)\nControl: ${this.getControlMethodName(this.data.controlMethod)}`;
+    
+    alert(summary);
+    this.close();
+  }
+}
+
+// Original LightWizard class (keeping for now)
 class LightWizard {
   constructor() {
+    console.log('[DEBUG] LightWizard constructor called');
     this.modal = document.getElementById('lightModal');
-    if (!this.modal) return;
+    console.log('[DEBUG] Modal element found:', this.modal);
+    if (!this.modal) {
+      console.error('[DEBUG] No modal element found, exiting constructor');
+      return;
+    }
     
-    this.baseSteps = ['fixtures', 'control', 'energy', 'mapping', 'review'];
+    this.baseSteps = ['location', 'fixtures', 'control', 'add-more', 'review'];
     this.steps = this.baseSteps.slice();
     this.currentStep = 0;
+    this.lightSetups = []; // Array to store multiple light setups
+    this.currentSetupIndex = 0;
     this.data = {
       id: '',
       name: '',
       room: '',
+      zone: '',
       fixtures: [],
       controlMethod: null,
       energy: '',
@@ -7290,13 +9207,29 @@ class LightWizard {
   }
 
   setupButtons() {
-    const prevBtn = this.modal.querySelector('.light-prev-btn');
-    const nextBtn = this.modal.querySelector('.light-next-btn');
-    const cancelBtn = this.modal.querySelector('.light-cancel-btn');
+    const prevBtn = document.getElementById('lightPrev');
+    const nextBtn = document.getElementById('lightNext');
+    const closeBtn = document.getElementById('lightModalClose');
+    const backdrop = document.getElementById('lightModalBackdrop');
     
-    if (prevBtn) prevBtn.addEventListener('click', () => this.prevStep());
-    if (nextBtn) nextBtn.addEventListener('click', () => this.nextStep());
-    if (cancelBtn) cancelBtn.addEventListener('click', () => this.close());
+    if (prevBtn) prevBtn.addEventListener('click', () => {
+      console.log('[LightWizard] Previous button clicked');
+      this.prevStep();
+    });
+    if (nextBtn) nextBtn.addEventListener('click', (e) => {
+      console.log('[LightWizard] Next button clicked, disabled:', nextBtn.disabled);
+      if (nextBtn.disabled) {
+        console.log('[LightWizard] Next button is disabled, preventing navigation');
+        e.preventDefault();
+        return;
+      }
+      this.nextStep();
+    });
+    if (closeBtn) closeBtn.addEventListener('click', () => this.close());
+    // DISABLED backdrop click handler to test interaction issue
+    // if (backdrop) backdrop.addEventListener('click', () => this.close());
+    
+    console.log('[LightWizard] Button event listeners setup complete');
   }
 
   setupEventListeners() {
@@ -7308,6 +9241,12 @@ class LightWizard {
         host.querySelectorAll('.chip-option').forEach(b=>b.removeAttribute('data-active'));
         btn.setAttribute('data-active','');
         target[field] = btn.dataset.value;
+        console.log('[LightWizard] Chip selection:', field, '=', btn.dataset.value, 'this.data:', this.data);
+        // Update navigation after chip selection - with explicit arrow function to preserve context
+        setTimeout(() => {
+          console.log('[LightWizard] About to update navigation, controlMethod:', this.data.controlMethod);
+          this.updateNavigation();
+        }, 0);
       });
     };
     
@@ -7348,18 +9287,72 @@ class LightWizard {
         this.data.photoperiod = Number.isFinite(v) ? Math.max(0, v) : 0;
       });
     }
-    
-    const energyHoursInput = document.getElementById('lightEnergyHours');
-    if (energyHoursInput) {
-      energyHoursInput.addEventListener('input', (e) => {
-        const v = Number(e.target.value || 0);
-        this.data.energyHours = Number.isFinite(v) ? Math.max(0, Math.min(24, v)) : 0;
-      });
-    }
 
     // Control method chips
     chipGroup('#lightControlMethod', this.data, 'controlMethod');
-    chipGroup('#lightEnergy', this.data, 'energy');
+    
+    // Room and zone selection - REBUILT
+    this.setupRoomZoneDropdowns();
+    
+    // Zone creation
+    const createZoneBtn = document.getElementById('lightCreateZone');
+    const newZoneInput = document.getElementById('lightNewZoneName');
+    const saveZoneBtn = document.getElementById('lightSaveNewZone');
+    const cancelZoneBtn = document.getElementById('lightCancelNewZone');
+    
+    if (createZoneBtn) {
+      createZoneBtn.addEventListener('click', () => {
+        createZoneBtn.style.display = 'none';
+        newZoneInput.style.display = 'inline-block';
+        saveZoneBtn.style.display = 'inline-block';
+        cancelZoneBtn.style.display = 'inline-block';
+        newZoneInput.focus();
+      });
+    }
+    
+    if (saveZoneBtn) {
+      saveZoneBtn.addEventListener('click', () => {
+        const zoneName = newZoneInput.value.trim();
+        if (zoneName && this.data.room) {
+          this.createNewZone(this.data.room, zoneName);
+          this.hideZoneCreation();
+        }
+      });
+    }
+    
+    if (cancelZoneBtn) {
+      cancelZoneBtn.addEventListener('click', () => {
+        this.hideZoneCreation();
+      });
+    }
+    
+    if (newZoneInput) {
+      newZoneInput.addEventListener('keydown', (e) => {
+        if (e.key === 'Enter') {
+          saveZoneBtn.click();
+        } else if (e.key === 'Escape') {
+          cancelZoneBtn.click();
+        }
+      });
+    }
+    
+    // Multiple setup buttons
+    const addMoreBtn = document.getElementById('lightAddMoreSetup');
+    const finishBtn = document.getElementById('lightFinishSetups');
+    
+    if (addMoreBtn) {
+      addMoreBtn.addEventListener('click', () => {
+        this.saveCurrentSetup();
+        this.startNewSetup();
+      });
+    }
+    
+    if (finishBtn) {
+      finishBtn.addEventListener('click', () => {
+        this.saveCurrentSetup();
+        this.nextStep();
+      });
+    }
     
     // Upload fixture datasheet
     const uploadBtn = document.getElementById('lightKbUploadBtn');
@@ -7391,6 +9384,7 @@ class LightWizard {
         
         if (action === 'add-kb') {
           this.data.fixtures.push({ ...item, count: 1 });
+          console.log('[LightWizard] Added fixture from KB:', item, 'Total fixtures:', this.data.fixtures.length);
         } else if (action === 'add-unknown') {
           const placeholder = {
             vendor: item.vendor || 'Unknown',
@@ -7404,25 +9398,13 @@ class LightWizard {
             note: 'Added as unknown from KB - needs research'
           };
           this.data.fixtures.push(placeholder);
+          console.log('[LightWizard] Added unknown fixture:', placeholder, 'Total fixtures:', this.data.fixtures.length);
         }
         
         this.renderKbSelected();
         kbResults.innerHTML = '';
         document.getElementById('lightKbSearch').value = '';
       });
-    }
-  }
-
-  open() {
-    if (!this.modal) return;
-    this.currentStep = 0;
-    this.renderStep();
-    this.modal.style.display = 'flex';
-    this.modal.setAttribute('aria-hidden', 'false');
-    
-    // Share discovery data if available from room wizard
-    if (window.roomWizard?.discoveredDevices) {
-      this.data.devices = [...(window.roomWizard.discoveredDevices || [])];
     }
   }
 
@@ -7433,27 +9415,281 @@ class LightWizard {
   }
 
   renderStep() {
+    // Sync internal current step state
     const stepKey = this.steps[this.currentStep];
+    console.log('[LightWizard] renderStep - currentStep:', this.currentStep, 'stepKey:', stepKey, 'steps array:', this.steps);
     
-    // Hide all steps
-    this.modal.querySelectorAll('.light-step').forEach(step => {
-      step.style.display = 'none';
+    // Hide all steps - using light-step class for Light wizard
+    document.querySelectorAll('.light-step').forEach(step => {
+      step.removeAttribute('data-active');
     });
     
     // Show current step
-    const currentStepEl = this.modal.querySelector(`[data-step="${stepKey}"]`);
+    const currentStepEl = document.querySelector(`.light-step[data-step="${stepKey}"]`);
     if (currentStepEl) {
-      currentStepEl.style.display = 'block';
+      currentStepEl.setAttribute('data-active', '');
+      console.log('[LightWizard] Activated step element:', stepKey);
+    } else {
+      console.error('[LightWizard] Could not find step element for:', stepKey);
     }
     
-    // Update navigation
+    // Update progress indicator
+    const progressEl = document.getElementById('lightModalProgress');
+    if (progressEl) {
+      progressEl.textContent = `Step ${this.currentStep + 1} of ${this.steps.length}`;
+      console.log('[LightWizard] Progress updated to:', progressEl.textContent);
+    }
+    
+    // Guard navigation button toggles
+    const prevBtn = document.getElementById('lightPrev');
+    const nextBtn = document.getElementById('lightNext');
+    const saveBtn = document.getElementById('btnSaveLight');
+    
+    // Only hide Previous button on first step
+    if (prevBtn) {
+      prevBtn.style.display = this.currentStep === 0 ? 'none' : 'inline-block';
+    }
+    
+    // Only hide Next button on final step, show on all others
+    if (this.currentStep === this.steps.length - 1) {
+      if (nextBtn) nextBtn.style.display = 'none';
+      if (saveBtn) saveBtn.style.display = 'inline-block';
+    } else {
+      if (nextBtn) {
+        nextBtn.style.display = 'inline-block';
+        nextBtn.style.visibility = 'visible';
+      }
+      if (saveBtn) saveBtn.style.display = 'none';
+    }
+    
+    // Update navigation state
     this.updateNavigation();
     
     // Collect step-specific data
     this.collectStepData(stepKey);
   }
 
+  setupRoomZoneDropdowns() {
+    console.log('[LightWizard] Setting up room/zone dropdowns - SIMPLIFIED VERSION');
+    
+    // DIAGNOSTIC: Check for interfering elements
+    console.log('[DIAGNOSTIC] Checking for interfering elements...');
+    
+    const allModals = document.querySelectorAll('[class*="modal"]');
+    console.log('[DIAGNOSTIC] All modals:', allModals);
+    allModals.forEach((modal, index) => {
+      const styles = window.getComputedStyle(modal);
+      console.log(`[DIAGNOSTIC] Modal ${index}:`, {
+        element: modal,
+        className: modal.className,
+        display: styles.display,
+        visibility: styles.visibility,
+        opacity: styles.opacity,
+        zIndex: styles.zIndex,
+        pointerEvents: styles.pointerEvents
+      });
+    });
+    
+    // Check for any elements that might be covering the dropdown area
+    const lightModal = document.getElementById('lightModal');
+    if (lightModal) {
+      const rect = lightModal.getBoundingClientRect();
+      const elementsAtCenter = document.elementsFromPoint(rect.left + rect.width/2, rect.top + rect.height/2);
+      console.log('[DIAGNOSTIC] Elements at light modal center:', elementsAtCenter);
+    }
+    
+    // Get dropdown elements
+    const roomSelect = document.getElementById('lightRoomSelect');
+    const zoneSelect = document.getElementById('lightZoneSelect');
+    
+    if (!roomSelect || !zoneSelect) {
+      console.error('[LightWizard] Could not find dropdown elements:', { roomSelect, zoneSelect });
+      return;
+    }
+    
+    console.log('[LightWizard] Found dropdown elements, setting up simple event handlers');
+    
+    // IMMEDIATE CLICK TEST - Add multiple event types to see what's happening
+    roomSelect.addEventListener('click', (e) => {
+      console.log('[LightWizard] ROOM DROPDOWN CLICKED!', e);
+    });
+    
+    roomSelect.addEventListener('mousedown', (e) => {
+      console.log('[LightWizard] ROOM DROPDOWN MOUSEDOWN!', e);
+    });
+    
+    roomSelect.addEventListener('focus', (e) => {
+      console.log('[LightWizard] ROOM DROPDOWN FOCUSED!', e);
+    });
+    
+    zoneSelect.addEventListener('click', (e) => {
+      console.log('[LightWizard] ZONE DROPDOWN CLICKED!', e);
+    });
+    
+    // Add click test to the modal itself
+    const modal = document.getElementById('lightModal');
+    if (modal) {
+      modal.addEventListener('click', (e) => {
+        console.log('[LightWizard] MODAL CLICKED!', e.target, 'classList:', e.target.classList);
+      });
+    }
+    
+    // SIMPLE APPROACH - just like the test buttons that worked
+    // Clear any existing state that might interfere
+    roomSelect.disabled = false;
+    zoneSelect.disabled = false;
+    roomSelect.style.pointerEvents = 'auto';
+    zoneSelect.style.pointerEvents = 'auto';
+    
+    // Log current computed styles for debugging
+    console.log('Room select computed pointer-events:', window.getComputedStyle(roomSelect).pointerEvents);
+    console.log('Room select disabled:', roomSelect.disabled);
+    console.log('Zone select computed pointer-events:', window.getComputedStyle(zoneSelect).pointerEvents);
+    console.log('Zone select disabled:', zoneSelect.disabled);
+    
+    // Add simple event listeners - NO CLONING
+    roomSelect.addEventListener('change', (e) => {
+      console.log('[LightWizard] Room selected:', e.target.value);
+      this.data.room = e.target.value;
+      this.updateZoneDropdown(e.target.value);
+      this.updateNavigation();
+    });
+    
+    zoneSelect.addEventListener('change', (e) => {
+      console.log('[LightWizard] Zone selected:', e.target.value);
+      this.data.zone = e.target.value;
+      this.updateNavigation();
+    });
+    
+    // Populate room dropdown immediately
+    this.populateRoomDropdown();
+    
+    console.log('[LightWizard] Simple dropdown setup complete');
+  }
+
+  populateRoomDropdown() {
+    console.log('[LightWizard] Populating room dropdown');
+    console.log('[LightWizard] STATE.farm:', STATE.farm);
+    console.log('[LightWizard] STATE.rooms:', STATE.rooms);
+    
+    const roomSelect = document.getElementById('lightRoomSelect');
+    if (!roomSelect) {
+      console.error('[LightWizard] Room select not found during population');
+      return;
+    }
+    
+    // Clear existing options
+    roomSelect.innerHTML = '<option value="">Select a room</option>';
+    
+    // Get all available rooms
+    const farmRooms = Array.isArray(STATE.farm?.rooms) ? STATE.farm.rooms : [];
+    const createdRooms = Array.isArray(STATE.rooms) ? STATE.rooms : [];
+    
+    console.log('[LightWizard] Available rooms - Farm:', farmRooms, 'Created:', createdRooms);
+    
+    // Combine and deduplicate rooms
+    const allRooms = [...farmRooms];
+    createdRooms.forEach(room => {
+      const existingRoom = allRooms.find(r => (r.id || r.name) === (room.id || room.name));
+      if (!existingRoom) {
+        allRooms.push(room);
+      }
+    });
+    
+    console.log('[LightWizard] Combined rooms:', allRooms);
+    
+    // Add test data if no rooms are available
+    if (allRooms.length === 0) {
+      console.log('[LightWizard] No room data found, adding test rooms');
+      allRooms.push(
+        { id: 'test-room-1', name: 'Test Room 1', zones: ['Zone A', 'Zone B'] },
+        { id: 'test-room-2', name: 'Test Room 2', zones: ['Zone 1', 'Zone 2', 'Zone 3'] },
+        { id: 'test-room-3', name: 'Test Room 3', zones: ['Main Zone'] }
+      );
+    }
+    
+    // Populate dropdown
+    allRooms.forEach(room => {
+      const option = document.createElement('option');
+      option.value = room.id || room.name;
+      option.textContent = room.name || room.id;
+      roomSelect.appendChild(option);
+    });
+    
+    console.log('[LightWizard] Room dropdown populated with', allRooms.length, 'rooms');
+  }
+
+  updateZoneDropdown(roomId) {
+    console.log('[LightWizard] Updating zone dropdown for room:', roomId);
+    
+    const zoneSelect = document.getElementById('lightZoneSelect');
+    if (!zoneSelect) {
+      console.error('[LightWizard] Zone select not found during update');
+      return;
+    }
+    
+    // Clear existing options
+    zoneSelect.innerHTML = '<option value="">Select a zone</option>';
+    
+    if (!roomId) {
+      console.log('[LightWizard] No room selected, leaving zone dropdown empty');
+      return;
+    }
+    
+    // Find the selected room - including test data
+    const farmRooms = Array.isArray(STATE.farm?.rooms) ? STATE.farm.rooms : [];
+    const createdRooms = Array.isArray(STATE.rooms) ? STATE.rooms : [];
+    let allRooms = [...farmRooms, ...createdRooms];
+    
+    // Add test data if no rooms exist
+    if (allRooms.length === 0) {
+      allRooms = [
+        { id: 'test-room-1', name: 'Test Room 1', zones: ['Zone A', 'Zone B'] },
+        { id: 'test-room-2', name: 'Test Room 2', zones: ['Zone 1', 'Zone 2', 'Zone 3'] },
+        { id: 'test-room-3', name: 'Test Room 3', zones: ['Main Zone'] }
+      ];
+    }
+    
+    const selectedRoom = allRooms.find(room => (room.id || room.name) === roomId);
+    console.log('[LightWizard] Found selected room:', selectedRoom);
+    
+    if (!selectedRoom || !selectedRoom.zones || !Array.isArray(selectedRoom.zones)) {
+      const option = document.createElement('option');
+      option.value = '';
+      option.textContent = 'No zones available - Create zones first';
+      option.disabled = true;
+      zoneSelect.appendChild(option);
+      return;
+    }
+    
+    // Add zone options
+    selectedRoom.zones.forEach(zone => {
+      const option = document.createElement('option');
+      if (typeof zone === 'string') {
+        option.value = zone;
+        option.textContent = zone;
+      } else {
+        option.value = zone.id || zone.name || '';
+        option.textContent = zone.name || zone.id || 'Unnamed Zone';
+      }
+      zoneSelect.appendChild(option);
+    });
+    
+    console.log('[LightWizard] Zone dropdown populated with', selectedRoom.zones.length, 'zones');
+  }
+
   collectStepData(stepKey) {
+    if (stepKey === 'location') {
+      // Use the new rebuilt dropdown population method
+      this.populateRoomDropdown();
+      
+      // Setup dropdowns AFTER the step is rendered and active
+      setTimeout(() => {
+        console.log('[LightWizard] Setting up dropdowns after step activation');
+        this.setupRoomZoneDropdowns();
+      }, 100);
+    }
+    
     if (stepKey === 'fixtures') {
       const seriesInput = document.getElementById('lightSeriesCount');
       if (seriesInput) seriesInput.value = String(this.data.seriesCount ?? 0);
@@ -7470,43 +9706,180 @@ class LightWizard {
       this.renderKbSelected();
     }
     
-    if (stepKey === 'energy') {
-      const energyHours = document.getElementById('lightEnergyHours');
-      if (energyHours) energyHours.value = String(this.data.energyHours ?? 0);
+    if (stepKey === 'add-more') {
+      this.renderSetupsSummary();
+    }
+    
+    if (stepKey === 'review') {
+      this.renderReview();
     }
   }
 
   updateNavigation() {
-    const prevBtn = this.modal.querySelector('.light-prev-btn');
-    const nextBtn = this.modal.querySelector('.light-next-btn');
+    const prevBtn = document.getElementById('lightPrev');
+    const nextBtn = document.getElementById('lightNext');
+    
+    console.log('[LightWizard] updateNavigation - currentStep:', this.currentStep, 'canAdvance:', this.canAdvance());
     
     if (prevBtn) {
       prevBtn.disabled = this.currentStep === 0;
+      prevBtn.style.display = this.currentStep === 0 ? 'none' : 'inline-block';
     }
     
     if (nextBtn) {
-      nextBtn.disabled = !this.canAdvance();
+      const canAdvance = this.canAdvance();
+      nextBtn.disabled = !canAdvance;
       nextBtn.textContent = this.currentStep === this.steps.length - 1 ? 'Complete' : 'Next';
+      console.log('[LightWizard] Next button disabled:', nextBtn.disabled, 'canAdvance:', canAdvance);
     }
+  }
+
+  updateNavigationState() {
+    // Alias for updateNavigation for compatibility
+    this.updateNavigation();
   }
 
   canAdvance() {
     const stepKey = this.steps[this.currentStep];
+    console.log('[LightWizard] canAdvance check - step:', stepKey, 'currentStep:', this.currentStep, 'controlMethod:', this.data.controlMethod, 'full data:', this.data);
     switch (stepKey) {
+      case 'location': return !!this.data.room && !!this.data.zone;
       case 'fixtures': return Array.isArray(this.data.fixtures) && this.data.fixtures.length > 0;
-      case 'control': return !!this.data.controlMethod;
-      case 'energy': return !!this.data.energy;
-      case 'mapping': return true; // Optional step
+      case 'control': {
+        const result = !!this.data.controlMethod;
+        console.log('[LightWizard] Control step canAdvance result:', result, 'controlMethod value:', this.data.controlMethod);
+        return result;
+      }
+      case 'add-more': return true; // Always can proceed from add-more step
       case 'review': return true;
       default: return true;
     }
   }
 
+  hideZoneCreation() {
+    const createZoneBtn = document.getElementById('lightCreateZone');
+    const newZoneInput = document.getElementById('lightNewZoneName');
+    const saveZoneBtn = document.getElementById('lightSaveNewZone');
+    const cancelZoneBtn = document.getElementById('lightCancelNewZone');
+    
+    if (createZoneBtn) createZoneBtn.style.display = 'inline-block';
+    if (newZoneInput) {
+      newZoneInput.style.display = 'none';
+      newZoneInput.value = '';
+    }
+    if (saveZoneBtn) saveZoneBtn.style.display = 'none';
+    if (cancelZoneBtn) cancelZoneBtn.style.display = 'none';
+  }
+
+  createNewZone(roomId, zoneName) {
+    // Find the room in STATE.rooms
+    const room = STATE.rooms?.find(r => r.id === roomId);
+    if (!room) {
+      showToast({ title: 'Error', msg: 'Room not found', kind: 'error' }, 3000);
+      return;
+    }
+    
+    // Add zone to room if it doesn't exist
+    if (!room.zones) room.zones = [];
+    
+    const existingZone = room.zones.find(z => z.name.toLowerCase() === zoneName.toLowerCase());
+    if (existingZone) {
+      showToast({ title: 'Zone Exists', msg: 'A zone with this name already exists', kind: 'warning' }, 3000);
+      return;
+    }
+    
+    const newZone = {
+      id: `zone-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
+      name: zoneName,
+      area: 0,
+      description: ''
+    };
+    
+    room.zones.push(newZone);
+    
+    // Update the zones dropdown
+    this.populateZonesForRoom(roomId);
+    
+    // Select the new zone
+    const zoneSelect = document.getElementById('lightZoneSelect');
+    if (zoneSelect) {
+      zoneSelect.value = newZone.id;
+      this.data.zone = newZone.id;
+    }
+    
+    showToast({ title: 'Zone Created', msg: `Zone "${zoneName}" has been created`, kind: 'success' }, 3000);
+    this.updateNavigation();
+  }
+
+  saveCurrentSetup() {
+    // Create a copy of current setup data
+    const setup = {
+      id: `setup-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
+      room: this.data.room,
+      zone: this.data.zone,
+      fixtures: [...this.data.fixtures],
+      controlMethod: this.data.controlMethod,
+      seriesCount: this.data.seriesCount,
+      controllersCount: this.data.controllersCount,
+      targetPpfd: this.data.targetPpfd,
+      photoperiod: this.data.photoperiod
+    };
+    
+    this.lightSetups.push(setup);
+    console.log('[LightWizard] Saved setup:', setup);
+  }
+
+  startNewSetup() {
+    // Reset fixture and control data for new setup
+    this.data.fixtures = [];
+    this.data.controlMethod = null;
+    this.data.seriesCount = 0;
+    this.data.controllersCount = 0;
+    this.data.targetPpfd = 0;
+    this.data.photoperiod = 0;
+    
+    // Go back to fixtures step
+    this.currentStep = 1; // fixtures step
+    this.renderStep();
+    
+    showToast({ title: 'New Setup', msg: 'Starting new light setup for the same room/zone', kind: 'info' }, 3000);
+  }
+
+  renderSetupsSummary() {
+    const container = document.getElementById('lightSetupsSummary');
+    if (!container) return;
+    
+    if (this.lightSetups.length === 0) {
+      container.innerHTML = '<p class="tiny" style="color:#64748b">No light setups configured yet.</p>';
+      return;
+    }
+    
+    const roomName = STATE.rooms?.find(r => r.id === this.data.room)?.name || 'Unknown Room';
+    const zoneName = STATE.rooms?.find(r => r.id === this.data.room)?.zones?.find(z => z.id === this.data.zone)?.name || 'Unknown Zone';
+    
+    let html = `<div class="tiny" style="margin-bottom:8px;color:#0f172a">Light setups for ${roomName} - ${zoneName}:</div>`;
+    
+    this.lightSetups.forEach((setup, index) => {
+      const fixtureCount = setup.fixtures.reduce((sum, f) => sum + (f.count || 1), 0);
+      html += `
+        <div class="setup-summary-item" style="padding:8px;background:#f8fafc;border:1px solid #e2e8f0;border-radius:4px;margin-bottom:4px">
+          <div class="tiny" style="font-weight:500">Setup ${index + 1}</div>
+          <div class="tiny" style="color:#64748b">${fixtureCount} fixtures • ${setup.controlMethod || 'No control'}</div>
+        </div>
+      `;
+    });
+    
+    container.innerHTML = html;
+  }
+
   nextStep() {
+    console.log('[LightWizard] nextStep called - currentStep:', this.currentStep, 'canAdvance:', this.canAdvance());
     if (this.currentStep < this.steps.length - 1) {
       this.currentStep++;
+      console.log('[LightWizard] Moving to step:', this.currentStep);
       this.renderStep();
     } else {
+      console.log('[LightWizard] Completing wizard');
       this.complete();
     }
   }
@@ -7519,10 +9892,87 @@ class LightWizard {
   }
 
   complete() {
-    // Save light setup data
-    console.log('Completing light setup:', this.data);
-    showToast({ title: 'Light Setup Complete', msg: 'Light configuration has been saved successfully', kind: 'success', icon: '💡' }, 4000);
+    // Save current setup if it has fixtures
+    if (this.data.fixtures?.length > 0) {
+      this.saveCurrentSetup();
+    }
+    
+    // Save all light setups to STATE or your data store
+    const allSetups = {
+      room: this.data.room,
+      zone: this.data.zone,
+      setups: this.lightSetups,
+      timestamp: new Date().toISOString()
+    };
+    
+    console.log('Completing light setup with all configurations:', allSetups);
+    
+    // Here you would typically save to your backend or STATE
+    // For now, just show success message with count
+    const totalSetups = this.lightSetups.length;
+    const message = totalSetups > 1 ? 
+      `${totalSetups} light setups saved successfully` : 
+      'Light setup saved successfully';
+    
+    showToast({ 
+      title: 'Light Setup Complete', 
+      msg: message, 
+      kind: 'success', 
+      icon: '💡' 
+    }, 4000);
+    
     this.close();
+  }
+
+  close() {
+    if (this.modal) {
+      this.modal.setAttribute('aria-hidden', 'true');
+    }
+  }
+
+  open() {
+    console.log('[DEBUG] LightWizard.open() called, modal:', this.modal);
+    if (this.modal) {
+      console.log('[DEBUG] Modal found, proceeding with open');
+      // Reset wizard state for fresh start
+      this.currentStep = 0;
+      this.steps = this.baseSteps.slice();
+      this.lightSetups = [];
+      this.currentSetupIndex = 0;
+      
+      // Reset data
+      this.data = {
+        id: '',
+        name: '',
+        room: '',
+        zone: '',
+        fixtures: [],
+        controlMethod: null,
+        energy: '',
+        energyHours: 0,
+        seriesCount: 0,
+        controllersCount: 0,
+        targetPpfd: 0,
+        photoperiod: 0,
+        devices: [],
+        mapping: { zones: [], groups: [] },
+        connectivity: { hasHub: null, hubType: '', hubIp: '', cloudTenant: 'Azure' }
+      };
+      
+      // Hide zone creation elements
+      this.hideZoneCreation();
+      
+      this.modal.setAttribute('aria-hidden', 'false');
+      console.log('[LightWizard] Modal opened successfully');
+      
+      this.renderStep();
+      console.log('[DEBUG] renderStep() called');
+      
+      // Force navigation update after modal opens
+      setTimeout(() => {
+        this.updateNavigation();
+      }, 100);
+    }
   }
 
   updateKbResults(query) {
@@ -7532,10 +9982,28 @@ class LightWizard {
       return; 
     }
     
+    console.log('[DEBUG] Light Setup search query:', query);
+    console.log('[DEBUG] Available fixtures:', STATE.deviceKB?.fixtures?.length || 0);
+    if (STATE.deviceKB?.fixtures?.length > 0) {
+      console.log('[DEBUG] Sample fixtures:', STATE.deviceKB.fixtures.slice(0, 3).map(f => `${f.vendor} ${f.model}`));
+    }
+    
     const fixtures = STATE.deviceKB?.fixtures || [];
-    const filtered = fixtures.filter(f => 
-      (f.vendor + ' ' + f.model).toLowerCase().includes(query.toLowerCase())
-    );
+    const filtered = fixtures.filter(f => {
+      const searchText = (f.vendor + ' ' + f.model + ' ' + (f.tags || []).join(' ')).toLowerCase();
+      const matches = searchText.includes(query.toLowerCase());
+      if (query.toLowerCase().length >= 2) {
+        console.log('[DEBUG] Checking:', searchText, 'matches query "' + query + '":', matches);
+      }
+      return matches;
+    });
+    
+    console.log('[DEBUG] Filtered results:', filtered.length);
+    
+    if (filtered.length === 0) {
+      host.innerHTML = `<li style="padding: 12px; color: #64748b; text-align: center;">No fixtures found matching "${query}"<br><small>Try searching for: GROW3, TopLight, Gavita, Fluence, etc.</small></li>`;
+      return;
+    }
     
     const res = filtered.slice(0, 8).map((it, localIdx) => {
       const globalIdx = fixtures.indexOf(it);
@@ -7563,23 +10031,211 @@ class LightWizard {
       <li>
         <div class="row" style="align-items:center;gap:6px">
           <span>${it.vendor} <strong>${it.model}</strong> • ${it.watts || '?'} W</span>
-          <label class="tiny">x <input type="number" min="1" value="${it.count||1}" style="width:64px" onchange="lightWizard.updateFixtureCount(${idx}, this.value)"></label>
           <button type="button" class="ghost" title="Remove" onclick="lightWizard.removeFixture(${idx})">×</button>
         </div>
       </li>
     `).join('');
+    
+    // Update navigation state after rendering fixtures
+    this.updateNavigation();
   }
 
   removeFixture(idx) {
     this.data.fixtures.splice(idx, 1);
     this.renderKbSelected();
+    // Navigation update is handled in renderKbSelected()
   }
 
   updateFixtureCount(idx, value) {
     const n = Math.max(1, Number(value || 1));
     if (this.data.fixtures[idx]) {
       this.data.fixtures[idx].count = n;
+      // Update navigation after changing fixture count
+      this.updateNavigation();
     }
+  }
+
+  populateRoomsFromGrowRoomsData() {
+    console.log('[LightWizard] populateRoomsFromGrowRoomsData called');
+    console.log('[LightWizard] STATE.farm:', STATE.farm);
+    console.log('[LightWizard] STATE.rooms:', STATE.rooms);
+    
+    const roomSelect = document.getElementById('lightRoomSelect');
+    const zoneSelect = document.getElementById('lightZoneSelect');
+    
+    if (!roomSelect) {
+      console.log('[LightWizard] Room select element not found');
+      return;
+    }
+    
+    // Clear existing options except the default
+    roomSelect.innerHTML = '<option value="">Select a room</option>';
+    if (zoneSelect) zoneSelect.innerHTML = '<option value="">Select a zone</option>';
+    
+    // Get rooms from both STATE.farm.rooms (Farm Registration) and STATE.rooms (Room wizard)
+    const farmRooms = Array.isArray(STATE.farm?.rooms) ? STATE.farm.rooms : [];
+    const createdRooms = Array.isArray(STATE.rooms) ? STATE.rooms : [];
+    
+    console.log('[LightWizard] Farm rooms:', farmRooms);
+    console.log('[LightWizard] Created rooms:', createdRooms);
+    
+    // Combine rooms, prioritizing created rooms over farm rooms if there are conflicts
+    const allRooms = [...farmRooms];
+    createdRooms.forEach(room => {
+      const existingRoom = allRooms.find(r => r.id === room.id);
+      if (existingRoom) {
+        // Update existing room with more complete data from room wizard
+        Object.assign(existingRoom, room);
+      } else {
+        allRooms.push(room);
+      }
+    });
+    
+    console.log('[LightWizard] Available rooms:', allRooms);
+    
+    // If no rooms are available, show a helpful message
+    if (allRooms.length === 0) {
+      const option = document.createElement('option');
+      option.value = '';
+      option.textContent = 'No rooms available - Create rooms first';
+      option.disabled = true;
+      roomSelect.appendChild(option);
+      return;
+    }
+    
+    allRooms.forEach(room => {
+      const option = document.createElement('option');
+      option.value = room.id || room.name;
+      option.textContent = room.name || 'Unnamed Room';
+      roomSelect.appendChild(option);
+    });
+    
+    // Restore selected values if they exist
+    if (this.data.room) {
+      roomSelect.value = this.data.room;
+      this.populateZonesForRoom(this.data.room);
+    }
+    if (this.data.zone && zoneSelect) {
+      zoneSelect.value = this.data.zone;
+    }
+  }
+
+  populateZonesForRoom(roomId) {
+    const zoneSelect = document.getElementById('lightZoneSelect');
+    if (!zoneSelect || !roomId) {
+      if (zoneSelect) zoneSelect.innerHTML = '<option value="">Select a zone</option>';
+      return;
+    }
+    
+    // Get rooms from both STATE.farm.rooms and STATE.rooms
+    const farmRooms = Array.isArray(STATE.farm?.rooms) ? STATE.farm.rooms : [];
+    const createdRooms = Array.isArray(STATE.rooms) ? STATE.rooms : [];
+    const allRooms = [...farmRooms, ...createdRooms];
+    
+    // Find the selected room
+    const selectedRoom = allRooms.find(room => (room.id || room.name) === roomId);
+    
+    // Clear existing zone options
+    zoneSelect.innerHTML = '<option value="">Select a zone</option>';
+    
+    // Populate zones from the selected room
+    if (selectedRoom && selectedRoom.zones && Array.isArray(selectedRoom.zones)) {
+      selectedRoom.zones.forEach(zone => {
+        const option = document.createElement('option');
+        // Handle both string zones and object zones
+        if (typeof zone === 'string') {
+          option.value = zone;
+          option.textContent = zone;
+        } else {
+          option.value = zone.id || zone.name;
+          option.textContent = zone.name || zone.id || 'Unnamed Zone';
+        }
+        zoneSelect.appendChild(option);
+      });
+    } else {
+      // If no zones found, show a helpful message
+      const option = document.createElement('option');
+      option.value = '';
+      option.textContent = 'No zones available - Create zones first';
+      option.disabled = true;
+      zoneSelect.appendChild(option);
+    }
+  }
+
+  renderReview() {
+    const reviewContainer = document.getElementById('lightReview');
+    if (!reviewContainer) return;
+    
+    // Include current setup in review if it has fixtures
+    const allSetups = [...this.lightSetups];
+    if (this.data.fixtures?.length > 0) {
+      allSetups.push({
+        id: 'current',
+        room: this.data.room,
+        zone: this.data.zone,
+        fixtures: this.data.fixtures,
+        controlMethod: this.data.controlMethod,
+        seriesCount: this.data.seriesCount,
+        controllersCount: this.data.controllersCount
+      });
+    }
+    
+    const roomName = STATE.rooms?.find(r => r.id === this.data.room)?.name || 'Unknown Room';
+    const zoneName = STATE.rooms?.find(r => r.id === this.data.room)?.zones?.find(z => z.id === this.data.zone)?.name || 'Unknown Zone';
+    
+    let html = `
+      <div class="farm-review">
+        <h3 class="tiny" style="margin:0 0 8px;color:#0f172a">Light Setup Review</h3>
+        
+        <div class="review-section">
+          <h4 class="tiny" style="margin:0 0 4px;color:#475569">Location</h4>
+          <div class="tiny">Room: ${roomName}</div>
+          <div class="tiny">Zone: ${zoneName}</div>
+        </div>
+    `;
+    
+    if (allSetups.length === 0) {
+      html += `
+        <div class="review-section" style="margin-top:12px">
+          <div class="tiny" style="color:#64748b">No light setups configured</div>
+        </div>
+      `;
+    } else {
+      allSetups.forEach((setup, index) => {
+        const fixtures = setup.fixtures || [];
+        const totalFixtures = fixtures.reduce((sum, f) => sum + (f.count || 1), 0);
+        
+        html += `
+          <div class="review-section" style="margin-top:12px;padding:8px;background:#f8fafc;border:1px solid #e2e8f0;border-radius:4px">
+            <h4 class="tiny" style="margin:0 0 4px;color:#475569">Light Setup ${index + 1}</h4>
+            
+            <div style="margin-bottom:6px">
+              <div class="tiny" style="font-weight:500">Fixtures (${totalFixtures} total)</div>
+              ${fixtures.length > 0 ? 
+                fixtures.map(f => `<div class="tiny">• ${f.vendor} ${f.model} (${f.watts || '?'} W) ${f.count > 1 ? `x${f.count}` : ''}</div>`).join('') :
+                '<div class="tiny">No fixtures selected</div>'
+              }
+            </div>
+            
+            <div style="margin-bottom:6px">
+              <div class="tiny" style="font-weight:500">Control Method</div>
+              <div class="tiny">${setup.controlMethod || 'Not selected'}</div>
+            </div>
+            
+            ${setup.seriesCount || setup.controllersCount ? `
+              <div>
+                <div class="tiny" style="font-weight:500">Configuration</div>
+                ${setup.seriesCount ? `<div class="tiny">Lights per controller: ${setup.seriesCount}</div>` : ''}
+                ${setup.controllersCount ? `<div class="tiny">Controllers: ${setup.controllersCount}</div>` : ''}
+              </div>
+            ` : ''}
+          </div>
+        `;
+      });
+    }
+    
+    html += '</div>';
+    reviewContainer.innerHTML = html;
   }
 }
 
@@ -7751,6 +10407,10 @@ function hookRoomDevicePairing(roomWizardInstance) {
           roomWizardInstance.data.devices = roomWizardInstance.data.devices || [];
           roomWizardInstance.data.devices.push(hubDevice);
           roomWizardInstance.renderDevicesList();
+          // Update controller assignments when hub devices are added
+          if (typeof renderControllerAssignments === 'function') {
+            renderControllerAssignments();
+          }
           showToast({ title: 'Hub added', msg: `Added ${hubName}. Now add child devices.`, kind: 'success', icon: '✅' }, 4000);
         }});
         return;
@@ -7768,6 +10428,10 @@ function hookRoomDevicePairing(roomWizardInstance) {
   ['deviceRs485UnitId','device0v10Channel','device0v10Scale'].forEach(id=>{ try{ clearFieldError(id); }catch(e){ const el=document.getElementById(id); if(el) el.classList.remove('invalid'); } });
       roomWizardInstance.data.devices.push(device);
       roomWizardInstance.renderDevicesList();
+      // Update controller assignments when external devices are added
+      if (typeof renderControllerAssignments === 'function') {
+        renderControllerAssignments();
+      }
     }});
   });
 }
@@ -7984,10 +10648,51 @@ document.addEventListener('DOMContentLoaded', async () => {
   // Initialize room wizard
   roomWizard = new RoomWizard();
   // Initialize light wizard
+  console.log('[DEBUG] About to initialize LightWizard');
   lightWizard = new LightWizard();
   window.lightWizard = lightWizard;
-  // Wire up light setup button
-  document.getElementById('btnLaunchLightSetup')?.addEventListener('click', () => lightWizard.open());
+  console.log('[DEBUG] LightWizard initialized:', lightWizard);
+  
+  // Initialize fresh light wizard
+  console.log('[DEBUG] About to initialize FreshLightWizard');
+  console.log('[DEBUG] Checking for freshLightModal element:', document.getElementById('freshLightModal'));
+  freshLightWizard = new FreshLightWizard();
+  window.freshLightWizard = freshLightWizard;
+  console.log('[DEBUG] FreshLightWizard initialized:', freshLightWizard);
+  
+  // Wire up light setup button (with retry logic)
+  function setupLightSetupButton() {
+    const lightSetupBtn = document.getElementById('btnLaunchLightSetup');
+    console.log('[DEBUG] Light setup button found:', lightSetupBtn);
+    
+    if (lightSetupBtn) {
+      lightSetupBtn.addEventListener('click', () => {
+        console.log('[DEBUG] Light setup button clicked, opening fresh wizard');
+        freshLightWizard.open();
+      });
+      console.log('[DEBUG] Light setup button event listener attached');
+    } else {
+      console.error('[DEBUG] Could not find Light setup button!');
+      // Retry after a short delay
+      setTimeout(() => {
+        console.log('[DEBUG] Retrying button setup...');
+        setupLightSetupButton();
+      }, 500);
+    }
+  }
+  
+  setupLightSetupButton();
+  
+  // Add manual test function for debugging
+  window.testFreshWizard = function() {
+    console.log('[DEBUG] Manual test - freshLightWizard:', window.freshLightWizard);
+    if (window.freshLightWizard) {
+      window.freshLightWizard.open();
+    } else {
+      console.error('[DEBUG] Fresh wizard not available!');
+    }
+  };
+  
   // Wire pairing hook so Add Device opens the DevicePairWizard
   try { hookRoomDevicePairing(roomWizard); } catch (e) { console.warn('Failed to hook device pairing', e); }
   

@@ -53,6 +53,16 @@
       "spectrum": { "cw": 40, "ww": 50, "bl": 5, "rd": 5 },
       "tags": ["LED"],
       "confidence": 0.8
+    },
+    {
+      "vendor": "GROW3",
+      "model": "TopLight MH Model-300W-22G12",
+      "watts": 300,
+      "control": "WiFi",
+      "spectrum": { "cw": 45, "ww": 45, "bl": 0, "rd": 100, "fr": 0, "uv": 0 },
+      "tags": ["LED", "WiFi", "Smart", "TopLight"],
+      "confidence": 0.95,
+      "description": "High-efficiency LED grow light with WiFi connectivity and dynamic spectrum control"
     }
   ]
 }

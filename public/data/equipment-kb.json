@@ -1,0 +1,136 @@
+{
+  "equipment": [
+    {
+      "vendor": "Quest",
+      "model": "Quest Dual 155",
+      "category": "dehumidifier",
+      "capacity": "155 pints/day",
+      "control": "WiFi",
+      "features": ["remote-monitoring", "app-control", "variable-speed-compressor"],
+      "power": "2100W",
+      "tags": ["Commercial", "High-Capacity", "WiFi"],
+      "confidence": 0.92,
+      "description": "High-capacity commercial dehumidifier with WiFi connectivity and app control"
+    },
+    {
+      "vendor": "Quest",
+      "model": "Quest 506",
+      "category": "dehumidifier", 
+      "capacity": "506 pints/day",
+      "control": "WiFi",
+      "features": ["remote-monitoring", "app-control", "hot-gas-defrost"],
+      "power": "5800W",
+      "tags": ["Commercial", "Ultra-High-Capacity", "WiFi"],
+      "confidence": 0.95,
+      "description": "Ultra-high-capacity commercial dehumidifier for large grow operations"
+    },
+    {
+      "vendor": "Anden",
+      "model": "A710",
+      "category": "dehumidifier",
+      "capacity": "710 pints/day", 
+      "control": "0-10V",
+      "features": ["variable-speed-compressor", "hot-gas-defrost", "modulating-control"],
+      "power": "6200W",
+      "tags": ["Commercial", "Ultra-High-Capacity", "0-10V"],
+      "confidence": 0.90,
+      "description": "Industrial-grade dehumidifier with 0-10V control interface"
+    },
+    {
+      "vendor": "Santa Fe",
+      "model": "Max Dry Dual XT",
+      "category": "dehumidifier",
+      "capacity": "320 pints/day",
+      "control": "WiFi",
+      "features": ["dual-ducting", "app-control", "auto-defrost"],
+      "power": "3400W", 
+      "tags": ["Residential", "High-Capacity", "WiFi"],
+      "confidence": 0.85,
+      "description": "Dual-ducted dehumidifier with WiFi control for residential grow setups"
+    },
+    {
+      "vendor": "Aprilaire",
+      "model": "E130",
+      "category": "dehumidifier",
+      "capacity": "130 pints/day",
+      "control": "Hardwired",
+      "features": ["whole-house", "ducted", "auto-restart"],
+      "power": "1200W",
+      "tags": ["Whole-House", "Ducted", "Hardwired"],
+      "confidence": 0.80,
+      "description": "Whole-house ducted dehumidifier for integrated HVAC systems"
+    },
+    {
+      "vendor": "Arctic Air",
+      "model": "AAD-50",
+      "category": "dehumidifier",
+      "capacity": "50 pints/day",
+      "control": "WiFi",
+      "features": ["smart-control", "app-monitoring", "energy-efficient"],
+      "power": "590W",
+      "tags": ["Residential", "Smart", "WiFi"],
+      "confidence": 0.82,
+      "description": "Residential smart dehumidifier with WiFi control and energy monitoring"
+    },
+    {
+      "vendor": "Carrier",
+      "model": "Performance Series",
+      "category": "hvac",
+      "capacity": "2-5 tons",
+      "control": "Smart Thermostat",
+      "features": ["variable-speed", "smart-control", "zone-control"],
+      "power": "3000-7500W",
+      "tags": ["Commercial", "Variable-Speed", "Smart"],
+      "confidence": 0.88,
+      "description": "Commercial HVAC system with smart thermostat and zone control"
+    },
+    {
+      "vendor": "Daikin",
+      "model": "VRV Life",
+      "category": "mini-split",
+      "capacity": "9000-36000 BTU",
+      "control": "WiFi",
+      "features": ["inverter-technology", "app-control", "multi-zone"],
+      "power": "800-3000W",
+      "tags": ["Multi-Zone", "Inverter", "WiFi"],
+      "confidence": 0.92,
+      "description": "Multi-zone mini-split system with inverter technology and WiFi control"
+    },
+    {
+      "vendor": "Mitsubishi",
+      "model": "MSZ-FH Series",
+      "category": "mini-split",
+      "capacity": "9000-24000 BTU",
+      "control": "WiFi",
+      "features": ["hyper-heating", "app-control", "dual-barrier-coating"],
+      "power": "700-2000W",
+      "tags": ["Hyper-Heating", "WiFi", "Efficient"],
+      "confidence": 0.90,
+      "description": "High-efficiency mini-split with hyper-heating technology"
+    },
+    {
+      "vendor": "Fantech",
+      "model": "FB Series",
+      "category": "fans",
+      "capacity": "100-2000 CFM",
+      "control": "0-10V",
+      "features": ["EC-motor", "variable-speed", "low-noise"],
+      "power": "15-150W",
+      "tags": ["EC-Motor", "Variable-Speed", "Quiet"],
+      "confidence": 0.85,
+      "description": "High-efficiency EC motor fan with 0-10V speed control"
+    },
+    {
+      "vendor": "Can-Fan",
+      "model": "Max Fan Pro",
+      "category": "fans",
+      "capacity": "200-1500 CFM",
+      "control": "Speed Controller",
+      "features": ["mixed-flow", "variable-speed", "weatherproof"],
+      "power": "50-300W",
+      "tags": ["Mixed-Flow", "Weather-Resistant", "Variable-Speed"],
+      "confidence": 0.88,
+      "description": "Professional mixed-flow fan with speed controller for grow room ventilation"
+    }
+  ]
+}

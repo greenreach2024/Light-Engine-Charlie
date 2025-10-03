@@ -236,6 +236,12 @@ button.ghost:hover {
 button:disabled {
   opacity: 0.5;
   cursor: not-allowed;
+  pointer-events: auto; /* Still allow clicks for debugging */
+}
+
+button:not(:disabled) {
+  cursor: pointer;
+  pointer-events: auto;
 }
 
 /* Button state utilities for action feedback */
@@ -617,17 +623,274 @@ input[type="checkbox"] {
 .room-modal { position: fixed; inset:0; z-index:50; display:flex; align-items:center; justify-content:center; opacity:0; pointer-events:none; transition: opacity .3s ease; }
 .room-modal[aria-hidden="false"] { opacity:1; pointer-events:all; }
 .room-modal__backdrop { position:absolute; inset:0; background: rgb(0 0 0 / .5); }
-.room-modal__dialog { position:relative; background: var(--gr-surface, #FFFFFF); border-radius: var(--radius); box-shadow: var(--shadow-lg); max-width:600px; width:90vw; max-height:90vh; padding:24px 24px 0px 24px; display:flex; flex-direction:column; overflow:hidden; }
-.room-modal__close { position:absolute; top:16px; right:16px; background:none; border:none; font-size:24px; color: var(--medium); cursor:pointer; padding:4px; border-radius:4px; }
+.room-modal__dialog { 
+  position:relative; 
+  background: var(--gr-surface, #FFFFFF); 
+  border-radius: var(--radius); 
+  box-shadow: var(--shadow-lg); 
+  max-width:600px; 
+  width:90vw; 
+  max-height:90vh; 
+  padding:24px;
+  pointer-events: auto;
+  z-index: 51;
+}
+.room-modal__close { background:none; border:none; font-size:24px; color: var(--medium); cursor:pointer; padding:4px; border-radius:4px; }
 .room-modal__close:hover { background: var(--gr-bg, #F3F4F6); }
-.room-modal__footer { border-top:1px solid var(--gr-border, #E5E7EB); padding:16px 24px; margin:0px -24px; background: white; position: sticky; bottom: 0; flex-shrink: 0; z-index: 10; }
-
-#roomSteps { flex: 1; overflow-y: auto; min-height: 0; padding-bottom: 16px; }
+.room-modal__header {
+  position: relative;
+  z-index: 12;
+  pointer-events: auto;
+}
+.room-modal__header button {
+  position: relative;
+  z-index: 13;
+  pointer-events: auto;
+}
+.room-modal__footer { 
+  border-top:1px solid var(--gr-border, #E5E7EB); 
+  padding-top:16px; 
+  margin-top:24px; 
+  position: relative;
+  z-index: 10;
+  pointer-events: auto;
+}
+.room-modal__footer button {
+  position: relative;
+  z-index: 11;
+  pointer-events: auto;
+}
 .room-question { font-size:1.125rem; font-weight:600; margin-bottom:12px; color: var(--dark); }
 .room-step { display:none; }
 .room-step[data-active] { display:block; }
 
-/* Shared: chip-row for option buttons */
+/* Light Modal (separate from room modal) */
+.light-modal { position: fixed; inset:0; z-index:50; display:flex; align-items:center; justify-content:center; opacity:0; pointer-events:none; transition: opacity .3s ease; }
+.light-modal[aria-hidden="false"] { opacity:1; pointer-events:all; }
+.light-modal__backdrop { 
+  position:absolute; 
+  inset:0; 
+  background: rgb(0 0 0 / .5); 
+  pointer-events: none; /* Prevent backdrop from blocking interactions */
+}
+.light-modal__dialog { 
+  position:relative; 
+  background: var(--gr-surface, #FFFFFF); 
+  border-radius: var(--radius); 
+  box-shadow: var(--shadow-lg); 
+  max-width:600px; 
+  width:90vw; 
+  max-height:90vh; 
+  padding:24px;
+  pointer-events: auto;
+  z-index: 51;
+}
+.light-modal__close { background:none; border:none; font-size:20px; color: var(--medium); cursor:pointer; padding:6px 8px; border-radius:4px; margin-left:8px; }
+.light-modal__close:hover { background: var(--gr-bg, #F3F4F6); }
+.light-modal__header {
+  position: relative;
+  z-index: 12;
+  pointer-events: auto;
+}
+.light-modal__header button {
+  position: relative;
+  z-index: 13;
+  pointer-events: auto;
+}
+.light-modal__footer { 
+  border-top:1px solid var(--gr-border, #E5E7EB); 
+  padding-top:16px; 
+  margin-top:24px; 
+  position: relative;
+  z-index: 10;
+  pointer-events: auto;
+}
+.light-modal__footer button {
+  position: relative;
+  z-index: 11;
+  pointer-events: auto;
+}
+.light-question { font-size:1.125rem; font-weight:600; margin-bottom:12px; color: var(--dark); }
+.light-step { display:none; }
+.light-step[data-active] { display:block; }
+
+/* Fresh Light Setup Modal - Clean Start */
+.fresh-light-modal {
+  position: fixed;
+  inset: 0;
+  z-index: 1000;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 0.3s ease;
+}
+
+.fresh-light-modal[aria-hidden="false"] {
+  opacity: 1;
+  pointer-events: all;
+}
+
+.fresh-light-modal__backdrop {
+  position: absolute;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.5);
+}
+
+.fresh-light-modal__dialog {
+  position: relative;
+  background: white;
+  border-radius: 8px;
+  box-shadow: 0 20px 25px -5px rgba(0, 0, 0, 0.1);
+  max-width: 500px;
+  width: 90vw;
+  max-height: 80vh;
+  z-index: 1001;
+}
+
+.fresh-light-modal__header {
+  padding: 20px 20px 0 20px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  border-bottom: 1px solid #e5e7eb;
+  padding-bottom: 16px;
+}
+
+.fresh-light-modal__header h2 {
+  margin: 0;
+  font-size: 18px;
+  font-weight: 600;
+}
+
+.fresh-light-modal__close {
+  background: none;
+  border: none;
+  font-size: 24px;
+  cursor: pointer;
+  padding: 4px;
+  color: #6b7280;
+}
+
+.fresh-light-modal__close:hover {
+  color: #374151;
+}
+
+.fresh-light-modal__content {
+  padding: 20px;
+  max-height: 400px;
+  overflow-y: auto;
+}
+
+.fresh-light-step {
+  display: none;
+}
+
+.fresh-light-step[data-active] {
+  display: block;
+}
+
+.fresh-light-step h3 {
+  margin: 0 0 16px 0;
+  font-size: 16px;
+  font-weight: 600;
+}
+
+.fresh-light-modal__footer {
+  padding: 16px 20px 20px 20px;
+  border-top: 1px solid #e5e7eb;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+
+.fresh-light-modal select {
+  border: 1px solid #d1d5db;
+  border-radius: 6px;
+  background: white;
+  cursor: pointer;
+}
+
+.fresh-light-modal button {
+  padding: 8px 16px;
+  border-radius: 6px;
+  font-size: 14px;
+  cursor: pointer;
+  border: 1px solid #d1d5db;
+  background: white;
+}
+
+.fresh-light-modal button:hover {
+  background: #f9fafb;
+}
+
+.fresh-control-option {
+  padding: 8px 12px;
+  border: 1px solid #d1d5db;
+  background: white;
+  border-radius: 6px;
+  font-size: 13px;
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+.fresh-control-option:hover {
+  border-color: #6366f1;
+  background: #f8fafc;
+}
+
+.fresh-control-option.selected {
+  background: #6366f1;
+  color: white;
+  border-color: #6366f1;
+}
+
+.fresh-fixture-result {
+  padding: 8px 12px;
+  border-bottom: 1px solid #e2e8f0;
+  cursor: pointer;
+  font-size: 13px;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+
+.fresh-fixture-result:hover {
+  background: #f8fafc;
+}
+
+.fresh-fixture-result:last-child {
+  border-bottom: none;
+}
+
+.fresh-selected-fixture {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 6px 8px;
+  background: #e0e7ff;
+  border-radius: 4px;
+  margin-bottom: 4px;
+  font-size: 13px;
+}
+
+.fresh-selected-fixture button {
+  background: none;
+  border: none;
+  color: #dc2626;
+  cursor: pointer;
+  padding: 2px 6px;
+  font-size: 12px;
+}
+
+.fresh-selected-fixture button:hover {
+  background: #fca5a5;
+  border-radius: 2px;
+}
+
+/* Original light modal styles */
+.light-modal { position: fixed; inset:0; z-index:50; display:flex; align-items:center; justify-content:center; opacity:0; pointer-events:none; transition: opacity .3s ease; }
 .chip-row { display:flex; flex-wrap:wrap; gap:6px; }
 .chip-row .chip-option[data-active] { background: var(--gr-primary-soft); border-color: var(--gr-primary); }
 
@@ -2041,4 +2304,54 @@ input[type="range"]#grd {
 @keyframes spin {
   0% { transform: rotate(0deg); }
   100% { transform: rotate(360deg); }
+}
+
+/* Light Setup Summary Styles */
+.light-setups-summary {
+  max-height: 300px;
+  overflow-y: auto;
+}
+
+.setup-summary-item {
+  padding: 8px;
+  background: #f8fafc;
+  border: 1px solid #e2e8f0;
+  border-radius: 4px;
+  margin-bottom: 4px;
+  transition: background-color 0.2s ease;
+}
+
+.setup-summary-item:hover {
+  background: #f1f5f9;
+}
+
+.setup-summary-item .tiny {
+  line-height: 1.3;
+}
+
+/* Modal system improvements for button interactions */
+.room-modal button,
+.farm-modal button,
+.cal-modal button,
+.env-modal button {
+  position: relative;
+  z-index: 10;
+  pointer-events: auto;
+}
+
+/* Top navigation button styling */
+#roomTopNext {
+  font-size: 12px;
+  padding: 6px 12px;
+  min-height: 32px;
+}
+
+/* Ensure modal buttons and form elements are interactive - but not everything */
+.room-modal[aria-hidden="false"] button,
+.farm-modal[aria-hidden="false"] button,
+.cal-modal[aria-hidden="false"] button,
+.env-modal[aria-hidden="false"] button,
+.room-modal[aria-hidden="false"] input,
+.room-modal[aria-hidden="false"] select {
+  pointer-events: auto;
 }

@@ -166,7 +166,6 @@
           <button id="btnEditFarm" type="button" class="primary pulse-button" style="display:none;padding:12px 24px;font-size:16px;font-weight:600;background:linear-gradient(135deg, var(--gr-primary) 0%, var(--gr-accent) 100%);border:none;box-shadow:0 4px 12px rgba(13, 125, 125, 0.3);transform:scale(1.05)">Start here</button>
         </div>
       </div>
-      <p class="tiny" style="margin:8px 0 0;color:#475569">Conversational prompts, 1–3 taps each. We'll store the farm profile locally and at <code>/farm</code>.</p>
       <div id="farmBadge" class="farm-summary" style="margin-top:12px; display:none;"></div>
     </section>
 
@@ -181,7 +180,6 @@
           <button id="btnLaunchRoom" type="button" class="primary">New Grow Room</button>
         </div>
       </div>
-      <p class="tiny" style="margin:8px 0 0;color:#475569">This wizard mirrors Farm Registration but is scoped to a single room.</p>
       <div id="roomsList" style="margin-top:12px"></div>
     </section>
 
@@ -196,8 +194,32 @@
           <button id="btnLaunchLightSetup" type="button" class="primary">New Light Setup</button>
         </div>
       </div>
-      <p class="tiny" style="margin:8px 0 0;color:#475569">Create light configurations, assign control, and map to rooms and groups.</p>
+      
+      <!-- Light Setup Summary -->
+      <div id="lightSetupSummary" style="margin:8px 0;padding:8px 0;color:#64748b;font-size:14px;">
+        <!-- Summary will be populated by JavaScript -->
+      </div>
+      
       <div id="lightSetupsList" style="margin-top:12px"></div>
+    </section>
+
+    <!-- Controller Assignments Panel -->
+    <section id="controllerAssignmentsPanel" class="card" style="border:1px solid #eee;border-radius:10px;padding:12px;margin-bottom:12px">
+      <div class="row" style="justify-content:space-between;align-items:center">
+        <h2 style="margin:0">
+          Controller Assignments
+          <span class="hint" tabindex="0" data-tip="Assign controllers to equipment requiring smart control (lights, HVAC, sensors).">?</span>
+        </h2>
+        <div class="row" style="gap:6px">
+          <button id="btnRefreshControllerAssignments" type="button" class="ghost">Refresh</button>
+          <button id="btnManageControllers" type="button" class="primary">Manage Controllers</button>
+        </div>
+      </div>
+      
+      <!-- Controller Assignments Table -->
+      <div id="controllerAssignmentsTable" style="margin-top:12px">
+        <!-- Table will be populated by JavaScript -->
+      </div>
     </section>
 
     <!-- Plans (Grow recipes) Panel -->
@@ -482,36 +504,124 @@
     </section>
   </main>
   
-  <!-- Light Setup Modal -->
-  <div id="lightModal" class="room-modal" aria-hidden="true">
-    <div class="room-modal__backdrop" id="lightModalBackdrop"></div>
-    <div class="room-modal__dialog" role="dialog" aria-modal="true" aria-labelledby="lightModalTitle">
-      <button type="button" class="room-modal__close" id="lightModalClose" aria-label="Close">×</button>
-      <form id="lightWizardForm" novalidate>
-        <p class="tiny" id="lightModalProgress" aria-live="polite">Step 1 of 8</p>
-        <h2 id="lightModalTitle" style="margin:0 0 12px">Set up Grow Lights</h2>
-        <div id="lightSteps">
-          <section class="room-step" data-step="device-discovery">
-            <p class="room-question">Discover lights and related devices.</p>
-            <div class="farm-step__stack">
-              <div id="lightDiscoveryProgress" class="scanning-container" style="display:none">
-                <div class="scanning-radar"></div>
-                <div class="scanning-text">Scanning for fixtures</div>
-                <div class="scanning-status">Wi‑Fi • BLE • mDNS • network…</div>
-              </div>
-              <div class="row" style="gap:8px;align-items:center;flex-wrap:wrap;margin-top:12px">
-                <button id="lightDiscoveryRun" type="button" class="primary">Start Discovery</button>
-                <button id="lightDiscoveryStop" type="button" class="ghost" style="display:none">Stop</button>
-                <div class="discovery-status" id="lightDiscoveryStatus" style="margin-left:12px"></div>
-              </div>
-              <div id="lightDiscoveryResults" style="margin-top:16px;display:none">
-                <div class="tiny" style="margin-bottom:8px">Discovered devices</div>
-                <div id="lightDiscoveryDeviceList" class="discovery-device-list"></div>
+  <!-- NEW FRESH Light Setup Modal -->
+  <div id="freshLightModal" class="fresh-light-modal" aria-hidden="true">
+    <div class="fresh-light-modal__backdrop"></div>
+    <div class="fresh-light-modal__dialog">
+      <div class="fresh-light-modal__header">
+        <h2>Light Setup Wizard</h2>
+        <button type="button" class="fresh-light-modal__close" id="freshLightClose">×</button>
+      </div>
+      
+      <div class="fresh-light-modal__content">
+        <div class="fresh-light-step" id="freshStep1" data-active>
+          <h3>Select Room and Zone</h3>
+          
+          <div style="margin-bottom: 20px;">
+            <label style="display: block; margin-bottom: 8px;">Room:</label>
+            <select id="freshRoomSelect" style="width: 100%; padding: 8px; font-size: 14px;">
+              <option value="">Select a room</option>
+            </select>
+          </div>
+          
+          <div style="margin-bottom: 20px;">
+            <label style="display: block; margin-bottom: 8px;">Zone:</label>
+            <select id="freshZoneSelect" style="width: 100%; padding: 8px; font-size: 14px;">
+              <option value="">Select a zone</option>
+            </select>
+          </div>
+          
+          <button id="freshCreateZone" type="button" style="padding: 8px 16px;">Create New Zone</button>
+        </div>
+        
+        <div class="fresh-light-step" id="freshStep2">
+          <h3>Select Fixtures</h3>
+          
+          <div style="margin-bottom: 20px;">
+            <div style="display: flex; gap: 12px; margin-bottom: 12px; flex-wrap: wrap;">
+              <label style="display: flex; align-items: center; gap: 6px;">
+                <span style="font-size: 13px;">Lights per controller:</span>
+                <input id="freshLightSeriesCount" type="number" min="0" value="1" style="width: 80px; padding: 4px;">
+              </label>
+              <label style="display: flex; align-items: center; gap: 6px;">
+                <span style="font-size: 13px;">Number of controllers:</span>
+                <input id="freshControllersCount" type="number" min="0" value="1" style="width: 80px; padding: 4px;">
+              </label>
+            </div>
+            
+            <div style="margin-bottom: 12px;">
+              <label style="display: block; margin-bottom: 8px; font-size: 13px;">Search fixtures:</label>
+              <input id="freshFixtureSearch" type="text" placeholder="Search models (e.g., Gavita 1700e)" 
+                     style="width: 100%; padding: 8px; font-size: 14px;">
+            </div>
+            
+            <div style="margin-bottom: 12px;">
+              <div style="font-size: 12px; color: #64748b; margin-bottom: 4px;">Search Results:</div>
+              <div id="freshFixtureResults" style="max-height: 150px; overflow-y: auto; border: 1px solid #e2e8f0; border-radius: 4px; min-height: 60px;">
+                <div style="padding: 20px; text-align: center; color: #64748b; font-size: 13px;">
+                  Type to search for fixture models...
+                </div>
               </div>
             </div>
-          </section>
-          <section class="room-step" data-step="fixtures">
-            <p class="room-question">Select fixtures and counts.</p>
+            
+            <div>
+              <div style="font-size: 12px; color: #64748b; margin-bottom: 4px;">Selected Fixtures:</div>
+              <div id="freshSelectedFixtures" style="min-height: 60px; border: 1px solid #e2e8f0; border-radius: 4px; padding: 8px;">
+                <div style="color: #64748b; font-size: 13px;">No fixtures selected yet</div>
+              </div>
+            </div>
+          </div>
+        </div>
+        
+        <div class="fresh-light-step" id="freshStep3">
+          <h3>Control Method</h3>
+          
+          <div style="margin-bottom: 20px;">
+            <div style="font-size: 13px; margin-bottom: 12px;">How will the fixtures be controlled?</div>
+            
+            <div id="freshControlMethod" style="display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 16px;">
+              <button type="button" class="fresh-control-option" data-value="wifi">Wi‑Fi / App</button>
+              <button type="button" class="fresh-control-option" data-value="smart-plug">Smart Plug</button>
+              <button type="button" class="fresh-control-option" data-value="0-10v">0‑10V / Wired</button>
+              <button type="button" class="fresh-control-option" data-value="rs485">RS‑485 / Modbus</button>
+              <button type="button" class="fresh-control-option" data-value="other">Other</button>
+            </div>
+            
+            <div id="freshControlDetails" style="font-size: 13px; color: #64748b; padding: 12px; background: #f8fafc; border-radius: 4px; display: none;">
+              Control method details will appear here...
+            </div>
+          </div>
+        </div>
+        
+        <div class="fresh-light-step" id="freshStep4">
+          <h3>Review Setup</h3>
+          
+          <div style="margin-bottom: 20px;">
+            <div id="freshReviewSummary" style="background: #f8fafc; border-radius: 8px; padding: 16px;">
+              <div style="font-weight: 600; margin-bottom: 12px;">Light Setup Summary</div>
+              <div id="freshReviewDetails" style="font-size: 14px; line-height: 1.5;">
+                <!-- Review details will be populated here -->
+              </div>
+            </div>
+            
+            <div style="margin-top: 16px; padding: 12px; background: #fef3c7; border-radius: 6px; border-left: 4px solid #f59e0b;">
+              <div style="font-size: 13px; color: #92400e;">
+                <strong>Ready to save:</strong> This will create your light setup configuration for the selected room and zone.
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+      
+      <div class="fresh-light-modal__footer">
+        <button id="freshPrev" type="button" style="display: none;">Previous</button>
+        <button id="freshNext" type="button">Next</button>
+        <button id="freshSave" type="button" style="display: none;">Save</button>
+      </div>
+    </div>
+  </div>
+          <section class="light-step" data-step="fixtures">
+            <p class="light-question">Select fixtures and counts.</p>
             <div class="farm-step__stack">
               <div class="row" style="gap:8px;align-items:center;flex-wrap:wrap;margin-bottom:6px">
                 <label class="tiny">How many lights per controller?
@@ -528,8 +638,8 @@
               <ul id="lightKbSelected" class="farm-kb-selected" aria-live="polite"></ul>
             </div>
           </section>
-          <section class="room-step" data-step="control">
-            <p class="room-question">How will the fixtures be controlled?</p>
+          <section class="light-step" data-step="control">
+            <p class="light-question">How will the fixtures be controlled?</p>
             <div class="farm-step__stack">
               <div class="tiny">Control method</div>
               <div id="lightControlMethod" class="chip-row" role="group" aria-label="Control method">
@@ -542,43 +652,22 @@
               <div id="lightControlDetails" style="margin-top:8px" class="tiny" aria-live="polite"></div>
             </div>
           </section>
-          <section class="room-step" data-step="energy">
-            <p class="room-question">How will you monitor energy?</p>
+          <section class="light-step" data-step="add-more">
+            <p class="light-question">Add more lights to this room/zone?</p>
             <div class="farm-step__stack">
-              <div class="chip-row" id="lightEnergy" role="group" aria-label="Energy monitoring">
-                <button type="button" class="chip-option" data-value="ct-branch">CT/branch meters</button>
-                <button type="button" class="chip-option" data-value="smart-plugs">Smart plugs</button>
-                <button type="button" class="chip-option" data-value="built-in">Built-in meter</button>
-                <button type="button" class="chip-option" data-value="none">None</button>
+              <div id="lightSetupsSummary" class="light-setups-summary"></div>
+              <div class="row" style="gap:12px;margin-top:16px;align-items:center;justify-content:center">
+                <button id="lightAddMoreSetup" type="button" class="primary">Add More Lights</button>
+                <button id="lightFinishSetups" type="button" class="primary">Continue to Review</button>
               </div>
-              <label class="tiny" style="margin-top:8px">Daily runtime (hrs)
-                <input id="lightEnergyHours" type="number" min="0" max="24" value="18" style="width:120px;margin-left:6px">
-              </label>
             </div>
           </section>
-          <section class="room-step" data-step="mapping">
-            <p class="room-question">Map to rooms, zones, and groups.</p>
-            <div class="farm-step__stack">
-              <label class="tiny">Room
-                <select id="lightRoomSelect" style="min-width:220px"></select>
-              </label>
-              <label class="tiny" style="margin-top:8px">Group
-                <select id="lightGroupSelect" style="min-width:220px"></select>
-              </label>
-            </div>
-          </section>
-          <section class="room-step" data-step="review">
-            <p class="room-question">Review light setup</p>
+          <section class="light-step" data-step="review">
+            <p class="light-question">Review light setup</p>
             <div id="lightReview" class="farm-review"></div>
           </section>
         </div>
-        <div class="row room-modal__footer" style="justify-content:space-between;margin-top:18px">
-          <button id="lightPrev" type="button" class="ghost">Back</button>
-          <div class="row" style="gap:8px">
-            <button id="lightNext" type="button" class="primary">Next</button>
-            <button id="btnSaveLight" type="submit" class="primary" style="display:none">Save Light Setup</button>
-          </div>
-        </div>
+
       </form>
     </div>
   </div>
@@ -688,14 +777,26 @@
   <div id="roomModal" class="room-modal" aria-hidden="true">
     <div class="room-modal__backdrop" id="roomModalBackdrop"></div>
     <div class="room-modal__dialog" role="dialog" aria-modal="true" aria-labelledby="roomModalTitle">
-      <button type="button" class="room-modal__close" id="roomModalClose" aria-label="Close">×</button>
       <form id="roomWizardForm" novalidate style="display:flex; flex-direction:column; height:100%; min-height:0;">
-        <div style="flex-shrink:0;">
-          <p class="tiny" id="roomModalProgress" aria-live="polite">Step 1 of 9</p>
-          <h2 id="roomModalTitle" style="margin:0 0 12px">Set up a Grow Room</h2>
+        <!-- Close button at top -->
+        <div style="display:flex; justify-content:flex-end; margin-bottom:16px;">
+          <button type="button" class="room-modal__close" id="roomModalClose" aria-label="Close">×</button>
         </div>
         
-        <div id="roomSteps" style="flex:1; overflow-y:auto; min-height:0;">
+        <!-- Header with progress, title, and navigation buttons -->
+        <div class="room-modal__header" style="flex-shrink:0; display:flex; align-items:center; justify-content:space-between; padding:0 0 12px 0; border-bottom:1px solid #e2e8f0;">
+          <div>
+            <p class="tiny" id="roomModalProgress" aria-live="polite" style="margin:0 0 4px 0;">Step 1 of 5</p>
+            <h2 id="roomModalTitle" style="margin:0;">Set up a Grow Room</h2>
+          </div>
+          <div style="display:flex; gap:8px; align-items:center;">
+            <button id="roomTopPrev" type="button" class="ghost" style="font-size:12px; padding:6px 12px; display:none;">Previous</button>
+            <button id="roomTopNext" type="button" class="primary" style="font-size:12px; padding:6px 12px;">Next</button>
+            <button id="roomTopSaveClose" type="button" class="primary" style="font-size:12px; padding:6px 12px; display:none;">Save & Close</button>
+          </div>
+        </div>
+        
+        <div id="roomSteps" style="flex:1; overflow-y:auto; min-height:0; position:relative; padding-top:16px;">
           <section class="room-step" data-step="connectivity">
             <p class="room-question" id="roomConnectivityIntro">Is your local smart hub on-line?</p>
             <div class="farm-step__stack">
@@ -712,25 +813,6 @@
                 <button id="roomHubDetect" type="button" class="ghost">Detect hub</button>
               </div>
               <p class="tiny" id="roomHubStatus" aria-live="polite" style="color:#0f172a;margin-top:4px"></p>
-              <div class="tiny" style="color:#475569;margin-top:6px">
-                This control system runs on an edge device. We'll check for a local hub and common vendor bridges (Node‑RED flows, Home Assistant add‑ons, or vendor hubs) so devices can be discovered and managed locally.
-                We use the hub to securely push credentials to SwitchBot, Kasa, Shelly, and other devices. <a href="https://www.digi.com/blog/post/edge-computing-vs-cloud-computing" target="_blank" rel="noopener">Edge computing</a> keeps automations responsive even during cloud outages.
-              </div>
-              <!-- Cloud tenant is centrally managed by Head Office. Keep a hidden field for data binding. -->
-              <input id="roomCloudTenant" type="hidden" value="Azure" aria-hidden="true">
-              <div class="tiny" style="color:#64748b;margin-top:12px">Cloud integration is preconfigured and managed by Head Office.</div>
-              <div class="tiny" style="color:#64748b;margin-top:12px">Assign farm management roles</div>
-              <div class="role-grid">
-                <label class="tiny">Admins
-                  <input id="roomRoleAdmin" type="text" placeholder="Emails or names" style="min-width:220px">
-                </label>
-                <label class="tiny">Operators
-                  <input id="roomRoleOperator" type="text" placeholder="Emails or names" style="min-width:220px">
-                </label>
-                <label class="tiny">Viewers
-                  <input id="roomRoleViewer" type="text" placeholder="Emails or names" style="min-width:220px">
-                </label>
-              </div>
             </div>
           </section>
 
@@ -848,6 +930,7 @@
             <p class="room-question">Now that hardware is mapped, what should we call this grow room?</p>
             <input id="roomName" type="text" placeholder="e.g., Flower A" required>
             <p class="tiny" style="color:#64748b;margin-top:6px">Friendly names from Farm Registration appear here so everyone speaks the same language.</p>
+            <p id="roomNameHint" class="tiny" style="color:#059669;margin-top:4px;display:none;font-style:italic;"></p>
           </section>
 
           <section class="room-step" data-step="location">
@@ -859,58 +942,6 @@
             </div>
           </section>
 
-          <section class="room-step" data-step="layout">
-            <p class="room-question">How's the canopy laid out?</p>
-            <div class="farm-step__stack">
-              <div class="chip-row" id="roomLayoutType" role="group" aria-label="Layout type">
-                <button type="button" class="chip-option" data-value="benches">Benches</button>
-                <button type="button" class="chip-option" data-value="racks">Racks (vertical)</button>
-                <button type="button" class="chip-option" data-value="open">Open floor</button>
-              </div>
-              <div class="row" style="gap:8px;flex-wrap:wrap">
-                <label class="tiny">Rows <input id="roomRows" type="number" min="0" value="0" style="width:90px"></label>
-                <label class="tiny">Racks/row <input id="roomRacks" type="number" min="0" value="0" style="width:110px"></label>
-                <label class="tiny">Levels/rack <input id="roomLevels" type="number" min="0" value="0" style="width:120px"></label>
-              </div>
-            </div>
-          </section>
-
-          <section class="room-step" data-step="zones">
-            <p class="room-question">Any zones or canopy levels we should track?</p>
-            <div class="farm-step__stack">
-              <p class="tiny" style="color:#64748b">Name the zones, tiers or aisles you reference day to day. We'll reuse them for dashboards and sensor placement.</p>
-              <div class="row" style="gap:8px;flex-wrap:wrap">
-                <input id="roomZoneInput" type="text" placeholder="e.g., South Canopy" style="flex:1;min-width:200px">
-                <button type="button" class="ghost" id="roomZoneAdd">Add zone</button>
-              </div>
-              <ul id="roomZoneList" class="farm-kb-selected" aria-live="polite" style="margin-top:8px"></ul>
-            </div>
-          </section>
-
-          
-
-          
-
-          <section class="room-step" data-step="grouping">
-            <p class="room-question">Group devices and assign plans so automations can start smart.</p>
-            <div class="farm-step__stack">
-              <div class="tiny">Groups</div>
-              <div class="row" style="gap:8px;flex-wrap:wrap">
-                <input id="roomGroupNameInput" type="text" placeholder="Add group (e.g., Flower Tier A)" style="flex:1;min-width:220px">
-                <button id="roomGroupAdd" type="button" class="ghost">Add group</button>
-              </div>
-              <div class="tiny" style="color:#64748b;margin-top:6px">Suggested groups from your zones appear as you add them. Each group can share plans and schedules.</div>
-              <div id="roomGroupSuggestions" class="chip-row" role="list" aria-label="Suggested groups"></div>
-              <ul id="roomGroupList" class="farm-kb-selected" aria-live="polite" style="margin-top:8px"></ul>
-              <label class="tiny" style="margin-top:12px">Assign grow plan
-                <select id="roomGroupPlan" style="min-width:220px"></select>
-              </label>
-              <label class="tiny" style="margin-top:12px">Schedule
-                <select id="roomGroupSchedule" style="min-width:220px"></select>
-              </label>
-            </div>
-          </section>
-
           <section class="room-step" data-step="review">
             <p class="room-question">Review this room before saving.</p>
             <div id="roomReview" class="farm-review"></div>
@@ -918,7 +949,7 @@
 
         </div>
 
-        <div class="row room-modal__footer" style="justify-content:space-between;margin-top:18px;flex-shrink:0;position:sticky;bottom:0;background:white;border-top:1px solid #e5e7eb;padding-top:16px;">
+        <div class="row room-modal__footer" style="justify-content:space-between;margin-top:18px;">
           <button id="roomPrev" type="button" class="ghost">Back</button>
           <div class="row" style="gap:8px">
             <button id="roomNext" type="button" class="primary">Next</button>
