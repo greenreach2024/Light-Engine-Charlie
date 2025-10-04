@@ -5,12 +5,13 @@ import asyncio
 import contextlib
 import logging
 import os
-from typing import List, Optional
+from typing import Any, Dict, List, Optional
 
 from fastapi import Depends, FastAPI, HTTPException, Query, status
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
 
+from .ai_assist import SetupAssistError, SetupAssistService
 from .automation import AutomationEngine, lux_balancing_rule, occupancy_rule
 from .config import EnvironmentConfig, build_environment_config
 from .device_discovery import fetch_switchbot_status, full_discovery_cycle
@@ -40,6 +41,14 @@ LIGHTING_STATE = LightingState(CONFIG.lighting_inventory or [])
 CONTROLLER = LightingController(CONFIG.lighting_inventory or [], LIGHTING_STATE)
 SCHEDULES = ScheduleStore()
 AUTOMATION = AutomationEngine(CONTROLLER, SCHEDULES)
+AI_ASSIST_SERVICE: Optional[SetupAssistService] = None
+
+if CONFIG.ai_assist and CONFIG.ai_assist.enabled:
+    try:
+        AI_ASSIST_SERVICE = SetupAssistService(CONFIG.ai_assist)
+    except SetupAssistError as exc:
+        LOGGER.error("Failed to initialise AI Assist: %s", exc)
+        AI_ASSIST_SERVICE = None
 
 ZONE_MAP = {fixture.name: fixture.address for fixture in CONFIG.lighting_inventory or []}
 if ZONE_MAP:
@@ -82,6 +91,20 @@ class LightingFixtureResponse(BaseModel):
     max_brightness: int
     spectrum_min: int
     spectrum_max: int
+
+
+class SetupAssistRequest(BaseModel):
+    device_metadata: Dict[str, Any] = Field(default_factory=dict)
+    wizard_state: Dict[str, Any] = Field(default_factory=dict)
+    environment_context: Dict[str, Any] = Field(default_factory=dict)
+    stage: str = Field("start", description="Call stage: start, mid, or complete")
+
+
+class SetupAssistResponse(BaseModel):
+    suggested_fields: Dict[str, Any] = Field(default_factory=dict)
+    next_steps: List[str] = Field(default_factory=list)
+    summary: Optional[str] = None
+    provider: str = Field("heuristic", description="Identifier for the backing AI provider")
 
 
 def _parse_time(value: str) -> tuple[int, int]:
@@ -149,6 +172,25 @@ async def shutdown() -> None:
 @app.get("/health")
 async def health() -> dict:
     return {"status": "ok", "devices": len(REGISTRY.list())}
+
+
+@app.post("/ai/setup-assist", response_model=SetupAssistResponse)
+async def setup_assist(request: SetupAssistRequest) -> SetupAssistResponse:
+    if not AI_ASSIST_SERVICE:
+        raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail="AI Assist not configured")
+    try:
+        result = await AI_ASSIST_SERVICE.generate(
+            device_metadata=request.device_metadata,
+            wizard_state=request.wizard_state,
+            environment_context=request.environment_context,
+            stage=request.stage,
+        )
+    except SetupAssistError as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+    except Exception as exc:  # pylint: disable=broad-except
+        LOGGER.exception("AI setup assist failed: %s", exc)
+        raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail="Failed to obtain AI suggestions") from exc
+    return SetupAssistResponse(**result)
 
 
 @app.get("/devices", response_model=List[DeviceResponse])
