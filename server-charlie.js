@@ -3358,7 +3358,19 @@ async function executeKasaWizardStep(stepId, data) {
       console.log(`🔍 Discovering Kasa devices (timeout: ${data.discoveryTimeout}s)`);
       
       try {
-        const { Client } = await import('tplink-smarthome-api');
+        const kasaModule = await import('tplink-smarthome-api');
+        const Client = kasaModule.Client ?? kasaModule.default?.Client ?? kasaModule.default;
+
+        if (typeof Client !== 'function') {
+          const message = 'tplink-smarthome-api Client constructor not available';
+          console.error(message);
+          return {
+            success: false,
+            error: message,
+            data: {}
+          };
+        }
+
         const client = new Client();
         const kasaDevices = [];
         
