@@ -3994,21 +3994,6 @@ app.use((error, req, res, next) => {
 });
 
 // Setup wizard endpoints - triggered when devices are identified
-app.get('/setup/wizards/:wizardId', async (req, res) => {
-  const { wizardId } = req.params;
-  try {
-    const wizard = await getSetupWizard(wizardId);
-    if (!wizard) {
-      return res.status(404).json({ error: 'Wizard not found' });
-    }
-    res.json(wizard);
-  } catch (error) {
-    console.error('Failed to load setup wizard:', error);
-    res.status(500).json({ error: 'Failed to load setup wizard' });
-  }
-});
-
-// Get all available setup wizards
 app.get('/setup/wizards', async (req, res) => {
   try {
     const wizards = await getAllSetupWizards();
@@ -4036,9 +4021,10 @@ app.get('/setup/wizards/:wizardId', async (req, res) => {
     });
   } catch (error) {
     console.error(`Error fetching wizard ${req.params.wizardId}:`, error);
-    res.status(404).json({
+    const isUnknownWizard = /Unknown wizard/i.test(error?.message || '');
+    res.status(isUnknownWizard ? 404 : 500).json({
       success: false,
-      error: error.message
+      error: isUnknownWizard ? 'Wizard not found' : error.message
     });
   }
 });
@@ -4619,111 +4605,15 @@ app.post('/setup/wizards/:wizardId/execute-validated', async (req, res) => {
   }
 });
 
-// 404 handler for undefined routes
+// 404 handler for undefined routes (must be registered last)
 app.use((req, res) => {
   console.warn(`⚠️  404 Not Found: ${req.method} ${req.url}`);
   res.status(404).json({
+    success: false,
     error: 'Not Found',
     message: `Route ${req.method} ${req.url} not found`,
     timestamp: new Date().toISOString()
   });
-});
-
-// Get wizard execution status
-app.get('/setup/wizards/:wizardId/status', async (req, res) => {
-  try {
-    const { wizardId } = req.params;
-    const status = await getWizardStatus(wizardId);
-    
-    if (!status.exists) {
-      return res.status(404).json({
-        success: false,
-        error: 'Wizard not found or never started'
-      });
-    }
-    
-    res.json({
-      success: true,
-      status
-    });
-  } catch (error) {
-    console.error(`Error getting wizard status ${req.params.wizardId}:`, error);
-    res.status(500).json({
-      success: false,
-      error: error.message
-    });
-  }
-});
-
-// Reset wizard state (useful for testing)
-app.delete('/setup/wizards/:wizardId', async (req, res) => {
-  try {
-    const { wizardId } = req.params;
-    wizardStates.delete(wizardId);
-    console.log(`🗑️ Reset wizard state for ${wizardId}`);
-    res.json({
-      success: true,
-      message: `Wizard ${wizardId} state reset`
-    });
-  } catch (error) {
-    console.error(`Error resetting wizard ${req.params.wizardId}:`, error);
-    res.status(500).json({
-      success: false,
-      error: error.message
-    });
-  }
-});
-
-// Automatically suggest wizards for discovered devices
-app.post('/discovery/suggest-wizards', async (req, res) => {
-  try {
-    const { devices } = req.body;
-    if (!Array.isArray(devices)) {
-      return res.status(400).json({
-        success: false,
-        error: 'devices array is required'
-      });
-    }
-    
-    const suggestions = [];
-    
-    for (const device of devices) {
-      // Find applicable wizards for this device type
-      const applicableWizards = Object.values(SETUP_WIZARDS).filter(wizard => 
-        wizard.targetDevices.includes(device.type) || 
-        device.services?.some(service => wizard.targetDevices.includes(service))
-      );
-      
-      if (applicableWizards.length > 0) {
-        suggestions.push({
-          device: {
-            ip: device.ip,
-            hostname: device.hostname,
-            type: device.type,
-            services: device.services
-          },
-          recommendedWizards: applicableWizards.map(w => ({
-            id: w.id,
-            name: w.name,
-            description: w.description,
-            confidence: calculateWizardConfidence(device, w)
-          })).sort((a, b) => b.confidence - a.confidence)
-        });
-      }
-    }
-    
-    res.json({
-      success: true,
-      suggestions
-    });
-    
-  } catch (error) {
-    console.error('Error suggesting wizards:', error);
-    res.status(500).json({
-      success: false,
-      error: error.message
-    });
-  }
 });
 
 // Start the server after all routes are defined

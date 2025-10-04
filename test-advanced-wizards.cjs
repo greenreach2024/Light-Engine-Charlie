@@ -52,6 +52,7 @@ async function testAdvancedWizardSystem() {
     console.log('📋 Test 1: Getting available wizard templates...');
     const templatesResponse = await makeRequest('GET', '/setup/templates');
     console.log(`Status: ${templatesResponse.status}`);
+    console.log(`Success: ${templatesResponse.data.success}`);
     if (templatesResponse.data.templates) {
       console.log('Available templates:');
       templatesResponse.data.templates.forEach(t => {
@@ -88,6 +89,7 @@ async function testAdvancedWizardSystem() {
     });
     
     console.log(`Status: ${recommendResponse.status}`);
+    console.log(`Success: ${recommendResponse.data.success}`);
     if (recommendResponse.data.recommendations) {
       const rec = recommendResponse.data.recommendations;
       console.log(`Individual wizards: ${rec.individualWizards.length}`);
@@ -114,6 +116,7 @@ async function testAdvancedWizardSystem() {
     });
     
     console.log(`Status: ${applyResponse.status}`);
+    console.log(`Success: ${applyResponse.data.success}`);
     if (applyResponse.data.result) {
       const result = applyResponse.data.result;
       console.log(`Template: ${result.templateName}`);
@@ -139,6 +142,7 @@ async function testAdvancedWizardSystem() {
     });
     
     console.log(`Status: ${validatedResponse.status}`);
+    console.log(`Success: ${validatedResponse.data.success}`);
     if (validatedResponse.data.result) {
       console.log(`Success: ${validatedResponse.data.result.success}`);
       if (validatedResponse.data.result.message) {
@@ -159,6 +163,7 @@ async function testAdvancedWizardSystem() {
     });
     
     console.log(`Status: ${invalidResponse.status}`);
+    console.log(`Success: ${invalidResponse.data.success}`);
     if (invalidResponse.data.errors) {
       console.log(`Validation errors: ${invalidResponse.data.errors.length}`);
       invalidResponse.data.errors.forEach(error => {
@@ -174,6 +179,7 @@ async function testAdvancedWizardSystem() {
     });
     
     console.log(`Status: ${bulkResponse.status}`);
+    console.log(`Success: ${bulkResponse.data.success}`);
     if (bulkResponse.data.result) {
       const result = bulkResponse.data.result;
       console.log(`Operation: ${result.operation}`);
@@ -196,6 +202,7 @@ async function testAdvancedWizardSystem() {
     });
     
     console.log(`Status: ${mqttResponse.status}`);
+    console.log(`Success: ${mqttResponse.data.success}`);
     if (mqttResponse.data.result) {
       console.log(`Success: ${mqttResponse.data.result.success}`);
       if (mqttResponse.data.result.message) {
@@ -218,6 +225,7 @@ async function testAdvancedWizardSystem() {
     });
     
     console.log(`Status: ${topicResponse.status}`);
+    console.log(`Success: ${topicResponse.data.success}`);
     if (topicResponse.data.result) {
       console.log(`Success: ${topicResponse.data.result.success}`);
       if (topicResponse.data.result.data?.discoveredTopics) {
