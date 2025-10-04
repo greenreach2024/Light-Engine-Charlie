@@ -1,3 +1,38 @@
+// --- Fallbacks for missing global helpers (standalone mode) ---
+if (typeof window.showToast !== 'function') {
+  window.showToast = function({ title = '', msg = '', kind = 'info', icon = '' } = {}) {
+    // Simple DOM toast
+    let toast = document.createElement('div');
+    toast.style.position = 'fixed';
+    toast.style.bottom = '2em';
+    toast.style.left = '50%';
+    toast.style.transform = 'translateX(-50%)';
+    toast.style.background = kind === 'success' ? '#2e7d32' : kind === 'warn' ? '#fbc02d' : '#1976d2';
+    toast.style.color = '#fff';
+    toast.style.padding = '1em 2em';
+    toast.style.borderRadius = '8px';
+    toast.style.boxShadow = '0 2px 8px rgba(0,0,0,0.2)';
+    toast.style.zIndex = 9999;
+    toast.style.fontSize = '1.1em';
+    toast.innerHTML = `<span style="margin-right:0.5em;">${icon || ''}</span><b>${title}</b> <span style="margin-left:0.5em;">${msg}</span>`;
+    document.body.appendChild(toast);
+    setTimeout(() => { toast.remove(); }, 3000);
+  };
+}
+
+if (typeof window.applyTheme !== 'function') {
+  window.applyTheme = function(themeObj) {
+    // Minimal CSS variable applier
+    if (!themeObj || typeof themeObj !== 'object') return;
+    const root = document.documentElement;
+    for (const [k, v] of Object.entries(themeObj)) {
+      if (typeof v === 'string') {
+        root.style.setProperty(`--${k.replace(/^--/, '')}`, v);
+      }
+    }
+  };
+}
+
 // Utility: Save farm to backend or localStorage fallback
 async function safeFarmSave(payload) {
   try {
@@ -1616,7 +1651,7 @@ class FarmWizard {
       try {
         await this.saveBrandingChanges();
       } catch (err) {
-        showToast({ title: 'Save failed', msg: err?.message || String(err), kind: 'warn', icon: '⚠️' });
+  if (typeof showToast === 'function') showToast({ title: 'Save failed', msg: err?.message || String(err), kind: 'warn', icon: '⚠️' });
       } finally {
         btn.disabled = false;
         btn.textContent = 'Save Branding';
@@ -1904,11 +1939,13 @@ class FarmWizard {
     // Apply theme using the global applyTheme function for comprehensive theming
     if (branding.palette) {
       console.log('🎨 Applying theme with palette:', branding.palette);
-      applyTheme(branding.palette, { 
+    if (typeof applyTheme === 'function') {
+      applyTheme(branding.palette, {
         fontFamily: branding.fontFamily || '',
         logoHeight: branding.logoHeight || ''
       });
       console.log('🎨 Theme applied successfully');
+    }
     } else {
       console.warn('🎨 No palette found in branding object!');
     }
