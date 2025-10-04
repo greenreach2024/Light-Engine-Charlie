@@ -85,42 +85,8 @@ CONTROLLER = LightingController(CONFIG.lighting_inventory or [], LIGHTING_STATE)
 
 @app.get("/")
 def root():
+
     return {"message": "Light Engine Charlie API is running. See /docs for API documentation."}
-"""FastAPI server wiring together discovery, automation, and RBAC."""
-from __future__ import annotations
-
-import asyncio
-import contextlib
-import logging
-import os
-from typing import Any, Dict, List, Optional
-
-from fastapi import Depends, FastAPI, HTTPException, Query, status
-from fastapi.middleware.cors import CORSMiddleware
-from pydantic import BaseModel, Field
-
-from .ai_assist import SetupAssistError, SetupAssistService
-from .automation import AutomationEngine, lux_balancing_rule, occupancy_rule
-from .config import EnvironmentConfig, build_environment_config
-from .device_discovery import fetch_switchbot_status, full_discovery_cycle
-from .device_models import Schedule as ScheduleModel
-from .device_models import UserContext
-from .lighting import LightingController
-from .logging_config import configure_logging
-from .state import DeviceRegistry, LightingState, ScheduleStore, SensorEventBuffer
-
-LOGGER = logging.getLogger(__name__)
-
-configure_logging()
-
-app = FastAPI(title="Light Engine Charlie", version="1.0.0")
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=["*"],
-    allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
-)
 
 CONFIG: EnvironmentConfig = build_environment_config()
 REGISTRY = DeviceRegistry()

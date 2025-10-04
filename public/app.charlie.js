@@ -13,7 +13,6 @@ function showToast({ title = '', msg = '', kind = 'info', icon = '' }, ttlMs = 4
   const closer = el.querySelector('.toast-close');
   closer?.addEventListener('click', ()=> el.remove());
   if (ttlMs > 0) setTimeout(()=> el.remove(), ttlMs);
-}
 
 // Global State Management
 const STATE = {
@@ -11321,6 +11320,7 @@ function initializeSidebarNavigation() {
   setActivePanel('overview');
 }
 
+// Ensure wireHints is defined before this handler
 document.addEventListener('DOMContentLoaded', async () => {
   // Clean up any existing invalid img src attributes that might cause 404s
   document.querySelectorAll('img').forEach(img => {
@@ -11329,13 +11329,13 @@ document.addEventListener('DOMContentLoaded', async () => {
       img.style.display = 'none';
     }
   });
-  
-  wireHints();
-  wireGlobalEvents();
-  initializeSidebarNavigation();
+
+  if (typeof wireHints === 'function') wireHints();
+  if (typeof wireGlobalEvents === 'function') wireGlobalEvents();
+  if (typeof initializeSidebarNavigation === 'function') initializeSidebarNavigation();
 
   document.getElementById('btnLaunchPairWizard')?.addEventListener('click', () => {
-    DEVICE_PAIR_WIZARD.open();
+    if (typeof DEVICE_PAIR_WIZARD !== 'undefined' && DEVICE_PAIR_WIZARD?.open) DEVICE_PAIR_WIZARD.open();
   });
 
   document.getElementById('btnPairWizardDocs')?.addEventListener('click', () => {
@@ -11580,5 +11580,14 @@ document.addEventListener('DOMContentLoaded', async () => {
   // Initialize Current Lights Status panel
   try { initLightsStatusUI(); } catch (e) { console.warn('Lights status init failed', e); }
   
+
   setStatus("Dashboard loaded");
+
+  // Ensure modal wizards are instantiated so buttons work
+  if (typeof FarmWizard === 'function') {
+    window.farmWizard = new FarmWizard();
+  }
+  if (typeof DeviceManagerWindow === 'function') {
+    window.deviceManagerWindow = new DeviceManagerWindow();
+  }
 });
