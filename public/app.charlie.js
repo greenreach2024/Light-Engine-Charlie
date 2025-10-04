@@ -1,3 +1,25 @@
+// Utility: Save farm to backend or localStorage fallback
+async function safeFarmSave(payload) {
+  try {
+    const resp = await fetch('/farm', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload)
+    });
+    if (resp.ok) return true;
+    throw new Error('HTTP ' + resp.status);
+  } catch (err) {
+    // Fallback: save to localStorage
+    try {
+      localStorage.setItem('gr.farm', JSON.stringify(payload));
+      console.warn('[safeFarmSave] Backend failed, saved to localStorage:', err);
+      return true;
+    } catch (e) {
+      console.error('[safeFarmSave] Could not save farm:', e);
+      return false;
+    }
+  }
+}
 // DEMO fallback: safeFarmSave always resolves true
 if (typeof window.safeFarmSave !== 'function') {
   window.safeFarmSave = async function(payload) {
@@ -913,17 +935,20 @@ class FarmWizard {
       locations: this.data.rooms.map(r => r.name),
       registered: existing.registered || new Date().toISOString()
     };
-    const saved = await safeFarmSave(payload);
-    if (!saved) { alert('Failed to save farm. Please try again.'); return; }
-    STATE.farm = this.normalizeFarm({
-      ...payload,
-      // Mirror name key for header branding components
-      name: payload.farmName || payload.name || 'Your Farm'
-    });
-    this.updateFarmDisplay();
-    // Also update the top-card branding header immediately
-    try { this.updateFarmHeaderDisplay(); } catch {}
-    showToast({ title: 'Farm saved', msg: 'We stored the farm profile and updated discovery defaults.', kind: 'success', icon: '✅' });
+    try {
+      const saved = await safeFarmSave(payload);
+      if (!saved) throw new Error('Failed to save farm.');
+      STATE.farm = this.normalizeFarm({
+        ...payload,
+        // Mirror name key for header branding components
+        name: payload.farmName || payload.name || 'Your Farm'
+      });
+      this.updateFarmDisplay();
+      try { this.updateFarmHeaderDisplay(); } catch {}
+      showToast({ title: 'Farm saved', msg: 'We stored the farm profile and updated discovery defaults.', kind: 'success', icon: '✅' });
+    } catch (err) {
+      showToast({ title: 'Save failed', msg: err?.message || String(err), kind: 'warn', icon: '⚠️' });
+    }
     this.close();
   }
 
@@ -1808,26 +1833,22 @@ class FarmWizard {
     // Force refresh of any displayed branding elements
     initializeTopCard();
     
-    // Save to localStorage
+    // Save to backend or localStorage, always close modal
     try {
       localStorage.setItem('gr.farm', JSON.stringify(STATE.farm));
     } catch (e) {
       console.warn('Could not save branding to localStorage:', e);
     }
-    
-    // Save to server if farm is registered
-    if (STATE.farm.name) {
-      try {
+    try {
+      if (STATE.farm.name) {
         await safeFarmSave(STATE.farm);
         showToast({ title: 'Branding saved', msg: 'Your farm branding has been updated successfully.', kind: 'success', icon: '🎨' });
-      } catch (e) {
-        showToast({ title: 'Save warning', msg: 'Branding applied locally but could not sync to server.', kind: 'warn', icon: '⚠️' });
+      } else {
+        showToast({ title: 'Branding applied', msg: 'Branding will be saved when you complete farm registration.', kind: 'info', icon: '🎨' });
       }
-    } else {
-      showToast({ title: 'Branding applied', msg: 'Branding will be saved when you complete farm registration.', kind: 'info', icon: '🎨' });
+    } catch (e) {
+      showToast({ title: 'Save warning', msg: 'Branding applied locally but could not sync to server.', kind: 'warn', icon: '⚠️' });
     }
-    
-    // Close the wizard
     document.getElementById('brandingWizardBackdrop').remove();
   }
   
