@@ -1804,26 +1804,107 @@ input[type="range"]#grd {
 }
 
 .device-manager__assignment {
-  margin-top: 4px;
+  margin-top: 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  border-top: 1px solid var(--gr-border, #E5E7EB);
+  padding-top: 12px;
+}
+
+.device-manager__assignment-summary {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
+  font-size: 0.875rem;
+  color: var(--medium, #64748b);
+}
+
+.device-manager__assignment-summary span {
+  font-weight: 500;
+  color: var(--dark, #0f172a);
+}
+
+.device-manager__assignment-actions {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+  justify-content: flex-end;
 }
 
 .device-manager__assign-form {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 8px;
-  align-items: flex-end;
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  gap: 12px;
+  align-items: end;
   background: var(--gr-bg, #f8fafc);
-  padding: 10px;
-  border-radius: 8px;
+  padding: 12px;
+  border-radius: 10px;
   border: 1px solid var(--gr-border, #E5E7EB);
 }
 
 .device-manager__assign-form label {
   display: flex;
   flex-direction: column;
-  gap: 4px;
+  gap: 6px;
   font-size: 0.75rem;
-  color: var(--medium);
+  color: var(--medium, #64748b);
+}
+
+.device-manager__assign-form select,
+.device-manager__assign-form input,
+.device-manager__assign-form button {
+  width: 100%;
+}
+
+.device-manager__assign-form select,
+.device-manager__assign-form input {
+  border-radius: 8px;
+  border: 1px solid var(--gr-border, #E5E7EB);
+  padding: 8px;
+  font-size: 0.875rem;
+  background: #fff;
+  color: var(--dark, #0f172a);
+}
+
+.device-manager__assign-form-actions {
+  display: flex;
+  gap: 8px;
+  justify-content: flex-end;
+  align-items: center;
+  flex-wrap: wrap;
+}
+
+.device-manager__assign-form--empty {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--gr-bg, #f8fafc);
+  border: 1px dashed var(--gr-border, #E5E7EB);
+  border-radius: 10px;
+  padding: 12px;
+}
+
+.device-manager__assign-form--empty p {
+  margin: 0;
+  color: var(--medium, #64748b);
+}
+
+@media (max-width: 720px) {
+  .device-manager__assign-form {
+    grid-template-columns: 1fr;
+  }
+
+  .device-manager__assignment-summary {
+    align-items: flex-start;
+  }
+
+  .device-manager__assignment-actions {
+    width: 100%;
+    justify-content: flex-start;
+  }
 }
 
 .device-manager__footer {

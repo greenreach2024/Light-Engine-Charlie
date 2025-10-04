@@ -183,9 +183,122 @@ app.post('/integrations/ifttt/incoming/:event', asyncHandler(async (req, res) =>
 }));
 
 // --- Device Database (NeDB) ---
+function isPlainObject(value) {
+  return !!value && typeof value === 'object' && !Array.isArray(value);
+}
+
+function normalizeAssignedEquipment(value) {
+  if (!isPlainObject(value)) {
+    return { roomId: null, equipmentId: null };
+  }
+  const roomId = value.roomId ?? value.room ?? null;
+  const equipmentId = value.equipmentId ?? value.equipment ?? null;
+  return {
+    roomId: roomId === '' ? null : roomId,
+    equipmentId: equipmentId === '' ? null : equipmentId,
+  };
+}
+
+function buildDeviceDoc(existing, incoming = {}) {
+  const base = existing ? { ...existing } : {};
+  const payload = isPlainObject(incoming) ? { ...incoming } : {};
+  const idFromPayload = typeof payload.id === 'string' && payload.id.trim() ? payload.id.trim() : null;
+  const deviceIdFromPayload = typeof payload.device_id === 'string' && payload.device_id.trim() ? payload.device_id.trim() : null;
+  const id = idFromPayload || deviceIdFromPayload || base.id;
+  if (!id) {
+    throw new Error('id required');
+  }
+
+  const name = payload.name || payload.deviceName || base.name || base.deviceName || id;
+  const protocolRaw = payload.protocol ?? payload.transport ?? base.protocol ?? base.transport ?? 'other';
+  const protocol = typeof protocolRaw === 'string' && protocolRaw.trim() ? protocolRaw.trim().toLowerCase() : 'other';
+  const category = payload.category || base.category || (id.startsWith('light-') ? 'lighting' : 'device');
+  const capabilities = isPlainObject(payload.capabilities)
+    ? payload.capabilities
+    : (isPlainObject(base.capabilities) ? base.capabilities : {});
+  const details = isPlainObject(payload.details)
+    ? payload.details
+    : (isPlainObject(base.details) ? base.details : {});
+  const assignedEquipment = normalizeAssignedEquipment(payload.assignedEquipment ?? base.assignedEquipment);
+  const online = typeof payload.online === 'boolean'
+    ? payload.online
+    : (typeof base.online === 'boolean' ? base.online : false);
+
+  const doc = {
+    ...base,
+    ...payload,
+    id,
+    deviceName: payload.deviceName || base.deviceName || name,
+    name,
+    transport: protocol,
+    protocol,
+    category,
+    online,
+    capabilities,
+    assignedEquipment,
+    details,
+  };
+
+  delete doc.device_id;
+  delete doc.deviceId;
+
+  return doc;
+}
+
 function deviceDocToJson(d){
   if (!d) return null;
-  const { _id, ...rest } = d; return rest;
+  const {
+    _id,
+    id,
+    device_id,
+    deviceId,
+    deviceName,
+    name,
+    category,
+    type,
+    transport,
+    protocol,
+    online,
+    capabilities,
+    details,
+    assignedEquipment,
+    createdAt,
+    updatedAt,
+    ...rest
+  } = d;
+
+  const deviceIdValue = device_id || deviceId || id || '';
+  const protocolValue = (protocol || transport || 'other') || 'other';
+  const baseDetails = isPlainObject(details) ? { ...details } : {};
+  const extraDetails = { ...rest };
+  delete extraDetails.extra; // legacy nested blob
+
+  const detailPayload = {
+    ...extraDetails,
+    ...baseDetails,
+    manufacturer: rest?.manufacturer ?? baseDetails.manufacturer ?? rest?.extra?.manufacturer,
+    model: rest?.model ?? baseDetails.model ?? rest?.extra?.model,
+    serial: rest?.serial ?? baseDetails.serial ?? rest?.extra?.serial,
+    watts: rest?.watts ?? baseDetails.watts ?? rest?.extra?.watts,
+    spectrumMode: rest?.spectrumMode ?? baseDetails.spectrumMode ?? rest?.extra?.spectrumMode,
+    createdAt,
+    updatedAt,
+  };
+
+  const sanitizedDetails = Object.fromEntries(
+    Object.entries(detailPayload).filter(([, value]) => value !== undefined)
+  );
+
+  return {
+    device_id: deviceIdValue,
+    name: name || deviceName || rest?.model || deviceIdValue,
+    category: category || type || rest?.category || 'device',
+    protocol: String(protocolValue || 'other').toLowerCase() || 'other',
+    online: Boolean(online),
+    capabilities: isPlainObject(capabilities) ? { ...capabilities } : {},
+    assignedEquipment: normalizeAssignedEquipment(assignedEquipment),
+    details: sanitizedDetails,
+  };
 }
 
 function createDeviceStore(){
@@ -202,18 +315,38 @@ async function seedDevicesFromMetaNedb(store){
     if (!fs.existsSync(metaPath)) return;
     const meta = JSON.parse(fs.readFileSync(metaPath, 'utf8'));
     const devices = meta?.devices || {};
-    const rows = Object.entries(devices).map(([id, m])=>({
-      id,
-      deviceName: m.deviceName || (/^light-/i.test(id) ? id.replace('light-','Light ').toUpperCase() : id),
-      manufacturer: m.manufacturer || '',
-      model: m.model || '',
-      serial: m.serial || '',
-      watts: m.watts || m.nominalW || null,
-      spectrumMode: m.spectrumMode || '',
-      transport: m.transport || m.conn || m.connectivity || '',
-      farm: m.farm || '', room: m.room || '', zone: m.zone || '', module: m.module || '', level: m.level || '', side: m.side || '',
-      extra: m
-    }));
+    const rows = Object.entries(devices).map(([id, m]) => {
+      const name = m.deviceName || m.name || (/^light-/i.test(id) ? id.replace('light-', 'Light ').toUpperCase() : id);
+      const protocol = String(m.protocol || m.transport || m.conn || m.connectivity || '').toLowerCase();
+      const assignedEquipment = normalizeAssignedEquipment({
+        roomId: m.roomId ?? m.room ?? null,
+        equipmentId: m.equipmentId ?? m.module ?? null,
+      });
+      return {
+        id,
+        deviceName: name,
+        name,
+        manufacturer: m.manufacturer || '',
+        model: m.model || '',
+        serial: m.serial || '',
+        watts: m.watts || m.nominalW || null,
+        spectrumMode: m.spectrumMode || '',
+        transport: protocol,
+        protocol,
+        category: m.category || m.type || (/^light-/i.test(id) ? 'lighting' : ''),
+        online: Boolean(m.online),
+        capabilities: isPlainObject(m.capabilities) ? m.capabilities : {},
+        assignedEquipment,
+        farm: m.farm || '',
+        room: assignedEquipment.roomId || '',
+        zone: m.zone || '',
+        module: m.module || '',
+        level: m.level || '',
+        side: m.side || '',
+        details: isPlainObject(m.details) ? m.details : {},
+        extra: m,
+      };
+    });
     await store.insert(rows);
     console.log(`[charlie] seeded ${rows.length} device(s) from device-meta.json`);
   } catch (e) {
@@ -259,7 +392,7 @@ app.get('/devices/:id', async (req, res) => {
     setApiCors(res);
     const row = await devicesStore.findOne({ id: req.params.id });
     if (!row) return res.status(404).json({ ok:false, error:'not found' });
-    return res.json(deviceDocToJson(row));
+    return res.json({ device: deviceDocToJson(row) });
   } catch (e) {
     return res.status(500).json({ ok:false, error: e.message });
   }
@@ -270,14 +403,22 @@ app.post('/devices', async (req, res) => {
   try {
     setApiCors(res);
     const d = req.body || {};
-    if (!d.id || typeof d.id !== 'string') return res.status(400).json({ ok:false, error:'id required' });
-    const existing = await devicesStore.findOne({ id: d.id });
-    if (existing) {
-      await devicesStore.update({ id: d.id }, { $set: { ...existing, ...d, updatedAt: new Date().toISOString() } }, {});
-    } else {
-      await devicesStore.insert({ ...d, createdAt: new Date().toISOString(), updatedAt: new Date().toISOString() });
+    let draft;
+    try {
+      draft = buildDeviceDoc(null, d);
+    } catch (validationError) {
+      return res.status(400).json({ ok: false, error: validationError.message });
     }
-    const row = await devicesStore.findOne({ id: d.id });
+    const id = draft.id;
+    const existing = await devicesStore.findOne({ id });
+    const merged = buildDeviceDoc(existing, d);
+    const timestamp = new Date().toISOString();
+    if (existing) {
+      await devicesStore.update({ id }, { $set: { ...merged, updatedAt: timestamp } }, {});
+    } else {
+      await devicesStore.insert({ ...merged, createdAt: timestamp, updatedAt: timestamp });
+    }
+    const row = await devicesStore.findOne({ id });
     return res.json({ ok:true, device: deviceDocToJson(row) });
   } catch (e) {
     return res.status(500).json({ ok:false, error: e.message });
@@ -291,8 +432,13 @@ app.patch('/devices/:id', async (req, res) => {
     const id = req.params.id;
     const existing = await devicesStore.findOne({ id });
     if (!existing) return res.status(404).json({ ok:false, error:'not found' });
-    const now = { ...existing, ...req.body, updatedAt: new Date().toISOString() };
-    await devicesStore.update({ id }, { $set: now }, {});
+    let merged;
+    try {
+      merged = buildDeviceDoc(existing, { ...req.body, id });
+    } catch (validationError) {
+      return res.status(400).json({ ok: false, error: validationError.message });
+    }
+    await devicesStore.update({ id }, { $set: { ...merged, updatedAt: new Date().toISOString() } }, {});
     const row = await devicesStore.findOne({ id });
     return res.json({ ok:true, device: deviceDocToJson(row) });
   } catch (e) {
