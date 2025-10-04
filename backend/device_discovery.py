@@ -330,16 +330,22 @@ class mDNSListener(ServiceListener):
                     "port": info.port,
                 },
                 details={
-                    "addresses": [addr.compressed for addr in info.parsed_addresses()],
+                    "addresses": [addr for addr in info.parsed_addresses()],
                     "port": info.port,
                     "service_type": type_,
-                    "properties": {k.decode('utf-8'): v.decode('utf-8') for k, v in info.properties.items()},
+                    "properties": {
+                        (k.decode('utf-8') if k is not None else ""): (v.decode('utf-8') if v is not None else "")
+                        for k, v in info.properties.items()
+                    },
                 },
             )
-            
             self.registry.upsert(device)
             self.discovered_devices.append(device)
             LOGGER.info("Discovered mDNS service %s (%s)", device.name, type_)
+
+    def update_service(self, zc, type_, name):
+        # No-op implementation to avoid NotImplementedError
+        pass
 
 
 async def discover_mdns_devices(registry: DeviceRegistry, scan_duration: float = 10.0) -> List[Device]:
