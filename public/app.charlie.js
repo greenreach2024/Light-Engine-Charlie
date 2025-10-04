@@ -7754,9 +7754,6 @@ function renderPlansPanel() {
   renderGrowRoomOverview();
 }
 
-// --- Research Mode Integration ---
-
-
 // --- Config banner and modal helpers ---
 async function loadConfig() {
   try {
@@ -7767,6 +7764,8 @@ async function loadConfig() {
     console.warn('Failed to load /config', e);
   }
 }
+
+// --- Research Mode Integration ---
 
 // --- Forwarder health polling ---
 let FORWARDER_POLL_TIMER = null;
@@ -11418,6 +11417,7 @@ document.addEventListener('DOMContentLoaded', async () => {
   
   // Initialize farm wizard
   farmWizard = new FarmWizard();
+  if (farmWizard && typeof farmWizard.init === 'function') farmWizard.init();
   // Initialize device manager window
   deviceManagerWindow = new DeviceManagerWindow();
   window.deviceManagerWindow = deviceManagerWindow;
@@ -11586,6 +11586,7 @@ document.addEventListener('DOMContentLoaded', async () => {
   // Ensure modal wizards are instantiated so buttons work
   if (typeof FarmWizard === 'function') {
     window.farmWizard = new FarmWizard();
+    if (window.farmWizard && typeof window.farmWizard.init === 'function') window.farmWizard.init();
   }
   if (typeof DeviceManagerWindow === 'function') {
     window.deviceManagerWindow = new DeviceManagerWindow();
