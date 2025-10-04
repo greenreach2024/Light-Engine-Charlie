@@ -42,6 +42,8 @@ let roomWizard;
 let lightWizard;
 let deviceManagerWindow;
 
+let ACTIVE_PANEL = 'overview';
+
 
 // --- Data Loading Utilities ---
 async function loadJSON(path) {
@@ -6543,6 +6545,8 @@ function renderRooms() {
       }
     });
   });
+
+  renderGrowRoomOverview();
 }
 
 function renderLightSetups() {
@@ -7231,9 +7235,216 @@ function saveControllerAssignments() {
 function renderSchedules() {
   const select = $('#groupSchedule');
   if (!select) return;
-  
+
   select.innerHTML = '<option value="">No schedule</option>' +
     STATE.schedules.map(schedule => `<option value="${schedule.id}">${schedule.name}</option>`).join('');
+
+  renderGrowRoomOverview();
+}
+
+function renderGrowRoomOverview() {
+  const summaryEl = document.getElementById('growOverviewSummary');
+  const gridEl = document.getElementById('growOverviewGrid');
+  if (!summaryEl || !gridEl) return;
+
+  const rooms = Array.isArray(STATE.rooms) ? STATE.rooms : [];
+  const zones = Array.isArray(STATE.environment) ? STATE.environment : [];
+  const plans = Array.isArray(STATE.plans) ? STATE.plans : [];
+  const schedules = Array.isArray(STATE.schedules) ? STATE.schedules : [];
+
+  const roomCount = rooms.length;
+  const zoneCount = zones.length;
+  const summaries = [
+    {
+      label: 'Grow Rooms',
+      value: roomCount
+        ? `${roomCount} room${roomCount === 1 ? '' : 's'}`
+        : zoneCount
+        ? `${zoneCount} zone${zoneCount === 1 ? '' : 's'}`
+        : 'None'
+    },
+    {
+      label: 'Plans running',
+      value:
+        plans.length === 0
+          ? 'None'
+          : (() => {
+              const names = plans.map((plan) => plan.name || 'Untitled plan').filter(Boolean);
+              const preview = names.slice(0, 2).join(', ');
+              const extra = names.length > 2 ? ` +${names.length - 2}` : '';
+              return `${preview}${extra}`;
+            })()
+    },
+    {
+      label: 'Schedules',
+      value:
+        schedules.length === 0
+          ? 'None'
+          : (() => {
+              const names = schedules.map((sched) => sched.name || 'Unnamed schedule').filter(Boolean);
+              const preview = names.slice(0, 2).join(', ');
+              const extra = names.length > 2 ? ` +${names.length - 2}` : '';
+              return `${preview}${extra}`;
+            })()
+    }
+  ];
+
+  summaryEl.innerHTML = summaries
+    .map(
+      (item) => `
+        <div class="grow-overview__summary-item">
+          <span class="grow-overview__summary-label">${escapeHtml(item.label)}</span>
+          <span class="grow-overview__summary-value">${escapeHtml(item.value)}</span>
+        </div>`
+    )
+    .join('');
+
+  const activeFeatures = Array.from(document.querySelectorAll('.ai-feature-card.active h3'))
+    .map((el) => el.textContent?.trim())
+    .filter(Boolean);
+
+  const matchZoneForRoom = (room) => {
+    if (!room) return null;
+    const identifiers = new Set(
+      [room.id, room.name]
+        .filter((value) => value !== undefined && value !== null)
+        .map((value) => String(value).toLowerCase())
+    );
+    if (!identifiers.size) return null;
+    return zones.find((zone) => {
+      const id = zone.id ? String(zone.id).toLowerCase() : '';
+      const name = zone.name ? String(zone.name).toLowerCase() : '';
+      const location = zone.location ? String(zone.location).toLowerCase() : '';
+      return identifiers.has(id) || identifiers.has(name) || identifiers.has(location);
+    }) || null;
+  };
+
+  const metricKeys = [
+    { key: 'tempC', label: 'Temp', unit: '°C', precision: 1 },
+    { key: 'rh', label: 'Humidity', unit: '%', precision: 1 },
+    { key: 'co2', label: 'CO₂', unit: ' ppm', precision: 0 },
+    { key: 'vpd', label: 'VPD', unit: ' kPa', precision: 2 }
+  ];
+
+  const formatMetricValue = (sensor, meta) => {
+    if (!sensor || typeof sensor.current !== 'number' || !Number.isFinite(sensor.current)) {
+      return '—';
+    }
+    const value = meta.precision != null ? sensor.current.toFixed(meta.precision) : String(sensor.current);
+    if (meta.unit.trim() === '%') {
+      return `${value}${meta.unit}`;
+    }
+    return `${value}${meta.unit}`;
+  };
+
+  const metricStatus = (sensor) => {
+    if (!sensor || typeof sensor.current !== 'number' || !Number.isFinite(sensor.current)) {
+      return 'unknown';
+    }
+    const min = sensor.setpoint?.min;
+    const max = sensor.setpoint?.max;
+    if (typeof min === 'number' && typeof max === 'number') {
+      return sensor.current >= min && sensor.current <= max ? 'ok' : 'warn';
+    }
+    return 'unknown';
+  };
+
+  const buildMetrics = (zone) => {
+    if (!zone || !zone.sensors) return '';
+    const items = metricKeys
+      .map((meta) => {
+        const sensor = zone.sensors?.[meta.key];
+        if (!sensor) return '';
+        const status = metricStatus(sensor);
+        const value = formatMetricValue(sensor, meta);
+        return `
+          <div class="grow-room-card__metric grow-room-card__metric--${status}">
+            <span class="grow-room-card__metric-label">${escapeHtml(meta.label)}</span>
+            <span class="grow-room-card__metric-value">${escapeHtml(value)}</span>
+          </div>`;
+      })
+      .filter(Boolean)
+      .join('');
+    return items;
+  };
+
+  const buildAiSection = () => {
+    if (!activeFeatures.length) {
+      return '<p class="tiny text-muted">AI features inactive.</p>';
+    }
+    return `
+      <ul class="grow-room-card__ai-list">
+        ${activeFeatures.map((name) => `<li class="grow-room-card__ai-chip">${escapeHtml(name)}</li>`).join('')}
+      </ul>`;
+  };
+
+  const cards = [];
+  if (rooms.length) {
+    rooms.forEach((room) => {
+      const zone = matchZoneForRoom(room);
+      const name = room.name || room.id || 'Grow Room';
+      const details = [];
+      const zonesList = Array.isArray(room.zones) ? room.zones.filter(Boolean) : [];
+      if (zonesList.length) {
+        details.push(`Zones: ${zonesList.map((item) => escapeHtml(item)).join(', ')}`);
+      }
+      if (room.layout?.type) {
+        details.push(`Layout: ${escapeHtml(room.layout.type)}`);
+      }
+      if (room.controlMethod) {
+        details.push(`Control: ${escapeHtml(room.controlMethod)}`);
+      }
+      const metaParts = [];
+      if (zone?.meta?.source) metaParts.push(`Source: ${escapeHtml(zone.meta.source)}`);
+      if (typeof zone?.meta?.battery === 'number') metaParts.push(`Battery: ${escapeHtml(`${zone.meta.battery}%`)}`);
+      if (typeof zone?.meta?.rssi === 'number') metaParts.push(`RSSI: ${escapeHtml(`${zone.meta.rssi} dBm`)}`);
+      const metrics = buildMetrics(zone);
+      cards.push(`
+        <article class="grow-room-card">
+          <div class="grow-room-card__header">
+            <h3>${escapeHtml(name)}</h3>
+            ${room.roomType ? `<span class="chip tiny">${escapeHtml(room.roomType)}</span>` : ''}
+          </div>
+          ${details.length ? `<div class="tiny text-muted">${details.join(' • ')}</div>` : ''}
+          ${metaParts.length ? `<div class="tiny text-muted">${metaParts.join(' • ')}</div>` : ''}
+          ${metrics ? `<div class="grow-room-card__metrics">${metrics}</div>` : '<p class="tiny text-muted">No telemetry available.</p>'}
+          <div class="grow-room-card__ai">
+            <span class="tiny text-muted">AI Features</span>
+            ${buildAiSection()}
+          </div>
+        </article>`);
+    });
+  } else if (zones.length) {
+    zones.forEach((zone) => {
+      const name = zone.name || zone.id || 'Zone';
+      const location = zone.location ? `Location: ${escapeHtml(zone.location)}` : '';
+      const metaParts = [];
+      if (zone.meta?.source) metaParts.push(`Source: ${escapeHtml(zone.meta.source)}`);
+      if (typeof zone.meta?.battery === 'number') metaParts.push(`Battery: ${escapeHtml(`${zone.meta.battery}%`)}`);
+      if (typeof zone.meta?.rssi === 'number') metaParts.push(`RSSI: ${escapeHtml(`${zone.meta.rssi} dBm`)}`);
+      const metrics = buildMetrics(zone);
+      cards.push(`
+        <article class="grow-room-card">
+          <div class="grow-room-card__header">
+            <h3>${escapeHtml(name)}</h3>
+          </div>
+          ${location ? `<div class="tiny text-muted">${location}</div>` : ''}
+          ${metaParts.length ? `<div class="tiny text-muted">${metaParts.join(' • ')}</div>` : ''}
+          ${metrics ? `<div class="grow-room-card__metrics">${metrics}</div>` : '<p class="tiny text-muted">No telemetry available.</p>'}
+          <div class="grow-room-card__ai">
+            <span class="tiny text-muted">AI Features</span>
+            ${buildAiSection()}
+          </div>
+        </article>`);
+    });
+  }
+
+  if (!cards.length) {
+    gridEl.innerHTML = '<p class="tiny text-muted">Add a grow room to view live status and telemetry.</p>';
+    return;
+  }
+
+  gridEl.innerHTML = cards.join('');
 }
 
 function renderEnvironment() {
@@ -7290,6 +7501,8 @@ function renderEnvironment() {
       metricEl.addEventListener('click', () => openEnvModal(zone, key));
     });
   });
+
+  renderGrowRoomOverview();
 }
 
 // Environment polling and actions
@@ -7414,6 +7627,8 @@ function renderPlans() {
   if (!select) return;
   select.innerHTML = '<option value="">No plan</option>' +
     STATE.plans.map(plan => `<option value="${plan.id}">${plan.name}</option>`).join('');
+
+  renderGrowRoomOverview();
 }
 
 // Plans panel rendering and wiring
@@ -7536,6 +7751,8 @@ function renderPlansPanel() {
       renderPlansPanel(); renderPlans();
     });
   });
+
+  renderGrowRoomOverview();
 }
 
 // --- Research Mode Integration ---
@@ -10972,6 +11189,8 @@ function initializeAIFeatures() {
           kind: featureData.status === 'on' ? 'success' : 'info',
           icon: featureData.status === 'on' ? '✅' : '⏸️'
         });
+
+        renderGrowRoomOverview();
       }
     });
 
@@ -10999,9 +11218,13 @@ function initializeAIFeatures() {
           spectraSyncCard.classList.remove('active');
           updateFeatureStatus(spectraSyncCard, 'off');
         }
+
+        renderGrowRoomOverview();
       }
     });
   }
+
+  renderGrowRoomOverview();
 }
 
 function updateFeatureStatus(card, status) {
@@ -11015,26 +11238,87 @@ function updateFeatureStatus(card, status) {
                         status === 'dev' ? 'DEV' : status.toUpperCase();
 }
 
-function wireSidebarPanels() {
-  document.querySelectorAll('.sidebar-panel').forEach(panel => {
-    const toggle = panel.querySelector('.panel-toggle');
-    if (!toggle) return;
-    const targetId = toggle.getAttribute('aria-controls');
-    const body = targetId ? document.getElementById(targetId) : null;
+function setActivePanel(panelId = 'overview') {
+  ACTIVE_PANEL = panelId;
+  const panels = document.querySelectorAll('[data-panel]');
+  let matched = false;
+  panels.forEach((panel) => {
+    const isMatch = panel.getAttribute('data-panel') === panelId;
+    panel.classList.toggle('is-active', isMatch);
+    if (isMatch) matched = true;
+  });
 
-    const setState = (collapsed) => {
-      panel.setAttribute('data-collapsed', collapsed ? 'true' : 'false');
-      toggle.setAttribute('aria-expanded', String(!collapsed));
-      if (body) body.hidden = collapsed;
-    };
+  if (!matched && panelId !== 'overview') {
+    setActivePanel('overview');
+    return;
+  }
 
-    setState(panel.getAttribute('data-collapsed') === 'true');
+  document.querySelectorAll('[data-sidebar-link]').forEach((link) => {
+    const target = link.getAttribute('data-target');
+    const isActive = target === panelId;
+    link.classList.toggle('is-active', isActive);
+    link.setAttribute('aria-current', isActive ? 'page' : 'false');
+  });
 
-    toggle.addEventListener('click', () => {
-      const collapsed = panel.getAttribute('data-collapsed') === 'true';
-      setState(!collapsed);
+  if (panelId === 'overview') {
+    document.querySelectorAll('.sidebar-group').forEach((group) => {
+      const trigger = group.querySelector('.sidebar-group__trigger');
+      const items = group.querySelector('.sidebar-group__items');
+      group.classList.remove('is-expanded');
+      if (trigger) trigger.setAttribute('aria-expanded', 'false');
+      if (items) items.hidden = true;
+    });
+  }
+}
+
+function initializeSidebarNavigation() {
+  document.querySelectorAll('.sidebar-group').forEach((group) => {
+    const trigger = group.querySelector('.sidebar-group__trigger');
+    const items = group.querySelector('.sidebar-group__items');
+    if (items) items.hidden = true;
+    trigger?.addEventListener('click', () => {
+      const expanded = trigger.getAttribute('aria-expanded') === 'true';
+      const next = !expanded;
+      trigger.setAttribute('aria-expanded', String(next));
+      group.classList.toggle('is-expanded', next);
+      if (items) items.hidden = !next;
+      if (!next) {
+        const activeLink = group.querySelector('[data-sidebar-link].is-active');
+        if (activeLink) {
+          setActivePanel('overview');
+        }
+      }
     });
   });
+
+  document.querySelectorAll('[data-sidebar-link]').forEach((link) => {
+    link.addEventListener('click', () => {
+      const target = link.getAttribute('data-target') || 'overview';
+      if (target === 'overview') {
+        setActivePanel('overview');
+        return;
+      }
+      const group = link.closest('.sidebar-group');
+      if (group) {
+        const trigger = group.querySelector('.sidebar-group__trigger');
+        const items = group.querySelector('.sidebar-group__items');
+        group.classList.add('is-expanded');
+        if (trigger) trigger.setAttribute('aria-expanded', 'true');
+        if (items) items.hidden = false;
+      } else {
+        document.querySelectorAll('.sidebar-group').forEach((otherGroup) => {
+          const otherTrigger = otherGroup.querySelector('.sidebar-group__trigger');
+          const otherItems = otherGroup.querySelector('.sidebar-group__items');
+          otherGroup.classList.remove('is-expanded');
+          if (otherTrigger) otherTrigger.setAttribute('aria-expanded', 'false');
+          if (otherItems) otherItems.hidden = true;
+        });
+      }
+      setActivePanel(target);
+    });
+  });
+
+  setActivePanel('overview');
 }
 
 document.addEventListener('DOMContentLoaded', async () => {
@@ -11048,7 +11332,73 @@ document.addEventListener('DOMContentLoaded', async () => {
   
   wireHints();
   wireGlobalEvents();
-  wireSidebarPanels();
+  initializeSidebarNavigation();
+
+  document.getElementById('btnLaunchPairWizard')?.addEventListener('click', () => {
+    DEVICE_PAIR_WIZARD.open();
+  });
+
+  document.getElementById('btnPairWizardDocs')?.addEventListener('click', () => {
+    showToast({
+      title: 'Pairing checklist',
+      msg: 'Review onboarding notes before pairing devices.',
+      kind: 'info',
+      icon: '🧭'
+    });
+  });
+
+  const profileForm = document.getElementById('profileForm');
+  if (profileForm) {
+    const nameInput = document.getElementById('profileName');
+    const roleInput = document.getElementById('profileRole');
+    const emailInput = document.getElementById('profileEmail');
+    const phoneInput = document.getElementById('profilePhone');
+    const statusEl = document.getElementById('profileStatus');
+
+    try {
+      const storedProfile = JSON.parse(localStorage.getItem('gr.profile') || 'null');
+      if (storedProfile) {
+        if (nameInput) nameInput.value = storedProfile.name || '';
+        if (roleInput) roleInput.value = storedProfile.role || '';
+        if (emailInput) emailInput.value = storedProfile.email || '';
+        if (phoneInput) phoneInput.value = storedProfile.phone || '';
+        if (statusEl) statusEl.textContent = 'Loaded from device';
+      }
+    } catch (err) {
+      console.warn('Failed to load stored profile', err);
+    }
+
+    profileForm.addEventListener('submit', (event) => {
+      event.preventDefault();
+      const payload = {
+        name: nameInput?.value?.trim() || '',
+        role: roleInput?.value?.trim() || '',
+        email: emailInput?.value?.trim() || '',
+        phone: phoneInput?.value?.trim() || ''
+      };
+      try {
+        localStorage.setItem('gr.profile', JSON.stringify(payload));
+      } catch (err) {
+        console.warn('Failed to persist profile', err);
+      }
+      if (statusEl) statusEl.textContent = 'Saved locally';
+      showToast({ title: 'Profile saved', msg: 'Profile details stored on this device.', kind: 'success', icon: '💾' });
+    });
+
+    document.getElementById('profileReset')?.addEventListener('click', () => {
+      if (nameInput) nameInput.value = '';
+      if (roleInput) roleInput.value = '';
+      if (emailInput) emailInput.value = '';
+      if (phoneInput) phoneInput.value = '';
+      try {
+        localStorage.removeItem('gr.profile');
+      } catch (err) {
+        console.warn('Failed to clear profile', err);
+      }
+      if (statusEl) statusEl.textContent = 'Profile cleared';
+      showToast({ title: 'Profile reset', msg: 'Local profile details removed.', kind: 'info', icon: '🧹' });
+    });
+  }
   // Load runtime config and show chip
   await loadConfig();
   // Start forwarder health polling (shows status near the config chip)
