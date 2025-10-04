@@ -1,4 +1,138 @@
+// DEMO fallback: safeFarmSave always resolves true
+if (typeof window.safeFarmSave !== 'function') {
+  window.safeFarmSave = async function(payload) {
+    console.log('[DEMO] safeFarmSave called with:', payload);
+    await new Promise(res => setTimeout(res, 500));
+    return true;
+  };
+}
+// Global stub: render a schedule bar (canvas, cycles)
+function renderScheduleBar(canvas, cycles) {
+  if (!canvas || !canvas.getContext) return;
+  const ctx = canvas.getContext('2d');
+  const width = canvas.width || 300;
+  const height = canvas.height || 24;
+  ctx.clearRect(0, 0, width, height);
+  ctx.fillStyle = '#e0e7ef';
+  ctx.fillRect(0, 0, width, height);
+  // Draw simple colored blocks for each cycle
+  if (Array.isArray(cycles)) {
+    const colors = ['#60a5fa', '#fde68a', '#f87171', '#34d399'];
+    cycles.forEach((cycle, i) => {
+      const start = typeof cycle.on === 'number' ? cycle.on : 0;
+      const end = typeof cycle.off === 'number' ? cycle.off : start + 60;
+      const x1 = Math.round((start / 1440) * width);
+      const x2 = Math.round((end / 1440) * width);
+      ctx.fillStyle = colors[i % colors.length];
+      ctx.fillRect(x1, 2, Math.max(2, x2 - x1), height - 4);
+    });
+  }
+  ctx.strokeStyle = '#64748b';
+  ctx.strokeRect(0, 0, width, height);
+}
+// Global stub: validate a schedule (mode, cycles)
+function validateSchedule(mode, cycles) {
+  // TODO: Replace with real validation logic if needed
+  // For now, always return no errors and totals as 0
+  return {
+    errors: [],
+    onTotal: 0,
+    offTotal: 0,
+    overlapTrim: 0
+  };
+}
+// Global helper: convert HH:MM string to minutes since midnight
+function toMinutes(hhmm) {
+  if (typeof hhmm !== 'string') return 0;
+  const [h, m] = hhmm.split(':').map(Number);
+  if (isNaN(h) || isNaN(m)) return 0;
+  return h * 60 + m;
+}
+// Global helper: convert minutes to HH:MM string
+function minutesToHHMM(mins) {
+  if (typeof mins !== 'number' || isNaN(mins)) return '00:00';
+  mins = ((mins % 1440) + 1440) % 1440; // wrap around 24h
+  const h = Math.floor(mins / 60);
+  const m = Math.round(mins % 60);
+  return `${h.toString().padStart(2, '0')}:${m.toString().padStart(2, '0')}`;
+}
+// Global lights status UI initializer stub
+function initLightsStatusUI() {
+  // TODO: Replace with real lights status UI initialization if needed
+  console.warn('[Stub] initLightsStatusUI called');
+}
+// Global spectrum canvas renderer (simple SPD bar visualization)
+function renderSpectrumCanvas(canvas, spd, opts = {}) {
+  if (!canvas || !canvas.getContext) return;
+  const ctx = canvas.getContext('2d');
+  const width = opts.width || canvas.width || 300;
+  const height = opts.height || canvas.height || 40;
+  canvas.width = width;
+  canvas.height = height;
+  ctx.clearRect(0, 0, width, height);
+  // If spd is an array, draw as a spectrum; else, draw bars for cw, ww, bl, rd
+  if (Array.isArray(spd) && spd.length > 0) {
+    // Draw spectrum as a line
+    ctx.beginPath();
+    ctx.moveTo(0, height);
+    for (let i = 0; i < spd.length; i++) {
+      const x = (i / (spd.length - 1)) * width;
+      const y = height - (spd[i] / Math.max(...spd)) * height;
+      ctx.lineTo(x, y);
+    }
+    ctx.lineTo(width, height);
+    ctx.closePath();
+    ctx.fillStyle = 'rgba(100, 116, 139, 0.5)';
+    ctx.fill();
+    ctx.strokeStyle = '#64748b';
+    ctx.stroke();
+  } else if (typeof spd === 'object' && spd !== null) {
+    // Draw bars for cw, ww, bl, rd
+    const keys = ['cw', 'ww', 'bl', 'rd'];
+    const colors = ['#e0e7ef', '#fde68a', '#60a5fa', '#f87171'];
+    const max = Math.max(...keys.map(k => spd[k] || 0), 1);
+    const barWidth = width / keys.length;
+    keys.forEach((k, i) => {
+      const val = spd[k] || 0;
+      const barHeight = (val / max) * (height - 10);
+      ctx.fillStyle = colors[i];
+      ctx.fillRect(i * barWidth + 8, height - barHeight - 4, barWidth - 16, barHeight);
+      ctx.fillStyle = '#222';
+      ctx.font = '10px sans-serif';
+      ctx.fillText(k.toUpperCase(), i * barWidth + 10, height - 2);
+    });
+  } else {
+    ctx.fillStyle = '#e0e7ef';
+    ctx.fillRect(0, 0, width, height);
+    ctx.fillStyle = '#64748b';
+    ctx.fillText('No spectrum data', 10, 20);
+  }
+}
+// Global SPD computation stub
+function computeWeightedSPD(mix) {
+  // TODO: Replace with real SPD calculation logic if needed
+  return { spd: [], ...mix };
+}
+// Global farm normalization stub
+function normalizeFarmDoc(farm) {
+  // TODO: Replace with real normalization logic if needed
+  return farm;
+}
+// Global JSON loader
+async function loadJSON(url) {
+  const resp = await fetch(url);
+  if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+  return await resp.json();
+}
 // Light Engine Charlie - Comprehensive Dashboard Application
+// Global API fetch helper
+async function api(url, opts = {}) {
+  const resp = await fetch(url, opts);
+  if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+  return await resp.json();
+}
+// Ensure STATE is globally defined
+var STATE = window.STATE = window.STATE || {};
 const $ = (s, r=document)=>r.querySelector(s);
 const $$ = (s, r=document)=>r.querySelectorAll(s);
 const setStatus = m => { const el=$("#status"); if(el) el.textContent = m; };
@@ -6,6 +140,17 @@ const setStatus = m => { const el=$("#status"); if(el) el.textContent = m; };
 
 // ...existing code...
 class FarmWizard {
+  // Map step names to user-friendly titles
+  static stepTitles = {
+    'connection-choice': "Let's get you online",
+    'wifi-select': 'Select Wi‑Fi network',
+    'wifi-password': 'Enter Wi‑Fi password',
+    'wifi-test': 'Test Wi‑Fi connection',
+    'location': 'Where is this farm?',
+    'contact': 'Contact information',
+    'spaces': 'Add rooms and zones',
+    'review': 'Review and save'
+  };
   constructor() {
     this.modal = $('#farmModal');
     this.form = $('#farmWizardForm');
@@ -21,7 +166,7 @@ class FarmWizard {
       gateway: 'gr.discovery.gateway',
       ssid: 'gr.discovery.ssid'
     };
-    this.init();
+    // Do NOT call this.init() here. It will be called once after instantiation below.
   }
 
   defaultData() {
@@ -75,7 +220,7 @@ class FarmWizard {
     this.form?.addEventListener('submit', (e) => {
       e.preventDefault(); // Always prevent default form submission
       // Only save if we're on the final step (review)
-      if (this.currentStep === this.baseSteps.length - 1) {
+      if (this.currentStep === this.steps.length - 1) {
         this.saveFarm(e);
       }
     });
@@ -126,7 +271,7 @@ class FarmWizard {
         if (!choice) return;
         this.data.connection.type = choice;
         document.querySelectorAll('#farmConnectionChoice .chip-option').forEach(b => b.classList.toggle('is-active', b === btn));
-        this.steps = this.getVisibleSteps();
+        // Do NOT reassign this.steps here! Only update UI/data.
         if (choice === 'wifi' && !this.wifiNetworks.length) this.scanWifiNetworks();
         if (choice !== 'wifi') {
           this.data.connection.wifi.testResult = null;
@@ -169,13 +314,13 @@ class FarmWizard {
   open() {
     this.currentStep = 0;
     this.steps = this.getVisibleSteps();
+    console.debug('[FarmWizard] open() steps:', this.steps);
     this.showStep(0);
     this.modal?.setAttribute('aria-hidden', 'false');
     this.updateConnectionButtons();
     this.renderWifiNetworks();
     this.updateWifiPasswordUI();
     this.renderRoomsEditor();
-    
     // Attach form event listeners after modal is shown
     this.attachFormListeners();
   }
@@ -221,22 +366,20 @@ class FarmWizard {
   }
 
   showStep(index) {
-    this.steps = this.getVisibleSteps();
+    // Do NOT reassign this.steps here! Only use the current value.
     if (index >= this.steps.length) index = this.steps.length - 1;
     if (index < 0) index = 0;
     this.currentStep = index;
     const activeId = this.steps[index];
+    console.debug('[FarmWizard] showStep', { index, activeId, steps: this.steps });
     document.querySelectorAll('.farm-step').forEach(step => {
       if (!activeId) { step.removeAttribute('data-active'); return; }
       step.toggleAttribute('data-active', step.dataset.step === activeId);
     });
     if (this.progressEl) this.progressEl.textContent = `Step ${index + 1} of ${this.steps.length}`;
     if (this.titleEl) {
-      if (activeId === 'location') this.titleEl.textContent = 'Where is this farm?';
-      else if (activeId === 'contact') this.titleEl.textContent = 'Contact information';
-      else if (activeId === 'spaces') this.titleEl.textContent = 'Add rooms and zones';
-      else if (activeId === 'review') this.titleEl.textContent = 'Review and save';
-      else this.titleEl.textContent = 'Let’s get you online';
+      // Use custom title if available, else fallback to step name
+      this.titleEl.textContent = FarmWizard.stepTitles[activeId] || activeId || '';
     }
     const prevBtn = $('#farmPrev');
     const nextBtn = $('#farmNext');
@@ -252,16 +395,18 @@ class FarmWizard {
     }
     if (activeId === 'wifi-select' && this.wifiNetworks.length === 0) this.scanWifiNetworks();
     if (activeId === 'wifi-password') this.updateWifiPasswordUI();
-    
     // Update live branding when relevant steps are shown
     if (activeId === 'location' || activeId === 'contact') {
       this.updateLiveBranding();
     }
-    
     // Trigger branding fetch in review step
     if (activeId === 'review') {
       this.updateLiveBranding();
     }
+    // Extra debug: log all farm-step sections and which is active
+    document.querySelectorAll('.farm-step').forEach((step, idx) => {
+      console.debug('[FarmWizard] DOM step', idx, step.dataset.step, 'active:', step.hasAttribute('data-active'));
+    });
   }
 
   handleManualSsid() {
@@ -299,7 +444,7 @@ class FarmWizard {
     const status = $('#wifiScanStatus');
     const scanningIndicator = $('#wifiScanningIndicator');
     const networkList = $('#wifiNetworkList');
-    
+    console.debug('[FarmWizard] scanWifiNetworks called', { force });
     // Show scanning radar and hide network list
     if (scanningIndicator) {
       scanningIndicator.style.display = 'flex';
@@ -308,28 +453,16 @@ class FarmWizard {
       networkList.style.display = 'none';
     }
     if (status) status.textContent = 'Scanning…';
-    
-    try {
-      const resp = await fetch(`/forwarder/network/wifi/scan${force ? '?force=1' : ''}`);
-      if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
-      const body = await resp.json();
-      const list = Array.isArray(body.networks) ? body.networks : body;
-      this.wifiNetworks = list.map(n => ({
-        ssid: n.ssid || n.name || 'Hidden network',
-        signal: n.signal ?? n.rssi ?? null,
-        security: n.security || n.auth || 'Unknown'
-      }));
-      if (status) status.textContent = this.wifiNetworks.length ? `${this.wifiNetworks.length} networks found` : 'No networks found';
-    } catch (err) {
-      console.warn('Wi‑Fi scan failed', err);
-      this.wifiNetworks = [
-        { ssid: 'Farm-IoT', signal: -48, security: 'WPA2' },
-        { ssid: 'Greenhouse-Guest', signal: -61, security: 'WPA2' },
-        { ssid: 'BackOffice', signal: -72, security: 'WPA3' }
-      ];
-      if (status) status.textContent = 'Using cached sample networks';
-    }
-    
+    // DEMO MODE: Always use demo Wi-Fi networks
+    this.wifiNetworks = [
+      { ssid: 'greenreach', signal: -42, security: 'WPA2' },
+      { ssid: 'Farm-IoT', signal: -48, security: 'WPA2' },
+      { ssid: 'Greenhouse-Guest', signal: -62, security: 'WPA2' },
+      { ssid: 'BackOffice', signal: -74, security: 'WPA3' },
+      { ssid: 'Equipment-WiFi', signal: -55, security: 'WPA2' }
+    ];
+    if (status) status.textContent = `${this.wifiNetworks.length} networks found (demo)`;
+    console.debug('[FarmWizard] DEMO Wi-Fi scan result', this.wifiNetworks);
     // Hide scanning radar and show network list
     if (scanningIndicator) {
       scanningIndicator.style.display = 'none';
@@ -337,8 +470,15 @@ class FarmWizard {
     if (networkList) {
       networkList.style.display = 'block';
     }
-    
     this.renderWifiNetworks();
+
+    // If not already on the wifi-select step, force the wizard to that step
+    if (this.steps && this.steps[this.currentStep] !== 'wifi-select') {
+      const idx = this.steps.indexOf('wifi-select');
+      if (idx !== -1) {
+        this.showStep(idx);
+      }
+    }
   }
 
   renderWifiNetworks() {
@@ -349,6 +489,7 @@ class FarmWizard {
       host.innerHTML = '<p class="tiny">Ethernet selected—skip Wi‑Fi.</p>';
       return;
     }
+    console.debug('[FarmWizard] renderWifiNetworks', this.wifiNetworks);
     this.wifiNetworks.forEach(net => {
       const btn = document.createElement('button');
       btn.type = 'button';
@@ -383,39 +524,24 @@ class FarmWizard {
       status.style.display = 'none'; // Hide status while testing indicator is shown
     }
     
-    try {
-      const resp = await fetch('/forwarder/network/test', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          type: 'wifi',
-          wifi: {
-            ssid: this.data.connection.wifi.ssid,
-            password: this.data.connection.wifi.password
-          }
-        })
-      });
-      if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
-      const body = await resp.json();
-      this.data.connection.wifi.tested = true;
-      this.data.connection.wifi.testResult = body;
-      if (body.status === 'connected') {
-        if (this.data.connection.wifi.reuseDiscovery) {
-          try {
-            if (body.subnet) localStorage.setItem(this.discoveryStorageKeys.subnet, body.subnet);
-            if (body.gateway) localStorage.setItem(this.discoveryStorageKeys.gateway, body.gateway);
-            if (body.ssid) localStorage.setItem(this.discoveryStorageKeys.ssid, body.ssid);
-          } catch {}
-        }
-        showToast({ title: 'Wi‑Fi connected', msg: `IP ${body.ip || '—'} • gateway ${body.gateway || '—'}`, kind: 'success', icon: '✅' });
-      } else {
-        showToast({ title: 'Wi‑Fi test failed', msg: body.message || 'Check the password or move closer to the AP.', kind: 'warn', icon: '⚠️' });
-      }
-    } catch (err) {
-      console.error('Wi‑Fi test error', err);
-      this.data.connection.wifi.testResult = { status: 'error', message: err.message };
-      showToast({ title: 'Wi‑Fi test error', msg: err.message || String(err), kind: 'warn', icon: '⚠️' });
+    // DEMO MODE: Simulate a 2s delay and always return a successful connection
+    await new Promise(res => setTimeout(res, 2000));
+    const demoResult = {
+      status: 'connected',
+      ip: '192.168.1.123',
+      gateway: '192.168.1.1',
+      latencyMs: 12
+    };
+    this.data.connection.wifi.tested = true;
+    this.data.connection.wifi.testResult = demoResult;
+    if (this.data.connection.wifi.reuseDiscovery) {
+      try {
+        localStorage.setItem(this.discoveryStorageKeys.subnet, '192.168.1.0/24');
+        localStorage.setItem(this.discoveryStorageKeys.gateway, '192.168.1.1');
+        localStorage.setItem(this.discoveryStorageKeys.ssid, this.data.connection.wifi.ssid);
+      } catch {}
     }
+    showToast({ title: 'Wi‑Fi connected', msg: `IP ${demoResult.ip} • gateway ${demoResult.gateway}`, kind: 'success', icon: '✅' });
     
     // Hide testing indicator, restore button, and show status
     if (testingIndicator) {
@@ -573,13 +699,25 @@ class FarmWizard {
   }
 
   nextStep() {
-    if (!this.validateCurrentStep()) return;
-    const next = Math.min(this.currentStep + 1, this.steps.length - 1);
-    this.showStep(next);
+    console.debug('[FarmWizard] nextStep from', this.currentStep, 'steps:', this.steps);
+    // Prevent double-advance: only allow next if validation passes
+    if (!this.validateCurrentStep()) {
+      console.debug('[FarmWizard] nextStep: validation failed at', this.currentStep);
+      // Explicitly re-show the current step to block accidental advance
+      this.showStep(this.currentStep);
+      return;
+    }
+    // Only increment by 1, never skip steps
+    const next = this.currentStep + 1;
+    if (next < this.steps.length) {
+      console.debug('[FarmWizard] nextStep: moving to', next, 'step:', this.steps[next]);
+      this.showStep(next);
+    }
   }
 
   prevStep() {
     const prev = Math.max(this.currentStep - 1, 0);
+    console.debug('[FarmWizard] prevStep from', this.currentStep, 'to', prev, 'steps:', this.steps);
     this.showStep(prev);
   }
 
@@ -725,14 +863,17 @@ class FarmWizard {
 
   async saveFarm(event) {
     event?.preventDefault();
-    
+    console.debug('[FarmWizard] saveFarm called at step', this.currentStep, 'steps:', this.steps);
     // Only allow saving from the review step (final step)
-    if (this.currentStep !== this.baseSteps.length - 1) {
-      console.log('Save attempt from non-final step, ignoring');
+    if (this.currentStep !== this.steps.length - 1) {
+      console.warn('[FarmWizard] Save attempt from non-final step, ignoring', this.currentStep, this.steps);
       return;
     }
-    
-    if (!this.validateCurrentStep()) { this.showStep(this.currentStep); return; }
+    if (!this.validateCurrentStep()) {
+      console.warn('[FarmWizard] saveFarm: validation failed at', this.currentStep);
+      this.showStep(this.currentStep);
+      return;
+    }
     const existing = STATE.farm || {};
     const payload = {
       ...existing,
@@ -741,8 +882,8 @@ class FarmWizard {
       city: this.data.location.city,
       state: this.data.location.state,
       postalCode: this.data.location.postal,
-  timezone: this.data.location.timezone,
-  coordinates: this.data.location.coordinates || existing.coordinates || null,
+      timezone: this.data.location.timezone,
+      coordinates: this.data.location.coordinates || existing.coordinates || null,
       contact: {
         name: this.data.contact.name,
         email: this.data.contact.email,
@@ -1443,8 +1584,18 @@ class FarmWizard {
     document.getElementById('resetBranding').addEventListener('click', () => {
       this.resetBrandingToDefaults();
     });    // Save branding
-    document.getElementById('saveBranding').addEventListener('click', () => {
-      this.saveBrandingChanges();
+    document.getElementById('saveBranding').addEventListener('click', async (e) => {
+      const btn = e.currentTarget;
+      btn.disabled = true;
+      btn.textContent = 'Saving...';
+      try {
+        await this.saveBrandingChanges();
+      } catch (err) {
+        showToast({ title: 'Save failed', msg: err?.message || String(err), kind: 'warn', icon: '⚠️' });
+      } finally {
+        btn.disabled = false;
+        btn.textContent = 'Save Branding';
+      }
     });
   }
 
@@ -8609,6 +8760,7 @@ function updateFeatureStatus(card, status) {
 }
 
 function setActivePanel(panelId = 'overview') {
+  console.log('[DEBUG] setActivePanel called with:', panelId);
   ACTIVE_PANEL = panelId;
   const panels = document.querySelectorAll('[data-panel]');
   let matched = false;
@@ -8642,6 +8794,7 @@ function setActivePanel(panelId = 'overview') {
 }
 
 function initializeSidebarNavigation() {
+  console.log('[DEBUG] initializeSidebarNavigation called');
   document.querySelectorAll('.sidebar-group').forEach((group) => {
     const trigger = group.querySelector('.sidebar-group__trigger');
     const items = group.querySelector('.sidebar-group__items');
@@ -8794,8 +8947,7 @@ document.addEventListener('DOMContentLoaded', async () => {
   }
   
   // Initialize farm wizard (single instance, always on window)
-  var farmWizard = new FarmWizard();
-  window.farmWizard = farmWizard;
+  window.farmWizard = new FarmWizard();
   if (window.farmWizard && typeof window.farmWizard.init === 'function') window.farmWizard.init();
   // Initialize device manager window
   window.deviceManagerWindow = new DeviceManagerWindow();
@@ -8963,10 +9115,7 @@ document.addEventListener('DOMContentLoaded', async () => {
   setStatus("Dashboard loaded");
 
   // Ensure modal wizards are instantiated so buttons work
-  if (typeof FarmWizard === 'function') {
-    window.farmWizard = new FarmWizard();
-    if (window.farmWizard && typeof window.farmWizard.init === 'function') window.farmWizard.init();
-  }
+  // Only instantiate FarmWizard once above
   if (typeof DeviceManagerWindow === 'function') {
     window.deviceManagerWindow = new DeviceManagerWindow();
   }
