@@ -2205,28 +2205,34 @@ class FarmWizard {
     const launchBtn = $('#btnLaunchFarm');
     const setupBtn = $('#btnStartDeviceSetup');
     const summaryChip = $('#farmSummaryChip');
+    const hide = el => { if (el) el.classList.add('is-hidden'); };
+    const show = el => { if (el) el.classList.remove('is-hidden'); };
+
     if (!STATE.farm) {
-      if (badge) badge.style.display = 'none';
-      if (setupBtn) setupBtn.style.display = 'none';
-      if (summaryChip) summaryChip.style.display = 'none';
+      hide(badge);
+      hide(setupBtn);
+      show(launchBtn);
+      hide(editBtn);
+      if (summaryChip) {
+        summaryChip.removeAttribute('data-has-summary');
+        summaryChip.textContent = '';
+      }
       return;
     }
     const roomCount = Array.isArray(STATE.farm.rooms) ? STATE.farm.rooms.length : 0;
     const zoneCount = (STATE.farm.rooms || []).reduce((acc, room) => acc + (room.zones?.length || 0), 0);
     const summary = `${STATE.farm.farmName || 'Farm'} · ${roomCount} room${roomCount === 1 ? '' : 's'} · ${zoneCount} zone${zoneCount === 1 ? '' : 's'}`;
     if (badge) {
-      badge.style.display = 'block';
+      show(badge);
       badge.textContent = summary;
     }
     if (summaryChip) {
-      summaryChip.style.display = 'inline-flex';
+      summaryChip.dataset.hasSummary = 'true';
       summaryChip.textContent = summary;
     }
-    if (setupBtn) {
-      setupBtn.style.display = 'inline-flex';
-    }
-    if (launchBtn) launchBtn.style.display = 'none';
-    if (editBtn) editBtn.style.display = 'inline-flex';
+    show(setupBtn);
+    if (launchBtn) hide(launchBtn);
+    show(editBtn);
   }
 
   guessTimezone() {
@@ -10604,12 +10610,34 @@ function initializeAIFeatures() {
 function updateFeatureStatus(card, status) {
   const statusEl = card.querySelector('.ai-feature-status');
   if (!statusEl) return;
-  
+
   statusEl.className = `ai-feature-status ${status}`;
-  statusEl.textContent = status === 'on' ? 'ON' : 
-                        status === 'off' ? 'OFF' : 
-                        status === 'always-on' ? 'ALWAYS ON' : 
+  statusEl.textContent = status === 'on' ? 'ON' :
+                        status === 'off' ? 'OFF' :
+                        status === 'always-on' ? 'ALWAYS ON' :
                         status === 'dev' ? 'DEV' : status.toUpperCase();
+}
+
+function wireSidebarPanels() {
+  document.querySelectorAll('.sidebar-panel').forEach(panel => {
+    const toggle = panel.querySelector('.panel-toggle');
+    if (!toggle) return;
+    const targetId = toggle.getAttribute('aria-controls');
+    const body = targetId ? document.getElementById(targetId) : null;
+
+    const setState = (collapsed) => {
+      panel.setAttribute('data-collapsed', collapsed ? 'true' : 'false');
+      toggle.setAttribute('aria-expanded', String(!collapsed));
+      if (body) body.hidden = collapsed;
+    };
+
+    setState(panel.getAttribute('data-collapsed') === 'true');
+
+    toggle.addEventListener('click', () => {
+      const collapsed = panel.getAttribute('data-collapsed') === 'true';
+      setState(!collapsed);
+    });
+  });
 }
 
 document.addEventListener('DOMContentLoaded', async () => {
@@ -10623,6 +10651,7 @@ document.addEventListener('DOMContentLoaded', async () => {
   
   wireHints();
   wireGlobalEvents();
+  wireSidebarPanels();
   // Load runtime config and show chip
   await loadConfig();
   // Start forwarder health polling (shows status near the config chip)
