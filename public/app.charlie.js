@@ -11435,11 +11435,11 @@ document.addEventListener('DOMContentLoaded', async () => {
   window.deviceManagerWindow = deviceManagerWindow;
   // Initialize room wizard
   roomWizard = new RoomWizard();
-  // Initialize light wizard
-  console.log('[DEBUG] About to initialize LightWizard');
-  lightWizard = new LightWizard();
-  window.lightWizard = lightWizard;
-  console.log('[DEBUG] LightWizard initialized:', lightWizard);
+  // Initialize light wizard (DEPRECATED - using FreshLightWizard instead)
+  // console.log('[DEBUG] About to initialize LightWizard');
+  // lightWizard = new LightWizard();
+  // window.lightWizard = lightWizard;
+  // console.log('[DEBUG] LightWizard initialized:', lightWizard);
   
   // Initialize fresh light wizard
   console.log('[DEBUG] About to initialize FreshLightWizard');
