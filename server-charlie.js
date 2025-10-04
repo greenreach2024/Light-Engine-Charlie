@@ -3390,16 +3390,33 @@ async function executeWizardStepWithValidation(wizardId, stepId, data) {
 // Device-specific wizard step execution
 async function executeDeviceSpecificStep(wizardId, stepId, data) {
   console.log(`🔧 Executing device-specific step: ${wizardId}/${stepId}`);
-  
+
+  const payload = data ? { ...data } : {};
+
+  if (Object.prototype.hasOwnProperty.call(payload, '__simulateFailure') && payload.__simulateFailure) {
+    const failureValue = payload.__simulateFailure;
+    delete payload.__simulateFailure;
+
+    const errorMessage = typeof failureValue === 'string'
+      ? failureValue
+      : 'Simulated device-specific failure';
+
+    return {
+      success: false,
+      error: errorMessage,
+      deviceSpecific: true
+    };
+  }
+
   switch (wizardId) {
     case 'mqtt-setup':
-      return await executeMQTTWizardStep(stepId, data);
+      return await executeMQTTWizardStep(stepId, payload);
     case 'modbus-setup':
-      return await executeModbusWizardStep(stepId, data);
+      return await executeModbusWizardStep(stepId, payload);
     case 'kasa-setup':
-      return await executeKasaWizardStep(stepId, data);
+      return await executeKasaWizardStep(stepId, payload);
     case 'sensor-hub-setup':
-      return await executeSensorHubWizardStep(stepId, data);
+      return await executeSensorHubWizardStep(stepId, payload);
     default:
       return { success: true, data: {}, deviceSpecific: false };
   }
@@ -3713,21 +3730,56 @@ async function executeWizardStep(wizardId, stepId, data) {
   if (!wizard) {
     throw new Error(`Unknown wizard: ${wizardId}`);
   }
-  
-  const state = wizardStates.get(wizardId) || {
-    currentStep: 0,
-    completed: false,
-    data: {},
-    startedAt: new Date().toISOString()
-  };
-  
+
+  const existingState = wizardStates.get(wizardId);
+  const state = existingState
+    ? { ...existingState, data: { ...existingState.data } }
+    : {
+        currentStep: 0,
+        completed: false,
+        data: {},
+        startedAt: new Date().toISOString()
+      };
+
+  const requestedStepIndex = wizard.steps.findIndex(s => s.id === stepId);
+  if (requestedStepIndex === -1) {
+    const err = new Error(`Step ${stepId} not found in wizard ${wizardId}`);
+    err.status = 404;
+    err.code = 'WIZARD_STEP_NOT_FOUND';
+    throw err;
+  }
+
+  if (state.completed) {
+    const err = new Error(`Wizard ${wizardId} is already completed`);
+    err.status = 409;
+    err.code = 'WIZARD_ALREADY_COMPLETED';
+    throw err;
+  }
+
+  const expectedStepIndex = Number.isInteger(state.currentStep) ? state.currentStep : 0;
+  const expectedStep = wizard.steps[expectedStepIndex];
+
+  if (!expectedStep) {
+    const err = new Error(`Wizard ${wizardId} has no remaining steps`);
+    err.status = 409;
+    err.code = 'WIZARD_NO_REMAINING_STEPS';
+    throw err;
+  }
+
+  if (expectedStep.id !== stepId) {
+    const err = new Error(`Step '${stepId}' is not the next expected step. Expected '${expectedStep.id}'.`);
+    err.status = 409;
+    err.code = 'WIZARD_STEP_OUT_OF_SEQUENCE';
+    err.expectedStep = expectedStep.id;
+    err.receivedStep = stepId;
+    throw err;
+  }
+
   console.log(`🧙 Executing wizard ${wizardId} step ${stepId}:`, data);
-  
-  // Execute step-specific logic based on wizard type
+
   let result = { success: true, data: {}, nextStep: null };
-  
+
   try {
-    // Validate step data first
     const validation = validateWizardStepData(wizard, stepId, data);
     if (!validation.isValid) {
       return {
@@ -3737,48 +3789,53 @@ async function executeWizardStep(wizardId, stepId, data) {
       };
     }
 
-    // Execute device-specific logic if available
     const deviceResult = await executeDeviceSpecificStep(wizardId, stepId, validation.data);
-    if (deviceResult.deviceSpecific !== false) {
+    if (deviceResult) {
       result = { ...result, ...deviceResult };
     }
-    
-    // Store step data
-    state.data[stepId] = {
-      input: validation.data,
-      result: deviceResult.data || {},
-      timestamp: new Date().toISOString(),
-      success: deviceResult.success !== false
+
+    const deviceSuccess = deviceResult?.success !== false;
+
+    if (!deviceSuccess) {
+      result.success = false;
+      result.nextStep = expectedStep.id;
+      return result;
+    }
+
+    const timestamp = new Date().toISOString();
+
+    state.data = {
+      ...state.data,
+      [stepId]: {
+        input: validation.data,
+        result: deviceResult?.data || {},
+        timestamp,
+        success: true
+      }
     };
-    
-    state.lastUpdated = new Date().toISOString();
-    
-    // Find next step
-    const currentStepIndex = wizard.steps.findIndex(s => s.id === stepId);
-    if (currentStepIndex < wizard.steps.length - 1) {
-      const nextStep = wizard.steps[currentStepIndex + 1];
+
+    state.lastUpdated = timestamp;
+
+    if (requestedStepIndex < wizard.steps.length - 1) {
+      const nextStep = wizard.steps[requestedStepIndex + 1];
       result.nextStep = nextStep.id;
-      state.currentStep = currentStepIndex + 1;
+      state.currentStep = requestedStepIndex + 1;
     } else {
+      state.currentStep = wizard.steps.length;
       state.completed = true;
-      state.completedAt = new Date().toISOString();
+      state.completedAt = timestamp;
       console.log(`✅ Wizard ${wizardId} completed successfully`);
-      
-      // Execute post-completion actions
+
       await executeWizardCompletion(wizardId, state);
     }
-    
+
     wizardStates.set(wizardId, state);
-    
+
   } catch (error) {
     console.error(`❌ Wizard step execution failed: ${wizardId}/${stepId}`, error);
-    result = {
-      success: false,
-      error: error.message,
-      data: {}
-    };
+    throw error;
   }
-  
+
   return result;
 }
 
@@ -4210,10 +4267,17 @@ app.post('/setup/wizards/:wizardId/execute', async (req, res) => {
     });
   } catch (error) {
     console.error(`Error executing wizard ${req.params.wizardId}:`, error);
-    res.status(500).json({
+    const status = error.status || error.statusCode || 500;
+    const response = {
       success: false,
       error: error.message
-    });
+    };
+
+    if (error.code) response.code = error.code;
+    if (error.expectedStep) response.expectedStep = error.expectedStep;
+    if (error.receivedStep) response.receivedStep = error.receivedStep;
+
+    res.status(status).json(response);
   }
 });
 
@@ -4758,10 +4822,17 @@ app.post('/setup/wizards/:wizardId/execute-validated', async (req, res) => {
     
   } catch (error) {
     console.error(`Error executing validated wizard ${req.params.wizardId}:`, error);
-    res.status(500).json({
+    const status = error.status || error.statusCode || 500;
+    const response = {
       success: false,
       error: error.message
-    });
+    };
+
+    if (error.code) response.code = error.code;
+    if (error.expectedStep) response.expectedStep = error.expectedStep;
+    if (error.receivedStep) response.receivedStep = error.receivedStep;
+
+    res.status(status).json(response);
   }
 });
 
