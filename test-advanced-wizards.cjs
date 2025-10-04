@@ -225,10 +225,63 @@ async function testAdvancedWizardSystem() {
         topicResponse.data.result.data.discoveredTopics.slice(0, 3).forEach(topic => {
           console.log(`  - ${topic}`);
         });
-        if (topicResponse.data.result.data.discoveredTopics.length > 3) {
+        if (topicResponse.data.result.data?.discoveredTopics.length > 3) {
           console.log(`  ... and ${topicResponse.data.result.data.discoveredTopics.length - 3} more`);
         }
       }
+    }
+    console.log('');
+
+    // Test 9: Failed step does not advance wizard state
+    console.log('🚫 Test 9: Ensuring failed steps do not advance wizard state...');
+    await makeRequest('DELETE', '/setup/wizards/kasa-setup');
+    const kasaFailure = await makeRequest('POST', '/setup/wizards/kasa-setup/execute', {
+      stepId: 'device-discovery',
+      data: {
+        discoveryTimeout: 1
+      }
+    });
+
+    console.log(`Status: ${kasaFailure.status}`);
+    if (kasaFailure.data.result) {
+      console.log(`Success: ${kasaFailure.data.result.success}`);
+      if (kasaFailure.data.result.error) {
+        console.log(`Error: ${kasaFailure.data.result.error}`);
+      }
+    }
+
+    const kasaStatus = await makeRequest('GET', '/setup/wizards/kasa-setup/status');
+    if (kasaStatus.data.status) {
+      console.log(`Current step after failure: ${kasaStatus.data.status.currentStep}`);
+      console.log(`Completed: ${kasaStatus.data.status.completed}`);
+    }
+    console.log('');
+
+    // Test 10: Out-of-order execution is rejected
+    console.log('⛔ Test 10: Preventing out-of-order wizard execution...');
+    await makeRequest('DELETE', '/setup/wizards/mqtt-setup');
+    const outOfOrder = await makeRequest('POST', '/setup/wizards/mqtt-setup/execute', {
+      stepId: 'topic-discovery',
+      data: {
+        baseTopic: 'farm/greenhouse/#'
+      }
+    });
+
+    console.log(`Status: ${outOfOrder.status}`);
+    if (outOfOrder.data.result) {
+      console.log(`Success: ${outOfOrder.data.result.success}`);
+      if (outOfOrder.data.result.missingStep) {
+        console.log(`Missing prerequisite: ${outOfOrder.data.result.missingStep}`);
+      }
+      if (outOfOrder.data.result.error) {
+        console.log(`Error: ${outOfOrder.data.result.error}`);
+      }
+    }
+
+    const mqttStatus = await makeRequest('GET', '/setup/wizards/mqtt-setup/status');
+    if (mqttStatus.data.status) {
+      console.log(`Current step after conflict: ${mqttStatus.data.status.currentStep}`);
+      console.log(`Completed: ${mqttStatus.data.status.completed}`);
     }
     console.log('');
 
