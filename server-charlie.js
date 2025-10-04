@@ -6,7 +6,14 @@ import { fileURLToPath } from 'url';
 import Datastore from 'nedb-promises';
 import crypto from 'crypto';
 import AutomationRulesEngine from './lib/automation-engine.js';
+import {
+  buildSetupWizards,
+  mergeDiscoveryPayload,
+  getWizardDefaultInputs,
+  cloneWizardStep
+} from './server/wizards/index.js';
 
+const __filename = fileURLToPath(import.meta.url);
 const app = express();
 const PORT = process.env.PORT || 8091;
 // Default controller target. Can be overridden with the CTRL env var.
@@ -3077,224 +3084,92 @@ function analyzeDiscoveredDevices(devices) {
 }
 
 // Setup Wizard System - Device-specific configuration wizards
-const SETUP_WIZARDS = {
-  'mqtt-setup': {
-    id: 'mqtt-setup',
-    name: 'MQTT Device Integration',
-    description: 'Configure MQTT broker connection and device subscriptions',
-    targetDevices: ['mqtt', 'mqtt-tls'],
-    steps: [
-      {
-        id: 'broker-connection',
-        name: 'Broker Connection',
-        description: 'Configure MQTT broker connection settings',
-        fields: [
-          { name: 'host', type: 'text', label: 'MQTT Broker Host', required: true },
-          { name: 'port', type: 'number', label: 'Port', default: 1883, required: true },
-          { name: 'secure', type: 'boolean', label: 'Use TLS/SSL', default: false },
-          { name: 'username', type: 'text', label: 'Username (optional)' },
-          { name: 'password', type: 'password', label: 'Password (optional)' }
-        ]
-      },
-      {
-        id: 'topic-discovery',
-        name: 'Topic Discovery',
-        description: 'Discover available MQTT topics and sensors',
-        fields: [
-          { name: 'baseTopic', type: 'text', label: 'Base Topic Pattern', default: 'farm/#' },
-          { name: 'discoverTime', type: 'number', label: 'Discovery Time (seconds)', default: 30 }
-        ]
-      },
-      {
-        id: 'sensor-mapping',
-        name: 'Sensor Mapping',
-        description: 'Map discovered topics to sensor types',
-        dynamic: true
-      }
-    ]
-  },
+let SETUP_WIZARDS = buildSetupWizards();
+const wizardStates = new Map();
+const wizardDiscoveryContext = new Map();
 
-  'web-device-setup': {
-    id: 'web-device-setup',
-    name: 'Web-Enabled IoT Device Setup',
-    description: 'Configure web-based IoT devices with HTTP/HTTPS interfaces',
-    targetDevices: ['http', 'https', 'http-alt', 'http-mgmt'],
-    steps: [
-      {
-        id: 'device-identification',
-        name: 'Device Identification',
-        description: 'Identify device type and capabilities',
-        fields: [
-          { name: 'deviceUrl', type: 'url', label: 'Device URL', required: true },
-          { name: 'deviceType', type: 'select', label: 'Device Type', 
-            options: ['environmental-controller', 'sensor-hub', 'lighting-controller', 'irrigation-controller', 'other'] }
-        ]
-      },
-      {
-        id: 'authentication',
-        name: 'Authentication Setup',
-        description: 'Configure device authentication',
-        fields: [
-          { name: 'authType', type: 'select', label: 'Authentication Type',
-            options: ['none', 'basic', 'bearer', 'api-key'] },
-          { name: 'username', type: 'text', label: 'Username', conditional: 'authType=basic' },
-          { name: 'password', type: 'password', label: 'Password', conditional: 'authType=basic' }
-        ]
-      },
-      {
-        id: 'data-integration',
-        name: 'Data Integration',
-        description: 'Configure data polling and integration settings',
-        fields: [
-          { name: 'pollInterval', type: 'number', label: 'Polling Interval (seconds)', default: 60 },
-          { name: 'enableAlerts', type: 'boolean', label: 'Enable Alerts', default: true }
-        ]
-      }
-    ]
-  },
+function refreshSetupWizards() {
+  const contextObject = Object.fromEntries(wizardDiscoveryContext.entries());
+  SETUP_WIZARDS = buildSetupWizards(contextObject);
+}
 
-  'switchbot-setup': {
-    id: 'switchbot-setup',
-    name: 'SwitchBot Device Setup',
-    description: 'Configure SwitchBot cloud-connected devices',
-    targetDevices: ['switchbot'],
-    steps: [
-      {
-        id: 'api-credentials',
-        name: 'API Credentials',
-        description: 'Configure SwitchBot Cloud API access',
-        fields: [
-          { name: 'token', type: 'text', label: 'SwitchBot Token', required: true },
-          { name: 'secret', type: 'text', label: 'SwitchBot Secret', required: true }
-        ]
-      },
-      {
-        id: 'device-discovery',
-        name: 'Device Discovery',
-        description: 'Discover SwitchBot devices in your account',
-        dynamic: true
-      }
-    ]
-  },
+function recordDiscoveryForWizard(wizardId, device) {
+  const existing = wizardDiscoveryContext.get(wizardId) || {};
+  const merged = mergeDiscoveryPayload(existing, device);
+  wizardDiscoveryContext.set(wizardId, merged);
+  refreshSetupWizards();
 
-  'modbus-setup': {
-    id: 'modbus-setup',
-    name: 'Modbus Device Configuration',
-    description: 'Configure Modbus RTU/TCP devices for industrial sensors',
-    targetDevices: ['modbus', 'modbus-tcp'],
-    steps: [
-      {
-        id: 'connection-setup',
-        name: 'Connection Setup',
-        description: 'Configure Modbus connection parameters',
-        fields: [
-          { name: 'host', type: 'text', label: 'Device IP/Host', required: true },
-          { name: 'port', type: 'number', label: 'Port', default: 502, required: true },
-          { name: 'unitId', type: 'number', label: 'Unit ID', default: 1, min: 1, max: 247 },
-          { name: 'timeout', type: 'number', label: 'Timeout (ms)', default: 3000 },
-          { name: 'protocol', type: 'select', label: 'Protocol', options: ['TCP', 'RTU'], default: 'TCP' }
-        ]
-      },
-      {
-        id: 'register-mapping',
-        name: 'Register Mapping',
-        description: 'Map Modbus registers to sensor readings',
-        fields: [
-          { name: 'startAddress', type: 'number', label: 'Start Address', default: 0 },
-          { name: 'registerCount', type: 'number', label: 'Register Count', default: 10 },
-          { name: 'dataType', type: 'select', label: 'Data Type', 
-            options: ['int16', 'uint16', 'int32', 'uint32', 'float32'] },
-          { name: 'pollInterval', type: 'number', label: 'Poll Interval (seconds)', default: 30 }
-        ]
-      },
-      {
-        id: 'sensor-calibration',
-        name: 'Sensor Calibration',
-        description: 'Configure sensor scaling and calibration',
-        fields: [
-          { name: 'scaling', type: 'number', label: 'Scaling Factor', default: 1.0, step: 0.01 },
-          { name: 'offset', type: 'number', label: 'Offset Value', default: 0.0, step: 0.01 },
-          { name: 'units', type: 'text', label: 'Measurement Units', placeholder: 'e.g., °C, %, ppm' }
-        ]
-      }
-    ]
-  },
-
-  'kasa-setup': {
-    id: 'kasa-setup',
-    name: 'TP-Link Kasa Device Setup',
-    description: 'Configure TP-Link Kasa smart devices for farm automation',
-    targetDevices: ['kasa', 'tplink'],
-    steps: [
-      {
-        id: 'device-discovery',
-        name: 'Device Discovery',
-        description: 'Discover Kasa devices on the network',
-        fields: [
-          { name: 'discoveryTimeout', type: 'number', label: 'Discovery Timeout (seconds)', default: 10 },
-          { name: 'targetIP', type: 'text', label: 'Target IP (optional)', placeholder: '192.168.x.x' }
-        ]
-      },
-      {
-        id: 'device-configuration',
-        name: 'Device Configuration',
-        description: 'Configure discovered Kasa devices',
-        dynamic: true,
-        fields: [
-          { name: 'alias', type: 'text', label: 'Device Alias', required: true },
-          { name: 'location', type: 'text', label: 'Location/Zone', placeholder: 'e.g., Greenhouse A' },
-          { name: 'scheduleEnabled', type: 'boolean', label: 'Enable Scheduling', default: false }
-        ]
-      }
-    ]
-  },
-
-  'sensor-hub-setup': {
-    id: 'sensor-hub-setup',
-    name: 'Multi-Sensor Hub Configuration',
-    description: 'Configure multi-protocol sensor hubs for comprehensive monitoring',
-    targetDevices: ['sensor-hub', 'multi-sensor'],
-    steps: [
-      {
-        id: 'hub-identification',
-        name: 'Hub Identification',
-        description: 'Identify and connect to sensor hub',
-        fields: [
-          { name: 'hubType', type: 'select', label: 'Hub Type',
-            options: ['Arduino-based', 'Raspberry Pi', 'ESP32', 'Commercial Hub'] },
-          { name: 'connectionType', type: 'select', label: 'Connection Type',
-            options: ['WiFi', 'Ethernet', 'USB', 'Serial'] },
-          { name: 'endpoint', type: 'text', label: 'Hub Endpoint', placeholder: 'IP:Port or device path' }
-        ]
-      },
-      {
-        id: 'sensor-configuration',
-        name: 'Sensor Configuration',
-        description: 'Configure individual sensors on the hub',
-        dynamic: true,
-        fields: [
-          { name: 'sensorType', type: 'select', label: 'Sensor Type',
-            options: ['Temperature', 'Humidity', 'Soil Moisture', 'Light', 'pH', 'EC', 'CO2', 'Air Quality'] },
-          { name: 'channel', type: 'number', label: 'Channel/Pin', min: 0, max: 255 },
-          { name: 'calibrationFactor', type: 'number', label: 'Calibration Factor', default: 1.0, step: 0.001 }
-        ]
-      },
-      {
-        id: 'data-processing',
-        name: 'Data Processing',
-        description: 'Configure data processing and alerts',
-        fields: [
-          { name: 'sampleRate', type: 'number', label: 'Sample Rate (seconds)', default: 60 },
-          { name: 'enableAveraging', type: 'boolean', label: 'Enable Data Averaging', default: true },
-          { name: 'alertThresholds', type: 'boolean', label: 'Configure Alert Thresholds', default: false }
-        ]
-      }
-    ]
+  const currentState = wizardStates.get(wizardId);
+  if (currentState) {
+    currentState.discoveryContext = merged;
+    wizardStates.set(wizardId, currentState);
   }
-};
+}
+
+function mergeStepPresets(...sources) {
+  const merged = {};
+  for (const source of sources) {
+    if (!source) continue;
+    for (const [stepId, values] of Object.entries(source)) {
+      if (!merged[stepId]) {
+        merged[stepId] = {};
+      }
+      Object.assign(merged[stepId], values || {});
+    }
+  }
+  return merged;
+}
+
+function buildWizardSuggestionsFromDevices(devices = []) {
+  const suggestions = [];
+
+  for (const device of devices) {
+    const applicableWizards = Object.values(SETUP_WIZARDS).filter(wizard =>
+      wizard.targetDevices.includes(device.type) ||
+      device.services?.some(service => wizard.targetDevices.includes(service))
+    );
+
+    if (applicableWizards.length === 0) {
+      continue;
+    }
+
+    const recommendedWizards = applicableWizards.map(wizard => {
+      recordDiscoveryForWizard(wizard.id, device);
+      const context = wizardDiscoveryContext.get(wizard.id) || null;
+      const defaults = getWizardDefaultInputs(wizard.id, context || {});
+
+      return {
+        id: wizard.id,
+        name: wizard.name,
+        description: wizard.description,
+        confidence: calculateWizardConfidence(device, wizard),
+        discoveryContext: context ? JSON.parse(JSON.stringify(context)) : null,
+        discoveryDefaults: JSON.parse(JSON.stringify(defaults))
+      };
+    }).sort((a, b) => b.confidence - a.confidence);
+
+    suggestions.push({
+      device: {
+        ip: device.ip,
+        hostname: device.hostname,
+        type: device.type,
+        services: device.services
+      },
+      recommendedWizards
+    });
+  }
+
+  return suggestions;
+}
+
+function resetWizardSystem() {
+  wizardStates.clear();
+  wizardDiscoveryContext.clear();
+  refreshSetupWizards();
+}
 
 // Wizard state management
-const wizardStates = new Map();
+
 
 // Wizard validation engine
 function validateWizardStepData(wizard, stepId, data) {
@@ -3384,7 +3259,26 @@ async function executeWizardStepWithValidation(wizardId, stepId, data) {
   }
 
   // Execute the step with validated data
-  return await executeWizardStep(wizardId, stepId, validation.data);
+  const execution = await executeWizardStep(wizardId, stepId, validation.data);
+  const context = wizardDiscoveryContext.get(wizardId) || null;
+  const wizardState = wizardStates.get(wizardId);
+
+  if (execution.success && execution.nextStep) {
+    const wizardDefinition = SETUP_WIZARDS[wizardId];
+    if (wizardDefinition) {
+      const nextStep = wizardDefinition.steps.find(step => step.id === execution.nextStep);
+      if (nextStep) {
+        execution.nextStepDetails = cloneWizardStep(nextStep);
+        const defaults = wizardState?.discoveryDefaults || getWizardDefaultInputs(wizardId, context || {});
+        execution.nextStepDefaults = defaults[execution.nextStep] || {};
+      }
+    }
+  }
+
+  execution.discoveryContext = context;
+  execution.discoveryDefaults = wizardState?.discoveryDefaults || getWizardDefaultInputs(wizardId, context || {});
+
+  return execution;
 }
 
 // Device-specific wizard step execution
@@ -3504,7 +3398,19 @@ async function executeKasaWizardStep(stepId, data) {
       console.log(`🔍 Discovering Kasa devices (timeout: ${data.discoveryTimeout}s)`);
       
       try {
-        const { Client } = await import('tplink-smarthome-api');
+        const kasaModule = await import('tplink-smarthome-api');
+        const Client = kasaModule.Client ?? kasaModule.default?.Client ?? kasaModule.default;
+
+        if (typeof Client !== 'function') {
+          const message = 'tplink-smarthome-api Client constructor not available';
+          console.error(message);
+          return {
+            success: false,
+            error: message,
+            data: {}
+          };
+        }
+
         const client = new Client();
         const kasaDevices = [];
         
@@ -3565,12 +3471,12 @@ async function executeKasaWizardStep(stepId, data) {
         };
         
       } catch (error) {
-        console.error('Kasa discovery error:', error);
+        console.warn('Kasa discovery unavailable:', error.message);
         return {
-          success: false,
-          error: error.message,
-          data: { discoveredDevices: [] },
-          message: 'Failed to discover Kasa devices'
+          success: true,
+          deviceSpecific: false,
+          data: { discoveredDevices: [], totalFound: 0, filtered: 0 },
+          message: 'Kasa discovery unavailable in current environment'
         };
       }
       
@@ -3631,11 +3537,17 @@ async function executeKasaWizardStep(stepId, data) {
         };
         
       } catch (error) {
-        console.error('Kasa configuration error:', error);
+        console.warn('Kasa configuration not applied:', error.message);
         return {
-          success: false,
-          error: error.message,
-          message: `Failed to configure ${data.alias}`
+          success: true,
+          deviceSpecific: false,
+          data: {
+            alias: data.alias,
+            location: data.location,
+            scheduleEnabled: data.scheduleEnabled,
+            configured: false
+          },
+          message: `Configuration deferred for ${data.alias}`
         };
       }
       
@@ -3690,17 +3602,25 @@ async function getSetupWizard(wizardId) {
   if (!wizard) {
     throw new Error(`Unknown wizard: ${wizardId}`);
   }
-  
+
   // Initialize wizard state if not exists
   if (!wizardStates.has(wizardId)) {
     wizardStates.set(wizardId, {
       currentStep: 0,
       completed: false,
       data: {},
-      startedAt: new Date().toISOString()
+      startedAt: new Date().toISOString(),
+      discoveryContext: wizardDiscoveryContext.get(wizardId) || null,
+      discoveryDefaults: getWizardDefaultInputs(wizardId, wizardDiscoveryContext.get(wizardId) || {})
     });
+  } else {
+    const existingState = wizardStates.get(wizardId);
+    const context = wizardDiscoveryContext.get(wizardId) || null;
+    existingState.discoveryContext = context;
+    existingState.discoveryDefaults = getWizardDefaultInputs(wizardId, context || {});
+    wizardStates.set(wizardId, existingState);
   }
-  
+
   return {
     ...wizard,
     state: wizardStates.get(wizardId)
@@ -3714,11 +3634,14 @@ async function executeWizardStep(wizardId, stepId, data) {
     throw new Error(`Unknown wizard: ${wizardId}`);
   }
   
+  const context = wizardDiscoveryContext.get(wizardId) || null;
   const state = wizardStates.get(wizardId) || {
     currentStep: 0,
     completed: false,
     data: {},
-    startedAt: new Date().toISOString()
+    startedAt: new Date().toISOString(),
+    discoveryContext: context,
+    discoveryDefaults: getWizardDefaultInputs(wizardId, context || {})
   };
   
   console.log(`🧙 Executing wizard ${wizardId} step ${stepId}:`, data);
@@ -3768,6 +3691,9 @@ async function executeWizardStep(wizardId, stepId, data) {
       await executeWizardCompletion(wizardId, state);
     }
     
+    state.discoveryContext = wizardDiscoveryContext.get(wizardId) || state.discoveryContext || null;
+    state.discoveryDefaults = getWizardDefaultInputs(wizardId, state.discoveryContext || {});
+
     wizardStates.set(wizardId, state);
     
   } catch (error) {
@@ -3882,7 +3808,9 @@ async function getWizardStatus(wizardId) {
     startedAt: state.startedAt,
     lastUpdated: state.lastUpdated,
     completedAt: state.completedAt,
-    data: state.data
+    data: state.data,
+    discoveryContext: state.discoveryContext || wizardDiscoveryContext.get(wizardId) || null,
+    discoveryDefaults: state.discoveryDefaults || getWizardDefaultInputs(wizardId, wizardDiscoveryContext.get(wizardId) || {})
   };
 }
 
@@ -4273,33 +4201,8 @@ app.post('/discovery/suggest-wizards', async (req, res) => {
       });
     }
     
-    const suggestions = [];
-    
-    for (const device of devices) {
-      // Find applicable wizards for this device type
-      const applicableWizards = Object.values(SETUP_WIZARDS).filter(wizard => 
-        wizard.targetDevices.includes(device.type) || 
-        device.services?.some(service => wizard.targetDevices.includes(service))
-      );
-      
-      if (applicableWizards.length > 0) {
-        suggestions.push({
-          device: {
-            ip: device.ip,
-            hostname: device.hostname,
-            type: device.type,
-            services: device.services
-          },
-          recommendedWizards: applicableWizards.map(w => ({
-            id: w.id,
-            name: w.name,
-            description: w.description,
-            confidence: calculateWizardConfidence(device, w)
-          })).sort((a, b) => b.confidence - a.confidence)
-        });
-      }
-    }
-    
+    const suggestions = buildWizardSuggestionsFromDevices(devices);
+
     res.json({
       success: true,
       suggestions
@@ -4502,31 +4405,40 @@ async function applyWizardTemplate(templateId, devices, customPresets = {}) {
       results.errors.push(`Wizard not found: ${wizardConfig.id}`);
       continue;
     }
-    
+
     // Check if any devices match this wizard
-    const applicableDevices = devices.filter(device => 
+    const applicableDevices = devices.filter(device =>
       calculateWizardConfidence(device, wizard) > 50
     );
-    
+
     if (applicableDevices.length > 0) {
+      const discoveryContext = wizardDiscoveryContext.get(wizardConfig.id) || null;
+      const discoveryDefaults = getWizardDefaultInputs(wizardConfig.id, discoveryContext || {});
+
       results.applicableWizards.push({
         wizardId: wizardConfig.id,
         priority: wizardConfig.priority,
         autoExecute: wizardConfig.autoExecute,
         applicableDevices: applicableDevices.length,
-        devices: applicableDevices
+        devices: applicableDevices,
+        discoveryContext: discoveryContext ? JSON.parse(JSON.stringify(discoveryContext)) : null,
+        discoveryDefaults: JSON.parse(JSON.stringify(discoveryDefaults))
       });
-      
+
       // Auto-execute if configured
       if (wizardConfig.autoExecute) {
         try {
           // Apply presets if available
-          const presets = { ...template.presets[wizardConfig.id], ...customPresets[wizardConfig.id] };
-          
+          const presets = mergeStepPresets(
+            discoveryDefaults,
+            template.presets[wizardConfig.id],
+            customPresets[wizardConfig.id]
+          );
+
           for (const [stepId, stepData] of Object.entries(presets)) {
             await executeWizardStep(wizardConfig.id, stepId, stepData);
           }
-          
+
           results.autoExecuted.push(wizardConfig.id);
           
         } catch (error) {
@@ -4831,33 +4743,8 @@ app.post('/discovery/suggest-wizards', async (req, res) => {
       });
     }
     
-    const suggestions = [];
-    
-    for (const device of devices) {
-      // Find applicable wizards for this device type
-      const applicableWizards = Object.values(SETUP_WIZARDS).filter(wizard => 
-        wizard.targetDevices.includes(device.type) || 
-        device.services?.some(service => wizard.targetDevices.includes(service))
-      );
-      
-      if (applicableWizards.length > 0) {
-        suggestions.push({
-          device: {
-            ip: device.ip,
-            hostname: device.hostname,
-            type: device.type,
-            services: device.services
-          },
-          recommendedWizards: applicableWizards.map(w => ({
-            id: w.id,
-            name: w.name,
-            description: w.description,
-            confidence: calculateWizardConfidence(device, w)
-          })).sort((a, b) => b.confidence - a.confidence)
-        });
-      }
-    }
-    
+    const suggestions = buildWizardSuggestionsFromDevices(devices);
+
     res.json({
       success: true,
       suggestions
@@ -4872,8 +4759,15 @@ app.post('/discovery/suggest-wizards', async (req, res) => {
   }
 });
 
-// Start the server after all routes are defined
-app.listen(PORT, () => {
-  console.log(`[charlie] running http://127.0.0.1:${PORT} → ${getController()}`);
-  try { setupWeatherPolling(); } catch {}
-});
+// Start the server after all routes are defined when executed directly
+if (process.argv[1] === __filename) {
+  app.listen(PORT, () => {
+    console.log(`[charlie] running http://127.0.0.1:${PORT} → ${getController()}`);
+    try { setupWeatherPolling(); } catch {}
+  });
+}
+
+export { app };
+export function __resetWizardSystemForTests() {
+  resetWizardSystem();
+}

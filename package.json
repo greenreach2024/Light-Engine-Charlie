@@ -8,7 +8,8 @@
   "scripts": {
     "start": "node server-charlie.js",
     "start:local": "PORT=8091 node server-charlie.js",
-    "smoke": "curl -sS http://localhost:8091/healthz"
+    "smoke": "curl -sS http://localhost:8091/healthz",
+    "test": "node --test tests/wizard-flows.test.mjs"
   },
   "dependencies": {
     "express": "^4.19.2",

@@ -6558,23 +6558,34 @@ function hookRoomDevicePairing(roomWizardInstance) {
     if (modelMeta?.requiresStaticIp) metadata.requiresStaticIp = modelMeta.requiresStaticIp;
     if (modelMeta?.preferredIp) metadata.preferredIp = modelMeta.preferredIp;
 
-    DEVICE_PAIR_WIZARD.open({ suggestedTransport: suggested, metadata, environmentContext, onSave: (setup) => {
-      const name = document.getElementById('roomDeviceName')?.value.trim() || '';
-      const vendor = document.getElementById('roomDeviceVendor')?.value || '';
-      const model = document.getElementById('roomDeviceModel')?.value || '';
-      const host = document.getElementById('roomDeviceHost')?.value.trim() || '';
-      roomWizardInstance.data.devices = roomWizardInstance.data.devices || [];
-      const device = { name: name || `${vendor} ${model}`, vendor, model, host, setup };
-  // Clear any previous invalid input markers before adding
-  ['deviceRs485UnitId','device0v10Channel','device0v10Scale'].forEach(id=>{ try{ clearFieldError(id); }catch(e){ const el=document.getElementById(id); if(el) el.classList.remove('invalid'); } });
-      roomWizardInstance.data.devices.push(device);
-      roomWizardInstance.renderDevicesList();
-      if (typeof renderControllerAssignments === 'function') {
-        renderControllerAssignments();
+    DEVICE_PAIR_WIZARD.open({
+      suggestedTransport: suggested,
+      metadata,
+      environmentContext,
+      onSave: (setup) => {
+        const name = document.getElementById('roomDeviceName')?.value.trim() || '';
+        const vendor = document.getElementById('roomDeviceVendor')?.value || '';
+        const model = document.getElementById('roomDeviceModel')?.value || '';
+        const host = document.getElementById('roomDeviceHost')?.value.trim() || '';
+        roomWizardInstance.data.devices = roomWizardInstance.data.devices || [];
+        const device = { name: name || `${vendor} ${model}`, vendor, model, host, setup };
+        // Clear any previous invalid input markers before adding
+        ['deviceRs485UnitId', 'device0v10Channel', 'device0v10Scale'].forEach(id => {
+          try {
+            clearFieldError(id);
+          } catch (e) {
+            const el = document.getElementById(id);
+            if (el) el.classList.remove('invalid');
+          }
+        });
+        roomWizardInstance.data.devices.push(device);
+        roomWizardInstance.renderDevicesList();
+        if (typeof renderControllerAssignments === 'function') {
+          renderControllerAssignments();
+        }
       }
-    }});
+    });
   });
-}
 }
 
 
@@ -6896,12 +6907,14 @@ document.addEventListener('DOMContentLoaded', async () => {
   }
   
   // Initialize farm wizard (single instance, always on window)
-  window.farmWizard = new FarmWizard();
+  var farmWizard = new FarmWizard();
+  window.farmWizard = farmWizard;
   if (window.farmWizard && typeof window.farmWizard.init === 'function') window.farmWizard.init();
   // Initialize device manager window
   window.deviceManagerWindow = new DeviceManagerWindow();
   // Initialize room wizard
   roomWizard = new RoomWizard();
+  window.roomWizard = roomWizard;
   // Initialize light wizard
   console.log('[DEBUG] About to initialize LightWizard');
   lightWizard = new LightWizard();

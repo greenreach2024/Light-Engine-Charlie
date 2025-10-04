@@ -32,66 +32,132 @@ const DeviceContext = createContext<DeviceContextValue | undefined>(undefined);
 const isRecord = (value: unknown): value is Record<string, unknown> =>
   value !== null && typeof value === "object" && !Array.isArray(value);
 
+const canonicalizeProtocol = (value: unknown): DeviceProtocol => {
+  const normalized = String(value ?? "").toLowerCase();
+  if (normalized === "kasa" || normalized === "kasa-wifi" || normalized === "tplink" || normalized === "kasa_cloud") {
+    return "kasa";
+  }
+  if (normalized === "mqtt" || normalized === "mqtt-tls" || normalized === "mqtt_tls") {
+    return "mqtt";
+  }
+  if (normalized === "switchbot" || normalized === "switchbot-cloud" || normalized === "ble-switchbot") {
+    return "switchbot";
+  }
+  return "other";
+};
+
+const normalizeCapabilities = (value: unknown): Record<string, unknown> => {
+  if (!value) {
+    return {};
+  }
+  if (Array.isArray(value)) {
+    return value.reduce<Record<string, boolean>>((acc, entry) => {
+      const key = typeof entry === "string" ? entry : String(entry);
+      acc[key] = true;
+      return acc;
+    }, {});
+  }
+  if (isRecord(value)) {
+    return value;
+  }
+  return { value };
+};
+
 const normalizeAssignment = (value: unknown): DeviceAssignment => {
-  if (!isRecord(value)) {
+  const direct = isRecord(value) ? value : null;
+  const maybeContainer = !direct && value && typeof value === "object" ? (value as Record<string, unknown>) : null;
+  const nestedAssigned = maybeContainer?.assignedEquipment;
+  const nestedAssignment = maybeContainer?.assignment;
+  const source =
+    direct ?? (isRecord(nestedAssigned) ? nestedAssigned : null) ?? (isRecord(nestedAssignment) ? nestedAssignment : null);
+  if (!source) {
     return { roomId: null, equipmentId: null };
   }
-  const roomId = typeof value.roomId === "string" ? value.roomId : typeof value.room === "string" ? value.room : null;
-  const equipmentId =
-    typeof value.equipmentId === "string"
-      ? value.equipmentId
-      : typeof value.equipment === "string"
-      ? value.equipment
+  const roomIdCandidate =
+    typeof source.roomId === "string"
+      ? source.roomId
+      : typeof source.room === "string"
+      ? source.room
+      : typeof source.room_id === "string"
+      ? source.room_id
       : null;
-  return {
-    roomId: roomId && roomId.length > 0 ? roomId : null,
-    equipmentId: equipmentId && equipmentId.length > 0 ? equipmentId : null,
-  };
+  const equipmentIdCandidate =
+    typeof source.equipmentId === "string"
+      ? source.equipmentId
+      : typeof source.equipment === "string"
+      ? source.equipment
+      : typeof source.equipment_id === "string"
+      ? source.equipment_id
+      : null;
+  const roomId = roomIdCandidate && roomIdCandidate.length > 0 ? roomIdCandidate : null;
+  const equipmentId = equipmentIdCandidate && equipmentIdCandidate.length > 0 ? equipmentIdCandidate : null;
+  return { roomId, equipmentId };
 };
 
 const normalizeDevice = (raw: unknown): Device => {
   const source = isRecord(raw) ? raw : {};
-  const rawId =
-    typeof source.device_id === "string" && source.device_id.trim().length > 0
-      ? source.device_id.trim()
-      : typeof source.id === "string" && source.id.trim().length > 0
-      ? source.id.trim()
-      : "";
-  const rawName =
-    typeof source.name === "string" && source.name.trim().length > 0
-      ? source.name.trim()
-      : typeof source.deviceName === "string" && source.deviceName.trim().length > 0
-      ? source.deviceName.trim()
-      : rawId;
-  const rawCategory =
-    typeof source.category === "string" && source.category.trim().length > 0
-      ? source.category.trim()
-      : typeof source.type === "string" && source.type.trim().length > 0
-      ? source.type.trim()
-      : "device";
-  const protocol =
-    typeof source.protocol === "string" && source.protocol.trim().length > 0
-      ? source.protocol.trim().toLowerCase()
-      : typeof source.transport === "string" && source.transport.trim().length > 0
-      ? source.transport.trim().toLowerCase()
-      : "other";
-  const online = typeof source.online === "boolean" ? source.online : Boolean(source.online);
-  const capabilities = isRecord(source.capabilities) ? source.capabilities : {};
-  const details = isRecord(source.details) ? source.details : {};
+
+  const deviceIdCandidate =
+    source.device_id ?? source.deviceId ?? source.id ?? source.uuid ?? source._id ?? "";
+  const rawId = String(deviceIdCandidate ?? "").trim();
+
+  const nameCandidate =
+    source.name ?? source.deviceName ?? source.label ?? (rawId ? `Device ${rawId.slice(-6)}` : "");
+  const rawName = String(nameCandidate ?? "").trim() || rawId || "";
+
+  const categoryCandidate = source.category ?? source.type ?? source.deviceType ?? source.model ?? "device";
+  const rawCategory = String(categoryCandidate ?? "device").trim() || "device";
+
+  const protocolCandidate =
+    source.protocol ?? source.transport ?? source.conn ?? source.connectivity ?? source.protocolType;
+  const protocol = canonicalizeProtocol(protocolCandidate);
+
+  const onlineValue = source.online ?? source.status ?? source.state;
+  const online =
+    typeof onlineValue === "boolean"
+      ? onlineValue
+      : String(onlineValue ?? "").toLowerCase() === "online" || Boolean(onlineValue);
+
+  const capabilities = normalizeCapabilities(source.capabilities);
+
+  const details: Record<string, unknown> = {
+    ...(isRecord(source.details) ? source.details : {}),
+  };
+
+  const assignDetail = (key: string, ...values: unknown[]) => {
+    for (const value of values) {
+      if (value !== undefined && value !== null && value !== "") {
+        details[key] = value;
+        break;
+      }
+    }
+  };
+
+  assignDetail("manufacturer", details.manufacturer, source.manufacturer, source.vendor);
+  assignDetail("model", details.model, source.model, source.deviceModel, source.device_type);
+  assignDetail("address", details.address, source.address, source.host, source.ip);
+  assignDetail("lastSeen", details.lastSeen, source.lastSeen, source.updatedAt, source.last_seen);
+
+  if (!details.raw) {
+    details.raw = source;
+  }
+
+  const assignmentSource =
+    source.assignedEquipment ?? source.assignment ?? (isRecord(source.assigned_equipment) ? source.assigned_equipment : null);
 
   return {
     device_id: rawId,
     name: rawName,
     category: rawCategory,
-    protocol: protocol || "other",
+    protocol,
     online,
     capabilities,
     details,
-    assignedEquipment: normalizeAssignment(source.assignedEquipment),
+    assignedEquipment: normalizeAssignment(assignmentSource),
   };
 };
 
-export const DeviceProvider: React.FC<React.PropsWithChildren> = ({ children }) => {
+export const DeviceProvider: React.FC<React.PropsWithChildren<unknown>> = ({ children }) => {
   const [devices, setDevices] = useState<Device[]>([]);
   const [loading, setLoading] = useState<boolean>(true);
   const [error, setError] = useState<string | null>(null);
@@ -105,8 +171,8 @@ export const DeviceProvider: React.FC<React.PropsWithChildren> = ({ children }) 
         throw new Error(`Failed to load devices (${response.status})`);
       }
       const payload = await response.json();
-      const list = Array.isArray(payload?.devices) ? payload.devices : Array.isArray(payload) ? payload : [];
-      setDevices(list.map((item) => normalizeDevice(item)));
+      const list: unknown[] = Array.isArray(payload?.devices) ? payload.devices : Array.isArray(payload) ? payload : [];
+      setDevices(list.map((item: unknown) => normalizeDevice(item)));
     } catch (err) {
       setError((err as Error).message);
     } finally {
@@ -129,9 +195,9 @@ export const DeviceProvider: React.FC<React.PropsWithChildren> = ({ children }) 
           .json()
           .catch(() => ({ device: { device_id: deviceId, assignedEquipment: assignment } }));
         const updated = normalizeDevice((body as Record<string, unknown>)?.device ?? body);
-        setDevices((prev) => {
-          const next = prev.map((device) => (device.device_id === updated.device_id ? updated : device));
-          if (next.some((device) => device.device_id === updated.device_id)) {
+        setDevices((prev: Device[]) => {
+          const next = prev.map((device: Device) => (device.device_id === updated.device_id ? updated : device));
+          if (next.some((device: Device) => device.device_id === updated.device_id)) {
             return next;
           }
           return [...next, updated];
@@ -170,7 +236,7 @@ export const DeviceProvider: React.FC<React.PropsWithChildren> = ({ children }) 
     [devices, loading, error, refresh, assignDevice, unassignDevice]
   );
 
-  return <DeviceContext.Provider value={value}>{children}</DeviceContext.Provider>;
+  return React.createElement(DeviceContext.Provider, { value }, children);
 };
 
 export const useDevices = (): DeviceContextValue => {

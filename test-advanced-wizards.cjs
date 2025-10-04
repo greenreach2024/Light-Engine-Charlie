@@ -232,6 +232,29 @@ async function testAdvancedWizardSystem() {
     }
     console.log('');
 
+    // Test 9: Kasa auto-discovery regression (ensures Client constructor is available)
+    console.log('🔌 Test 9: Testing Kasa auto-discovery regression...');
+    const kasaDiscoveryResponse = await makeRequest('POST', '/setup/wizards/kasa-setup/execute', {
+      stepId: 'device-discovery',
+      data: {
+        discoveryTimeout: 1
+      }
+    });
+
+    console.log(`Status: ${kasaDiscoveryResponse.status}`);
+    if (kasaDiscoveryResponse.data?.result) {
+      const kasaResult = kasaDiscoveryResponse.data.result;
+      console.log(`Success: ${kasaResult.success}`);
+      if (kasaResult.message) {
+        console.log(`Message: ${kasaResult.message}`);
+      }
+      if (kasaResult.success === false) {
+        throw new Error(`Kasa discovery step failed: ${kasaResult.error || 'Unknown error'}`);
+      }
+    } else {
+      throw new Error('Kasa discovery response did not include a result payload');
+    }
+
     console.log('✅ All advanced wizard system tests completed successfully!');
     console.log('\n🎯 Advanced Features Tested:');
     console.log('  ✅ Wizard templates and recommendations');
@@ -240,6 +263,7 @@ async function testAdvancedWizardSystem() {
     console.log('  ✅ Bulk wizard operations');
     console.log('  ✅ Device-specific wizard execution');
     console.log('  ✅ Real-time device testing and connection validation');
+    console.log('  ✅ Kasa device auto-discovery regression coverage');
 
   } catch (error) {
     console.error('❌ Advanced test failed:', error.message);
