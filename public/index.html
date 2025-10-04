@@ -975,6 +975,10 @@
               <label class="chip-option"><input type="radio" name="pairTransport" value="bluetooth"><span>Bluetooth</span></label>
             </div>
             <p class="tiny" style="color:#64748b">Select the transport that the device supports. The KB will suggest one.</p>
+            <div id="pairTransportAiSuggestion" class="ai-suggestion" style="display:none">
+              <div class="ai-suggestion__text tiny"></div>
+              <button type="button" class="ghost ai-suggestion__apply">Accept AI suggestion</button>
+            </div>
           </section>
 
           <section class="pair-step" data-step="wifi">
@@ -985,6 +989,10 @@
               <label class="tiny" style="align-items:center;display:flex;gap:6px"><input id="pairWifiStatic" type="checkbox"> Use static IP</label>
               <input id="pairWifiStaticIp" type="text" placeholder="Static IP (optional)" style="min-width:160px;display:none">
               <div class="tiny" style="color:#64748b;margin-top:8px">If the device uses AP-mode for initial setup, follow vendor instructions to connect to its temporary SSID and then return here to enter credentials.</div>
+              <div id="pairWifiAiSuggestion" class="ai-suggestion" style="display:none">
+                <div class="ai-suggestion__text tiny"></div>
+                <button type="button" class="ghost ai-suggestion__apply">Accept AI suggestion</button>
+              </div>
             </div>
           </section>
 
@@ -994,12 +1002,19 @@
               <input id="pairBtName" type="text" placeholder="Advertised device name (optional)" style="min-width:260px">
               <input id="pairBtPin" type="text" placeholder="Pairing code (if any)" style="min-width:160px">
               <div class="tiny" style="color:#64748b;margin-top:8px">Most BLE sensors don't require a PIN. Use the advertised name to help find the device in scans or enter a known MAC/address here.</div>
+              <div id="pairBtAiSuggestion" class="ai-suggestion" style="display:none">
+                <div class="ai-suggestion__text tiny"></div>
+                <button type="button" class="ghost ai-suggestion__apply">Accept AI suggestion</button>
+              </div>
             </div>
           </section>
 
           <section class="pair-step" data-step="review">
             <p class="pair-question">Review pairing info</p>
             <div id="pairReview" class="farm-review tiny" style="color:#0f172a"></div>
+            <div id="pairReviewAiSummary" class="ai-suggestion" style="display:none">
+              <div class="ai-suggestion__text tiny"></div>
+            </div>
           </section>
         </div>
 

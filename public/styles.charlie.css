@@ -1891,6 +1891,33 @@ input[type="range"]#grd {
   left: 100%;
 }
 
+.ai-suggestion {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-top: 12px;
+  padding: 10px 12px;
+  border-radius: 8px;
+  border: 1px dashed var(--accent-blue, #3B82F6);
+  background: rgba(59, 130, 246, 0.08);
+}
+
+.ai-suggestion__text {
+  color: var(--medium, #475569);
+  line-height: 1.4;
+}
+
+.ai-suggestion--applied {
+  border-style: solid;
+  background: rgba(5, 150, 105, 0.1);
+}
+
+.ai-suggestion .ghost {
+  align-self: flex-start;
+  padding: 4px 10px;
+  font-size: 12px;
+}
+
 /* AI Features Card Styling */
 .ai-features-horizontal {
   display: flex;

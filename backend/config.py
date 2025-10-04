@@ -57,6 +57,15 @@ class LightingFixture:
 
 
 @dataclass(frozen=True)
+class AIConfig:
+    """Configuration for AI Assist integrations."""
+
+    enabled: bool = False
+    provider: str = "heuristic"
+    api_url: Optional[str] = None
+
+
+@dataclass(frozen=True)
 class EnvironmentConfig:
     """Bundle of configuration for a specific deployment environment."""
 
@@ -64,6 +73,7 @@ class EnvironmentConfig:
     mqtt: Optional[MQTTConfig] = None
     switchbot: Optional[SwitchBotConfig] = None
     lighting_inventory: Optional[List[LightingFixture]] = None
+    ai_assist: Optional[AIConfig] = None
 
 
 def get_environment() -> str:
@@ -136,11 +146,21 @@ def build_environment_config() -> EnvironmentConfig:
 
     timeout = int(os.getenv("KASA_DISCOVERY_TIMEOUT", "10"))
 
+    ai_assist_config = None
+    raw_ai_enabled = os.getenv("AI_ASSIST_ENABLED", "").strip().lower()
+    if raw_ai_enabled in {"1", "true", "yes", "on"}:
+        ai_assist_config = AIConfig(
+            enabled=True,
+            provider=os.getenv("AI_ASSIST_PROVIDER", "heuristic"),
+            api_url=os.getenv("AI_ASSIST_API_URL"),
+        )
+
     return EnvironmentConfig(
         kasa_discovery_timeout=timeout,
         mqtt=mqtt_config,
         switchbot=switchbot_config,
         lighting_inventory=lighting_inventory,
+        ai_assist=ai_assist_config,
     )
 
 
@@ -148,6 +168,7 @@ __all__ = [
     "MQTTConfig",
     "SwitchBotConfig",
     "LightingFixture",
+    "AIConfig",
     "EnvironmentConfig",
     "build_environment_config",
     "get_environment",

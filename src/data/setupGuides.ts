@@ -25,22 +25,22 @@ export const SETUP_GUIDES: Record<string, SetupGuide> = {
       {
         title: "Pair the device",
         bodyMd:
-          "Follow the vendor’s pairing instructions (AP mode or QR). Capture any **Device ID** or **Token** if presented. _This varies by manufacturer._"
+          "Follow the vendor’s pairing instructions (AP mode or QR). Capture any **Device ID** or **Token** if presented. _This varies by manufacturer._\n\n{{AI_ASSIST_PAIRING_HINTS}}"
       },
       {
         title: "Join farm Wi-Fi",
         bodyMd:
-          "Using the vendor flow, connect the light to the farm SSID/password so it can reach the network."
+          "Using the vendor flow, connect the light to the farm SSID/password so it can reach the network.\n\n{{AI_ASSIST_WIFI_STEPS}}"
       },
       {
         title: "Authorize Light Engine",
         bodyMd:
-          "Enter the **API Key / OAuth token** from the vendor portal into the field below to allow Light Engine to discover and control the device. _If the vendor provides local-LAN control, toggle **Local Control** and enter IP/Port._"
+          "Enter the **API Key / OAuth token** from the vendor portal into the field below to allow Light Engine to discover and control the device. _If the vendor provides local-LAN control, toggle **Local Control** and enter IP/Port._\n\n{{AI_ASSIST_AUTH_GUIDANCE}}"
       },
       {
         title: "Discover & Name",
         bodyMd:
-          "Click **Discover**. Select your device from the list, then set **Name**, **Location**, **Zone**, **Group** and **Save**."
+          "Click **Discover**. Select your device from the list, then set **Name**, **Location**, **Zone**, **Group** and **Save**.\n\n{{AI_ASSIST_DISCOVERY_COACHING}}"
       }
     ]
   },
@@ -84,7 +84,7 @@ export const SETUP_GUIDES: Record<string, SetupGuide> = {
       },
       {
         title: "Finalize",
-        bodyMd: "Name the device and assign **Location**, **Zone**, **Group**."
+        bodyMd: "Name the device and assign **Location**, **Zone**, **Group**.\n\n{{AI_ASSIST_ANALOG_SUMMARY}}"
       }
     ]
   },
@@ -109,7 +109,7 @@ export const SETUP_GUIDES: Record<string, SetupGuide> = {
       },
       {
         title: "Assign metadata",
-        bodyMd: "Set **Name**, **Location**, **Zone**, and **Group** before saving."
+        bodyMd: "Set **Name**, **Location**, **Zone**, and **Group** before saving.\n\n{{AI_ASSIST_DC_DRIVER_HINTS}}"
       }
     ]
   },
@@ -154,7 +154,7 @@ export const SETUP_GUIDES: Record<string, SetupGuide> = {
           "Toggle **IA Assist** and **IA In Training** to allow the AI to:\n" +
           "- Learn from IFTTT automation patterns\n" +
           "- Suggest optimization improvements\n" +
-          "- Create predictive automations based on environmental data"
+          "- Create predictive automations based on environmental data\n\n{{AI_ASSIST_IFTTT_SUMMARY}}"
       }
     ]
   },
@@ -181,7 +181,7 @@ export const SETUP_GUIDES: Record<string, SetupGuide> = {
       },
       {
         title: "Test Integration",
-        bodyMd: "Send a test webhook to verify Light Engine responds correctly. Check the device activity log for confirmation."
+        bodyMd: "Send a test webhook to verify Light Engine responds correctly. Check the device activity log for confirmation.\n\n{{AI_ASSIST_WEBHOOK_NOTES}}"
       }
     ]
   }

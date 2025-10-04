@@ -10260,6 +10260,12 @@ class DevicePairWizard {
     this.steps = Array.from(this.modal.querySelectorAll('.pair-step'));
     this.current = 0;
     this.onSave = null;
+    this.aiEnabled = false;
+    this.aiStart = null;
+    this.aiFollowUp = null;
+    this.deviceMetadata = {};
+    this.environmentContext = {};
+    this.aiNotifiedFailure = false;
 
     this.nextBtn = document.getElementById('pairNext');
     this.prevBtn = document.getElementById('pairPrev');
@@ -10273,40 +10279,97 @@ class DevicePairWizard {
 
     const wifiStatic = document.getElementById('pairWifiStatic');
     wifiStatic?.addEventListener('change', (e) => {
-      const ip = document.getElementById('pairWifiStaticIp'); if (ip) ip.style.display = e.target.checked ? 'block' : 'none';
+      const ip = document.getElementById('pairWifiStaticIp');
+      if (ip) ip.style.display = e.target.checked ? 'block' : 'none';
     });
   }
 
   open(opts = {}) {
     if (!this.modal) return;
-    this.current = 0; this.onSave = opts.onSave || null;
+    this.current = 0;
+    this.onSave = opts.onSave || null;
+    this.deviceMetadata = { ...(opts.metadata || {}) };
+    this.environmentContext = { ...(opts.environmentContext || {}) };
+    this.aiEnabled = isIAAssistActive();
+    this.aiStart = null;
+    this.aiFollowUp = null;
+    this.aiNotifiedFailure = false;
+    this.resetAiAffordances();
     if (opts.suggestedTransport) {
       const r = this.modal.querySelector(`input[name=pairTransport][value=${opts.suggestedTransport}]`);
       if (r) r.checked = true;
     }
     this.showStep(0);
     this.modal.style.display = 'block';
-    this.modal.setAttribute('aria-hidden','false');
+    this.modal.setAttribute('aria-hidden', 'false');
+    if (this.aiEnabled) {
+      this.loadInitialAISuggestions();
+    }
   }
 
-  close() { if (!this.modal) return; this.modal.style.display = 'none'; this.modal.setAttribute('aria-hidden','true'); }
+  close() {
+    if (!this.modal) return;
+    this.modal.style.display = 'none';
+    this.modal.setAttribute('aria-hidden', 'true');
+    this.resetAiAffordances();
+    this.aiEnabled = false;
+  }
 
   showStep(i) {
     if (!this.steps) return;
-    this.steps.forEach((s, idx) => s.style.display = idx === i ? 'block' : 'none');
+    this.steps.forEach((s, idx) => { s.style.display = idx === i ? 'block' : 'none'; });
     this.current = i;
-    this.progress.textContent = `Step ${Math.min(i+1, this.steps.length)} of ${this.steps.length}`;
-    this.prevBtn.style.display = i === 0 ? 'none' : 'inline-block';
-    this.nextBtn.style.display = i === (this.steps.length - 1) ? 'none' : 'inline-block';
-    this.saveBtn.style.display = i === (this.steps.length - 1) ? 'inline-block' : 'none';
+    if (this.progress) {
+      this.progress.textContent = `Step ${Math.min(i + 1, this.steps.length)} of ${this.steps.length}`;
+    }
+    if (this.prevBtn) this.prevBtn.style.display = i === 0 ? 'none' : 'inline-block';
+    if (this.nextBtn) this.nextBtn.style.display = i === (this.steps.length - 1) ? 'none' : 'inline-block';
+    if (this.saveBtn) this.saveBtn.style.display = i === (this.steps.length - 1) ? 'inline-block' : 'none';
     if (this.steps[i]?.dataset.step === 'review') this.updateReview();
   }
 
-  next() { if (this.current < this.steps.length - 1) this.showStep(this.current + 1); }
-  prev() { if (this.current > 0) this.showStep(this.current - 1); }
+  next() {
+    if (this.current < this.steps.length - 1) this.showStep(this.current + 1);
+  }
+
+  prev() {
+    if (this.current > 0) this.showStep(this.current - 1);
+  }
+
+  getWizardSnapshot() {
+    if (!this.modal) return {};
+    const snapshot = {};
+    const transport = this.modal.querySelector('input[name=pairTransport]:checked')?.value || 'wifi';
+    snapshot.transport = transport;
+
+    const wifi = {};
+    const ssidEl = document.getElementById('pairWifiSsid');
+    if (ssidEl && ssidEl.value) wifi.ssid = ssidEl.value.trim();
+    const pskEl = document.getElementById('pairWifiPsk');
+    if (pskEl && pskEl.value) wifi.psk = pskEl.value;
+    const staticChk = document.getElementById('pairWifiStatic');
+    if (staticChk) wifi.static = !!staticChk.checked;
+    const staticIpEl = document.getElementById('pairWifiStaticIp');
+    if (staticIpEl && staticIpEl.value) wifi.staticIp = staticIpEl.value.trim();
+    if (Object.keys(wifi).length) snapshot.wifi = wifi;
+
+    const bt = {};
+    const btName = document.getElementById('pairBtName');
+    if (btName && btName.value) bt.name = btName.value.trim();
+    const btPin = document.getElementById('pairBtPin');
+    if (btPin && btPin.value) bt.pin = btPin.value.trim();
+    if (Object.keys(bt).length) snapshot.bluetooth = bt;
+
+    if (this.steps?.[this.current]?.dataset.step) {
+      snapshot.step = this.steps[this.current].dataset.step;
+    }
+
+    return snapshot;
+  }
 
   collect() {
     const transport = this.modal.querySelector('input[name=pairTransport]:checked')?.value || 'wifi';
+    const result = { transport };
     if (transport === 'wifi') {
       const ssid = document.getElementById('pairWifiSsid')?.value.trim() || '';
       const psk = document.getElementById('pairWifiPsk')?.value || '';
@@ -10314,45 +10377,297 @@ class DevicePairWizard {
       const staticIp = document.getElementById('pairWifiStaticIp')?.value.trim() || '';
       const wifi = { ssid, psk, static: !!isStatic };
       if (isStatic && staticIp) wifi.staticIp = staticIp;
-      return { wifi };
-    }
-    if (transport === 'bluetooth') {
+      result.wifi = wifi;
+    } else if (transport === 'bluetooth') {
       const name = document.getElementById('pairBtName')?.value.trim() || null;
       const pin = document.getElementById('pairBtPin')?.value.trim() || null;
-      return { bluetooth: { name, pin } };
+      result.bluetooth = { name, pin };
     }
-    return {};
+    return result;
   }
 
   updateReview() {
     const cfg = this.collect();
-    const el = document.getElementById('pairReview'); if (!el) return; el.innerHTML = '';
-    Object.keys(cfg).forEach(k => { const pre = document.createElement('pre'); pre.style.margin='0'; pre.textContent = `${k}: ` + JSON.stringify(cfg[k], null, 2); el.appendChild(pre); });
+    const el = document.getElementById('pairReview');
+    if (!el) return;
+    el.innerHTML = '';
+    Object.keys(cfg).forEach((k) => {
+      const pre = document.createElement('pre');
+      pre.style.margin = '0';
+      if (typeof cfg[k] === 'string') {
+        pre.textContent = `${k}: ${cfg[k]}`;
+      } else {
+        pre.textContent = `${k}: ` + JSON.stringify(cfg[k], null, 2);
+      }
+      el.appendChild(pre);
+    });
+    this.renderReviewSummary();
+  }
+
+  resetAiAffordances() {
+    ['pairTransportAiSuggestion', 'pairWifiAiSuggestion', 'pairBtAiSuggestion', 'pairReviewAiSummary'].forEach((id) => {
+      const el = document.getElementById(id);
+      if (!el) return;
+      el.style.display = 'none';
+      el.classList.remove('ai-suggestion--applied');
+      const textEl = el.querySelector('.ai-suggestion__text');
+      if (textEl) textEl.textContent = '';
+      const button = el.querySelector('button.ai-suggestion__apply');
+      if (button) {
+        button.disabled = false;
+        button.textContent = 'Accept AI suggestion';
+        button.onclick = null;
+      }
+    });
+  }
+
+  describeDevice() {
+    const vendor = this.deviceMetadata.vendor || '';
+    const model = this.deviceMetadata.model || '';
+    const category = this.deviceMetadata.category || '';
+    const combined = [vendor, model].filter(Boolean).join(' ').trim();
+    if (combined) return combined;
+    return category || 'device';
+  }
+
+  async loadInitialAISuggestions() {
+    const data = await this.requestAISuggestions('start');
+    if (data) this.applyInitialSuggestions(data);
+  }
+
+  async requestAISuggestions(stage = 'start', overrides = {}) {
+    if (!this.aiEnabled) return null;
+    const metadata = { ...(this.deviceMetadata || {}) };
+    if (overrides.device_metadata) Object.assign(metadata, overrides.device_metadata);
+
+    const wizardSnapshot = this.getWizardSnapshot();
+    const wizardState = { ...wizardSnapshot, ...(overrides.wizard_state || {}) };
+
+    const baseContext = { ...(this.environmentContext || {}) };
+    if (overrides.environment_context) {
+      Object.entries(overrides.environment_context).forEach(([key, value]) => {
+        if (value && typeof value === 'object' && !Array.isArray(value)) {
+          baseContext[key] = { ...(baseContext[key] || {}), ...value };
+        } else {
+          baseContext[key] = value;
+        }
+      });
+    }
+
+    try {
+      const resp = await fetch('/ai/setup-assist', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          stage,
+          device_metadata: metadata,
+          wizard_state: wizardState,
+          environment_context: baseContext
+        })
+      });
+      if (resp.status === 404 || resp.status === 503) {
+        return null;
+      }
+      if (!resp.ok) {
+        const txt = await resp.text().catch(() => '');
+        throw new Error(`HTTP ${resp.status} ${txt}`.trim());
+      }
+      return await resp.json();
+    } catch (err) {
+      console.warn('AI Assist request failed', err);
+      if (!this.aiNotifiedFailure && stage === 'start') {
+        this.aiNotifiedFailure = true;
+        showToast({ title: 'IA Assist', msg: 'Unable to fetch pairing suggestions right now.', kind: 'info', icon: '🤖' }, 5000);
+      }
+      return null;
+    }
+  }
+
+  applyInitialSuggestions(data) {
+    this.aiStart = data;
+    const fields = (data && data.suggested_fields) || {};
+    this.renderTransportSuggestion(fields.transport);
+    this.renderWifiSuggestion(fields.wifi);
+    this.renderBluetoothSuggestion(fields.bluetooth);
+    this.renderReviewSummary();
+  }
+
+  renderTransportSuggestion(transport) {
+    const container = document.getElementById('pairTransportAiSuggestion');
+    if (!container) return;
+    if (!this.aiEnabled || !transport) {
+      container.style.display = 'none';
+      return;
+    }
+    const textEl = container.querySelector('.ai-suggestion__text');
+    if (textEl) {
+      textEl.textContent = `IA Assist recommends pairing ${this.describeDevice()} over ${String(transport).toUpperCase()}.`;
+    }
+    const button = container.querySelector('button.ai-suggestion__apply');
+    if (button) {
+      button.disabled = false;
+      button.textContent = 'Accept AI suggestion';
+      button.onclick = () => this.applyTransportSuggestion(transport, container);
+    }
+    container.style.display = 'flex';
+  }
+
+  applyTransportSuggestion(transport, container) {
+    const radio = this.modal?.querySelector(`input[name=pairTransport][value=${transport}]`);
+    if (radio) {
+      radio.checked = true;
+      radio.dispatchEvent(new Event('change', { bubbles: true }));
+    }
+    if (container) {
+      container.classList.add('ai-suggestion--applied');
+      const button = container.querySelector('button.ai-suggestion__apply');
+      if (button) {
+        button.disabled = true;
+        button.textContent = 'Suggestion applied';
+      }
+    }
+    showToast({ title: 'IA Assist', msg: `Transport set to ${String(transport).toUpperCase()}.`, kind: 'info', icon: '🤖' }, 5000);
+    this.updateReview();
+  }
+
+  renderWifiSuggestion(suggestion) {
+    const container = document.getElementById('pairWifiAiSuggestion');
+    if (!container) return;
+    if (!this.aiEnabled || !suggestion || !Object.keys(suggestion).length) {
+      container.style.display = 'none';
+      return;
+    }
+    const parts = [];
+    if (suggestion.ssid) parts.push(`SSID ${suggestion.ssid}`);
+    if (suggestion.staticIp) parts.push(`static IP ${suggestion.staticIp}`);
+    const message = parts.length
+      ? `IA Assist suggests configuring ${this.describeDevice()} with ${parts.join(' and ')}.`
+      : `IA Assist prepared Wi‑Fi guidance for ${this.describeDevice()}.`;
+    const textEl = container.querySelector('.ai-suggestion__text');
+    if (textEl) textEl.textContent = message;
+    const button = container.querySelector('button.ai-suggestion__apply');
+    if (button) {
+      button.disabled = false;
+      button.textContent = 'Accept AI suggestion';
+      button.onclick = () => this.applyWifiSuggestion(suggestion, container);
+    }
+    container.style.display = 'flex';
+  }
+
+  applyWifiSuggestion(suggestion, container) {
+    const ssidInput = document.getElementById('pairWifiSsid');
+    if (ssidInput && suggestion.ssid) ssidInput.value = suggestion.ssid;
+    const pskInput = document.getElementById('pairWifiPsk');
+    if (pskInput && suggestion.psk) pskInput.value = suggestion.psk;
+    const staticCheckbox = document.getElementById('pairWifiStatic');
+    const staticIpInput = document.getElementById('pairWifiStaticIp');
+    const useStatic = suggestion.useStatic ?? Boolean(suggestion.staticIp);
+    if (staticCheckbox && typeof useStatic === 'boolean') {
+      staticCheckbox.checked = useStatic;
+      staticCheckbox.dispatchEvent(new Event('change', { bubbles: true }));
+    }
+    if (staticIpInput && suggestion.staticIp) staticIpInput.value = suggestion.staticIp;
+    if (container) {
+      container.classList.add('ai-suggestion--applied');
+      const button = container.querySelector('button.ai-suggestion__apply');
+      if (button) {
+        button.disabled = true;
+        button.textContent = 'Suggestion applied';
+      }
+    }
+    showToast({ title: 'IA Assist', msg: 'Applied Wi‑Fi configuration suggestions.', kind: 'info', icon: '🤖' }, 5000);
+    this.updateReview();
+  }
+
+  renderBluetoothSuggestion(suggestion) {
+    const container = document.getElementById('pairBtAiSuggestion');
+    if (!container) return;
+    if (!this.aiEnabled || !suggestion || !Object.keys(suggestion).length) {
+      container.style.display = 'none';
+      return;
+    }
+    const details = [];
+    if (suggestion.name) details.push(`name ${suggestion.name}`);
+    if (suggestion.pin) details.push(`PIN ${suggestion.pin}`);
+    const message = details.length
+      ? `IA Assist recommends preparing Bluetooth with ${details.join(' and ')}.`
+      : `IA Assist prepared Bluetooth pairing hints for ${this.describeDevice()}.`;
+    const textEl = container.querySelector('.ai-suggestion__text');
+    if (textEl) textEl.textContent = message;
+    const button = container.querySelector('button.ai-suggestion__apply');
+    if (button) {
+      button.disabled = false;
+      button.textContent = 'Accept AI suggestion';
+      button.onclick = () => this.applyBluetoothSuggestion(suggestion, container);
+    }
+    container.style.display = 'flex';
+  }
+
+  applyBluetoothSuggestion(suggestion, container) {
+    const nameInput = document.getElementById('pairBtName');
+    if (nameInput && suggestion.name) nameInput.value = suggestion.name;
+    const pinInput = document.getElementById('pairBtPin');
+    if (pinInput && suggestion.pin) pinInput.value = suggestion.pin;
+    if (container) {
+      container.classList.add('ai-suggestion--applied');
+      const button = container.querySelector('button.ai-suggestion__apply');
+      if (button) {
+        button.disabled = true;
+        button.textContent = 'Suggestion applied';
+      }
+    }
+    showToast({ title: 'IA Assist', msg: 'Bluetooth pairing details filled in.', kind: 'info', icon: '🤖' }, 5000);
+    this.updateReview();
+  }
+
+  renderReviewSummary() {
+    const container = document.getElementById('pairReviewAiSummary');
+    if (!container) return;
+    const textEl = container.querySelector('.ai-suggestion__text');
+    const lines = [];
+    if (this.aiStart?.summary) lines.push(this.aiStart.summary);
+    if (Array.isArray(this.aiStart?.next_steps) && this.aiStart.next_steps.length) {
+      lines.push(`Suggested next steps: ${this.aiStart.next_steps.join(' → ')}`);
+    }
+    if (!lines.length) {
+      container.style.display = 'none';
+      if (textEl) textEl.textContent = '';
+      return;
+    }
+    if (textEl) textEl.textContent = lines.join(' ');
+    container.style.display = 'flex';
   }
 
   async finish() {
     const cfg = this.collect();
-    // If Wi‑Fi transport, attempt provisioning through the forwarder/controller proxy
     try {
       if (cfg.wifi) {
         if (this.progress) this.progress.textContent = 'Provisioning device Wi‑Fi via controller...';
-        const resp = await fetch('/forwarder/provision/wifi', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(cfg.wifi) });
+        const resp = await fetch('/forwarder/provision/wifi', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(cfg.wifi)
+        });
         if (!resp.ok) {
-          const txt = await resp.text().catch(()=>null);
+          const txt = await resp.text().catch(() => null);
           showToast({ title: 'Provision failed', msg: `Controller returned ${resp.status}: ${txt || ''}`, kind: 'warn', icon: '⚠️' }, 6000);
         } else {
-          const body = await resp.json().catch(()=>null);
+          const body = await resp.json().catch(() => null);
           showToast({ title: 'Provisioning initiated', msg: body?.message || 'Controller accepted provisioning request', kind: 'success', icon: '✅' }, 4000);
         }
       }
       if (cfg.bluetooth) {
         if (this.progress) this.progress.textContent = 'Requesting controller to pair via Bluetooth...';
-        const resp = await fetch('/forwarder/provision/bluetooth', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(cfg.bluetooth) });
+        const resp = await fetch('/forwarder/provision/bluetooth', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(cfg.bluetooth)
+        });
         if (!resp.ok) {
-          const txt = await resp.text().catch(()=>null);
+          const txt = await resp.text().catch(() => null);
           showToast({ title: 'BT pair failed', msg: `Controller returned ${resp.status}: ${txt || ''}`, kind: 'warn', icon: '⚠️' }, 6000);
         } else {
-          const body = await resp.json().catch(()=>null);
+          const body = await resp.json().catch(() => null);
           showToast({ title: 'Pairing requested', msg: body?.message || 'Controller pairing request sent', kind: 'success', icon: '✅' }, 4000);
         }
       }
@@ -10362,9 +10677,61 @@ class DevicePairWizard {
       if (this.progress) this.progress.textContent = '';
     }
 
+    if (this.aiEnabled) {
+      const followUp = await this.requestAISuggestions('complete', {
+        wizard_state: { completed: true, collected_setup: cfg }
+      });
+      if (followUp) {
+        this.aiFollowUp = followUp;
+        const steps = Array.isArray(followUp.next_steps) ? followUp.next_steps : [];
+        if (steps.length) {
+          showToast({ title: 'IA Assist', msg: steps.join(' • '), kind: 'info', icon: '🤖' }, 8000);
+        } else if (followUp.summary) {
+          showToast({ title: 'IA Assist', msg: followUp.summary, kind: 'info', icon: '🤖' }, 6000);
+        }
+      }
+    }
+
     if (this.onSave) this.onSave(cfg);
     this.close();
   }
+}
+
+function isIAAssistActive() {
+  const card = document.getElementById('iaAssistFeature');
+  if (!card) return false;
+  if (card.classList.contains('active')) return true;
+  const statusEl = card.querySelector('.ai-feature-status');
+  const text = (statusEl?.textContent || '').trim().toLowerCase();
+  return statusEl?.classList.contains('always-on') || text.includes('always');
+}
+
+function buildPairingEnvironmentContext(roomWizardInstance) {
+  const farm = STATE.farm || {};
+  const discovery = farm.discovery || {};
+  const connection = (farm.connection && farm.connection.wifi) || {};
+  const testResult = connection.testResult || {};
+  const roomData = (roomWizardInstance && roomWizardInstance.data) || {};
+  const roomNameInput = document.getElementById('roomName');
+  const locationSelect = document.getElementById('roomLocationSelect');
+
+  const preferredSsid = discovery.ssid || connection.ssid || testResult.ssid || '';
+  const subnet = discovery.subnet || testResult.subnet || '';
+  const gateway = discovery.gateway || testResult.gateway || '';
+
+  return {
+    farm: {
+      name: farm.name || farm.farmName || '',
+      preferredSsid,
+      subnet,
+      gateway,
+      controller: (STATE.config && STATE.config.controller) || ''
+    },
+    room: {
+      name: roomData.name || roomNameInput?.value?.trim() || '',
+      location: roomData.location || locationSelect?.value || ''
+    }
+  };
 }
 
 const DEVICE_PAIR_WIZARD = new DevicePairWizard();
@@ -10384,40 +10751,70 @@ function hookRoomDevicePairing(roomWizardInstance) {
     ev.preventDefault();
     let suggested = 'wifi';
     const modelSel = document.getElementById('roomDeviceModel');
+    let modelMeta = null;
     if (modelSel && modelSel.value) {
-      const md = findModelByValue(modelSel.value);
-      if (md && md.connectivity && md.connectivity.includes('bluetooth')) suggested = 'bluetooth';
+      modelMeta = findModelByValue(modelSel.value);
+      if (modelMeta && modelMeta.connectivity && modelMeta.connectivity.includes('bluetooth')) suggested = 'bluetooth';
     }
-    // If selected model/vendor indicates a hub requirement, enforce hub-first.
     const vendor = document.getElementById('roomDeviceVendor')?.value || '';
     const model = document.getElementById('roomDeviceModel')?.value || '';
     const man = DEVICE_MANUFACTURERS && DEVICE_MANUFACTURERS.find(x=>x.name===vendor);
-    const md = man && man.models && man.models.find(m=>m.model===model);
-  // Prefer explicit requiresHub flags on model or manufacturer; fall back to feature-text heuristic
-  const requiresHub = (md && md.requiresHub) || (man && man.requiresHub) || ((md && (md.features || []).some(f=>/bridge|hub|ir-bridge-required/i.test(f))) || false);
+    if (!modelMeta && man && man.models) {
+      modelMeta = man.models.find(m=>m.model===model) || modelMeta;
+    }
+    const requiresHub = (modelMeta && modelMeta.requiresHub) || (man && man.requiresHub) || ((modelMeta && (modelMeta.features || []).some(f=>/bridge|hub|ir-bridge-required/i.test(f))) || false);
+    const environmentContext = buildPairingEnvironmentContext(roomWizardInstance);
     if (requiresHub) {
-      // Check if a hub is already added to room devices
       const hasHub = (roomWizardInstance.data.devices||[]).some(d=> (d.vendor===vendor && /(hub|bridge|bridge mini|hub)/i.test(d.model)) || (d.setup && d.setup.isHub));
       if (!hasHub) {
-        showToast({ title: 'Hub required', msg: `${vendor} ${model} typically requires a hub. Please add the hub first.`, kind: 'warn', icon: '⚠️' }, 6000);
-        // Optionally open device pair modal pre-configured for a hub
-        DEVICE_PAIR_WIZARD.open({ suggestedTransport: 'wifi', onSave: (setup) => {
-          const hubName = `${vendor} Hub`;
-          const hubDevice = { name: hubName, vendor, model: `${vendor} Hub`, host: setup?.wifi?.staticIp || '', setup: { ...setup, isHub: true } };
-          roomWizardInstance.data.devices = roomWizardInstance.data.devices || [];
-          roomWizardInstance.data.devices.push(hubDevice);
-          roomWizardInstance.renderDevicesList();
-          // Update controller assignments when hub devices are added
-          if (typeof renderControllerAssignments === 'function') {
-            renderControllerAssignments();
+        showToast({ title: 'Hub required', msg: `${vendor} ${model} typically requires a hub. Please add the hub first.`, kind:'warn', icon: '⚠️' }, 6000);
+        DEVICE_PAIR_WIZARD.open({
+          suggestedTransport: 'wifi',
+          metadata: {
+            vendor,
+            model: `${vendor} Hub`,
+            category: 'hub',
+            connectivity: ['wifi', 'ethernet'],
+            requiresHub: false,
+            preferred_transport: 'wifi'
+          },
+          environmentContext,
+          onSave: (setup) => {
+            const hubName = `${vendor} Hub`;
+            const hubDevice = { name: hubName, vendor, model: `${vendor} Hub`, host: setup?.wifi?.staticIp || '', setup: { ...setup, isHub: true } };
+            roomWizardInstance.data.devices = roomWizardInstance.data.devices || [];
+            roomWizardInstance.data.devices.push(hubDevice);
+            roomWizardInstance.renderDevicesList();
+            if (typeof renderControllerAssignments === 'function') {
+              renderControllerAssignments();
+            }
+            showToast({ title: 'Hub added', msg: `Added ${hubName}. Now add child devices.`, kind: 'success', icon: '✅' }, 4000);
           }
-          showToast({ title: 'Hub added', msg: `Added ${hubName}. Now add child devices.`, kind: 'success', icon: '✅' }, 4000);
-        }});
+        });
         return;
       }
     }
 
-    DEVICE_PAIR_WIZARD.open({ suggestedTransport: suggested, onSave: (setup) => {
+    const connectivity = [];
+    if (Array.isArray(modelMeta?.connectivity)) connectivity.push(...modelMeta.connectivity);
+    else if (modelMeta?.connectivity) connectivity.push(modelMeta.connectivity);
+    else if (Array.isArray(man?.connectivity)) connectivity.push(...man.connectivity);
+    const metadata = {
+      vendor,
+      model,
+      category: modelMeta?.category || man?.category || '',
+      connectivity: connectivity.map(c => String(c).toLowerCase()),
+      features: Array.isArray(modelMeta?.features) ? modelMeta.features : [],
+      requiresHub,
+      preferred_transport: suggested
+    };
+    if (modelMeta?.advertisedName) metadata.advertisedName = modelMeta.advertisedName;
+    if (modelMeta?.defaultPin) metadata.defaultPin = modelMeta.defaultPin;
+    if (modelMeta?.pairingPin) metadata.pairingPin = modelMeta.pairingPin;
+    if (modelMeta?.requiresStaticIp) metadata.requiresStaticIp = modelMeta.requiresStaticIp;
+    if (modelMeta?.preferredIp) metadata.preferredIp = modelMeta.preferredIp;
+
+    DEVICE_PAIR_WIZARD.open({ suggestedTransport: suggested, metadata, environmentContext, onSave: (setup) => {
       const name = document.getElementById('roomDeviceName')?.value.trim() || '';
       const vendor = document.getElementById('roomDeviceVendor')?.value || '';
       const model = document.getElementById('roomDeviceModel')?.value || '';
@@ -10428,12 +10825,12 @@ function hookRoomDevicePairing(roomWizardInstance) {
   ['deviceRs485UnitId','device0v10Channel','device0v10Scale'].forEach(id=>{ try{ clearFieldError(id); }catch(e){ const el=document.getElementById(id); if(el) el.classList.remove('invalid'); } });
       roomWizardInstance.data.devices.push(device);
       roomWizardInstance.renderDevicesList();
-      // Update controller assignments when external devices are added
       if (typeof renderControllerAssignments === 'function') {
         renderControllerAssignments();
       }
     }});
   });
+}
 }
 
 // --- Top Card and AI Features Management ---
