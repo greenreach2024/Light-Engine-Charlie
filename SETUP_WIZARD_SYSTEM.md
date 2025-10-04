@@ -59,6 +59,17 @@ The Light Engine Charlie now includes a comprehensive **Setup Wizard System** th
 
 ## 🚀 API Endpoints
 
+All setup-wizard endpoints respond with a JSON payload shaped as:
+
+```json
+{
+  "success": true,
+  "...": "Endpoint-specific data"
+}
+```
+
+On errors the `success` flag is `false` and an `error` message is included.
+
 ### Get Available Wizards
 ```http
 GET /setup/wizards

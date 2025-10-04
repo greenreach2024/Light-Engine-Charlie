@@ -52,8 +52,9 @@ async function testWizardSystem() {
     console.log('📋 Test 1: Getting all available wizards...');
     const wizardsResponse = await makeRequest('GET', '/setup/wizards');
     console.log(`Status: ${wizardsResponse.status}`);
+    console.log(`Success: ${wizardsResponse.data.success}`);
     console.log('Available wizards:');
-    if (wizardsResponse.data.wizards) {
+    if (wizardsResponse.data.success && wizardsResponse.data.wizards) {
       wizardsResponse.data.wizards.forEach(w => {
         console.log(`  - ${w.id}: ${w.name} (${w.stepCount} steps)`);
       });
@@ -64,7 +65,8 @@ async function testWizardSystem() {
     console.log('🎯 Test 2: Getting MQTT wizard definition...');
     const mqttWizardResponse = await makeRequest('GET', '/setup/wizards/mqtt-setup');
     console.log(`Status: ${mqttWizardResponse.status}`);
-    if (mqttWizardResponse.data.wizard) {
+    console.log(`Success: ${mqttWizardResponse.data.success}`);
+    if (mqttWizardResponse.data.success && mqttWizardResponse.data.wizard) {
       const wizard = mqttWizardResponse.data.wizard;
       console.log(`Wizard: ${wizard.name}`);
       console.log(`Description: ${wizard.description}`);
@@ -89,6 +91,7 @@ async function testWizardSystem() {
       data: stepData
     });
     console.log(`Status: ${executeResponse.status}`);
+    console.log(`Success: ${executeResponse.data.success}`);
     if (executeResponse.data.result) {
       console.log(`Success: ${executeResponse.data.result.success}`);
       console.log(`Next step: ${executeResponse.data.result.nextStep}`);
@@ -99,7 +102,8 @@ async function testWizardSystem() {
     console.log('📊 Test 4: Checking wizard execution status...');
     const statusResponse = await makeRequest('GET', '/setup/wizards/mqtt-setup/status');
     console.log(`Status: ${statusResponse.status}`);
-    if (statusResponse.data.status) {
+    console.log(`Success: ${statusResponse.data.success}`);
+    if (statusResponse.data.success && statusResponse.data.status) {
       const status = statusResponse.data.status;
       console.log(`Progress: ${status.progress}% (${status.currentStep}/${status.totalSteps})`);
       console.log(`Completed: ${status.completed}`);
@@ -128,7 +132,8 @@ async function testWizardSystem() {
       devices: testDevices
     });
     console.log(`Status: ${suggestResponse.status}`);
-    if (suggestResponse.data.suggestions) {
+    console.log(`Success: ${suggestResponse.data.success}`);
+    if (suggestResponse.data.success && suggestResponse.data.suggestions) {
       console.log('Wizard suggestions:');
       suggestResponse.data.suggestions.forEach(suggestion => {
         console.log(`  Device: ${suggestion.device.ip} (${suggestion.device.type})`);
