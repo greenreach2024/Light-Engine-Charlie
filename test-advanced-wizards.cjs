@@ -232,6 +232,72 @@ async function testAdvancedWizardSystem() {
     }
     console.log('');
 
+    // Test 9: Reject out-of-order wizard execution
+    console.log('⛔ Test 9: Ensuring out-of-order wizard steps are rejected...');
+    await makeRequest('DELETE', '/setup/wizards/mqtt-setup');
+    const outOfOrderResponse = await makeRequest('POST', '/setup/wizards/mqtt-setup/execute', {
+      stepId: 'topic-discovery',
+      data: {
+        baseTopic: 'farm/test/#'
+      }
+    });
+
+    console.log(`Status: ${outOfOrderResponse.status}`);
+    if (outOfOrderResponse.status === 409) {
+      console.log('Received expected 409 Conflict for out-of-order execution.');
+    } else {
+      console.log('Unexpected response for out-of-order execution:', outOfOrderResponse.data);
+    }
+
+    const wizardAfterOutOfOrder = await makeRequest('GET', '/setup/wizards/mqtt-setup');
+    const currentStepAfterOutOfOrder = wizardAfterOutOfOrder.data?.wizard?.state?.currentStep;
+    console.log(`Wizard current step index after rejection: ${currentStepAfterOutOfOrder}`);
+    console.log('');
+
+    // Test 10: Confirm device failures do not advance progress
+    console.log('🧪 Test 10: Ensuring device step failures do not advance progress...');
+    await makeRequest('DELETE', '/setup/wizards/mqtt-setup');
+
+    const brokerSuccess = await makeRequest('POST', '/setup/wizards/mqtt-setup/execute', {
+      stepId: 'broker-connection',
+      data: {
+        host: '192.168.2.38',
+        port: 8883,
+        secure: true
+      }
+    });
+    console.log(`Broker connection status: ${brokerSuccess.status}`);
+
+    const discoverySuccess = await makeRequest('POST', '/setup/wizards/mqtt-setup/execute', {
+      stepId: 'topic-discovery',
+      data: {
+        baseTopic: 'farm/greenhouse/#',
+        discoverTime: 10
+      }
+    });
+    console.log(`Topic discovery status: ${discoverySuccess.status}`);
+
+    const failingStep = await makeRequest('POST', '/setup/wizards/mqtt-setup/execute', {
+      stepId: 'sensor-mapping',
+      data: {
+        __simulateFailure: true
+      }
+    });
+
+    console.log(`Sensor mapping failure status: ${failingStep.status}`);
+    if (failingStep.data?.result) {
+      console.log('Failure payload:', failingStep.data.result);
+    } else {
+      console.log('Failure response:', failingStep.data);
+    }
+
+    const wizardAfterFailure = await makeRequest('GET', '/setup/wizards/mqtt-setup');
+    const stateAfterFailure = wizardAfterFailure.data?.wizard?.state;
+    const storedSteps = stateAfterFailure?.data ? Object.keys(stateAfterFailure.data) : [];
+    console.log(`Wizard current step index after failure: ${stateAfterFailure?.currentStep}`);
+    console.log(`Stored steps after failure: ${storedSteps.join(', ') || 'none'}`);
+    console.log('');
+
     console.log('✅ All advanced wizard system tests completed successfully!');
     console.log('\n🎯 Advanced Features Tested:');
     console.log('  ✅ Wizard templates and recommendations');
