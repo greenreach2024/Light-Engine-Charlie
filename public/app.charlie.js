@@ -11435,6 +11435,7 @@ document.addEventListener('DOMContentLoaded', async () => {
   window.deviceManagerWindow = deviceManagerWindow;
   // Initialize room wizard
   roomWizard = new RoomWizard();
+  window.roomWizard = roomWizard;
   // Initialize light wizard
   console.log('[DEBUG] About to initialize LightWizard');
   lightWizard = new LightWizard();
