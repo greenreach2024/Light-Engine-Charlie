@@ -275,12 +275,57 @@ async def discover_ble_devices(registry: DeviceRegistry, scan_duration: float = 
     
     try:
         discovered = await BleakScanner.discover(timeout=scan_duration, return_adv=True)
-        
         for device_address, (device, advertisement_data) in discovered.items():
             # Filter out devices without names or services (likely not IoT devices)
             if not device.name and not advertisement_data.service_uuids:
                 continue
-                
+
+            # Extract manufacturer info if present
+            manufacturer_data = dict(advertisement_data.manufacturer_data) if advertisement_data.manufacturer_data else {}
+            vendor = None
+            if manufacturer_data:
+                # BLE manufacturer data keys are 16-bit company IDs; try to map to a known vendor
+                # For Samsung, the company ID is 0x0075 (117)
+                company_id_map = {
+                    0x0075: "Samsung",
+                    0x004C: "Apple",
+                    0x0006: "Microsoft",
+                    0x000F: "Broadcom",
+                    0x003D: "Google",
+                    0x0131: "Sony",
+                    0x00E0: "LG Electronics",
+                    0x0171: "Amazon",
+                    0x00C7: "Fitbit",
+                    0x00D2: "Garmin",
+                    0x00A0: "Bosch",
+                    0x00E1: "Lenovo",
+                    0x00A4: "Huawei",
+                    0x00E2: "Nokia",
+                    0x00A9: "HTC",
+                    0x00B0: "Intel",
+                    0x00B1: "Cisco",
+                    0x00B2: "Motorola",
+                    0x00B3: "Texas Instruments",
+                    0x00B4: "STMicroelectronics",
+                    0x00B5: "Infineon",
+                    0x00B6: "Qualcomm",
+                    0x00B7: "NXP",
+                    0x00B8: "Dialog Semiconductor",
+                    0x00B9: "Nordic Semiconductor",
+                    0x00BA: "Silicon Labs",
+                    0x00BB: "Dialog Semiconductor",
+                    0x00BC: "Xiaomi",
+                    0x00BD: "Oppo",
+                    0x00BE: "Vivo",
+                    0x00BF: "Realtek",
+                }
+                for cid in manufacturer_data.keys():
+                    if cid in company_id_map:
+                        vendor = company_id_map[cid]
+                        break
+                    # fallback: show hex if not mapped
+                    vendor = f"0x{cid:04X}"
+
             device_obj = Device(
                 device_id=device.address,
                 name=device.name or f"BLE Device {device.address[-8:]}",
@@ -294,18 +339,18 @@ async def discover_ble_devices(registry: DeviceRegistry, scan_duration: float = 
                 details={
                     "address": device.address,
                     "rssi": advertisement_data.rssi,
-                    "manufacturer_data": dict(advertisement_data.manufacturer_data) if advertisement_data.manufacturer_data else {},
+                    "manufacturer_data": manufacturer_data,
                     "service_data": dict(advertisement_data.service_data) if advertisement_data.service_data else {},
                 },
             )
-            
+            # Attach vendor as top-level field if found
+            if vendor:
+                setattr(device_obj, 'vendor', vendor)
             registry.upsert(device_obj)
             devices.append(device_obj)
-            LOGGER.info("Discovered BLE device %s (%s)", device_obj.name, device.address)
-            
+            LOGGER.info("Discovered BLE device %s (%s) vendor=%s", device_obj.name, device.address, vendor)
     except Exception as exc:
         LOGGER.error("BLE discovery failed: %s", exc)
-        
     return devices
 
 

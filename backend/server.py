@@ -6,7 +6,7 @@ import asyncio
 import contextlib
 import logging
 import os
-from typing import List, Optional
+from typing import List, Optional, Dict, Any
 
 from fastapi import Depends, FastAPI, HTTPException, Query, status
 from fastapi.middleware.cors import CORSMiddleware
@@ -20,6 +20,7 @@ from .device_models import UserContext
 from .lighting import LightingController
 from .logging_config import configure_logging
 from .state import DeviceRegistry, LightingState, ScheduleStore, SensorEventBuffer
+from .ai_assist import SetupAssistService, SetupAssistError
 
 LOGGER = logging.getLogger(__name__)
 
@@ -146,6 +147,28 @@ class LightingFixtureResponse(BaseModel):
     spectrum_min: int
     spectrum_max: int
 
+
+# Live device discovery endpoint: orchestrates all protocol-specific discovery functions
+from fastapi.responses import JSONResponse
+from .device_discovery import discover_kasa_devices, discover_ble_devices, discover_mdns_devices
+
+@app.get("/discovery/devices", response_class=JSONResponse)
+async def discovery_devices() -> dict:
+    """Perform a live scan for all supported device types and return fresh results."""
+    results = await asyncio.gather(
+        discover_kasa_devices(REGISTRY, timeout=5),
+        discover_ble_devices(REGISTRY, scan_duration=8.0),
+        discover_mdns_devices(REGISTRY, scan_duration=5.0),
+        return_exceptions=True
+    )
+    devices = []
+    protocols = ["kasa", "bluetooth-le", "mdns"]
+    for idx, res in enumerate(results):
+        if isinstance(res, Exception):
+            LOGGER.warning(f"Discovery for {protocols[idx]} failed: {res}")
+            continue
+        devices.extend([d.__dict__ for d in res])
+    return {"devices": devices, "timestamp": asyncio.get_event_loop().time()}
 
 class SetupAssistRequest(BaseModel):
     device_metadata: Dict[str, Any] = Field(default_factory=dict)

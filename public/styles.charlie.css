@@ -1,3 +1,94 @@
+/* IoT Scan Progress Bar */
+#iotScanBarContainer {
+  width: 100%;
+  margin-bottom: 8px;
+}
+#iotScanBar {
+  width: 100%;
+  height: 22px;
+  background: #e0e7ef;
+  border-radius: 12px;
+  overflow: hidden;
+  box-shadow: 0 1px 4px #0001;
+  position: relative;
+}
+#iotScanBarFill {
+  height: 100%;
+  width: 0%;
+  background: linear-gradient(90deg, #60a5fa, #34d399);
+  border-radius: 12px;
+  transition: width 0.2s cubic-bezier(.4,2,.6,1);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  position: relative;
+}
+#iotScanBarPercent {
+  position: absolute;
+  width: 100%;
+  text-align: center;
+  font-weight: bold;
+  color: #222;
+  letter-spacing: 0.5px;
+  font-size: 1em;
+  pointer-events: none;
+}
+/* Device Pair Modal (mirrors room/farm modal) */
+.device-pair-modal {
+  position: fixed;
+  inset: 0;
+  z-index: 50;
+  display: none;
+  align-items: center;
+  justify-content: center;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 0.3s ease;
+}
+.device-pair-modal[aria-hidden="false"] {
+  display: flex;
+  opacity: 1;
+  pointer-events: all;
+}
+.device-pair-modal__backdrop {
+  position: absolute;
+  inset: 0;
+  background: rgb(0 0 0 / .5);
+}
+.device-pair-modal__dialog {
+  position: relative;
+  background: var(--gr-surface, #FFFFFF);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow-lg);
+  max-width: 600px;
+  width: 90vw;
+  max-height: 90vh;
+  padding: 24px;
+  pointer-events: auto;
+  z-index: 51;
+}
+.device-pair-modal__close {
+  background: none;
+  border: none;
+  font-size: 24px;
+  color: var(--medium);
+  cursor: pointer;
+  padding: 4px;
+  border-radius: 4px;
+}
+.device-pair-modal__close:hover {
+  background: var(--gr-bg, #F3F4F6);
+}
+.device-pair-modal__footer {
+  border-top: 1px solid var(--gr-border, #E5E7EB);
+  padding-top: 16px;
+  margin-top: 24px;
+  position: relative;
+  z-index: 10;
+  pointer-events: auto;
+}
+.pair-step { display: none; }
+.pair-step[data-active] { display: block; }
 /* Light Engine Charlie - Comprehensive UI Styles */
 :root {
   /* Branding tokens (applied dynamically) */

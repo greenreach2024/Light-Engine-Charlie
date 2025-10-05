@@ -1,0 +1,494 @@
+INFO:     Will watch for changes in these directories: ['/Users/petergilbert/Desktop/GreenReach/Light-Engine-Charlie']
+INFO:     Uvicorn running on http://0.0.0.0:8000 (Press CTRL+C to quit)
+INFO:     Started reloader process [7008] using StatReload
+/Users/petergilbert/Library/Python/3.9/lib/python/site-packages/urllib3/__init__.py:35: NotOpenSSLWarning: urllib3 v2 only supports OpenSSL 1.1.1+, currently the 'ssl' module is compiled with 'LibreSSL 2.8.3'. See: https://github.com/urllib3/urllib3/issues/3020
+  warnings.warn(
+2025-10-05 11:35:16,576 [INFO] backend.config: Loading configuration for environment: production
+2025-10-05 11:35:16,578 [INFO] backend.config: Loading configuration for environment: production
+2025-10-05 11:35:16,579 [INFO] backend.config: Loading configuration for environment: production
+INFO:     Started server process [7074]
+INFO:     Waiting for application startup.
+2025-10-05 11:35:16,588 [INFO] backend.automation: Starting automation engine
+2025-10-05 11:35:16,588 [INFO] backend.server: Starting discovery loop with interval 300
+2025-10-05 11:35:17,116 [INFO] backend.device_discovery: Discovered mDNS service Smart Bridge 2 (_hap._tcp.local.)
+2025-10-05 11:35:17,150 [INFO] backend.device_discovery: Discovered mDNS service Family Room TV (_airplay._tcp.local.)
+2025-10-05 11:35:17,169 [INFO] backend.device_discovery: Discovered mDNS service Apple TV (_airplay._tcp.local.)
+2025-10-05 11:35:17,214 [INFO] backend.device_discovery: Discovered mDNS service My ecobee (_hap._tcp.local.)
+2025-10-05 11:35:17,275 [INFO] backend.device_discovery: Discovered mDNS service Officejet Pro 8600 [50B982] (_http._tcp.local.)
+2025-10-05 11:35:17,275 [INFO] backend.device_discovery: Discovered mDNS service Officejet Pro 8600 [50B982] (_http._tcp.local.)
+2025-10-05 11:35:17,357 [INFO] backend.device_discovery: Discovered mDNS service GreenReach Farms (_airplay._tcp.local.)
+2025-10-05 11:35:17,357 [INFO] backend.device_discovery: Discovered mDNS service GreenReach Farms (_airplay._tcp.local.)
+2025-10-05 11:35:17,376 [INFO] backend.device_discovery: Discovered mDNS service Officejet Pro 8600 [50B982] (_ipp._tcp.local.)
+2025-10-05 11:35:17,376 [INFO] backend.device_discovery: Discovered mDNS service Officejet Pro 8600 [50B982] (_ipp._tcp.local.)
+2025-10-05 11:35:17,378 [INFO] backend.device_discovery: Discovered mDNS service Brother MFC-L8900CDW series (_http._tcp.local.)
+2025-10-05 11:35:17,378 [INFO] backend.device_discovery: Discovered mDNS service Brother MFC-L8900CDW series (_ipp._tcp.local.)
+2025-10-05 11:35:17,378 [INFO] backend.device_discovery: Discovered mDNS service Brother MFC-L8900CDW series (_http._tcp.local.)
+2025-10-05 11:35:17,378 [INFO] backend.device_discovery: Discovered mDNS service Brother MFC-L8900CDW series (_ipp._tcp.local.)
+2025-10-05 11:35:18,195 [INFO] backend.device_discovery: Discovered mDNS service Smart Bridge 2 (_hap._tcp.local.)
+2025-10-05 11:35:18,197 [INFO] backend.device_discovery: Discovered mDNS service Family Room TV (_airplay._tcp.local.)
+2025-10-05 11:35:18,297 [INFO] backend.device_discovery: Discovered mDNS service My ecobee (_hap._tcp.local.)
+2025-10-05 11:35:18,298 [INFO] backend.device_discovery: Discovered mDNS service Apple TV (_airplay._tcp.local.)
+2025-10-05 11:35:21,592 [WARNING] zeroconf: unregister_all_services skipped as it does blocking i/o; use AsyncZeroconf with asyncio
+2025-10-05 11:35:21,827 [WARNING] zeroconf: unregister_all_services skipped as it does blocking i/o; use AsyncZeroconf with asyncio
+2025-10-05 11:35:24,826 [INFO] backend.device_discovery: Discovered BLE device [TV] Samsung AU8000 55 TV (A1FD6113-F675-AC8E-2173-617D787994F7)
+2025-10-05 11:35:24,827 [INFO] backend.device_discovery: Discovered BLE device BLE Device CA702CD2 (00D70BFB-B057-DC31-3C36-94F9CA702CD2)
+INFO:     Application startup complete.
+2025-10-05 11:35:24,864 [INFO] backend.device_discovery: Discovered BLE device [TV] Samsung AU8000 55 TV (A1FD6113-F675-AC8E-2173-617D787994F7)
+2025-10-05 11:35:24,864 [INFO] backend.device_discovery: Discovered BLE device BLE Device CA702CD2 (00D70BFB-B057-DC31-3C36-94F9CA702CD2)
+2025-10-05 11:40:25,073 [INFO] backend.device_discovery: Discovered mDNS service Family Room TV (_airplay._tcp.local.)
+2025-10-05 11:40:25,103 [INFO] backend.device_discovery: Discovered mDNS service My ecobee (_hap._tcp.local.)
+2025-10-05 11:40:25,103 [INFO] backend.device_discovery: Discovered mDNS service Smart Bridge 2 (_hap._tcp.local.)
+2025-10-05 11:40:25,230 [INFO] backend.device_discovery: Discovered mDNS service GreenReach Farms (_airplay._tcp.local.)
+2025-10-05 11:40:25,230 [INFO] backend.device_discovery: Discovered mDNS service Apple TV (_airplay._tcp.local.)
+2025-10-05 11:40:25,271 [INFO] backend.device_discovery: Discovered mDNS service Officejet Pro 8600 [50B982] (_http._tcp.local.)
+2025-10-05 11:40:25,271 [INFO] backend.device_discovery: Discovered mDNS service Officejet Pro 8600 [50B982] (_ipp._tcp.local.)
+2025-10-05 11:40:25,280 [INFO] backend.device_discovery: Discovered mDNS service Brother MFC-L8900CDW series (_http._tcp.local.)
+2025-10-05 11:40:25,280 [INFO] backend.device_discovery: Discovered mDNS service Brother MFC-L8900CDW series (_ipp._tcp.local.)
+2025-10-05 11:40:25,735 [INFO] backend.device_discovery: Discovered mDNS service Peter’s MacBook Air (_airplay._tcp.local.)
+Exception in thread zeroconf-ServiceBrowser-_airplay._tcp-96817:
+Traceback (most recent call last):
+  File "/Library/Developer/CommandLineTools/Library/Frameworks/Python3.framework/Versions/3.9/lib/python3.9/threading.py", line 973, in _bootstrap_inner
+    self.run()
+  File "src/zeroconf/_services/browser.py", line 805, in zeroconf._services.browser.ServiceBrowser.run
+  File "src/zeroconf/_services/browser.py", line 724, in zeroconf._services.browser._ServiceBrowserBase._fire_service_state_changed_event
+  File "src/zeroconf/_services/browser.py", line 734, in zeroconf._services.browser._ServiceBrowserBase._fire_service_state_changed_event
+  File "src/zeroconf/_services/__init__.py", line 58, in zeroconf._services.Signal.fire
+  File "src/zeroconf/_services/browser.py", line 300, in zeroconf._services.browser._on_change_dispatcher
+  File "src/zeroconf/_services/__init__.py", line 44, in zeroconf._services.ServiceListener.remove_service
+NotImplementedError
+2025-10-05 11:40:29,871 [WARNING] zeroconf: unregister_all_services skipped as it does blocking i/o; use AsyncZeroconf with asyncio
+2025-10-05 11:40:32,916 [INFO] backend.device_discovery: Discovered BLE device BLE Device CA702CD2 (00D70BFB-B057-DC31-3C36-94F9CA702CD2)
+2025-10-05 11:40:32,916 [INFO] backend.device_discovery: Discovered BLE device [TV] Samsung AU8000 55 TV (A1FD6113-F675-AC8E-2173-617D787994F7)
+2025-10-05 11:40:32,916 [INFO] backend.device_discovery: Discovered BLE device ALAM (78:FD:AE) (437AE3FF-D660-6511-AE60-745C085E7B9F)
+2025-10-05 11:45:33,105 [INFO] backend.device_discovery: Discovered mDNS service Family Room TV (_airplay._tcp.local.)
+2025-10-05 11:45:33,152 [INFO] backend.device_discovery: Discovered mDNS service Smart Bridge 2 (_hap._tcp.local.)
+2025-10-05 11:45:33,270 [INFO] backend.device_discovery: Discovered mDNS service Officejet Pro 8600 [50B982] (_ipp._tcp.local.)
+2025-10-05 11:45:33,271 [INFO] backend.device_discovery: Discovered mDNS service My ecobee (_hap._tcp.local.)
+2025-10-05 11:45:33,349 [INFO] backend.device_discovery: Discovered mDNS service Officejet Pro 8600 [50B982] (_http._tcp.local.)
+2025-10-05 11:45:33,350 [INFO] backend.device_discovery: Discovered mDNS service GreenReach Farms (_airplay._tcp.local.)
+2025-10-05 11:45:33,350 [INFO] backend.device_discovery: Discovered mDNS service Apple TV (_airplay._tcp.local.)
+2025-10-05 11:45:37,922 [WARNING] zeroconf: unregister_all_services skipped as it does blocking i/o; use AsyncZeroconf with asyncio
+2025-10-05 11:45:40,954 [INFO] backend.device_discovery: Discovered BLE device [TV] Samsung AU8000 55 TV (A1FD6113-F675-AC8E-2173-617D787994F7)
+2025-10-05 11:45:40,954 [INFO] backend.device_discovery: Discovered BLE device BLE Device CA702CD2 (00D70BFB-B057-DC31-3C36-94F9CA702CD2)
+2025-10-05 11:50:41,164 [INFO] backend.device_discovery: Discovered mDNS service Smart Bridge 2 (_hap._tcp.local.)
+2025-10-05 11:50:41,179 [INFO] backend.device_discovery: Discovered mDNS service Family Room TV (_airplay._tcp.local.)
+2025-10-05 11:50:41,186 [INFO] backend.device_discovery: Discovered mDNS service Apple TV (_airplay._tcp.local.)
+2025-10-05 11:50:41,186 [INFO] backend.device_discovery: Discovered mDNS service My ecobee (_hap._tcp.local.)
+2025-10-05 11:50:41,194 [INFO] backend.device_discovery: Discovered mDNS service Officejet Pro 8600 [50B982] (_ipp._tcp.local.)
+2025-10-05 11:50:41,228 [INFO] backend.device_discovery: Discovered mDNS service Brother MFC-L8900CDW series (_ipp._tcp.local.)
+2025-10-05 11:50:41,290 [INFO] backend.device_discovery: Discovered mDNS service Officejet Pro 8600 [50B982] (_http._tcp.local.)
+2025-10-05 11:50:41,325 [INFO] backend.device_discovery: Discovered mDNS service Brother MFC-L8900CDW series (_http._tcp.local.)
+2025-10-05 11:50:41,393 [INFO] backend.device_discovery: Discovered mDNS service GreenReach Farms (_airplay._tcp.local.)
+2025-10-05 11:50:45,965 [WARNING] zeroconf: unregister_all_services skipped as it does blocking i/o; use AsyncZeroconf with asyncio
+2025-10-05 11:50:48,998 [INFO] backend.device_discovery: Discovered BLE device ALAM (78:FD:AE) (437AE3FF-D660-6511-AE60-745C085E7B9F)
+2025-10-05 11:50:48,998 [INFO] backend.device_discovery: Discovered BLE device [TV] Samsung AU8000 55 TV (A1FD6113-F675-AC8E-2173-617D787994F7)
+2025-10-05 11:50:48,998 [INFO] backend.device_discovery: Discovered BLE device BLE Device CA702CD2 (00D70BFB-B057-DC31-3C36-94F9CA702CD2)
+2025-10-05 11:55:49,208 [INFO] backend.device_discovery: Discovered mDNS service My ecobee (_hap._tcp.local.)
+2025-10-05 11:55:49,243 [INFO] backend.device_discovery: Discovered mDNS service Smart Bridge 2 (_hap._tcp.local.)
+2025-10-05 11:55:49,308 [INFO] backend.device_discovery: Discovered mDNS service GreenReach Farms (_airplay._tcp.local.)
+2025-10-05 11:55:49,308 [INFO] backend.device_discovery: Discovered mDNS service Family Room TV (_airplay._tcp.local.)
+2025-10-05 11:55:49,309 [INFO] backend.device_discovery: Discovered mDNS service Apple TV (_airplay._tcp.local.)
+2025-10-05 11:55:49,440 [INFO] backend.device_discovery: Discovered mDNS service Brother MFC-L8900CDW series (_http._tcp.local.)
+2025-10-05 11:55:49,443 [INFO] backend.device_discovery: Discovered mDNS service Officejet Pro 8600 [50B982] (_http._tcp.local.)
+2025-10-05 11:55:49,634 [INFO] backend.device_discovery: Discovered mDNS service Brother MFC-L8900CDW series (_ipp._tcp.local.)
+2025-10-05 11:55:49,635 [INFO] backend.device_discovery: Discovered mDNS service Officejet Pro 8600 [50B982] (_ipp._tcp.local.)
+2025-10-05 11:55:54,007 [WARNING] zeroconf: unregister_all_services skipped as it does blocking i/o; use AsyncZeroconf with asyncio
+2025-10-05 11:55:57,045 [INFO] backend.device_discovery: Discovered BLE device BLE Device CA702CD2 (00D70BFB-B057-DC31-3C36-94F9CA702CD2)
+2025-10-05 11:55:57,046 [INFO] backend.device_discovery: Discovered BLE device [TV] Samsung AU8000 55 TV (A1FD6113-F675-AC8E-2173-617D787994F7)
+2025-10-05 11:55:57,046 [INFO] backend.device_discovery: Discovered BLE device ALAM (78:FD:AE) (437AE3FF-D660-6511-AE60-745C085E7B9F)
+2025-10-05 12:00:57,240 [INFO] backend.device_discovery: Discovered mDNS service Smart Bridge 2 (_hap._tcp.local.)
+2025-10-05 12:00:57,244 [INFO] backend.device_discovery: Discovered mDNS service Apple TV (_airplay._tcp.local.)
+2025-10-05 12:00:57,251 [INFO] backend.device_discovery: Discovered mDNS service Family Room TV (_airplay._tcp.local.)
+2025-10-05 12:00:57,267 [INFO] backend.device_discovery: Discovered mDNS service My ecobee (_hap._tcp.local.)
+2025-10-05 12:00:57,302 [INFO] backend.device_discovery: Discovered mDNS service Brother MFC-L8900CDW series (_http._tcp.local.)
+2025-10-05 12:00:57,363 [INFO] backend.device_discovery: Discovered mDNS service Officejet Pro 8600 [50B982] (_http._tcp.local.)
+2025-10-05 12:00:57,403 [INFO] backend.device_discovery: Discovered mDNS service GreenReach Farms (_airplay._tcp.local.)
+2025-10-05 12:00:57,434 [INFO] backend.device_discovery: Discovered mDNS service Officejet Pro 8600 [50B982] (_ipp._tcp.local.)
+2025-10-05 12:00:57,455 [INFO] backend.device_discovery: Discovered mDNS service Brother MFC-L8900CDW series (_ipp._tcp.local.)
+2025-10-05 12:01:02,055 [WARNING] zeroconf: unregister_all_services skipped as it does blocking i/o; use AsyncZeroconf with asyncio
+2025-10-05 12:01:05,105 [INFO] backend.device_discovery: Discovered BLE device BLE Device CA702CD2 (00D70BFB-B057-DC31-3C36-94F9CA702CD2)
+2025-10-05 12:01:05,105 [INFO] backend.device_discovery: Discovered BLE device [TV] Samsung AU8000 55 TV (A1FD6113-F675-AC8E-2173-617D787994F7)
+2025-10-05 12:06:05,304 [INFO] backend.device_discovery: Discovered mDNS service Smart Bridge 2 (_hap._tcp.local.)
+2025-10-05 12:06:05,305 [INFO] backend.device_discovery: Discovered mDNS service Family Room TV (_airplay._tcp.local.)
+2025-10-05 12:06:05,385 [INFO] backend.device_discovery: Discovered mDNS service My ecobee (_hap._tcp.local.)
+2025-10-05 12:06:05,408 [INFO] backend.device_discovery: Discovered mDNS service Officejet Pro 8600 [50B982] (_ipp._tcp.local.)
+2025-10-05 12:06:05,486 [INFO] backend.device_discovery: Discovered mDNS service GreenReach Farms (_airplay._tcp.local.)
+2025-10-05 12:06:05,561 [INFO] backend.device_discovery: Discovered mDNS service Apple TV (_airplay._tcp.local.)
+2025-10-05 12:06:05,623 [INFO] backend.device_discovery: Discovered mDNS service Officejet Pro 8600 [50B982] (_http._tcp.local.)
+2025-10-05 12:06:05,730 [INFO] backend.device_discovery: Discovered mDNS service Brother MFC-L8900CDW series (_http._tcp.local.)
+2025-10-05 12:06:05,730 [INFO] backend.device_discovery: Discovered mDNS service Brother MFC-L8900CDW series (_ipp._tcp.local.)
+2025-10-05 12:06:10,114 [WARNING] zeroconf: unregister_all_services skipped as it does blocking i/o; use AsyncZeroconf with asyncio
+2025-10-05 12:06:13,157 [INFO] backend.device_discovery: Discovered BLE device [TV] Samsung AU8000 55 TV (A1FD6113-F675-AC8E-2173-617D787994F7)
+2025-10-05 12:06:13,157 [INFO] backend.device_discovery: Discovered BLE device BLE Device CA702CD2 (00D70BFB-B057-DC31-3C36-94F9CA702CD2)
+2025-10-05 12:06:13,157 [INFO] backend.device_discovery: Discovered BLE device ALAM (78:FD:AE) (437AE3FF-D660-6511-AE60-745C085E7B9F)
+2025-10-05 12:11:13,408 [INFO] backend.device_discovery: Discovered mDNS service My ecobee (_hap._tcp.local.)
+2025-10-05 12:11:13,420 [INFO] backend.device_discovery: Discovered mDNS service Smart Bridge 2 (_hap._tcp.local.)
+2025-10-05 12:11:13,420 [INFO] backend.device_discovery: Discovered mDNS service Family Room TV (_airplay._tcp.local.)
+2025-10-05 12:11:13,514 [INFO] backend.device_discovery: Discovered mDNS service Officejet Pro 8600 [50B982] (_http._tcp.local.)
+2025-10-05 12:11:13,642 [INFO] backend.device_discovery: Discovered mDNS service Officejet Pro 8600 [50B982] (_ipp._tcp.local.)
+2025-10-05 12:11:13,676 [INFO] backend.device_discovery: Discovered mDNS service GreenReach Farms (_airplay._tcp.local.)
+2025-10-05 12:11:13,676 [INFO] backend.device_discovery: Discovered mDNS service Apple TV (_airplay._tcp.local.)
+2025-10-05 12:11:13,718 [INFO] backend.device_discovery: Discovered mDNS service Brother MFC-L8900CDW series (_ipp._tcp.local.)
+2025-10-05 12:11:13,718 [INFO] backend.device_discovery: Discovered mDNS service Brother MFC-L8900CDW series (_http._tcp.local.)
+2025-10-05 12:11:18,194 [WARNING] zeroconf: unregister_all_services skipped as it does blocking i/o; use AsyncZeroconf with asyncio
+2025-10-05 12:11:21,248 [INFO] backend.device_discovery: Discovered BLE device BLE Device CA702CD2 (00D70BFB-B057-DC31-3C36-94F9CA702CD2)
+2025-10-05 12:11:21,248 [INFO] backend.device_discovery: Discovered BLE device [TV] Samsung AU8000 55 TV (A1FD6113-F675-AC8E-2173-617D787994F7)
+2025-10-05 12:16:21,446 [INFO] backend.device_discovery: Discovered mDNS service Officejet Pro 8600 [50B982] (_ipp._tcp.local.)
+2025-10-05 12:16:21,460 [INFO] backend.device_discovery: Discovered mDNS service Family Room TV (_airplay._tcp.local.)
+2025-10-05 12:16:21,460 [INFO] backend.device_discovery: Discovered mDNS service Smart Bridge 2 (_hap._tcp.local.)
+2025-10-05 12:16:21,482 [INFO] backend.device_discovery: Discovered mDNS service My ecobee (_hap._tcp.local.)
+2025-10-05 12:16:21,671 [INFO] backend.device_discovery: Discovered mDNS service GreenReach Farms (_airplay._tcp.local.)
+2025-10-05 12:16:21,728 [INFO] backend.device_discovery: Discovered mDNS service Apple TV (_airplay._tcp.local.)
+2025-10-05 12:16:21,844 [INFO] backend.device_discovery: Discovered mDNS service Officejet Pro 8600 [50B982] (_http._tcp.local.)
+2025-10-05 12:16:21,907 [INFO] backend.device_discovery: Discovered mDNS service Brother MFC-L8900CDW series (_ipp._tcp.local.)
+2025-10-05 12:16:21,907 [INFO] backend.device_discovery: Discovered mDNS service Brother MFC-L8900CDW series (_http._tcp.local.)
+2025-10-05 12:16:26,258 [WARNING] zeroconf: unregister_all_services skipped as it does blocking i/o; use AsyncZeroconf with asyncio
+2025-10-05 12:16:29,306 [INFO] backend.device_discovery: Discovered BLE device [TV] Samsung AU8000 55 TV (A1FD6113-F675-AC8E-2173-617D787994F7)
+2025-10-05 12:16:29,306 [INFO] backend.device_discovery: Discovered BLE device BLE Device CA702CD2 (00D70BFB-B057-DC31-3C36-94F9CA702CD2)
+WARNING:  StatReload detected changes in 'backend/server.py'. Reloading...
+INFO:     Shutting down
+INFO:     Waiting for application shutdown.
+2025-10-05 12:54:01,912 [INFO] backend.automation: Stopping automation engine
+INFO:     Application shutdown complete.
+INFO:     Finished server process [7074]
+/Users/petergilbert/Library/Python/3.9/lib/python/site-packages/urllib3/__init__.py:35: NotOpenSSLWarning: urllib3 v2 only supports OpenSSL 1.1.1+, currently the 'ssl' module is compiled with 'LibreSSL 2.8.3'. See: https://github.com/urllib3/urllib3/issues/3020
+  warnings.warn(
+2025-10-05 12:54:02,414 [INFO] backend.config: Loading configuration for environment: production
+2025-10-05 12:54:02,416 [INFO] backend.config: Loading configuration for environment: production
+2025-10-05 12:54:02,417 [INFO] backend.config: Loading configuration for environment: production
+INFO:     Started server process [8195]
+INFO:     Waiting for application startup.
+2025-10-05 12:54:02,425 [INFO] backend.automation: Starting automation engine
+2025-10-05 12:54:02,425 [INFO] backend.server: Starting discovery loop with interval 300
+2025-10-05 12:54:02,802 [INFO] backend.device_discovery: Discovered mDNS service Smart Bridge 2 (_hap._tcp.local.)
+2025-10-05 12:54:02,808 [INFO] backend.device_discovery: Discovered mDNS service My ecobee (_hap._tcp.local.)
+2025-10-05 12:54:02,826 [INFO] backend.device_discovery: Discovered mDNS service Family Room TV (_airplay._tcp.local.)
+2025-10-05 12:54:02,966 [INFO] backend.device_discovery: Discovered mDNS service GreenReach Farms (_airplay._tcp.local.)
+2025-10-05 12:54:02,966 [INFO] backend.device_discovery: Discovered mDNS service GreenReach Farms (_airplay._tcp.local.)
+2025-10-05 12:54:03,030 [INFO] backend.device_discovery: Discovered mDNS service Apple TV (_airplay._tcp.local.)
+2025-10-05 12:54:03,499 [INFO] backend.device_discovery: Discovered mDNS service Brother MFC-L8900CDW series (_ipp._tcp.local.)
+2025-10-05 12:54:03,511 [INFO] backend.device_discovery: Discovered mDNS service Officejet Pro 8600 [50B982] (_ipp._tcp.local.)
+2025-10-05 12:54:03,511 [INFO] backend.device_discovery: Discovered mDNS service Officejet Pro 8600 [50B982] (_ipp._tcp.local.)
+2025-10-05 12:54:03,581 [INFO] backend.device_discovery: Discovered mDNS service Apple TV (_airplay._tcp.local.)
+2025-10-05 12:54:03,816 [INFO] backend.device_discovery: Discovered mDNS service Officejet Pro 8600 [50B982] (_http._tcp.local.)
+2025-10-05 12:54:03,816 [INFO] backend.device_discovery: Discovered mDNS service Officejet Pro 8600 [50B982] (_http._tcp.local.)
+2025-10-05 12:54:03,918 [INFO] backend.device_discovery: Discovered mDNS service Brother MFC-L8900CDW series (_http._tcp.local.)
+2025-10-05 12:54:03,918 [INFO] backend.device_discovery: Discovered mDNS service Brother MFC-L8900CDW series (_http._tcp.local.)
+2025-10-05 12:54:03,918 [INFO] backend.device_discovery: Discovered mDNS service Smart Bridge 2 (_hap._tcp.local.)
+2025-10-05 12:54:03,919 [INFO] backend.device_discovery: Discovered mDNS service My ecobee (_hap._tcp.local.)
+2025-10-05 12:54:04,329 [INFO] backend.device_discovery: Discovered mDNS service Brother MFC-L8900CDW series (_ipp._tcp.local.)
+2025-10-05 12:54:07,428 [WARNING] zeroconf: unregister_all_services skipped as it does blocking i/o; use AsyncZeroconf with asyncio
+2025-10-05 12:54:07,515 [WARNING] zeroconf: unregister_all_services skipped as it does blocking i/o; use AsyncZeroconf with asyncio
+2025-10-05 12:54:10,514 [INFO] backend.device_discovery: Discovered BLE device BLE Device CA702CD2 (00D70BFB-B057-DC31-3C36-94F9CA702CD2)
+2025-10-05 12:54:10,514 [INFO] backend.device_discovery: Discovered BLE device [TV] Samsung AU8000 55 TV (A1FD6113-F675-AC8E-2173-617D787994F7)
+2025-10-05 12:54:10,514 [INFO] backend.device_discovery: Discovered BLE device ALAM (78:FD:AE) (437AE3FF-D660-6511-AE60-745C085E7B9F)
+INFO:     Application startup complete.
+2025-10-05 12:54:10,550 [INFO] backend.device_discovery: Discovered BLE device BLE Device CA702CD2 (00D70BFB-B057-DC31-3C36-94F9CA702CD2)
+2025-10-05 12:54:10,551 [INFO] backend.device_discovery: Discovered BLE device [TV] Samsung AU8000 55 TV (A1FD6113-F675-AC8E-2173-617D787994F7)
+2025-10-05 12:54:10,551 [INFO] backend.device_discovery: Discovered BLE device ALAM (78:FD:AE) (437AE3FF-D660-6511-AE60-745C085E7B9F)
+2025-10-05 12:59:10,742 [INFO] backend.device_discovery: Discovered mDNS service Smart Bridge 2 (_hap._tcp.local.)
+2025-10-05 12:59:10,751 [INFO] backend.device_discovery: Discovered mDNS service Family Room TV (_airplay._tcp.local.)
+2025-10-05 12:59:10,810 [INFO] backend.device_discovery: Discovered mDNS service Brother MFC-L8900CDW series (_ipp._tcp.local.)
+2025-10-05 12:59:10,878 [INFO] backend.device_discovery: Discovered mDNS service My ecobee (_hap._tcp.local.)
+2025-10-05 12:59:10,881 [INFO] backend.device_discovery: Discovered mDNS service Officejet Pro 8600 [50B982] (_ipp._tcp.local.)
+2025-10-05 12:59:10,907 [INFO] backend.device_discovery: Discovered mDNS service GreenReach Farms (_airplay._tcp.local.)
+2025-10-05 12:59:10,929 [INFO] backend.device_discovery: Discovered mDNS service Apple TV (_airplay._tcp.local.)
+2025-10-05 12:59:10,957 [INFO] backend.device_discovery: Discovered mDNS service Brother MFC-L8900CDW series (_http._tcp.local.)
+2025-10-05 12:59:10,979 [INFO] backend.device_discovery: Discovered mDNS service Officejet Pro 8600 [50B982] (_http._tcp.local.)
+2025-10-05 12:59:15,557 [WARNING] zeroconf: unregister_all_services skipped as it does blocking i/o; use AsyncZeroconf with asyncio
+2025-10-05 12:59:18,590 [INFO] backend.device_discovery: Discovered BLE device [TV] Samsung AU8000 55 TV (A1FD6113-F675-AC8E-2173-617D787994F7)
+2025-10-05 12:59:18,590 [INFO] backend.device_discovery: Discovered BLE device BLE Device CA702CD2 (00D70BFB-B057-DC31-3C36-94F9CA702CD2)
+2025-10-05 13:04:18,729 [INFO] backend.device_discovery: Discovered mDNS service Family Room TV (_airplay._tcp.local.)
+2025-10-05 13:04:18,788 [INFO] backend.device_discovery: Discovered mDNS service My ecobee (_hap._tcp.local.)
+2025-10-05 13:04:18,827 [INFO] backend.device_discovery: Discovered mDNS service Apple TV (_airplay._tcp.local.)
+2025-10-05 13:04:18,834 [INFO] backend.device_discovery: Discovered mDNS service Smart Bridge 2 (_hap._tcp.local.)
+2025-10-05 13:04:18,932 [INFO] backend.device_discovery: Discovered mDNS service GreenReach Farms (_airplay._tcp.local.)
+2025-10-05 13:04:18,987 [INFO] backend.device_discovery: Discovered mDNS service Officejet Pro 8600 [50B982] (_http._tcp.local.)
+2025-10-05 13:04:18,987 [INFO] backend.device_discovery: Discovered mDNS service Officejet Pro 8600 [50B982] (_ipp._tcp.local.)
+2025-10-05 13:04:19,099 [INFO] backend.device_discovery: Discovered mDNS service Brother MFC-L8900CDW series (_http._tcp.local.)
+2025-10-05 13:04:19,099 [INFO] backend.device_discovery: Discovered mDNS service Brother MFC-L8900CDW series (_ipp._tcp.local.)
+2025-10-05 13:04:23,598 [WARNING] zeroconf: unregister_all_services skipped as it does blocking i/o; use AsyncZeroconf with asyncio
+2025-10-05 13:04:26,638 [INFO] backend.device_discovery: Discovered BLE device BLE Device CA702CD2 (00D70BFB-B057-DC31-3C36-94F9CA702CD2)
+2025-10-05 13:04:26,639 [INFO] backend.device_discovery: Discovered BLE device [TV] Samsung AU8000 55 TV (A1FD6113-F675-AC8E-2173-617D787994F7)
+2025-10-05 13:09:26,838 [INFO] backend.device_discovery: Discovered mDNS service Family Room TV (_airplay._tcp.local.)
+2025-10-05 13:09:26,840 [INFO] backend.device_discovery: Discovered mDNS service My ecobee (_hap._tcp.local.)
+2025-10-05 13:09:26,862 [INFO] backend.device_discovery: Discovered mDNS service Apple TV (_airplay._tcp.local.)
+2025-10-05 13:09:26,862 [INFO] backend.device_discovery: Discovered mDNS service Smart Bridge 2 (_hap._tcp.local.)
+2025-10-05 13:09:26,874 [INFO] backend.device_discovery: Discovered mDNS service Officejet Pro 8600 [50B982] (_ipp._tcp.local.)
+2025-10-05 13:09:26,932 [INFO] backend.device_discovery: Discovered mDNS service Brother MFC-L8900CDW series (_ipp._tcp.local.)
+2025-10-05 13:09:27,033 [INFO] backend.device_discovery: Discovered mDNS service GreenReach Farms (_airplay._tcp.local.)
+2025-10-05 13:09:27,213 [INFO] backend.device_discovery: Discovered mDNS service Brother MFC-L8900CDW series (_http._tcp.local.)
+2025-10-05 13:09:27,221 [INFO] backend.device_discovery: Discovered mDNS service Officejet Pro 8600 [50B982] (_http._tcp.local.)
+2025-10-05 13:09:31,647 [WARNING] zeroconf: unregister_all_services skipped as it does blocking i/o; use AsyncZeroconf with asyncio
+2025-10-05 13:09:34,684 [INFO] backend.device_discovery: Discovered BLE device BLE Device 17E1ECF9 (8948A79A-A456-403B-8345-9D7B17E1ECF9)
+2025-10-05 13:09:34,684 [INFO] backend.device_discovery: Discovered BLE device [TV] Samsung AU8000 55 TV (A1FD6113-F675-AC8E-2173-617D787994F7)
+2025-10-05 13:09:34,684 [INFO] backend.device_discovery: Discovered BLE device BLE Device CA702CD2 (00D70BFB-B057-DC31-3C36-94F9CA702CD2)
+2025-10-05 13:14:34,862 [INFO] backend.device_discovery: Discovered mDNS service Family Room TV (_airplay._tcp.local.)
+2025-10-05 13:14:34,886 [INFO] backend.device_discovery: Discovered mDNS service My ecobee (_hap._tcp.local.)
+2025-10-05 13:14:34,890 [INFO] backend.device_discovery: Discovered mDNS service Smart Bridge 2 (_hap._tcp.local.)
+2025-10-05 13:14:34,925 [INFO] backend.device_discovery: Discovered mDNS service Officejet Pro 8600 [50B982] (_ipp._tcp.local.)
+2025-10-05 13:14:35,027 [INFO] backend.device_discovery: Discovered mDNS service Officejet Pro 8600 [50B982] (_http._tcp.local.)
+2025-10-05 13:14:35,050 [INFO] backend.device_discovery: Discovered mDNS service GreenReach Farms (_airplay._tcp.local.)
+2025-10-05 13:14:35,232 [INFO] backend.device_discovery: Discovered mDNS service Brother MFC-L8900CDW series (_ipp._tcp.local.)
+2025-10-05 13:14:35,232 [INFO] backend.device_discovery: Discovered mDNS service Brother MFC-L8900CDW series (_http._tcp.local.)
+2025-10-05 13:14:39,685 [WARNING] zeroconf: unregister_all_services skipped as it does blocking i/o; use AsyncZeroconf with asyncio
+2025-10-05 13:14:42,723 [INFO] backend.device_discovery: Discovered BLE device Family Room Display (742EC9E9-1B17-32EE-9090-24EF16A0A468)
+2025-10-05 13:14:42,724 [INFO] backend.device_discovery: Discovered BLE device [TV] Samsung AU8000 55 TV (A1FD6113-F675-AC8E-2173-617D787994F7)
+2025-10-05 13:14:42,724 [INFO] backend.device_discovery: Discovered BLE device BLE Device CA702CD2 (00D70BFB-B057-DC31-3C36-94F9CA702CD2)
+2025-10-05 13:14:42,724 [INFO] backend.device_discovery: Discovered BLE device ALAM (78:FD:AE) (437AE3FF-D660-6511-AE60-745C085E7B9F)
+2025-10-05 13:19:42,878 [INFO] backend.device_discovery: Discovered mDNS service Family Room TV (_airplay._tcp.local.)
+2025-10-05 13:19:42,933 [INFO] backend.device_discovery: Discovered mDNS service My ecobee (_hap._tcp.local.)
+2025-10-05 13:19:42,944 [INFO] backend.device_discovery: Discovered mDNS service Smart Bridge 2 (_hap._tcp.local.)
+2025-10-05 13:19:43,097 [INFO] backend.device_discovery: Discovered mDNS service Officejet Pro 8600 [50B982] (_ipp._tcp.local.)
+2025-10-05 13:19:43,097 [INFO] backend.device_discovery: Discovered mDNS service GreenReach Farms (_airplay._tcp.local.)
+2025-10-05 13:19:43,288 [INFO] backend.device_discovery: Discovered mDNS service Officejet Pro 8600 [50B982] (_http._tcp.local.)
+2025-10-05 13:19:43,375 [INFO] backend.device_discovery: Discovered mDNS service Brother MFC-L8900CDW series (_http._tcp.local.)
+2025-10-05 13:19:43,995 [INFO] backend.device_discovery: Discovered mDNS service Brother MFC-L8900CDW series (_ipp._tcp.local.)
+2025-10-05 13:19:43,998 [INFO] backend.device_discovery: Discovered mDNS service Apple TV (_airplay._tcp.local.)
+2025-10-05 13:19:47,733 [WARNING] zeroconf: unregister_all_services skipped as it does blocking i/o; use AsyncZeroconf with asyncio
+2025-10-05 13:19:50,780 [INFO] backend.device_discovery: Discovered BLE device [TV] Samsung AU8000 55 TV (A1FD6113-F675-AC8E-2173-617D787994F7)
+2025-10-05 13:19:50,780 [INFO] backend.device_discovery: Discovered BLE device Family Room Display (742EC9E9-1B17-32EE-9090-24EF16A0A468)
+2025-10-05 13:24:50,995 [INFO] backend.device_discovery: Discovered mDNS service Family Room TV (_airplay._tcp.local.)
+2025-10-05 13:24:50,999 [INFO] backend.device_discovery: Discovered mDNS service Smart Bridge 2 (_hap._tcp.local.)
+2025-10-05 13:24:51,017 [INFO] backend.device_discovery: Discovered mDNS service My ecobee (_hap._tcp.local.)
+2025-10-05 13:24:51,168 [INFO] backend.device_discovery: Discovered mDNS service GreenReach Farms (_airplay._tcp.local.)
+2025-10-05 13:24:51,184 [INFO] backend.device_discovery: Discovered mDNS service Officejet Pro 8600 [50B982] (_ipp._tcp.local.)
+2025-10-05 13:24:51,322 [INFO] backend.device_discovery: Discovered mDNS service Brother MFC-L8900CDW series (_ipp._tcp.local.)
+2025-10-05 13:24:51,322 [INFO] backend.device_discovery: Discovered mDNS service Brother MFC-L8900CDW series (_http._tcp.local.)
+2025-10-05 13:24:51,322 [INFO] backend.device_discovery: Discovered mDNS service Officejet Pro 8600 [50B982] (_http._tcp.local.)
+2025-10-05 13:24:52,037 [INFO] backend.device_discovery: Discovered mDNS service Apple TV (_airplay._tcp.local.)
+2025-10-05 13:24:55,788 [WARNING] zeroconf: unregister_all_services skipped as it does blocking i/o; use AsyncZeroconf with asyncio
+2025-10-05 13:24:58,823 [INFO] backend.device_discovery: Discovered BLE device Family Room Display (742EC9E9-1B17-32EE-9090-24EF16A0A468)
+2025-10-05 13:24:58,823 [INFO] backend.device_discovery: Discovered BLE device [TV] Samsung AU8000 55 TV (A1FD6113-F675-AC8E-2173-617D787994F7)
+2025-10-05 13:24:58,823 [INFO] backend.device_discovery: Discovered BLE device ALAM (78:FD:AE) (437AE3FF-D660-6511-AE60-745C085E7B9F)
+2025-10-05 13:29:58,997 [INFO] backend.device_discovery: Discovered mDNS service Officejet Pro 8600 [50B982] (_http._tcp.local.)
+2025-10-05 13:29:59,018 [INFO] backend.device_discovery: Discovered mDNS service Brother MFC-L8900CDW series (_http._tcp.local.)
+2025-10-05 13:29:59,101 [INFO] backend.device_discovery: Discovered mDNS service Smart Bridge 2 (_hap._tcp.local.)
+2025-10-05 13:29:59,169 [INFO] backend.device_discovery: Discovered mDNS service GreenReach Farms (_airplay._tcp.local.)
+2025-10-05 13:29:59,171 [INFO] backend.device_discovery: Discovered mDNS service Family Room TV (_airplay._tcp.local.)
+2025-10-05 13:29:59,171 [INFO] backend.device_discovery: Discovered mDNS service My ecobee (_hap._tcp.local.)
+2025-10-05 13:29:59,217 [INFO] backend.device_discovery: Discovered mDNS service Apple TV (_airplay._tcp.local.)
+2025-10-05 13:29:59,317 [INFO] backend.device_discovery: Discovered mDNS service Brother MFC-L8900CDW series (_ipp._tcp.local.)
+2025-10-05 13:29:59,389 [INFO] backend.device_discovery: Discovered mDNS service Officejet Pro 8600 [50B982] (_ipp._tcp.local.)
+2025-10-05 13:30:03,839 [WARNING] zeroconf: unregister_all_services skipped as it does blocking i/o; use AsyncZeroconf with asyncio
+2025-10-05 13:30:06,894 [INFO] backend.device_discovery: Discovered BLE device Family Room Display (742EC9E9-1B17-32EE-9090-24EF16A0A468)
+2025-10-05 13:30:06,894 [INFO] backend.device_discovery: Discovered BLE device [TV] Samsung AU8000 55 TV (A1FD6113-F675-AC8E-2173-617D787994F7)
+2025-10-05 13:35:07,089 [INFO] backend.device_discovery: Discovered mDNS service Family Room TV (_airplay._tcp.local.)
+2025-10-05 13:35:07,100 [INFO] backend.device_discovery: Discovered mDNS service Smart Bridge 2 (_hap._tcp.local.)
+2025-10-05 13:35:07,120 [INFO] backend.device_discovery: Discovered mDNS service Officejet Pro 8600 [50B982] (_ipp._tcp.local.)
+2025-10-05 13:35:07,152 [INFO] backend.device_discovery: Discovered mDNS service Brother MFC-L8900CDW series (_ipp._tcp.local.)
+2025-10-05 13:35:07,174 [INFO] backend.device_discovery: Discovered mDNS service My ecobee (_hap._tcp.local.)
+2025-10-05 13:35:07,305 [INFO] backend.device_discovery: Discovered mDNS service Brother MFC-L8900CDW series (_http._tcp.local.)
+2025-10-05 13:35:07,307 [INFO] backend.device_discovery: Discovered mDNS service Officejet Pro 8600 [50B982] (_http._tcp.local.)
+2025-10-05 13:35:07,317 [INFO] backend.device_discovery: Discovered mDNS service GreenReach Farms (_airplay._tcp.local.)
+2025-10-05 13:35:07,317 [INFO] backend.device_discovery: Discovered mDNS service Apple TV (_airplay._tcp.local.)
+2025-10-05 13:35:11,894 [WARNING] zeroconf: unregister_all_services skipped as it does blocking i/o; use AsyncZeroconf with asyncio
+2025-10-05 13:35:14,931 [INFO] backend.device_discovery: Discovered BLE device Family Room Display (742EC9E9-1B17-32EE-9090-24EF16A0A468)
+2025-10-05 13:35:14,931 [INFO] backend.device_discovery: Discovered BLE device BLE Device CA702CD2 (00D70BFB-B057-DC31-3C36-94F9CA702CD2)
+2025-10-05 13:35:14,931 [INFO] backend.device_discovery: Discovered BLE device [TV] Samsung AU8000 55 TV (A1FD6113-F675-AC8E-2173-617D787994F7)
+2025-10-05 13:40:15,163 [INFO] backend.device_discovery: Discovered mDNS service My ecobee (_hap._tcp.local.)
+2025-10-05 13:40:15,186 [INFO] backend.device_discovery: Discovered mDNS service Officejet Pro 8600 [50B982] (_http._tcp.local.)
+2025-10-05 13:40:15,186 [INFO] backend.device_discovery: Discovered mDNS service Officejet Pro 8600 [50B982] (_ipp._tcp.local.)
+2025-10-05 13:40:15,193 [INFO] backend.device_discovery: Discovered mDNS service Smart Bridge 2 (_hap._tcp.local.)
+2025-10-05 13:40:15,202 [INFO] backend.device_discovery: Discovered mDNS service Family Room TV (_airplay._tcp.local.)
+2025-10-05 13:40:15,375 [INFO] backend.device_discovery: Discovered mDNS service Brother MFC-L8900CDW series (_http._tcp.local.)
+2025-10-05 13:40:15,375 [INFO] backend.device_discovery: Discovered mDNS service Brother MFC-L8900CDW series (_ipp._tcp.local.)
+2025-10-05 13:40:15,384 [INFO] backend.device_discovery: Discovered mDNS service GreenReach Farms (_airplay._tcp.local.)
+2025-10-05 13:40:15,386 [INFO] backend.device_discovery: Discovered mDNS service Peter’s MacBook Air (_airplay._tcp.local.)
+2025-10-05 13:40:15,653 [INFO] backend.device_discovery: Discovered mDNS service Apple TV (_airplay._tcp.local.)
+2025-10-05 13:40:19,945 [WARNING] zeroconf: unregister_all_services skipped as it does blocking i/o; use AsyncZeroconf with asyncio
+2025-10-05 13:40:23,004 [INFO] backend.device_discovery: Discovered BLE device Family Room Display (742EC9E9-1B17-32EE-9090-24EF16A0A468)
+2025-10-05 13:40:23,004 [INFO] backend.device_discovery: Discovered BLE device [TV] Samsung AU8000 55 TV (A1FD6113-F675-AC8E-2173-617D787994F7)
+2025-10-05 13:40:23,004 [INFO] backend.device_discovery: Discovered BLE device BLE Device CA702CD2 (00D70BFB-B057-DC31-3C36-94F9CA702CD2)
+WARNING:  StatReload detected changes in 'backend/device_discovery.py'. Reloading...
+INFO:     Shutting down
+INFO:     Waiting for application shutdown.
+2025-10-05 13:41:03,275 [INFO] backend.automation: Stopping automation engine
+INFO:     Application shutdown complete.
+INFO:     Finished server process [8195]
+/Users/petergilbert/Library/Python/3.9/lib/python/site-packages/urllib3/__init__.py:35: NotOpenSSLWarning: urllib3 v2 only supports OpenSSL 1.1.1+, currently the 'ssl' module is compiled with 'LibreSSL 2.8.3'. See: https://github.com/urllib3/urllib3/issues/3020
+  warnings.warn(
+2025-10-05 13:41:03,792 [INFO] backend.config: Loading configuration for environment: production
+2025-10-05 13:41:03,794 [INFO] backend.config: Loading configuration for environment: production
+2025-10-05 13:41:03,795 [INFO] backend.config: Loading configuration for environment: production
+INFO:     Started server process [9191]
+INFO:     Waiting for application startup.
+2025-10-05 13:41:03,803 [INFO] backend.automation: Starting automation engine
+2025-10-05 13:41:03,803 [INFO] backend.server: Starting discovery loop with interval 300
+2025-10-05 13:41:04,130 [INFO] backend.device_discovery: Discovered mDNS service Smart Bridge 2 (_hap._tcp.local.)
+2025-10-05 13:41:04,132 [INFO] backend.device_discovery: Discovered mDNS service Family Room TV (_airplay._tcp.local.)
+2025-10-05 13:41:04,171 [INFO] backend.device_discovery: Discovered mDNS service My ecobee (_hap._tcp.local.)
+2025-10-05 13:41:04,331 [INFO] backend.device_discovery: Discovered mDNS service Brother MFC-L8900CDW series (_ipp._tcp.local.)
+2025-10-05 13:41:04,351 [INFO] backend.device_discovery: Discovered mDNS service Officejet Pro 8600 [50B982] (_ipp._tcp.local.)
+2025-10-05 13:41:04,396 [INFO] backend.device_discovery: Discovered mDNS service GreenReach Farms (_airplay._tcp.local.)
+2025-10-05 13:41:04,396 [INFO] backend.device_discovery: Discovered mDNS service GreenReach Farms (_airplay._tcp.local.)
+2025-10-05 13:41:04,582 [INFO] backend.device_discovery: Discovered mDNS service Brother MFC-L8900CDW series (_http._tcp.local.)
+2025-10-05 13:41:04,677 [INFO] backend.device_discovery: Discovered mDNS service Officejet Pro 8600 [50B982] (_http._tcp.local.)
+2025-10-05 13:41:05,222 [INFO] backend.device_discovery: Discovered mDNS service Family Room TV (_airplay._tcp.local.)
+2025-10-05 13:41:05,323 [INFO] backend.device_discovery: Discovered mDNS service Brother MFC-L8900CDW series (_ipp._tcp.local.)
+2025-10-05 13:41:05,426 [INFO] backend.device_discovery: Discovered mDNS service Officejet Pro 8600 [50B982] (_http._tcp.local.)
+2025-10-05 13:41:05,426 [INFO] backend.device_discovery: Discovered mDNS service Officejet Pro 8600 [50B982] (_ipp._tcp.local.)
+2025-10-05 13:41:05,427 [INFO] backend.device_discovery: Discovered mDNS service Brother MFC-L8900CDW series (_http._tcp.local.)
+2025-10-05 13:41:08,805 [WARNING] zeroconf: unregister_all_services skipped as it does blocking i/o; use AsyncZeroconf with asyncio
+2025-10-05 13:41:08,897 [WARNING] zeroconf: unregister_all_services skipped as it does blocking i/o; use AsyncZeroconf with asyncio
+2025-10-05 13:41:11,896 [INFO] backend.device_discovery: Discovered BLE device Family Room Display (742EC9E9-1B17-32EE-9090-24EF16A0A468) vendor=None
+2025-10-05 13:41:11,896 [INFO] backend.device_discovery: Discovered BLE device [TV] Samsung AU8000 55 TV (A1FD6113-F675-AC8E-2173-617D787994F7) vendor=Samsung
+2025-10-05 13:41:11,896 [INFO] backend.device_discovery: Discovered BLE device BLE Device CA702CD2 (00D70BFB-B057-DC31-3C36-94F9CA702CD2) vendor=0x0201
+INFO:     Application startup complete.
+2025-10-05 13:41:11,938 [INFO] backend.device_discovery: Discovered BLE device Family Room Display (742EC9E9-1B17-32EE-9090-24EF16A0A468) vendor=None
+2025-10-05 13:41:11,938 [INFO] backend.device_discovery: Discovered BLE device [TV] Samsung AU8000 55 TV (A1FD6113-F675-AC8E-2173-617D787994F7) vendor=Samsung
+2025-10-05 13:41:11,938 [INFO] backend.device_discovery: Discovered BLE device BLE Device CA702CD2 (00D70BFB-B057-DC31-3C36-94F9CA702CD2) vendor=0x0201
+2025-10-05 13:46:12,128 [INFO] backend.device_discovery: Discovered mDNS service Brother MFC-L8900CDW series (_http._tcp.local.)
+2025-10-05 13:46:12,175 [INFO] backend.device_discovery: Discovered mDNS service Smart Bridge 2 (_hap._tcp.local.)
+2025-10-05 13:46:12,182 [INFO] backend.device_discovery: Discovered mDNS service My ecobee (_hap._tcp.local.)
+2025-10-05 13:46:12,239 [INFO] backend.device_discovery: Discovered mDNS service Family Room TV (_airplay._tcp.local.)
+2025-10-05 13:46:12,243 [INFO] backend.device_discovery: Discovered mDNS service Officejet Pro 8600 [50B982] (_http._tcp.local.)
+2025-10-05 13:46:12,487 [INFO] backend.device_discovery: Discovered mDNS service GreenReach Farms (_airplay._tcp.local.)
+2025-10-05 13:46:12,578 [INFO] backend.device_discovery: Discovered mDNS service Officejet Pro 8600 [50B982] (_ipp._tcp.local.)
+2025-10-05 13:46:12,633 [INFO] backend.device_discovery: Discovered mDNS service Brother MFC-L8900CDW series (_ipp._tcp.local.)
+2025-10-05 13:46:13,569 [INFO] backend.device_discovery: Discovered mDNS service Apple TV (_airplay._tcp.local.)
+2025-10-05 13:46:16,948 [WARNING] zeroconf: unregister_all_services skipped as it does blocking i/o; use AsyncZeroconf with asyncio
+2025-10-05 13:46:19,999 [INFO] backend.device_discovery: Discovered BLE device Family Room Display (742EC9E9-1B17-32EE-9090-24EF16A0A468) vendor=None
+2025-10-05 13:46:19,999 [INFO] backend.device_discovery: Discovered BLE device [TV] Samsung AU8000 55 TV (A1FD6113-F675-AC8E-2173-617D787994F7) vendor=Samsung
+2025-10-05 13:46:19,999 [INFO] backend.device_discovery: Discovered BLE device ALAM (78:FD:AE) (437AE3FF-D660-6511-AE60-745C085E7B9F) vendor=None
+2025-10-05 13:46:20,000 [INFO] backend.device_discovery: Discovered BLE device BLE Device CA702CD2 (00D70BFB-B057-DC31-3C36-94F9CA702CD2) vendor=0x0201
+2025-10-05 13:51:20,218 [INFO] backend.device_discovery: Discovered mDNS service Smart Bridge 2 (_hap._tcp.local.)
+2025-10-05 13:51:20,221 [INFO] backend.device_discovery: Discovered mDNS service My ecobee (_hap._tcp.local.)
+2025-10-05 13:51:20,226 [INFO] backend.device_discovery: Discovered mDNS service Brother MFC-L8900CDW series (_ipp._tcp.local.)
+2025-10-05 13:51:20,257 [INFO] backend.device_discovery: Discovered mDNS service Family Room TV (_airplay._tcp.local.)
+2025-10-05 13:51:20,284 [INFO] backend.device_discovery: Discovered mDNS service Officejet Pro 8600 [50B982] (_ipp._tcp.local.)
+2025-10-05 13:51:20,375 [INFO] backend.device_discovery: Discovered mDNS service Brother MFC-L8900CDW series (_http._tcp.local.)
+2025-10-05 13:51:20,403 [INFO] backend.device_discovery: Discovered mDNS service GreenReach Farms (_airplay._tcp.local.)
+2025-10-05 13:51:20,414 [INFO] backend.device_discovery: Discovered mDNS service Officejet Pro 8600 [50B982] (_http._tcp.local.)
+2025-10-05 13:51:25,012 [WARNING] zeroconf: unregister_all_services skipped as it does blocking i/o; use AsyncZeroconf with asyncio
+2025-10-05 13:51:28,067 [INFO] backend.device_discovery: Discovered BLE device [TV] Samsung AU8000 55 TV (A1FD6113-F675-AC8E-2173-617D787994F7) vendor=Samsung
+2025-10-05 13:51:28,067 [INFO] backend.device_discovery: Discovered BLE device Family Room Display (742EC9E9-1B17-32EE-9090-24EF16A0A468) vendor=None
+2025-10-05 13:51:28,067 [INFO] backend.device_discovery: Discovered BLE device ALAM (78:FD:AE) (437AE3FF-D660-6511-AE60-745C085E7B9F) vendor=None
+2025-10-05 13:56:28,275 [INFO] backend.device_discovery: Discovered mDNS service Officejet Pro 8600 [50B982] (_ipp._tcp.local.)
+2025-10-05 13:56:28,285 [INFO] backend.device_discovery: Discovered mDNS service Family Room TV (_airplay._tcp.local.)
+2025-10-05 13:56:28,285 [INFO] backend.device_discovery: Discovered mDNS service My ecobee (_hap._tcp.local.)
+2025-10-05 13:56:28,320 [INFO] backend.device_discovery: Discovered mDNS service Smart Bridge 2 (_hap._tcp.local.)
+2025-10-05 13:56:28,382 [INFO] backend.device_discovery: Discovered mDNS service Brother MFC-L8900CDW series (_ipp._tcp.local.)
+2025-10-05 13:56:28,453 [INFO] backend.device_discovery: Discovered mDNS service GreenReach Farms (_airplay._tcp.local.)
+2025-10-05 13:56:28,522 [INFO] backend.device_discovery: Discovered mDNS service Brother MFC-L8900CDW series (_http._tcp.local.)
+2025-10-05 13:56:28,522 [INFO] backend.device_discovery: Discovered mDNS service Officejet Pro 8600 [50B982] (_http._tcp.local.)
+2025-10-05 13:56:33,066 [WARNING] zeroconf: unregister_all_services skipped as it does blocking i/o; use AsyncZeroconf with asyncio
+2025-10-05 13:56:36,100 [INFO] backend.device_discovery: Discovered BLE device Family Room Display (742EC9E9-1B17-32EE-9090-24EF16A0A468) vendor=None
+2025-10-05 13:56:36,101 [INFO] backend.device_discovery: Discovered BLE device [TV] Samsung AU8000 55 TV (A1FD6113-F675-AC8E-2173-617D787994F7) vendor=Samsung
+2025-10-05 14:01:36,299 [INFO] backend.device_discovery: Discovered mDNS service My ecobee (_hap._tcp.local.)
+2025-10-05 14:01:36,312 [INFO] backend.device_discovery: Discovered mDNS service Smart Bridge 2 (_hap._tcp.local.)
+2025-10-05 14:01:36,380 [INFO] backend.device_discovery: Discovered mDNS service Family Room TV (_airplay._tcp.local.)
+2025-10-05 14:01:36,452 [INFO] backend.device_discovery: Discovered mDNS service Officejet Pro 8600 [50B982] (_http._tcp.local.)
+2025-10-05 14:01:36,498 [INFO] backend.device_discovery: Discovered mDNS service GreenReach Farms (_airplay._tcp.local.)
+2025-10-05 14:01:36,507 [INFO] backend.device_discovery: Discovered mDNS service Apple TV (_airplay._tcp.local.)
+2025-10-05 14:01:36,657 [INFO] backend.device_discovery: Discovered mDNS service Brother MFC-L8900CDW series (_http._tcp.local.)
+2025-10-05 14:01:36,657 [INFO] backend.device_discovery: Discovered mDNS service Brother MFC-L8900CDW series (_ipp._tcp.local.)
+2025-10-05 14:01:36,963 [INFO] backend.device_discovery: Discovered mDNS service Officejet Pro 8600 [50B982] (_ipp._tcp.local.)
+2025-10-05 14:01:41,107 [WARNING] zeroconf: unregister_all_services skipped as it does blocking i/o; use AsyncZeroconf with asyncio
+2025-10-05 14:01:44,143 [INFO] backend.device_discovery: Discovered BLE device Family Room Display (742EC9E9-1B17-32EE-9090-24EF16A0A468) vendor=None
+2025-10-05 14:01:44,143 [INFO] backend.device_discovery: Discovered BLE device [TV] Samsung AU8000 55 TV (A1FD6113-F675-AC8E-2173-617D787994F7) vendor=Samsung
+2025-10-05 14:01:44,143 [INFO] backend.device_discovery: Discovered BLE device BLE Device CA702CD2 (00D70BFB-B057-DC31-3C36-94F9CA702CD2) vendor=0x0201
+2025-10-05 14:06:44,350 [INFO] backend.device_discovery: Discovered mDNS service My ecobee (_hap._tcp.local.)
+2025-10-05 14:06:44,374 [INFO] backend.device_discovery: Discovered mDNS service Officejet Pro 8600 [50B982] (_http._tcp.local.)
+2025-10-05 14:06:44,380 [INFO] backend.device_discovery: Discovered mDNS service Family Room TV (_airplay._tcp.local.)
+2025-10-05 14:06:44,409 [INFO] backend.device_discovery: Discovered mDNS service Smart Bridge 2 (_hap._tcp.local.)
+2025-10-05 14:06:44,450 [INFO] backend.device_discovery: Discovered mDNS service Brother MFC-L8900CDW series (_http._tcp.local.)
+2025-10-05 14:06:44,530 [INFO] backend.device_discovery: Discovered mDNS service GreenReach Farms (_airplay._tcp.local.)
+2025-10-05 14:06:44,548 [INFO] backend.device_discovery: Discovered mDNS service Brother MFC-L8900CDW series (_ipp._tcp.local.)
+2025-10-05 14:06:44,549 [INFO] backend.device_discovery: Discovered mDNS service Officejet Pro 8600 [50B982] (_ipp._tcp.local.)
+2025-10-05 14:06:44,559 [INFO] backend.device_discovery: Discovered mDNS service Apple TV (_airplay._tcp.local.)
+2025-10-05 14:06:49,155 [WARNING] zeroconf: unregister_all_services skipped as it does blocking i/o; use AsyncZeroconf with asyncio
+2025-10-05 14:06:52,205 [INFO] backend.device_discovery: Discovered BLE device Family Room Display (742EC9E9-1B17-32EE-9090-24EF16A0A468) vendor=None
+2025-10-05 14:06:52,206 [INFO] backend.device_discovery: Discovered BLE device [TV] Samsung AU8000 55 TV (A1FD6113-F675-AC8E-2173-617D787994F7) vendor=Samsung
+2025-10-05 14:06:52,206 [INFO] backend.device_discovery: Discovered BLE device BLE Device CA702CD2 (00D70BFB-B057-DC31-3C36-94F9CA702CD2) vendor=0x0201
+2025-10-05 14:06:52,206 [INFO] backend.device_discovery: Discovered BLE device ALAM (78:FD:AE) (437AE3FF-D660-6511-AE60-745C085E7B9F) vendor=None
+2025-10-05 14:11:52,377 [INFO] backend.device_discovery: Discovered mDNS service Family Room TV (_airplay._tcp.local.)
+2025-10-05 14:11:52,388 [INFO] backend.device_discovery: Discovered mDNS service Smart Bridge 2 (_hap._tcp.local.)
+2025-10-05 14:11:52,448 [INFO] backend.device_discovery: Discovered mDNS service Apple TV (_airplay._tcp.local.)
+2025-10-05 14:11:52,539 [INFO] backend.device_discovery: Discovered mDNS service My ecobee (_hap._tcp.local.)
+2025-10-05 14:11:52,570 [INFO] backend.device_discovery: Discovered mDNS service Officejet Pro 8600 [50B982] (_ipp._tcp.local.)
+2025-10-05 14:11:52,570 [INFO] backend.device_discovery: Discovered mDNS service Officejet Pro 8600 [50B982] (_http._tcp.local.)
+2025-10-05 14:11:52,651 [INFO] backend.device_discovery: Discovered mDNS service GreenReach Farms (_airplay._tcp.local.)
+2025-10-05 14:11:52,670 [INFO] backend.device_discovery: Discovered mDNS service Brother MFC-L8900CDW series (_ipp._tcp.local.)
+2025-10-05 14:11:52,671 [INFO] backend.device_discovery: Discovered mDNS service Brother MFC-L8900CDW series (_http._tcp.local.)
+2025-10-05 14:11:57,218 [WARNING] zeroconf: unregister_all_services skipped as it does blocking i/o; use AsyncZeroconf with asyncio
+2025-10-05 14:12:00,269 [INFO] backend.device_discovery: Discovered BLE device [TV] Samsung AU8000 55 TV (A1FD6113-F675-AC8E-2173-617D787994F7) vendor=Samsung
+2025-10-05 14:12:00,269 [INFO] backend.device_discovery: Discovered BLE device Family Room Display (742EC9E9-1B17-32EE-9090-24EF16A0A468) vendor=None
+2025-10-05 14:12:00,269 [INFO] backend.device_discovery: Discovered BLE device ALAM (78:FD:AE) (437AE3FF-D660-6511-AE60-745C085E7B9F) vendor=None
+2025-10-05 14:12:00,269 [INFO] backend.device_discovery: Discovered BLE device BLE Device CA702CD2 (00D70BFB-B057-DC31-3C36-94F9CA702CD2) vendor=0x0201
+2025-10-05 14:17:00,443 [INFO] backend.device_discovery: Discovered mDNS service My ecobee (_hap._tcp.local.)
+2025-10-05 14:17:00,446 [INFO] backend.device_discovery: Discovered mDNS service Smart Bridge 2 (_hap._tcp.local.)
+2025-10-05 14:17:00,446 [INFO] backend.device_discovery: Discovered mDNS service Family Room TV (_airplay._tcp.local.)
+2025-10-05 14:17:00,481 [INFO] backend.device_discovery: Discovered mDNS service Officejet Pro 8600 [50B982] (_ipp._tcp.local.)
+2025-10-05 14:17:00,572 [INFO] backend.device_discovery: Discovered mDNS service Brother MFC-L8900CDW series (_ipp._tcp.local.)
+2025-10-05 14:17:00,646 [INFO] backend.device_discovery: Discovered mDNS service GreenReach Farms (_airplay._tcp.local.)
+2025-10-05 14:17:00,693 [INFO] backend.device_discovery: Discovered mDNS service Officejet Pro 8600 [50B982] (_http._tcp.local.)
+2025-10-05 14:17:00,698 [INFO] backend.device_discovery: Discovered mDNS service Apple TV (_airplay._tcp.local.)
+2025-10-05 14:17:00,772 [INFO] backend.device_discovery: Discovered mDNS service Brother MFC-L8900CDW series (_http._tcp.local.)
+2025-10-05 14:17:05,255 [WARNING] zeroconf: unregister_all_services skipped as it does blocking i/o; use AsyncZeroconf with asyncio
+2025-10-05 14:17:08,299 [INFO] backend.device_discovery: Discovered BLE device [TV] Samsung AU8000 55 TV (A1FD6113-F675-AC8E-2173-617D787994F7) vendor=Samsung
+2025-10-05 14:17:08,299 [INFO] backend.device_discovery: Discovered BLE device Family Room Display (742EC9E9-1B17-32EE-9090-24EF16A0A468) vendor=None
+2025-10-05 14:17:08,299 [INFO] backend.device_discovery: Discovered BLE device BLE Device CA702CD2 (00D70BFB-B057-DC31-3C36-94F9CA702CD2) vendor=0x0201
+2025-10-05 14:34:01,564 [INFO] backend.device_discovery: Discovered mDNS service Smart Bridge 2 (_hap._tcp.local.)
+2025-10-05 14:34:01,610 [INFO] backend.device_discovery: Discovered mDNS service My ecobee (_hap._tcp.local.)
+2025-10-05 14:34:01,616 [INFO] backend.device_discovery: Discovered mDNS service Family Room TV (_airplay._tcp.local.)
+2025-10-05 14:34:01,640 [INFO] backend.device_discovery: Discovered mDNS service Officejet Pro 8600 [50B982] (_ipp._tcp.local.)
+2025-10-05 14:34:01,756 [INFO] backend.device_discovery: Discovered mDNS service GreenReach Farms (_airplay._tcp.local.)
+2025-10-05 14:34:01,757 [INFO] backend.device_discovery: Discovered mDNS service Apple TV (_airplay._tcp.local.)
+2025-10-05 14:34:01,763 [INFO] backend.device_discovery: Discovered mDNS service Brother MFC-L8900CDW series (_ipp._tcp.local.)
+2025-10-05 14:34:01,766 [INFO] backend.device_discovery: Discovered mDNS service Brother MFC-L8900CDW series (_http._tcp.local.)
+2025-10-05 14:34:01,958 [INFO] backend.device_discovery: Discovered mDNS service Officejet Pro 8600 [50B982] (_http._tcp.local.)
+2025-10-05 14:34:06,389 [WARNING] zeroconf: unregister_all_services skipped as it does blocking i/o; use AsyncZeroconf with asyncio
+2025-10-05 14:34:09,432 [INFO] backend.device_discovery: Discovered BLE device Family Room Display (742EC9E9-1B17-32EE-9090-24EF16A0A468) vendor=None
+2025-10-05 14:34:09,433 [INFO] backend.device_discovery: Discovered BLE device BLE Device CA702CD2 (00D70BFB-B057-DC31-3C36-94F9CA702CD2) vendor=0x0201
+2025-10-05 14:34:09,433 [INFO] backend.device_discovery: Discovered BLE device [TV] Samsung AU8000 55 TV (A1FD6113-F675-AC8E-2173-617D787994F7) vendor=Samsung
+2025-10-05 14:39:09,633 [INFO] backend.device_discovery: Discovered mDNS service Smart Bridge 2 (_hap._tcp.local.)
+2025-10-05 14:39:09,658 [INFO] backend.device_discovery: Discovered mDNS service My ecobee (_hap._tcp.local.)
+2025-10-05 14:39:09,667 [INFO] backend.device_discovery: Discovered mDNS service Family Room TV (_airplay._tcp.local.)
+2025-10-05 14:39:09,871 [INFO] backend.device_discovery: Discovered mDNS service Brother MFC-L8900CDW series (_http._tcp.local.)
+2025-10-05 14:39:09,875 [INFO] backend.device_discovery: Discovered mDNS service Officejet Pro 8600 [50B982] (_ipp._tcp.local.)
+2025-10-05 14:39:09,875 [INFO] backend.device_discovery: Discovered mDNS service Officejet Pro 8600 [50B982] (_http._tcp.local.)
+2025-10-05 14:39:09,909 [INFO] backend.device_discovery: Discovered mDNS service GreenReach Farms (_airplay._tcp.local.)
+2025-10-05 14:39:09,909 [INFO] backend.device_discovery: Discovered mDNS service Apple TV (_airplay._tcp.local.)
+2025-10-05 14:39:14,437 [WARNING] zeroconf: unregister_all_services skipped as it does blocking i/o; use AsyncZeroconf with asyncio
+2025-10-05 14:39:17,471 [INFO] backend.device_discovery: Discovered BLE device Family Room Display (742EC9E9-1B17-32EE-9090-24EF16A0A468) vendor=None
+2025-10-05 14:39:17,471 [INFO] backend.device_discovery: Discovered BLE device [TV] Samsung AU8000 55 TV (A1FD6113-F675-AC8E-2173-617D787994F7) vendor=Samsung
+2025-10-05 14:39:17,471 [INFO] backend.device_discovery: Discovered BLE device BLE Device CA702CD2 (00D70BFB-B057-DC31-3C36-94F9CA702CD2) vendor=0x0201
+WARNING:  StatReload detected changes in 'backend/device_discovery.py'. Reloading...
+INFO:     Shutting down
+INFO:     Waiting for application shutdown.
+2025-10-05 14:43:17,479 [INFO] backend.automation: Stopping automation engine
+INFO:     Application shutdown complete.
+INFO:     Finished server process [9191]
+/Users/petergilbert/Library/Python/3.9/lib/python/site-packages/urllib3/__init__.py:35: NotOpenSSLWarning: urllib3 v2 only supports OpenSSL 1.1.1+, currently the 'ssl' module is compiled with 'LibreSSL 2.8.3'. See: https://github.com/urllib3/urllib3/issues/3020
+  warnings.warn(
+2025-10-05 14:43:18,034 [INFO] backend.config: Loading configuration for environment: production
+2025-10-05 14:43:18,036 [INFO] backend.config: Loading configuration for environment: production
+2025-10-05 14:43:18,037 [INFO] backend.config: Loading configuration for environment: production
+INFO:     Started server process [10832]
+INFO:     Waiting for application startup.
+2025-10-05 14:43:18,046 [INFO] backend.automation: Starting automation engine
+2025-10-05 14:43:18,046 [INFO] backend.server: Starting discovery loop with interval 300
+2025-10-05 14:43:18,454 [INFO] backend.device_discovery: Discovered mDNS service My ecobee (_hap._tcp.local.)
+2025-10-05 14:43:18,461 [INFO] backend.device_discovery: Discovered mDNS service Smart Bridge 2 (_hap._tcp.local.)
+2025-10-05 14:43:18,470 [INFO] backend.device_discovery: Discovered mDNS service Family Room TV (_airplay._tcp.local.)
+2025-10-05 14:43:18,518 [INFO] backend.device_discovery: Discovered mDNS service Officejet Pro 8600 [50B982] (_ipp._tcp.local.)
+2025-10-05 14:43:18,610 [INFO] backend.device_discovery: Discovered mDNS service GreenReach Farms (_airplay._tcp.local.)
+2025-10-05 14:43:18,610 [INFO] backend.device_discovery: Discovered mDNS service GreenReach Farms (_airplay._tcp.local.)
+2025-10-05 14:43:18,610 [INFO] backend.device_discovery: Discovered mDNS service Apple TV (_airplay._tcp.local.)
+2025-10-05 14:43:18,662 [INFO] backend.device_discovery: Discovered mDNS service Officejet Pro 8600 [50B982] (_http._tcp.local.)
+2025-10-05 14:43:18,698 [INFO] backend.device_discovery: Discovered mDNS service Brother MFC-L8900CDW series (_ipp._tcp.local.)
+2025-10-05 14:43:18,698 [INFO] backend.device_discovery: Discovered mDNS service Brother MFC-L8900CDW series (_http._tcp.local.)
+2025-10-05 14:43:19,749 [INFO] backend.device_discovery: Discovered mDNS service Brother MFC-L8900CDW series (_http._tcp.local.)
+2025-10-05 14:43:19,751 [INFO] backend.device_discovery: Discovered mDNS service Officejet Pro 8600 [50B982] (_ipp._tcp.local.)
+2025-10-05 14:43:19,751 [INFO] backend.device_discovery: Discovered mDNS service Officejet Pro 8600 [50B982] (_http._tcp.local.)
+2025-10-05 14:43:19,854 [INFO] backend.device_discovery: Discovered mDNS service Brother MFC-L8900CDW series (_ipp._tcp.local.)
+2025-10-05 14:43:23,049 [WARNING] zeroconf: unregister_all_services skipped as it does blocking i/o; use AsyncZeroconf with asyncio
+2025-10-05 14:43:23,138 [WARNING] zeroconf: unregister_all_services skipped as it does blocking i/o; use AsyncZeroconf with asyncio
+2025-10-05 14:43:26,138 [INFO] backend.device_discovery: Discovered BLE device Family Room Display (742EC9E9-1B17-32EE-9090-24EF16A0A468) vendor=None
+2025-10-05 14:43:26,138 [INFO] backend.device_discovery: Discovered BLE device [TV] Samsung AU8000 55 TV (A1FD6113-F675-AC8E-2173-617D787994F7) vendor=Samsung
+2025-10-05 14:43:26,139 [INFO] backend.device_discovery: Discovered BLE device BLE Device CA702CD2 (00D70BFB-B057-DC31-3C36-94F9CA702CD2) vendor=0x0201
+INFO:     Application startup complete.
+2025-10-05 14:43:26,183 [INFO] backend.device_discovery: Discovered BLE device Family Room Display (742EC9E9-1B17-32EE-9090-24EF16A0A468) vendor=None
+2025-10-05 14:43:26,184 [INFO] backend.device_discovery: Discovered BLE device [TV] Samsung AU8000 55 TV (A1FD6113-F675-AC8E-2173-617D787994F7) vendor=Samsung
+2025-10-05 14:43:26,184 [INFO] backend.device_discovery: Discovered BLE device BLE Device CA702CD2 (00D70BFB-B057-DC31-3C36-94F9CA702CD2) vendor=0x0201
