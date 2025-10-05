@@ -910,32 +910,14 @@
         </div>
         
         <div id="roomSteps" style="flex:1; overflow-y:auto; min-height:0; position:relative; padding-top:16px;">
-          <section class="room-step" data-step="room-setup">
-            <p class="room-question">Set the name of this grow room and its zones.</p>
+          <section class="room-step" data-step="room-info">
+            <p class="room-question">Name the grow room and define its zones.</p>
             <div class="farm-step__stack">
-              <label class="tiny">Room name</label>
-              <input id="roomSetupName" type="text" placeholder="e.g., Flower A" required>
-              <label class="tiny" style="margin-top:12px">Number of zones</label>
-              <input id="roomSetupZoneCount" type="number" min="1" max="12" value="1" style="width:80px">
-              <div id="roomSetupZoneInputs" style="margin-top:12px;display:flex;flex-direction:column;gap:8px"></div>
-            </div>
-          </section>
-          <section class="room-step" data-step="connectivity">
-            <p class="room-question" id="roomConnectivityIntro">Is your local smart hub on-line?</p>
-            <div class="farm-step__stack">
-              <div class="tiny">Hub presence</div>
-              <div class="row row--gap-sm row--wrap">
-                <label class="tiny" style="display:flex;align-items:center;gap:6px"><input type="radio" name="roomHubPresence" value="yes"> Hub on-site</label>
-                <label class="tiny" style="display:flex;align-items:center;gap:6px"><input type="radio" name="roomHubPresence" value="no"> No hub yet</label>
-              </div>
-              <div class="row row--gap-sm row--wrap mt-xs">
-                <input id="roomHubType" type="text" placeholder="Hub model (e.g., reTerminal, Jetson Nano)" style="flex:1;min-width:200px">
-                <input id="roomHubIp" type="text" placeholder="Local IP address" style="flex:1;min-width:180px">
-              </div>
-              <div class="row row--gap-sm row--wrap mt-sm">
-                <button id="roomHubDetect" type="button" class="ghost">Detect hub</button>
-              </div>
-              <p class="tiny" id="roomHubStatus" aria-live="polite" style="color:#0f172a;margin-top:4px"></p>
+              <label class="tiny" for="roomInfoName">Grow room name</label>
+              <input id="roomInfoName" type="text" placeholder="e.g., Flower A" required>
+              <label class="tiny" for="roomInfoZoneCount" style="margin-top:12px">Number of zones</label>
+              <input id="roomInfoZoneCount" type="number" min="1" max="12" value="1" style="width:80px">
+              <div id="roomInfoZoneInputs" style="margin-top:12px;display:flex;flex-direction:column;gap:8px"></div>
             </div>
           </section>
 
@@ -1047,13 +1029,6 @@
               </div>
               <p class="tiny" style="color:#64748b">We pre-select sensors based on fixtures and control methods; adjust placements to match your canopy map.</p>
             </div>
-          </section>
-
-          <section class="room-step" data-step="room-name">
-            <p class="room-question">Now that hardware is mapped, what should we call this grow room?</p>
-            <input id="roomName" type="text" placeholder="e.g., Flower A" required>
-            <p class="tiny" style="color:#64748b;margin-top:6px">Friendly names from Farm Registration appear here so everyone speaks the same language.</p>
-            <p id="roomNameHint" class="tiny" style="color:#059669;margin-top:4px;display:none;font-style:italic;"></p>
           </section>
 
           <section class="room-step" data-step="location">
