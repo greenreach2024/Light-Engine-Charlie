@@ -910,6 +910,16 @@
         </div>
         
         <div id="roomSteps" style="flex:1; overflow-y:auto; min-height:0; position:relative; padding-top:16px;">
+          <section class="room-step" data-step="room-setup">
+            <p class="room-question">Set the name of this grow room and its zones.</p>
+            <div class="farm-step__stack">
+              <label class="tiny">Room name</label>
+              <input id="roomSetupName" type="text" placeholder="e.g., Flower A" required>
+              <label class="tiny" style="margin-top:12px">Number of zones</label>
+              <input id="roomSetupZoneCount" type="number" min="1" max="12" value="1" style="width:80px">
+              <div id="roomSetupZoneInputs" style="margin-top:12px;display:flex;flex-direction:column;gap:8px"></div>
+            </div>
+          </section>
           <section class="room-step" data-step="connectivity">
             <p class="room-question" id="roomConnectivityIntro">Is your local smart hub on-line?</p>
             <div class="farm-step__stack">

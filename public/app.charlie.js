@@ -214,7 +214,8 @@ class FarmWizard {
     this.progressEl = $('#farmModalProgress');
     this.titleEl = $('#farmModalTitle');
     this.currentStep = 0;
-    this.baseSteps = ['connection-choice', 'wifi-select', 'wifi-password', 'wifi-test', 'location', 'contact', 'spaces', 'review'];
+    // 1. Remove 'spaces' from FarmWizard baseSteps
+        this.baseSteps = ['connection-choice', 'wifi-select', 'wifi-password', 'wifi-test', 'location', 'contact', 'review'];
     this.wifiNetworks = [];
     this.data = this.defaultData();
     this.discoveryStorageKeys = {
@@ -985,6 +986,18 @@ class FarmWizard {
       showToast({ title: 'Save failed', msg: err?.message || String(err), kind: 'warn', icon: '⚠️' });
     }
     this.close();
+
+    // 3. After farm registration completes, launch RoomWizard for room/zone setup
+    if (typeof RoomWizard === 'function') {
+      setTimeout(() => {
+        if (window.roomWizard) {
+          window.roomWizard.open();
+        } else {
+          window.roomWizard = new RoomWizard();
+          window.roomWizard.open();
+        }
+      }, 500);
+    }
   }
 
   updateFarmDisplay() {
@@ -2352,7 +2365,7 @@ class RoomWizard {
     this.autoAdvance = false;
     // equipment-first: begin with connectivity and hardware categories for room management
     // Steps can be augmented dynamically based on selected hardware (e.g., hvac, dehumidifier, etc.)
-  this.baseSteps = ['connectivity','hardware','category-setup','room-name','review'];
+  this.baseSteps = ['hardware','category-setup','review'];
     this.steps = this.baseSteps.slice();
     this.currentStep = 0;
     this.data = {
@@ -2628,76 +2641,76 @@ class RoomWizard {
       const vendor = ($('#roomDeviceVendor')?.value||'');
       const man = DEVICE_MANUFACTURERS && DEVICE_MANUFACTURERS.find(x=>x.name===vendor);
       const md = man?.models?.find(m=>m.model===modelName);
-      toggleSetupFormsForModel(md);
-    });
-
-    $('#catPrevType')?.addEventListener('click', () => this.stepCategory(-1));
-    $('#catNextType')?.addEventListener('click', () => this.stepCategory(1));
-
-    // Control method chips (buttons wired dynamically when showing control step)
-    // Hardware categories (new step)
-    // Use delegated click handling on the container so handlers are robust and not overwritten later.
-    const hwHost = document.getElementById('roomHardwareCats');
-    if (hwHost) {
-      hwHost.addEventListener('click', (e) => {
-        const btn = e.target.closest('.chip-option');
-        if (!btn || !hwHost.contains(btn)) return;
-        // Toggle visual active state
-        if (btn.hasAttribute('data-active')) btn.removeAttribute('data-active'); else btn.setAttribute('data-active','');
-        // normalize selections into this.data.hardwareCats
-        const active = Array.from(hwHost.querySelectorAll('.chip-option[data-active]')).map(b=>b.dataset.value);
-        // Preserve selection order by tracking the sequence in data.hardwareOrder
-        this.data.hardwareOrder = this.data.hardwareOrder || [];
-        // Rebuild order: keep prior order for any still-active, then append newly active at the end
-        const prior = Array.isArray(this.data.hardwareOrder) ? this.data.hardwareOrder.filter(v => active.includes(v)) : [];
-        const newly = active.filter(v => !prior.includes(v));
-        this.data.hardwareOrder = [...prior, ...newly];
-        this.data.hardwareCats = active;
-        // Debug help: visible in browser console to trace clicks
-        console.debug('[RoomWizard] hardware toggle', { value: btn.dataset.value, active });
-        // Recompute dynamic steps as categories change (only when we're on or past hardware step)
-        this.rebuildDynamicSteps();
-        this.updateSetupQueue();
+      constructor() {
+        this.modal = $('#roomModal');
+        this.form = $('#roomWizardForm');
+        this.autoAdvance = false;
+        this.baseSteps = ['room-setup', 'hardware', 'category-setup', 'review'];
+        this.steps = this.baseSteps.slice();
+        this.currentStep = 0;
+        this.data = {
+          id: '',
+          name: '',
+          location: '',
+          hardwareCats: [],
+          hardwareOrder: [],
+          layout: { type: '', rows: 0, racks: 0, levels: 0 },
+          zones: [],
+          energy: '',
+          energyHours: 0,
+          connectivity: { hasHub: null, hubType: '', hubIp: '', cloudTenant: 'Azure' },
+          roles: { admin: [], operator: [], viewer: [] },
+          grouping: { groups: [], planId: '', scheduleId: '' }
+        };
+        this.hardwareSearchResults = [];
+        // dynamic category setup state
+        this.categoryQueue = []; // ordered list of categories to visit
+        this.categoryIndex = -1; // index within categoryQueue for current category-setup step
+        // Per-category progress and status map. Keys are category ids, values: { status: 'not-started'|'needs-hub'|'needs-setup'|'needs-energy'|'complete', controlConfirmed: bool, notes: string }
+        this.categoryProgress = {};
+        this.init();
+      }
+    // Room setup step: name, number of zones, and zone names
+    var self = this;
+    var roomNameInput = document.getElementById('roomSetupName');
+    if (roomNameInput) {
+      roomNameInput.addEventListener('input', function(e) {
+        self.data.name = (e.target.value || '').trim();
       });
     }
-
-    const hubRadios = document.querySelectorAll('input[name="roomHubPresence"]');
-    if (hubRadios && hubRadios.length) {
-      hubRadios.forEach(radio => {
-        radio.addEventListener('change', (e) => {
-          const val = e.target.value;
-          this.data.connectivity = this.data.connectivity || { hasHub: null, hubType: '', hubIp: '', cloudTenant: 'Azure' };
-          this.data.connectivity.hasHub = val === 'yes' ? true : val === 'no' ? false : null;
-          this.updateSetupQueue();
-        });
+    var zoneCountInput = document.getElementById('roomSetupZoneCount');
+    if (zoneCountInput) {
+      zoneCountInput.addEventListener('input', function(e) {
+        var n = parseInt(e.target.value, 10);
+        if (!Number.isFinite(n) || n < 1) n = 1;
+        if (n > 12) n = 12;
+        e.target.value = n;
+        if (!Array.isArray(self.data.zones)) self.data.zones = [];
+        while (self.data.zones.length < n) self.data.zones.push('');
+        while (self.data.zones.length > n) self.data.zones.pop();
+        self.renderZoneInputs();
       });
     }
-    $('#roomHubDetect')?.addEventListener('click', () => this.detectHub());
-    $('#roomHubVerify')?.addEventListener('click', () => this.verifyHub());
-    $('#roomDeviceScan')?.addEventListener('click', () => this.scanLocalDevices());
-
-    $('#roomHubType')?.addEventListener('input', (e) => {
-      this.data.connectivity = this.data.connectivity || {};
-      this.data.connectivity.hubType = (e.target.value || '').trim();
-      this.updateSetupQueue();
-    });
-    $('#roomHubIp')?.addEventListener('input', (e) => {
-      this.data.connectivity = this.data.connectivity || {};
-      this.data.connectivity.hubIp = (e.target.value || '').trim();
-      this.updateSetupQueue();
-    });
-    $('#roomCloudTenant')?.addEventListener('input', (e) => {
-      this.data.connectivity = this.data.connectivity || {};
-      this.data.connectivity.cloudTenant = (e.target.value || '').trim();
-      this.updateSetupQueue();
-    });
-
-    const bindRoleInput = (id, key) => {
-      const el = document.getElementById(id);
-      if (!el) return;
-      el.addEventListener('input', () => {
-        this.setRoleList(key, el.value);
-        this.updateSetupQueue();
+    self.renderZoneInputs = function() {
+      var zoneInputsHost = document.getElementById('roomSetupZoneInputs');
+      if (!zoneInputsHost) return;
+      zoneInputsHost.innerHTML = '';
+      if (!Array.isArray(self.data.zones)) self.data.zones = [];
+      for (var i = 0; i < self.data.zones.length; i++) {
+        var input = document.createElement('input');
+        input.type = 'text';
+        input.placeholder = 'Zone ' + (i + 1) + ' name';
+        input.value = self.data.zones[i] || '';
+        input.className = 'zone-name-input';
+        input.addEventListener('input', (function(idx) {
+          return function(e) {
+            self.data.zones[idx] = (e.target.value || '').trim();
+          };
+        })(i));
+        zoneInputsHost.appendChild(input);
+      }
+    };
+    if (document.getElementById('roomSetupZoneInputs')) self.renderZoneInputs();
       });
     };
     bindRoleInput('roomRoleAdmin', 'admin');
