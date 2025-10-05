@@ -2363,9 +2363,9 @@ class RoomWizard {
     // the wizard will advance automatically. Can be disabled if needed.
     // Default to manual navigation so you can review each page without being blocked
     this.autoAdvance = false;
-    // equipment-first: begin with connectivity and hardware categories for room management
+    // equipment-first: begin with hardware categories for room management
     // Steps can be augmented dynamically based on selected hardware (e.g., hvac, dehumidifier, etc.)
-  this.baseSteps = ['hardware','category-setup','review'];
+    this.baseSteps = ['room-info', 'hardware', 'category-setup', 'review'];
     this.steps = this.baseSteps.slice();
     this.currentStep = 0;
     this.data = {
@@ -2376,11 +2376,10 @@ class RoomWizard {
       hardwareOrder: [],
       layout: { type: '', rows: 0, racks: 0, levels: 0 },
       zones: [],
-  energy: '',
-  energyHours: 0,
-      connectivity: { hasHub: null, hubType: '', hubIp: '', cloudTenant: 'Azure' },
+      energy: '',
+      energyHours: 0,
       roles: { admin: [], operator: [], viewer: [] },
-  grouping: { groups: [], planId: '', scheduleId: '' }
+      grouping: { groups: [], planId: '', scheduleId: '' }
     };
     this.hardwareSearchResults = [];
     // dynamic category setup state
@@ -2429,34 +2428,7 @@ class RoomWizard {
         this.updateSetupQueue();
       });
     }
-    // Auto-advance hooks: room name
-    const roomNameInput = document.getElementById('roomName');
-    if (roomNameInput) {
-      roomNameInput.addEventListener('input', (e) => {
-        this.data.name = (e.target.value || '').trim();
-        // try auto-advancing if enabled and we're on the name step
-        this.tryAutoAdvance();
-        this.updateSetupQueue();
-      });
-    }
-
-    const zoneInput = document.getElementById('roomZoneInput');
-    const zoneAdd = document.getElementById('roomZoneAdd');
-    if (zoneAdd) zoneAdd.addEventListener('click', () => this.handleZoneAdd());
-    if (zoneInput) {
-      zoneInput.addEventListener('keydown', (e) => {
-        if (e.key === 'Enter') { e.preventDefault(); this.handleZoneAdd(); }
-      });
-    }
-    const zoneList = document.getElementById('roomZoneList');
-    if (zoneList) {
-      zoneList.addEventListener('click', (e) => {
-        const btn = e.target.closest('button[data-zone-idx]');
-        if (!btn) return;
-        const idx = Number(btn.getAttribute('data-zone-idx'));
-        if (!Number.isNaN(idx)) this.removeZone(idx);
-      });
-    }
+    // Legacy zone inputs removed in favor of room-info step
   // Upload nameplate / datasheet functionality removed - moved to Light Setup wizard
 
     const hwSearch = document.getElementById('roomDeviceSearch');
@@ -2645,7 +2617,7 @@ class RoomWizard {
         this.modal = $('#roomModal');
         this.form = $('#roomWizardForm');
         this.autoAdvance = false;
-        this.baseSteps = ['room-setup', 'hardware', 'category-setup', 'review'];
+        this.baseSteps = ['room-info', 'hardware', 'category-setup', 'review'];
         this.steps = this.baseSteps.slice();
         this.currentStep = 0;
         this.data = {
@@ -2658,7 +2630,6 @@ class RoomWizard {
           zones: [],
           energy: '',
           energyHours: 0,
-          connectivity: { hasHub: null, hubType: '', hubIp: '', cloudTenant: 'Azure' },
           roles: { admin: [], operator: [], viewer: [] },
           grouping: { groups: [], planId: '', scheduleId: '' }
         };
@@ -2670,47 +2641,57 @@ class RoomWizard {
         this.categoryProgress = {};
         this.init();
       }
-    // Room setup step: name, number of zones, and zone names
-    var self = this;
-    var roomNameInput = document.getElementById('roomSetupName');
-    if (roomNameInput) {
-      roomNameInput.addEventListener('input', function(e) {
+    // Room info step: grow room name, number of zones, and zone names
+    const self = this;
+    const roomInfoNameInput = document.getElementById('roomInfoName');
+    if (roomInfoNameInput) {
+      roomInfoNameInput.addEventListener('input', (e) => {
         self.data.name = (e.target.value || '').trim();
+        self.updateSetupQueue();
       });
     }
-    var zoneCountInput = document.getElementById('roomSetupZoneCount');
+    const zoneCountInput = document.getElementById('roomInfoZoneCount');
     if (zoneCountInput) {
-      zoneCountInput.addEventListener('input', function(e) {
-        var n = parseInt(e.target.value, 10);
+      zoneCountInput.addEventListener('input', (e) => {
+        let n = parseInt(e.target.value, 10);
         if (!Number.isFinite(n) || n < 1) n = 1;
         if (n > 12) n = 12;
-        e.target.value = n;
+        e.target.value = String(n);
         if (!Array.isArray(self.data.zones)) self.data.zones = [];
         while (self.data.zones.length < n) self.data.zones.push('');
         while (self.data.zones.length > n) self.data.zones.pop();
-        self.renderZoneInputs();
+        self.renderRoomInfoZones();
+        self.updateSetupQueue();
       });
     }
-    self.renderZoneInputs = function() {
-      var zoneInputsHost = document.getElementById('roomSetupZoneInputs');
+    self.renderRoomInfoZones = function () {
+      const zoneInputsHost = document.getElementById('roomInfoZoneInputs');
       if (!zoneInputsHost) return;
       zoneInputsHost.innerHTML = '';
       if (!Array.isArray(self.data.zones)) self.data.zones = [];
-      for (var i = 0; i < self.data.zones.length; i++) {
-        var input = document.createElement('input');
+      self.data.zones.forEach((zoneName, index) => {
+        const wrapper = document.createElement('div');
+        wrapper.className = 'zone-name-row';
+        const label = document.createElement('label');
+        label.className = 'tiny';
+        label.textContent = `Zone ${index + 1}`;
+        label.setAttribute('for', `roomInfoZone-${index}`);
+        const input = document.createElement('input');
+        input.id = `roomInfoZone-${index}`;
         input.type = 'text';
-        input.placeholder = 'Zone ' + (i + 1) + ' name';
-        input.value = self.data.zones[i] || '';
-        input.className = 'zone-name-input';
-        input.addEventListener('input', (function(idx) {
-          return function(e) {
-            self.data.zones[idx] = (e.target.value || '').trim();
-          };
-        })(i));
-        zoneInputsHost.appendChild(input);
-      }
+        input.placeholder = `Zone ${index + 1} name`;
+        input.value = zoneName || '';
+        input.required = true;
+        input.addEventListener('input', (event) => {
+          self.data.zones[index] = (event.target.value || '').trim();
+          self.updateSetupQueue();
+        });
+        wrapper.appendChild(label);
+        wrapper.appendChild(input);
+        zoneInputsHost.appendChild(wrapper);
+      });
     };
-    if (document.getElementById('roomSetupZoneInputs')) self.renderZoneInputs();
+    if (document.getElementById('roomInfoZoneInputs')) self.renderRoomInfoZones();
       });
     };
     bindRoleInput('roomRoleAdmin', 'admin');
@@ -2820,7 +2801,6 @@ class RoomWizard {
       energyHours: 0,
       targetPpfd: 0,
       photoperiod: 0,
-      connectivity: { hasHub: null, hubType: '', hubIp: '', cloudTenant: 'Azure' },
       roles: { admin: [], operator: [], viewer: [] },
       grouping: { groups: [], planId: '', scheduleId: '' },
       seriesCount: 0
@@ -2833,7 +2813,6 @@ class RoomWizard {
         ...clone,
         layout: { ...base.layout, ...(clone.layout || {}) },
         sensors: { ...base.sensors, ...(clone.sensors || {}) },
-        connectivity: { ...base.connectivity, ...(clone.connectivity || {}) },
         roles: { ...base.roles, ...(clone.roles || {}) },
         grouping: { ...base.grouping, ...(clone.grouping || {}) }
       };
@@ -3111,24 +3090,20 @@ class RoomWizard {
     // Track previous step for transitions
     this.previousStep = stepKey;
     
-    if (stepKey === 'room-name') {
-      const nameInput = document.getElementById('roomName');
+    if (stepKey === 'room-info') {
+      if (!Array.isArray(this.data.zones) || this.data.zones.length === 0) {
+        this.data.zones = [''];
+      }
+      const nameInput = document.getElementById('roomInfoName');
       if (nameInput) {
-        // The room name should already be pre-filled from Farm Registration data
-        // Don't override it unless it's empty
-        if (!this.data.name && STATE.farm?.farmName) {
-          // Fallback naming if somehow the room name is missing
-          const roomNumber = (this.multiRoomIndex || 0) + 1;
-          this.data.name = `${STATE.farm.farmName} - Room ${roomNumber}`;
-        }
         nameInput.value = this.data.name || '';
-        
-        // Show a hint about the room being from Farm Registration
-        const hintEl = document.getElementById('roomNameHint');
-        if (hintEl && this.multiRoomList && this.multiRoomList.length > 0) {
-          hintEl.textContent = `Room name from Farm Registration. Editing this will update the farm configuration.`;
-          hintEl.style.display = 'block';
-        }
+      }
+      const zoneCountInput = document.getElementById('roomInfoZoneCount');
+      if (zoneCountInput) {
+        zoneCountInput.value = String(this.data.zones.length || 1);
+      }
+      if (typeof this.renderRoomInfoZones === 'function') {
+        this.renderRoomInfoZones();
       }
     }
 
@@ -3200,25 +3175,6 @@ class RoomWizard {
       const cm = this.data.controlMethod;
       this.renderDevicesList();
     }
-    if (stepKey === 'connectivity') {
-      const hub = this.data.connectivity || {};
-      document.querySelectorAll('input[name="roomHubPresence"]').forEach(radio => {
-        if (hub.hasHub === null) radio.checked = false;
-        else radio.checked = (hub.hasHub && radio.value === 'yes') || (!hub.hasHub && radio.value === 'no');
-      });
-      const hubType = document.getElementById('roomHubType'); if (hubType) hubType.value = hub.hubType || '';
-      const hubIp = document.getElementById('roomHubIp'); if (hubIp) hubIp.value = hub.hubIp || '';
-      const tenant = document.getElementById('roomCloudTenant'); if (tenant) tenant.value = hub.cloudTenant || '';
-      const roles = this.data.roles || {};
-      const adminInput = document.getElementById('roomRoleAdmin'); if (adminInput) adminInput.value = (roles.admin || []).join(', ');
-      const opInput = document.getElementById('roomRoleOperator'); if (opInput) opInput.value = (roles.operator || []).join(', ');
-      const viewerInput = document.getElementById('roomRoleViewer'); if (viewerInput) viewerInput.value = (roles.viewer || []).join(', ');
-      const statusEl = document.getElementById('roomHubStatus');
-      if (statusEl) {
-        if (hub.hasHub) statusEl.textContent = hub.hubIp ? `Hub recorded at ${hub.hubIp}. Verify Node-RED when ready.` : 'Hub recorded. Add IP to enable edge control.';
-        else statusEl.textContent = '';
-      }
-    }
     if (stepKey === 'energy') {
       document.querySelectorAll('#roomEnergy .chip-option').forEach(btn => {
         if (btn.dataset.value === this.data.energy) btn.setAttribute('data-active', ''); else btn.removeAttribute('data-active');
@@ -3238,19 +3194,18 @@ class RoomWizard {
   silentValidateCurrentStep(){
     const step = this.steps[this.currentStep];
     switch(step){
-      case 'room-name': {
-        const v = ($('#roomName')?.value||'').trim(); return !!v; }
-
+      case 'room-info': {
+        const v = ($('#roomInfoName')?.value||'').trim();
+        const zones = Array.isArray(this.data.zones) ? this.data.zones : [];
+        const zonesFilled = zones.length > 0 && zones.every(z => typeof z === 'string' && z.trim().length > 0);
+        return !!v && zonesFilled;
+      }
       case 'layout': return true;
       case 'zones': return Array.isArray(this.data.zones) && this.data.zones.length > 0;
       case 'hardware': return false; // multi-select; don't auto-advance here
       case 'category-setup': return true; // allow auto-advance if user clicks next; forms are optional counts
       case 'control': return !!this.data.controlMethod;
       case 'devices': return false;
-      case 'connectivity': {
-        const conn = this.data.connectivity || {};
-        return conn.hasHub !== null;
-      }
       case 'energy': return !!this.data.energy;
       case 'grouping': return Array.isArray(this.data.grouping?.groups) && this.data.grouping.groups.length > 0;
       case 'review': return false;
@@ -3275,9 +3230,26 @@ class RoomWizard {
   validateCurrentStep(){
     const step = this.steps[this.currentStep];
     switch(step){
-      case 'room-name': {
-        const v = ($('#roomName')?.value||'').trim(); if (!v) { alert('Enter a room name'); return false; }
-        this.data.name = v; break; }
+      case 'room-info': {
+        const name = ($('#roomInfoName')?.value||'').trim();
+        if (!name) { alert('Enter a grow room name'); return false; }
+        this.data.name = name;
+        const zoneCountField = document.getElementById('roomInfoZoneCount');
+        const requestedCount = zoneCountField ? parseInt(zoneCountField.value, 10) : (this.data.zones?.length || 0);
+        const count = Number.isFinite(requestedCount) && requestedCount > 0 ? Math.min(requestedCount, 12) : Math.max(this.data.zones?.length || 0, 1);
+        if (zoneCountField) zoneCountField.value = String(count);
+        if (!Array.isArray(this.data.zones)) this.data.zones = [];
+        while (this.data.zones.length < count) this.data.zones.push('');
+        while (this.data.zones.length > count) this.data.zones.pop();
+        if (typeof this.renderRoomInfoZones === 'function') this.renderRoomInfoZones();
+        const emptyIdx = this.data.zones.findIndex(z => !z || !String(z).trim());
+        if (emptyIdx >= 0) {
+          alert('Provide a name for every zone.');
+          const field = document.getElementById(`roomInfoZone-${emptyIdx}`);
+          field?.focus();
+          return false;
+        }
+        break; }
 
       case 'layout': {
         // no strict validation
@@ -3321,25 +3293,6 @@ class RoomWizard {
           const ok = confirm('No connected devices were added for this control method. Continue?');
           if (!ok) return false;
         }
-        break; }
-      case 'connectivity': {
-        const conn = this.data.connectivity || (this.data.connectivity = { hasHub: null, hubType: '', hubIp: '', cloudTenant: 'Azure' });
-        const radios = document.querySelector('input[name="roomHubPresence"]:checked');
-        if (radios) {
-          conn.hasHub = radios.value === 'yes' ? true : radios.value === 'no' ? false : null;
-        }
-        if (conn.hasHub === null) { alert('Let us know if a local hub is present.'); return false; }
-        conn.hubType = ($('#roomHubType')?.value || '').trim();
-        conn.hubIp = ($('#roomHubIp')?.value || '').trim();
-        conn.cloudTenant = ($('#roomCloudTenant')?.value || '').trim() || 'Azure';
-        if (conn.hasHub && !conn.hubIp) { alert('Enter the hub IP address so we can link automations.'); return false; }
-        if (!conn.hasHub && (this.data.hardwareCats || []).includes('controllers')) {
-          const ok = confirm('Controllers were selected, but no hub is configured. Continue?');
-          if (!ok) return false;
-        }
-        this.setRoleList('admin', ($('#roomRoleAdmin')?.value || ''));
-        this.setRoleList('operator', ($('#roomRoleOperator')?.value || ''));
-        this.setRoleList('viewer', ($('#roomRoleViewer')?.value || ''));
         break; }
       case 'grouping': {
         this.data.grouping = this.data.grouping || { groups: [], planId: '', scheduleId: '' };
@@ -3516,9 +3469,14 @@ class RoomWizard {
     } else if (catId === 'fans') {
       html = `
         <div class="tiny">Fans</div>
-        <div class="equipment-selection">
+        <div class="equipment-selection" style="display:flex;flex-direction:column;gap:8px;max-width:260px;">
           <label class="tiny">Manufacturer
-            <input type="text" id="cat-fans-manufacturer" placeholder="Search manufacturer..." value="${v(catData.manufacturer||'')}" style="width:200px">
+            <input type="text" id="cat-fans-manufacturer" placeholder="Search manufacturer..." value="${v(catData.manufacturer||'')}" style="width:100%">
+          </label>
+          <label class="tiny">Model
+            <select id="cat-fans-model" style="width:100%">
+              <option value="">Select model</option>
+            </select>
           </label>
         </div>
         <label class="tiny">How many? <input type="number" id="cat-fans-count" min="0" value="${v(catData.count||0)}" style="width:80px"></label>
@@ -3555,9 +3513,14 @@ class RoomWizard {
     } else {
       html = `
         <div class="tiny">Other equipment</div>
-        <div class="equipment-selection">
+        <div class="equipment-selection" style="display:flex;flex-direction:column;gap:8px;max-width:260px;">
           <label class="tiny">Manufacturer
-            <input type="text" id="cat-other-manufacturer" placeholder="Search manufacturer..." value="${v(catData.manufacturer||'')}" style="width:200px">
+            <input type="text" id="cat-other-manufacturer" placeholder="Search manufacturer..." value="${v(catData.manufacturer||'')}" style="width:100%">
+          </label>
+          <label class="tiny">Model
+            <select id="cat-other-model" style="width:100%">
+              <option value="">Select model</option>
+            </select>
           </label>
         </div>
         <label class="tiny">Describe <input type="text" id="cat-other-notes" value="${v(catData.notes||'')}" placeholder="e.g., CO₂ burner" style="min-width:220px"></label>
@@ -3567,6 +3530,13 @@ class RoomWizard {
     
     // Add event listeners for manufacturer search to populate model dropdowns
     this.setupManufacturerSearch();
+
+    if (catId === 'fans' && catData.manufacturer) {
+      this.populateModelDropdown('cat-fans-model', catData.manufacturer, 'fans');
+    }
+    if (catId === 'other' && catData.manufacturer) {
+      this.populateModelDropdown('cat-other-model', catData.manufacturer, 'other');
+    }
     
     // Wire chip groups to update data (for categories that still use chips)
     body.querySelectorAll('.chip-row').forEach(row => {
@@ -3637,6 +3607,63 @@ class RoomWizard {
         });
       }
     });
+
+    const fansModelSelect = document.getElementById('cat-fans-model');
+    if (fansModelSelect) {
+      if (catData.model) {
+        fansModelSelect.value = catData.model;
+        if (!fansModelSelect.querySelector(`option[value="${catData.model}"]`) && catData.model) {
+          const option = document.createElement('option');
+          option.value = catData.model;
+          option.textContent = catData.model;
+          fansModelSelect.appendChild(option);
+          fansModelSelect.value = catData.model;
+        }
+      }
+      fansModelSelect.addEventListener('change', () => {
+        this.data.category.fans = this.data.category.fans || {};
+        this.data.category.fans.model = fansModelSelect.value || '';
+        const selected = fansModelSelect.selectedOptions[0];
+        if (selected) {
+          const vendor = selected.dataset.vendor || '';
+          if (vendor && !this.data.category.fans.manufacturer) {
+            this.data.category.fans.manufacturer = vendor;
+            const manufacturerInput = document.getElementById('cat-fans-manufacturer');
+            if (manufacturerInput && !manufacturerInput.value) manufacturerInput.value = vendor;
+          }
+          const control = selected.dataset.control || '';
+          const capacity = selected.dataset.capacity || selected.textContent || '';
+          this.data.category.fans.modelMeta = { control, capacity };
+        }
+      });
+    }
+
+    const otherModelSelect = document.getElementById('cat-other-model');
+    if (otherModelSelect) {
+      if (catData.model) {
+        otherModelSelect.value = catData.model;
+        if (!otherModelSelect.querySelector(`option[value="${catData.model}"]`) && catData.model) {
+          const option = document.createElement('option');
+          option.value = catData.model;
+          option.textContent = catData.model;
+          otherModelSelect.appendChild(option);
+          otherModelSelect.value = catData.model;
+        }
+      }
+      otherModelSelect.addEventListener('change', () => {
+        this.data.category.other = this.data.category.other || {};
+        this.data.category.other.model = otherModelSelect.value || '';
+        const selected = otherModelSelect.selectedOptions[0];
+        if (selected) {
+          const vendor = selected.dataset.vendor || '';
+          if (vendor && !this.data.category.other.manufacturer) {
+            this.data.category.other.manufacturer = vendor;
+            const manufacturerInput = document.getElementById('cat-other-manufacturer');
+            if (manufacturerInput && !manufacturerInput.value) manufacturerInput.value = vendor;
+          }
+        }
+      });
+    }
   }
 
   // Capture inputs for the current category
@@ -3682,6 +3709,7 @@ class RoomWizard {
     if (catId === 'fans') {
       catData.count = getNum('cat-fans-count') ?? catData.count;
       catData.manufacturer = getStr('cat-fans-manufacturer') ?? catData.manufacturer;
+      catData.model = getStr('cat-fans-model') ?? catData.model;
       catData.wifi = getChecked('cat-fans-wifi');
       catData.wired = getChecked('cat-fans-wired');
     }
@@ -3698,6 +3726,7 @@ class RoomWizard {
     if (catId === 'other') {
       catData.notes = getStr('cat-other-notes') ?? catData.notes;
       catData.manufacturer = getStr('cat-other-manufacturer') ?? catData.manufacturer;
+      catData.model = getStr('cat-other-model') ?? catData.model;
     }
   }
 
@@ -3917,7 +3946,8 @@ class RoomWizard {
       option.textContent = `${item.model} (${item.capacity || item.power || 'Unknown capacity'})`;
       option.dataset.vendor = item.vendor;
       option.dataset.category = item.category;
-      option.dataset.control = item.control;
+      option.dataset.control = item.control || '';
+      option.dataset.capacity = item.capacity || item.power || '';
       modelSelect.appendChild(option);
     });
 
@@ -4562,6 +4592,15 @@ class RoomWizard {
   updateReview(){
     const host = $('#roomReview'); if (!host) return;
     const escape = escapeHtml;
+    const zones = Array.isArray(this.data.zones)
+      ? this.data.zones.filter(z => typeof z === 'string' && z.trim().length > 0)
+      : [];
+    const zoneHtml = zones.length
+      ? `<ul class="tiny" style="margin:6px 0 0 0; padding-left:18px">${zones
+          .map((name, idx) => `<li>Zone ${idx + 1}: ${escape(name)}</li>`)
+          .join('')}</ul>`
+      : '<span>—</span>';
+
     // Hardware categories selected in 'hardware' step
     const hardwareCats = Array.isArray(this.data.hardwareCats) ? this.data.hardwareCats : [];
     const hardwareHtml = hardwareCats.length ? hardwareCats.map(id => `<span class="chip tiny">${escape(this.categoryLabel(id))}</span>`).join(' ') : '—';
@@ -4569,6 +4608,8 @@ class RoomWizard {
     const catData = this.data.category || {};
     const catDetails = Object.entries(catData).map(([key, val]) => {
       const parts = [];
+      if (val.manufacturer) parts.push(escape(String(val.manufacturer)));
+      if (val.model) parts.push(escape(String(val.model)));
       if (val.count != null) parts.push(`${escape(String(val.count))} units`);
       if (val.control) parts.push(escape(String(val.control)));
       if (val.energy) parts.push(escape(String(val.energy)));
@@ -4582,6 +4623,7 @@ class RoomWizard {
     host.innerHTML = `
       <div><strong>Name:</strong> ${escape(this.data.name || '—')}</div>
       <div><strong>Location:</strong> ${escape(this.data.location || '—')}</div>
+      <div><strong>Zones:</strong> ${zoneHtml}</div>
       <div><strong>Hardware:</strong> ${hardwareHtml}</div>
       <div><strong>Per-category details:</strong> ${categoryHtml}</div>
   ${progressEntries ? `<div><strong>Setup queue:</strong> ${progressEntries}</div>` : ''}
@@ -8565,7 +8607,7 @@ function buildPairingEnvironmentContext(roomWizardInstance) {
   const connection = (farm.connection && farm.connection.wifi) || {};
   const testResult = connection.testResult || {};
   const roomData = (roomWizardInstance && roomWizardInstance.data) || {};
-  const roomNameInput = document.getElementById('roomName');
+  const roomNameInput = document.getElementById('roomInfoName');
   const locationSelect = document.getElementById('roomLocationSelect');
 
   const preferredSsid = discovery.ssid || connection.ssid || testResult.ssid || '';
