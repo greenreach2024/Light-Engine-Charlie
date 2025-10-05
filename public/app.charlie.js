@@ -1,3 +1,27 @@
+// --- Groups Card Room/Zone Dropdown Seeding ---
+function seedGroupRoomZoneDropdowns() {
+  const roomSel = document.getElementById('groupRoomDropdown');
+  const zoneSel = document.getElementById('groupZoneDropdown');
+  if (!roomSel || !zoneSel) return;
+  // Populate rooms from STATE.farm.rooms
+  const rooms = Array.isArray(STATE.farm?.rooms) ? STATE.farm.rooms : [];
+  roomSel.innerHTML = '<option value="">Room</option>' + rooms.map(r => `<option value="${r.id}">${r.name}</option>`).join('');
+  // On room change, update zones
+  roomSel.addEventListener('change', function() {
+    const room = rooms.find(r => r.id === roomSel.value);
+    if (room) {
+      zoneSel.innerHTML = '<option value="">Zone</option>' + (room.zones||[]).map(z => `<option value="${z}">${z}</option>`).join('');
+    } else {
+      zoneSel.innerHTML = '<option value="">Zone</option>';
+    }
+  });
+  // Initial zone population for first room
+  if (rooms.length > 0) {
+    roomSel.value = rooms[0].id;
+    roomSel.dispatchEvent(new Event('change'));
+  }
+}
+
 // --- IoT System Setup Card Show/Hide Logic ---
 document.addEventListener('DOMContentLoaded', function() {
   const btn = document.getElementById('btnShowIotSetup');
@@ -564,6 +588,35 @@ async function safeFarmSave(payload) {
     }
   }
 }
+
+// Utility: Save rooms to backend or localStorage fallback
+async function safeRoomsSave() {
+  const rooms = Array.isArray(STATE.rooms) ? STATE.rooms : [];
+  try {
+    const resp = await fetch('/data/rooms.json', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ rooms })
+    });
+    if (resp.ok) return true;
+    throw new Error('HTTP ' + resp.status);
+  } catch (err) {
+    // Fallback: save to localStorage
+    try {
+      localStorage.setItem('gr.rooms', JSON.stringify({ rooms }));
+      console.warn('[safeRoomsSave] Backend failed, saved to localStorage:', err);
+      return true;
+    } catch (e) {
+      console.error('[safeRoomsSave] Could not save rooms:', e);
+      return false;
+    }
+  }
+}
+
+// DEMO fallback: safeRoomsSave always resolves true
+if (typeof window.safeRoomsSave !== 'function') {
+  window.safeRoomsSave = safeRoomsSave;
+}
 // DEMO fallback: safeFarmSave always resolves true
 if (typeof window.safeFarmSave !== 'function') {
   window.safeFarmSave = async function(payload) {
@@ -783,7 +836,18 @@ class FarmWizard {
     // Remove backdrop click to close - wizard should only close on save
     // $('#farmModalBackdrop')?.addEventListener('click', () => this.close());
     $('#farmPrev')?.addEventListener('click', () => this.prevStep());
-    $('#farmNext')?.addEventListener('click', () => this.nextStep());
+    const nextBtn = $('#farmNext');
+    if (nextBtn) {
+      nextBtn.addEventListener('click', () => {
+        console.debug('[FarmWizard] Next button clicked. Current step:', this.currentStep, 'Step id:', this.steps?.[this.currentStep]);
+        const valid = this.validateCurrentStep();
+        console.debug('[FarmWizard] validateCurrentStep() returned:', valid);
+        if (valid) this.nextStep();
+        else console.warn('[FarmWizard] Validation failed, not advancing.');
+      });
+    } else {
+      console.warn('[FarmWizard] #farmNext button not found in DOM');
+    }
     this.form?.addEventListener('submit', (e) => {
       e.preventDefault(); // Always prevent default form submission
       // Only save if we're on the final step (review)
@@ -929,7 +993,10 @@ class FarmWizard {
   }
 
   close() {
-    this.modal?.setAttribute('aria-hidden', 'true');
+    if (this.modal) {
+      this.modal.setAttribute('aria-hidden', 'true');
+      this.modal.style.display = 'none';
+    }
   }
 
   showStep(index) {
@@ -1210,8 +1277,11 @@ class FarmWizard {
 
   validateCurrentStep() {
     const stepId = this.steps[this.currentStep];
-    console.log('🔍 Validating step:', stepId, 'with data:', this.data);
-    
+    console.debug('🔍 Validating step:', stepId, 'with data:', JSON.parse(JSON.stringify(this.data)));
+    if (!stepId) {
+      console.warn('[FarmWizard] validateCurrentStep: No stepId for currentStep', this.currentStep);
+      return false;
+    }
     if (stepId === 'connection-choice' && !['wifi','ethernet'].includes(this.data.connection.type)) {
       alert('Pick Wi‑Fi or Ethernet to continue.');
       return false;
@@ -1224,9 +1294,9 @@ class FarmWizard {
       alert('Run the Wi‑Fi test so we know the credentials work.');
       return false;
     }
-  if (stepId === 'location') {
+    if (stepId === 'location') {
       // Capture all location data for subscription services
-  const farmNameEl = document.querySelector('#farmWizardForm #farmName');
+      const farmNameEl = document.querySelector('#farmWizardForm #farmName');
       const farmNameValue = farmNameEl?.value?.trim() || '';
       const addressEl = $('#farmAddress');
       const addressValue = addressEl?.value?.trim() || '';
@@ -1236,22 +1306,19 @@ class FarmWizard {
       const stateValue = stateEl?.value?.trim() || '';
       const postalEl = $('#farmPostal');
       const postalValue = postalEl?.value?.trim() || '';
-      
       // Always update the data with current form values (required for subscriptions)
       this.data.location.farmName = farmNameValue;
       this.data.location.address = addressValue;
       this.data.location.city = cityValue;
       this.data.location.state = stateValue;
       this.data.location.postal = postalValue;
-      
-      console.log('✅ Location data captured for subscriptions:', {
+      console.debug('✅ Location data captured for subscriptions:', {
         farmName: farmNameValue || '(blank)',
         address: addressValue || '(blank)',
         city: cityValue || '(blank)', 
         state: stateValue || '(blank)',
         postal: postalValue || '(blank)'
       });
-      
       return true; // Always allow progression - data collection for future subscriptions
     }
     if (stepId === 'contact' && (!this.data.contact.name || !this.data.contact.email)) {
@@ -1326,7 +1393,14 @@ class FarmWizard {
       <div><strong>Timezone:</strong> ${escapeHtml(timezone)}</div>
       <div><strong>Contact:</strong> ${escapeHtml(this.data.contact.name || '')} ${this.data.contact.email ? `&lt;${escapeHtml(this.data.contact.email)}&gt;` : ''} ${this.data.contact.phone ? escapeHtml(this.data.contact.phone) : ''}</div>
       ${this.data.contact.website ? `<div><strong>Website:</strong> <a href="${this.data.contact.website.startsWith('http') ? escapeHtml(this.data.contact.website) : 'https://' + escapeHtml(this.data.contact.website)}" target="_blank">${escapeHtml(this.data.contact.website)}</a></div>` : ''}
-      <div><strong>Rooms:</strong> ${rooms.map(r => `${escapeHtml(r.name)} (${r.zones.length || 0} zones)`).join(', ')}</div>`;
+      <div><strong>Rooms:</strong> ${rooms.map(r => `${escapeHtml(r.name)} (${r.zones.length || 0} zones)`).join(', ')}</div>
+      <div><strong>Zones:</strong> ${rooms.length === 0 ? '—' : rooms.map(r => {
+        if (!r.zones || r.zones.length === 0) {
+          return `${escapeHtml(r.name)}: 0 zones`;
+        }
+        return `${escapeHtml(r.name)}: ${r.zones.length} zone${r.zones.length > 1 ? 's' : ''} — ${r.zones.map(z => escapeHtml(z)).join(', ')}`;
+      }).join('<br>')}</div>
+    `;
   }
 
   hydrateFromFarm(farmData) {
@@ -1491,6 +1565,8 @@ class FarmWizard {
       this.updateFarmDisplay();
       try { this.updateFarmHeaderDisplay(); } catch {}
       showToast({ title: 'Farm saved', msg: 'We stored the farm profile and updated discovery defaults.', kind: 'success', icon: '✅' });
+      // Notify listeners (e.g., Groups card) that farm data changed
+      window.dispatchEvent(new CustomEvent('farmDataChanged'));
     } catch (err) {
       showToast({ title: 'Save failed', msg: err?.message || String(err), kind: 'warn', icon: '⚠️' });
     }
@@ -3557,7 +3633,10 @@ class RoomWizard {
     };
   }
 
-  close(){ this.modal.setAttribute('aria-hidden','true'); }
+  close(){
+    this.modal.setAttribute('aria-hidden','true');
+    this.modal.style.display = 'none';
+  }
 
   showStep(index) {
     // Sync internal current step state
@@ -3568,13 +3647,7 @@ class RoomWizard {
     if (el) el.setAttribute('data-active', '');
     $('#roomModalProgress').textContent = `Step ${index + 1} of ${this.steps.length}`;
 
-    // Hide legacy footer except on final step
-    if (this.form) {
-      const legacyFooter = this.form.querySelector('.room-modal__footer');
-      if (legacyFooter) {
-        legacyFooter.style.display = (index === this.steps.length - 1) ? 'flex' : 'none';
-      }
-    }
+    // Legacy footer removed: all navigation is now handled by header controls
 
     // Guard navigation button toggles
     const prev = $('#roomPrev');
@@ -3763,8 +3836,10 @@ class RoomWizard {
           this.updateSetupQueue();
         };
       }
-      if (zoneInputsHost) {
+      if (zoneInputsHost && typeof this.renderRoomInfoZones === 'function') {
         this.renderRoomInfoZones();
+      } else if (zoneInputsHost) {
+        console.error('[RoomWizard] renderRoomInfoZones is not a function', this.renderRoomInfoZones);
       }
     }
 
@@ -5006,35 +5081,41 @@ class RoomWizard {
       this.data.devices = this.data.devices || [];
       
       // Create device entry from equipment
-      const device = {
-        vendor: item.vendor,
-        model: item.model,
-        category: item.category,
-        power: item.power,
-        capacity: item.capacity,
-        features: item.features || [],
-        setup: {}
-      };
-      
-      // Map control method to setup properties
-      if (item.control === 'WiFi') {
-        device.setup.wifi = true;
-      } else if (item.control === '0-10V') {
-        device.setup['0-10v'] = true;
-      } else if (item.control === 'Smart Thermostat') {
-        device.setup.wifi = true;
-        device.setup.thermostat = true;
-      } else if (item.control === 'Speed Controller') {
-        device.setup['speed-controller'] = true;
-      }
-      
-      this.data.devices.push(device);
-      this.ensureHardwareCategory(item.category);
-      this.updateSetupQueue();
-      
-      // Update controller assignments when equipment is added
-      if (typeof renderControllerAssignments === 'function') {
-        renderControllerAssignments();
+  function updateReview(){
+        const host = $('#roomReview'); if (!host) return;
+        const escape = escapeHtml;
+        // Hardware categories selected in 'hardware' step
+        const hardwareCats = Array.isArray(this.data.hardwareCats) ? this.data.hardwareCats : [];
+        const hardwareHtml = hardwareCats.length ? hardwareCats.map(id => `<span class=\"chip tiny\">${escape(this.categoryLabel(id))}</span>`).join(' ') : '—';
+        // Per-category detail captured in 'category-setup' step
+        const catData = this.data.category || {};
+        const catDetails = Object.entries(catData).map(([key, val]) => {
+          const parts = [];
+          if (val.count != null) parts.push(`${escape(String(val.count))} units`);
+          if (val.control) parts.push(escape(String(val.control)));
+          if (val.energy) parts.push(escape(String(val.energy)));
+          if (val.notes) parts.push(escape(String(val.notes)));
+          const label = escape(this.categoryLabel(key));
+          return `<li><strong>${label}</strong> — ${parts.length ? parts.join(' • ') : 'No details captured'}</li>`;
+        });
+        const categoryHtml = catDetails.length ? `<ul class=\"tiny\" style=\"margin:6px 0 0 0; padding-left:18px\">${catDetails.join('')}</ul>` : '<span>—</span>';
+        // Zones summary from step 1 (for multi-room, use current room's zones)
+        let zones = [];
+        if (this.multiRoomList && this.multiRoomList.length > 0 && typeof this.multiRoomIndex === 'number') {
+          const currentRoom = this.multiRoomList[this.multiRoomIndex];
+          zones = Array.isArray(currentRoom?.zones) ? currentRoom.zones : [];
+        } else {
+          zones = Array.isArray(this.data.zones) ? this.data.zones : [];
+        }
+        const zonesHtml = zones.length
+          ? `${zones.length} zone${zones.length > 1 ? 's' : ''}: <span>${zones.map(z => escape(z)).join(', ')}</span>`
+          : '—';
+        host.innerHTML = `
+          <div><strong>Name:</strong> ${escape(this.data.name || '—')}</div>
+          <div><strong>Zones:</strong> ${zonesHtml}</div>
+          <div><strong>Hardware:</strong> ${hardwareHtml}</div>
+          <div><strong>Per-category details:</strong> ${categoryHtml}</div>
+        `;
       }
       
       showToast({ 
@@ -5235,14 +5316,16 @@ class RoomWizard {
       return `<li><strong>${label}</strong> — ${parts.length ? parts.join(' • ') : 'No details captured'}</li>`;
     });
     const categoryHtml = catDetails.length ? `<ul class="tiny" style="margin:6px 0 0 0; padding-left:18px">${catDetails.join('')}</ul>` : '<span>—</span>';
-    // Category setup queue/progress removed from room review per spec
-    const progressEntries = '';
+    // Zones summary from step 1
+    const zones = Array.isArray(this.data.zones) ? this.data.zones : [];
+    const zonesHtml = zones.length
+      ? `${zones.length} zone${zones.length > 1 ? 's' : ''}: <span>${zones.map(z => escape(z)).join(', ')}</span>`
+      : '—';
     host.innerHTML = `
       <div><strong>Name:</strong> ${escape(this.data.name || '—')}</div>
-      <div><strong>Location:</strong> ${escape(this.data.location || '—')}</div>
+      <div><strong>Zones:</strong> ${zonesHtml}</div>
       <div><strong>Hardware:</strong> ${hardwareHtml}</div>
       <div><strong>Per-category details:</strong> ${categoryHtml}</div>
-  ${progressEntries ? `<div><strong>Setup queue:</strong> ${progressEntries}</div>` : ''}
     `;
   }
 
@@ -5496,55 +5579,17 @@ class RoomWizard {
   }
 
   async saveAndClose() {
-    // Check if there are more rooms to setup
-    const hasMoreRooms = Array.isArray(this.multiRoomList) && this.multiRoomList.length > 1 && this.multiRoomIndex < this.multiRoomList.length - 1;
-    
-    // Create a mock event to satisfy saveRoom's preventDefault call
+    // Always save and close the wizard (single or multi-room)
     const mockEvent = { preventDefault: () => {} };
-    
-    // Save the current room
-    const success = await this.saveRoom(mockEvent, false);
-    
-    if (success && hasMoreRooms) {
-      // If there are more rooms, ask user if they want to continue or close
-      const continueSetup = confirm(`Room "${this.data.name}" saved successfully!\n\nYou have ${this.multiRoomList.length - this.multiRoomIndex - 1} more room(s) to setup.\n\nClick OK to continue with the next room, or Cancel to finish later.`);
-      
-      if (continueSetup) {
-        // Move to next room
-        this.multiRoomIndex++;
-        const nextRoom = this.multiRoomList[this.multiRoomIndex];
-        this._openSingleRoom(nextRoom);
-        this.currentStep = 0;
-        this.showStep(0);
-        this._injectMultiRoomNav();
-        
-        showToast({ 
-          title: 'Continuing Setup', 
-          msg: `Now setting up: ${nextRoom.name}`, 
-          kind: 'success', 
-          icon: '▶️' 
-        });
-      } else {
-        // User chose to finish later, close the wizard
-        this.close();
-        showToast({ 
-          title: 'Setup Paused', 
-          msg: 'You can resume room setup anytime from the Grow Rooms section', 
-          kind: 'info', 
-          icon: '⏸️' 
-        });
-      }
-    } else if (success) {
-      // This was the last room or single room setup, close normally
+    const success = await this.saveRoom(mockEvent, true);
+    if (success) {
       this.close();
-      if (this.multiRoomList && this.multiRoomList.length > 1) {
-        showToast({ 
-          title: 'All Rooms Complete!', 
-          msg: 'All grow rooms have been set up successfully', 
-          kind: 'success', 
-          icon: '🎉' 
-        });
-      }
+      showToast({
+        title: 'Room Saved',
+        msg: `Room \"${this.data.name}\" saved successfully!`,
+        kind: 'success',
+        icon: '✅'
+      });
     }
     // If save failed, saveRoom will handle the error display and we stay in the wizard
   }
@@ -5919,7 +5964,6 @@ function hydrateDeviceSelect() {
 function renderGroups() {
   const select = $('#groupSelect');
   if (!select) return;
-  
   const prev = STATE.currentGroup?.id || select.value || '';
   select.innerHTML = '<option value="">Select group...</option>' +
     STATE.groups.map(group => `<option value="${group.id}">${escapeHtml(group.name||group.id)}</option>`).join('');
@@ -5932,6 +5976,8 @@ function renderGroups() {
     // Reflect name input
     const nameInput = $('#groupName'); if (nameInput) nameInput.value = STATE.currentGroup?.name || '';
   }
+  // Seed Room/Zone dropdowns for Groups card
+  seedGroupRoomZoneDropdowns();
 }
 
 function renderRooms() {
@@ -7369,18 +7415,72 @@ function wireGlobalEvents() {
   const groupQuick = $('#groupQuick');
   if (groupQuick && !groupQuick.dataset.enhanced) {
     groupQuick.dataset.enhanced = '1';
-    const roomSel = document.createElement('input'); roomSel.type='text'; roomSel.placeholder='Room'; roomSel.style.minWidth='120px';
-    const zoneSel = document.createElement('input'); zoneSel.type='text'; zoneSel.placeholder='Zone'; zoneSel.style.minWidth='120px';
+    // --- Room/Zone dropdowns for Groups card quick selector ---
+    const roomSel = document.createElement('select');
+    roomSel.style.minWidth = '120px';
+    roomSel.title = 'Room';
+    const zoneSel = document.createElement('select');
+    zoneSel.style.minWidth = '120px';
+    zoneSel.title = 'Zone';
     const applyBtn = document.createElement('button'); applyBtn.type='button'; applyBtn.className='ghost'; applyBtn.textContent='Apply to Group';
     const importBtn = document.createElement('button'); importBtn.type='button'; importBtn.className='ghost'; importBtn.textContent='Import selection'; importBtn.title = 'Import Devices panel selection as roster';
     const clearBtn = document.createElement('button'); clearBtn.type='button'; clearBtn.className='ghost danger'; clearBtn.textContent='Clear roster';
     groupQuick.append(roomSel, zoneSel, applyBtn, importBtn, clearBtn);
+
+    // Helper to get rooms/zones from Grow Room setup (FarmWizard)
+    function getRoomsAndZones() {
+      // Try STATE.farm.rooms, fallback to []
+      const rooms = (STATE.farm && Array.isArray(STATE.farm.rooms)) ? STATE.farm.rooms : [];
+      return rooms.map(r => ({ id: r.id, name: r.name, zones: Array.isArray(r.zones) ? r.zones : [] }));
+    }
+
+    function populateRoomDropdown() {
+      const rooms = getRoomsAndZones();
+      roomSel.innerHTML = '<option value="">Room</option>' + rooms.map(r => `<option value="${r.id}">${escapeHtml(r.name)}</option>`).join('');
+      // If a room is selected, keep it selected
+      if (roomSel._lastValue && rooms.some(r => r.id === roomSel._lastValue)) {
+        roomSel.value = roomSel._lastValue;
+      }
+      populateZoneDropdown();
+    }
+    function populateZoneDropdown() {
+      const rooms = getRoomsAndZones();
+      const selectedRoom = rooms.find(r => r.id === roomSel.value);
+      const zones = selectedRoom ? selectedRoom.zones : [];
+      zoneSel.innerHTML = '<option value="">Zone</option>' + zones.map(z => `<option value="${escapeHtml(z)}">${escapeHtml(z)}</option>`).join('');
+      // If a zone is selected, keep it selected
+      if (zoneSel._lastValue && zones.includes(zoneSel._lastValue)) {
+        zoneSel.value = zoneSel._lastValue;
+      }
+    }
+    // Wire dropdown change events
+    roomSel.addEventListener('change', () => {
+      roomSel._lastValue = roomSel.value;
+      populateZoneDropdown();
+    });
+    zoneSel.addEventListener('change', () => {
+      zoneSel._lastValue = zoneSel.value;
+    });
+    // Initial population
+    populateRoomDropdown();
+    // Re-populate when farm data changes (after Grow Room wizard save)
+    window.addEventListener('farmDataChanged', populateRoomDropdown);
+
     applyBtn.addEventListener('click', async () => {
       if (!STATE.currentGroup) return alert('Select a group first');
       const ids = (STATE.currentGroup.lights||[]).map(l=>l.id);
+      const roomId = roomSel.value;
+      const zone = zoneSel.value;
+      // Find room name for meta
+      const rooms = getRoomsAndZones();
+      const roomObj = rooms.find(r => r.id === roomId);
+      const roomName = roomObj ? roomObj.name : '';
       ids.forEach(id => {
         const meta = getDeviceMeta(id);
-        setDeviceMeta(id, { room: roomSel.value.trim() || meta.room, zone: zoneSel.value.trim() || meta.zone });
+        setDeviceMeta(id, {
+          room: roomName || meta.room,
+          zone: zone || meta.zone
+        });
       });
       await saveDeviceMeta();
       renderDevices();
@@ -9502,15 +9602,31 @@ function setActivePanel(panelId = 'overview') {
   ACTIVE_PANEL = panelId;
   const panels = document.querySelectorAll('[data-panel]');
   let matched = false;
+  let activePanel = null;
   panels.forEach((panel) => {
     const isMatch = panel.getAttribute('data-panel') === panelId;
     panel.classList.toggle('is-active', isMatch);
-    if (isMatch) matched = true;
+    panel.hidden = !isMatch;
+    panel.style.display = isMatch ? '' : 'none';
+    if (isMatch) {
+      matched = true;
+      activePanel = panel;
+    }
   });
 
   if (!matched && panelId !== 'overview') {
     setActivePanel('overview');
     return;
+  }
+
+  // Move the active panel to the top of .dashboard-main
+  if (activePanel) {
+    const dashboardMain = document.querySelector('.dashboard-main');
+    if (dashboardMain && dashboardMain.firstElementChild !== activePanel) {
+      dashboardMain.insertBefore(activePanel, dashboardMain.firstElementChild);
+    }
+    // Reset scroll position
+    dashboardMain.scrollTop = 0;
   }
 
   document.querySelectorAll('[data-sidebar-link]').forEach((link) => {
@@ -9684,6 +9800,8 @@ document.addEventListener('DOMContentLoaded', async () => {
     });
   }
   
+
+  // --- Ensure sidebar navigation is always initialized after wizards ---
   // Initialize farm wizard (single instance, always on window)
   window.farmWizard = new FarmWizard();
   if (window.farmWizard && typeof window.farmWizard.init === 'function') window.farmWizard.init();
@@ -9693,55 +9811,26 @@ document.addEventListener('DOMContentLoaded', async () => {
   const roomWizard = new RoomWizard();
   window.roomWizard = roomWizard;
   // Initialize light wizard
-  console.log('[DEBUG] About to initialize LightWizard');
   const lightWizard = new LightWizard();
   window.lightWizard = lightWizard;
-  console.log('[DEBUG] LightWizard initialized:', lightWizard);
-
-  // Initialize fresh light wizard
-  console.log('[DEBUG] About to initialize FreshLightWizard');
-  console.log('[DEBUG] Checking for freshLightModal element:', document.getElementById('freshLightModal'));
   const freshLightWizard = new FreshLightWizard();
   window.freshLightWizard = freshLightWizard;
-  console.log('[DEBUG] FreshLightWizard initialized:', freshLightWizard);
-  
   // Wire up light setup button (with retry logic)
   function setupLightSetupButton() {
     const lightSetupBtn = document.getElementById('btnLaunchLightSetup');
-    console.log('[DEBUG] Light setup button found:', lightSetupBtn);
-    
     if (lightSetupBtn) {
       lightSetupBtn.addEventListener('click', () => {
-        console.log('[DEBUG] Light setup button clicked, opening fresh wizard');
         freshLightWizard.open();
       });
-      console.log('[DEBUG] Light setup button event listener attached');
     } else {
-      console.error('[DEBUG] Could not find Light setup button!');
-      // Retry after a short delay
-      setTimeout(() => {
-        console.log('[DEBUG] Retrying button setup...');
-        setupLightSetupButton();
-      }, 500);
+      setTimeout(setupLightSetupButton, 500);
     }
   }
-  
   setupLightSetupButton();
-  
-  // Add manual test function for debugging
   window.testFreshWizard = function() {
-    console.log('[DEBUG] Manual test - freshLightWizard:', window.freshLightWizard);
-    if (window.freshLightWizard) {
-      window.freshLightWizard.open();
-    } else {
-      console.error('[DEBUG] Fresh wizard not available!');
-    }
+    if (window.freshLightWizard) window.freshLightWizard.open();
   };
-  
-  // Wire pairing hook so Add Device opens the DevicePairWizard
   try { hookRoomDevicePairing(roomWizard); } catch (e) { console.warn('Failed to hook device pairing', e); }
-  
-  // Load all data (devices will be fetched preferring the forwarder proxy)
   await loadAllData();
   // Wire Plans panel buttons
   try {
@@ -9797,31 +9886,22 @@ document.addEventListener('DOMContentLoaded', async () => {
       e.target.value = '';
     });
   } catch (e) { console.warn('Plans panel wiring failed', e); }
-  
-  // Wire SwitchBot panel buttons
   try {
     document.getElementById('btnScanIoTDevices')?.addEventListener('click', window.scanIoTDevices);
     document.getElementById('btnOpenSwitchBotManager')?.addEventListener('click', window.openSwitchBotManager);
     document.getElementById('btnOpenKasaManager')?.addEventListener('click', window.openKasaManager);
     document.getElementById('btnOpenShellyManager')?.addEventListener('click', window.openShellyManager);
   } catch (e) { console.warn('SwitchBot panel wiring failed', e); }
-  
-  // Load device KB for vendor/model selects
-  // On load, show last scan or empty
   if (document.getElementById('iotDevicesList')) {
     renderIoTDeviceCards(window.LAST_IOT_SCAN);
   }
   await loadDeviceManufacturers();
-  // Apply saved branding if present
   try {
     const farmLocal = JSON.parse(localStorage.getItem('gr.farm') || 'null') || STATE.farm;
-    
-    // Clean up invalid logo URLs from localStorage
     if (farmLocal?.branding?.logo && !farmLocal.branding.logo.startsWith('http://') && !farmLocal.branding.logo.startsWith('https://')) {
       farmLocal.branding.logo = '';
       localStorage.setItem('gr.farm', JSON.stringify(farmLocal));
     }
-    
     const branding = farmLocal?.branding || STATE.farm?.branding;
     if (branding?.palette) applyTheme(branding.palette, { fontFamily: branding.fontFamily || '' });
     if (Array.isArray(branding?.fontCss) && branding.fontCss.length) {
@@ -9830,10 +9910,8 @@ document.addEventListener('DOMContentLoaded', async () => {
     }
     const headerLogo = document.querySelector('.header.logo img');
     if (headerLogo && branding?.logo) { 
-      // Validate logo URL before attempting to load
       const logoUrl = branding.logo.trim();
       if (logoUrl && (logoUrl.startsWith('http://') || logoUrl.startsWith('https://'))) {
-        // Use test image approach to avoid 404s
         const testImg = new Image();
         testImg.onload = () => {
           headerLogo.src = logoUrl;
@@ -9844,23 +9922,17 @@ document.addEventListener('DOMContentLoaded', async () => {
         };
         testImg.src = logoUrl;
       } else {
-        // Invalid URL format, hide logo
         headerLogo.style.display = 'none';
       }
     }
     const title = document.querySelector('.header.logo h1');
     if (title && branding?.fontFamily) { title.style.fontFamily = branding.fontFamily + ', var(--gr-font)'; }
   } catch {}
-  
-  // Initialize Current Lights Status panel
   try { initLightsStatusUI(); } catch (e) { console.warn('Lights status init failed', e); }
-  
-
   setStatus("Dashboard loaded");
-
-  // Ensure modal wizards are instantiated so buttons work
-  // Only instantiate FarmWizard once above
   if (typeof DeviceManagerWindow === 'function') {
     window.deviceManagerWindow = new DeviceManagerWindow();
   }
+  // --- Always initialize sidebar navigation last ---
+  if (typeof initializeSidebarNavigation === 'function') initializeSidebarNavigation();
 });

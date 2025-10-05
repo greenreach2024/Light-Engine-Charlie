@@ -366,7 +366,8 @@
               <!-- IoT device cards by manufacturer will be loaded here -->
             </div>
           </section>
-      <section id="controllerAssignmentsPanel" class="card card--panel" data-panel="control-assignments">
+
+          <section id="controllerAssignmentsPanel" class="card card--panel" data-panel="control-assignments" style="margin-top:24px;">
             <div class="row row--between row--center">
               <h2 class="section-title">
                 Controller Assignments
@@ -469,12 +470,21 @@
             </div>
           </section>
       <section id="groupsPanel" class="card" data-panel="groups">
+
             <div class="row row--between row--center">
               <h2 style="margin:0">
                 Groups
                 <span class="hint" tabindex="0" data-tip="Make named collections of devices. Quick selectors use Farm Rooms/Zones. Save writes to groups.json. Apply sends spectrum (HEX12) to all checked devices.">?</span>
               </h2>
               <span id="groupsStatus" class="tiny" aria-live="polite"></span>
+            </div>
+
+            <!-- Room/Zone dropdowns for group assignment -->
+            <div class="row row--gap-sm row--wrap mb-sm">
+              <label for="groupRoomDropdown" class="tiny" style="margin-right:8px;">Room</label>
+              <select id="groupRoomDropdown" style="min-width:140px;margin-right:16px;"></select>
+              <label for="groupZoneDropdown" class="tiny" style="margin-right:8px;">Zone</label>
+              <select id="groupZoneDropdown" style="min-width:140px;"></select>
             </div>
 
             <!-- Group pick / save -->
@@ -1098,13 +1108,6 @@
 
         </div>
 
-        <div class="row room-modal__footer" style="justify-content:space-between;margin-top:18px;">
-          <button id="roomPrev" type="button" class="ghost">Back</button>
-          <div class="row row--gap-sm">
-            <button id="roomNext" type="button" class="primary">Next</button>
-            <button id="btnSaveRoom" type="submit" class="primary" style="display:none">Save Room</button>
-          </div>
-        </div>
       </form>
     </div>
   </div>
