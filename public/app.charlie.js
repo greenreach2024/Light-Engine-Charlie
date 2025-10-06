@@ -4632,11 +4632,6 @@ class RoomWizard {
         const cats = this.data.hardwareCats || [];
         if (!cats.length) {
           this.showError('hardwareError', 'Select at least one hardware category.');
-          const hwHost = document.getElementById('roomHardwareCats');
-          if (hwHost && !hwHost.dataset.clearListenerAttached) {
-            hwHost.addEventListener('click', () => this.showError('hardwareError', ''));
-            hwHost.dataset.clearListenerAttached = '1';
-          }
           return false;
         }
         this.showError('hardwareError', '');
