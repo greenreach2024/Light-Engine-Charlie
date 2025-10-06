@@ -1,3 +1,143 @@
+// --- Grow3 Manager Modal Logic with Controller Info ---
+function getGrow3ControllerConfig() {
+  let config = { name: 'Grow3 Controller', address: '127.0.0.1', port: '8091' };
+  try {
+    const stored = JSON.parse(localStorage.getItem('grow3.controller.config') || '{}');
+    if (stored && typeof stored === 'object') config = { ...config, ...stored };
+  } catch {}
+  return config;
+}
+function saveGrow3ControllerConfig(cfg) {
+  localStorage.setItem('grow3.controller.config', JSON.stringify(cfg));
+}
+
+window.openGrow3Manager = async function() {
+  const modal = document.getElementById('grow3Modal');
+  const body = document.getElementById('grow3ManagerBody');
+  if (!modal || !body) {
+    window.showToast?.({ title: 'Grow3 Manager', msg: 'Modal not found.', kind: 'error', icon: '❌' });
+    return;
+  }
+  // Show controller info at the top
+  const cfg = getGrow3ControllerConfig();
+  body.innerHTML = `
+    <h2 style="margin-top:0">Grow3 Manager</h2>
+    <form id="grow3ControllerForm" style="background:#f8fafc;padding:12px 16px;border-radius:8px;margin-bottom:18px;display:flex;gap:16px;align-items:center;flex-wrap:wrap;">
+      <label style="font-size:13px;">Name<br><input type="text" id="grow3ControllerName" value="${escapeHtml(cfg.name)}" style="width:160px;"></label>
+      <label style="font-size:13px;">Address<br><input type="text" id="grow3ControllerAddress" value="${escapeHtml(cfg.address)}" style="width:140px;"></label>
+      <label style="font-size:13px;">Port<br><input type="text" id="grow3ControllerPort" value="${escapeHtml(cfg.port)}" style="width:80px;"></label>
+      <button type="submit" class="primary" style="margin-top:18px;">Save</button>
+    </form>
+    <div id="grow3DevicesLoading" style="text-align:center;padding:32px;">Loading Grow3 devices…</div>
+  `;
+  modal.style.display = 'flex';
+  // Save handler
+  body.querySelector('#grow3ControllerForm').onsubmit = function(e) {
+    e.preventDefault();
+    const newCfg = {
+      name: body.querySelector('#grow3ControllerName').value.trim() || 'Grow3 Controller',
+      address: body.querySelector('#grow3ControllerAddress').value.trim() || '127.0.0.1',
+      port: body.querySelector('#grow3ControllerPort').value.trim() || '8091'
+    };
+    saveGrow3ControllerConfig(newCfg);
+    window.showToast?.({ title: 'Controller Info Saved', msg: `${newCfg.name} (${newCfg.address}:${newCfg.port})`, kind: 'success', icon: '✅' });
+    window.openGrow3Manager();
+  };
+  // Fetch device list from controller API using config
+  let devices = [];
+  let apiBase = `http://${cfg.address}:${cfg.port}`;
+  try {
+    const resp = await fetch(`${apiBase}/api/devicedatas`);
+    if (!resp.ok) throw new Error('Controller not reachable');
+    const data = await resp.json();
+    devices = Array.isArray(data) ? data : (data.devices || []);
+  } catch (e) {
+    body.querySelector('#grow3DevicesLoading').innerHTML = `<div style=\"color:#b91c1c;text-align:center;padding:32px;\">Failed to load devices: ${e.message}</div>`;
+    return;
+  }
+  // Filter for Grow3 lights (customize as needed)
+  const grow3s = devices.filter(d => (d.type||'').toLowerCase().includes('grow3') || (d.model||'').toLowerCase().includes('grow3'));
+  if (!grow3s.length) {
+    body.querySelector('#grow3DevicesLoading').innerHTML = '<div style=\"color:#b91c1c;text-align:center;padding:32px;\">No Grow3 lights found on controller.</div>';
+    return;
+  }
+  // Render device controls
+  body.querySelector('#grow3DevicesLoading').outerHTML = `
+    <div style="overflow-x:auto;">
+      <table style="width:100%;border-collapse:collapse;">
+        <thead><tr style="background:#f1f5f9"><th>Name</th><th>Device ID</th><th>Status</th><th>HEX</th><th>Actions</th></tr></thead>
+        <tbody>
+          ${grow3s.map(dev => `
+            <tr data-id="${dev.id}">
+              <td>${escapeHtml(dev.name||dev.model||'Grow3')}</td>
+              <td>${escapeHtml(dev.id||'')}</td>
+              <td class="grow3-status">${escapeHtml(dev.status||'—')}</td>
+              <td><input type="text" class="grow3-hex" value="${escapeHtml(dev.lastHex||'')}" placeholder="HEX payload" style="width:110px"></td>
+              <td>
+                <button class="ghost grow3-on">ON</button>
+                <button class="ghost grow3-off">OFF</button>
+                <button class="primary grow3-send">Send HEX</button>
+              </td>
+            </tr>
+          `).join('')}
+        </tbody>
+      </table>
+    </div>
+    <div class="tiny" style="margin-top:16px;color:#64748b">Controller API: <code>${apiBase}/api/devicedatas</code> (GET), <code>${apiBase}/api/devicedatas/device/:id</code> (PATCH)</div>
+  `;
+  // Wire up actions
+  Array.from(body.querySelectorAll('.grow3-on')).forEach(btn => {
+    btn.onclick = async function() {
+      const row = btn.closest('tr');
+      const id = row.getAttribute('data-id');
+      await sendGrow3Command(id, { power: 'on' }, row, apiBase);
+    };
+  });
+  Array.from(body.querySelectorAll('.grow3-off')).forEach(btn => {
+    btn.onclick = async function() {
+      const row = btn.closest('tr');
+      const id = row.getAttribute('data-id');
+      await sendGrow3Command(id, { power: 'off' }, row, apiBase);
+    };
+  });
+  Array.from(body.querySelectorAll('.grow3-send')).forEach(btn => {
+    btn.onclick = async function() {
+      const row = btn.closest('tr');
+      const id = row.getAttribute('data-id');
+      const hex = row.querySelector('.grow3-hex').value.trim();
+      if (!hex) { window.showToast?.({ title: 'HEX required', msg: 'Enter a HEX payload.', kind: 'warn', icon: '⚠️' }); return; }
+      await sendGrow3Command(id, { hex }, row, apiBase);
+    };
+  });
+};
+
+async function sendGrow3Command(id, payload, row, apiBase) {
+  try {
+    const resp = await fetch(`${apiBase}/api/devicedatas/device/${encodeURIComponent(id)}`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload)
+    });
+    if (!resp.ok) throw new Error('Controller error');
+    const data = await resp.json();
+    row.querySelector('.grow3-status').textContent = data.status || 'OK';
+    window.showToast?.({ title: 'Grow3 Updated', msg: `Device ${id} updated.`, kind: 'success', icon: '✅' });
+  } catch (e) {
+    window.showToast?.({ title: 'Grow3 Error', msg: e.message, kind: 'error', icon: '❌' });
+  }
+}
+
+// Modal open/close wiring
+document.addEventListener('DOMContentLoaded', function() {
+  const btn = document.getElementById('btnOpenGrow3Manager');
+  const modal = document.getElementById('grow3Modal');
+  const closeBtn = document.getElementById('closeGrow3Modal');
+  if (btn && modal && closeBtn) {
+    btn.onclick = window.openGrow3Manager;
+    closeBtn.onclick = function() { modal.style.display = 'none'; };
+    modal.addEventListener('click', function(e) { if (e.target === modal) modal.style.display = 'none'; });
+  }
+});
 // --- Groups Card Room/Zone Dropdown Seeding ---
 function collectRoomsFromState() {
   const wizardRooms = Array.isArray(STATE.rooms) ? STATE.rooms : [];
@@ -383,17 +523,6 @@ document.addEventListener('DOMContentLoaded', function() {
 let ACTIVE_PANEL = 'overview';
 
 // --- Grow Room Modal Show/Hide Logic ---
-document.addEventListener('DOMContentLoaded', function() {
-  const btn = document.getElementById('btnLaunchRoom');
-  const modal = document.getElementById('roomModal');
-  const closeBtn = document.getElementById('roomModalClose');
-  if (btn && modal && closeBtn) {
-    btn.onclick = function() { modal.style.display = 'flex'; modal.setAttribute('aria-hidden', 'false'); };
-    closeBtn.onclick = function() { modal.style.display = 'none'; modal.setAttribute('aria-hidden', 'true'); };
-    // Optional: close modal on outside click
-    modal.addEventListener('click', function(e) { if (e.target === modal) { modal.style.display = 'none'; modal.setAttribute('aria-hidden', 'true'); } });
-  }
-});
 
 // --- Fallbacks for missing global helpers (standalone mode) ---
 // Utility: Group array of objects by key
@@ -3182,6 +3311,7 @@ class DeviceManagerWindow {
 // --- Grow Room Wizard ---
 class RoomWizard {
   constructor() {
+    console.debug('[RoomWizard] constructor called');
     this.modal = $('#roomModal');
     this.form = $('#roomWizardForm');
     // Auto-advance behavior: when a required field for a step is completed,
@@ -3217,7 +3347,17 @@ class RoomWizard {
   }
 
   init() {
-    $('#btnLaunchRoom')?.addEventListener('click', () => this.open());
+    console.debug('[RoomWizard] init called');
+    // Remove any existing event listeners by replacing the button node
+    const oldBtn = document.getElementById('btnLaunchRoom');
+    if (oldBtn) {
+      const newBtn = oldBtn.cloneNode(true);
+      oldBtn.parentNode.replaceChild(newBtn, oldBtn);
+      newBtn.addEventListener('click', () => {
+        console.debug('[RoomWizard] btnLaunchRoom clicked');
+        this.open();
+      });
+    }
     $('#roomModalClose')?.addEventListener('click', () => this.close());
     $('#roomModalBackdrop')?.addEventListener('click', () => this.close());
     $('#roomPrev')?.addEventListener('click', () => this.prevStep());
@@ -3590,32 +3730,54 @@ class RoomWizard {
   }
 
   open(room = null) {
+    console.debug('[RoomWizard.open] called. room:', room);
+    // Always make the modal visible
+    if (this.modal) {
+      this.modal.setAttribute('aria-hidden', 'false');
+    }
     // Always refresh the room list from STATE.farm.rooms to reflect latest Farm Registration
     const farmRooms = Array.isArray(STATE.farm?.rooms) ? STATE.farm.rooms.map(r => ({ ...r })) : [];
-    
-    // If no farm rooms are available, show a warning
-    if (farmRooms.length === 0) {
-      showToast({ 
-        title: 'No Rooms Found', 
-        msg: 'Please create rooms in Farm Registration first', 
-        kind: 'warning', 
-        icon: '⚠️' 
-      });
+    const hasFarmRooms = farmRooms.length > 0;
+
+    // Editing an existing room should always work, even if Farm Registration has no rooms yet
+    if (room) {
+      if (hasFarmRooms) {
+        const idx = farmRooms.findIndex(r => r.id === room.id);
+        if (idx >= 0) {
+          this.multiRoomList = farmRooms;
+          this.multiRoomIndex = idx;
+        } else {
+          this.multiRoomList = [room];
+          this.multiRoomIndex = 0;
+        }
+      } else {
+        this.multiRoomList = [room];
+        this.multiRoomIndex = 0;
+      }
+      this._openSingleRoom(room);
+      if (this.multiRoomList.length > 1) {
+        this._injectMultiRoomNav();
+      }
       return;
     }
-    
+
+    if (!hasFarmRooms) {
+      showToast({
+        title: 'No Rooms Found',
+        msg: 'Farm Registration has no rooms yet. Starting a blank Grow Room setup.',
+        kind: 'info',
+        icon: 'ℹ️'
+      });
+      this.multiRoomList = [];
+      this.multiRoomIndex = 0;
+      this._openSingleRoom(null);
+      return;
+    }
+
     this.multiRoomList = farmRooms;
     this.multiRoomIndex = 0;
-    
-    // If a room is provided, just open for that room
-    if (room) {
-      this._openSingleRoom(room);
-      return;
-    }
-    
     // Start with the first room from Farm Registration
     this._openSingleRoom(this.multiRoomList[this.multiRoomIndex]);
-    
     // Always inject multi-room navigation if there are multiple rooms
     if (this.multiRoomList.length > 1) {
       this._injectMultiRoomNav();
@@ -3623,6 +3785,12 @@ class RoomWizard {
   }
 
   _openSingleRoom(room) {
+      // Prefill the room location select if present
+      const locationSelect = document.getElementById('roomLocationSelect');
+      if (locationSelect && this.data && this.data.location) {
+        locationSelect.value = this.data.location;
+      }
+    console.debug('[RoomWizard._openSingleRoom] Called with room:', room);
     // Reset navigation state to ensure clean slate
     this.currentStep = 0;
     this.steps = this.baseSteps.slice(); // Reset to base steps
@@ -3693,6 +3861,34 @@ class RoomWizard {
       this.showStep(0);
       // Force navigation update after modal opens
       this.showStep(this.currentStep);
+      // Prefill the room name input if present
+      const nameInput = document.getElementById('roomInfoName');
+      if (nameInput && this.data && this.data.name) {
+        nameInput.value = this.data.name;
+      }
+      // Prefill the zone count and zone names if present
+      const zoneCountInput = document.getElementById('roomInfoZoneCount');
+      if (zoneCountInput && this.data && Array.isArray(this.data.zones)) {
+        zoneCountInput.value = this.data.zones.length;
+        // Render the zone name inputs and prefill them
+        const zoneInputsHost = document.getElementById('roomInfoZoneInputs');
+        if (zoneInputsHost) {
+          zoneInputsHost.innerHTML = '';
+          for (let i = 0; i < this.data.zones.length; ++i) {
+            const input = document.createElement('input');
+            input.type = 'text';
+            input.value = this.data.zones[i] || `Zone ${i+1}`;
+            input.placeholder = `Zone ${i+1} name`;
+            input.className = 'tiny';
+            input.style.marginBottom = '2px';
+            input.oninput = (e) => {
+              this.data.zones[i] = (e.target.value || '').trim() || `Zone ${i+1}`;
+              this.updateSetupQueue();
+            };
+            zoneInputsHost.appendChild(input);
+          }
+        }
+      }
     }, 10);
     
     // Prefill lists (fixtures rendering moved to Light Setup wizard)
@@ -6283,7 +6479,6 @@ function renderRooms() {
       const name = escapeHtml(r.name || '');
       const control = escapeHtml(r.controlMethod || '—');
       const roomId = escapeHtml(r.id || '');
-      const editPayload = escapeHtml(JSON.stringify(r || {}));
       return `<div class="card" style="margin-top:8px">
         <div class="row" style="justify-content:space-between;align-items:center">
           <div>
@@ -6294,34 +6489,60 @@ function renderRooms() {
             ${statusRow ? `<div class="tiny" style="margin-top:4px">${statusRow}</div>` : ''}
           </div>
           <div class="row" style="gap:6px">
-            <button type="button" class="ghost" onclick="roomWizard.open(${editPayload})">Edit</button>
+            <button type="button" class="ghost" data-action="edit-room" data-room-id="${roomId}">Edit</button>
             <button type="button" class="ghost danger" data-action="del-room" data-room-id="${roomId}">Delete</button>
           </div>
         </div>
       </div>`;
-  }).join('');
+    }).join('');
 
-  // Wire Delete actions
-  host.querySelectorAll('[data-action="del-room"]').forEach(btn => {
-    btn.addEventListener('click', async (e) => {
-      const id = btn.getAttribute('data-room-id');
-      const room = STATE.rooms.find(r => String(r.id) === String(id));
-      if (!id) return;
-      const name = room?.name || id;
-      if (!confirm(`Delete grow room “${name}”? This cannot be undone.`)) return;
-      const ok = await safeRoomsDelete(id);
-      if (ok) {
-        setStatus(`Deleted room ${name}`);
-        renderRooms();
-        // Update controller assignments when rooms are deleted
-        if (typeof renderControllerAssignments === 'function') {
-          renderControllerAssignments();
+    // Wire Edit actions
+    host.querySelectorAll('[data-action="edit-room"]').forEach(btn => {
+      btn.addEventListener('click', () => {
+        const id = btn.getAttribute('data-room-id');
+        if (!id) return;
+        const room = STATE.rooms.find(r => String(r.id) === String(id));
+        console.debug('[Edit Room Button] Clicked. id:', id, 'room:', room);
+        if (!room) {
+          console.warn('Edit requested for unknown room id', id);
+          if (typeof showToast === 'function') {
+            showToast({ title: 'Room not found', msg: 'Unable to load room for editing.', kind: 'warn', icon: '⚠️' });
+          }
+          return;
         }
-      } else {
-        alert('Failed to delete room');
-      }
+        if (window.roomWizard && typeof window.roomWizard.open === 'function') {
+          window.roomWizard.open(room);
+        } else {
+          const modal = document.getElementById('roomModal');
+          if (modal) {
+            modal.style.display = 'flex';
+            modal.setAttribute('aria-hidden', 'false');
+          }
+        }
+      });
     });
-  });
+
+    // Wire Delete actions
+    host.querySelectorAll('[data-action="del-room"]').forEach(btn => {
+      btn.addEventListener('click', async (e) => {
+        const id = btn.getAttribute('data-room-id');
+        const room = STATE.rooms.find(r => String(r.id) === String(id));
+        if (!id) return;
+        const name = room?.name || id;
+        if (!confirm(`Delete grow room “${name}”? This cannot be undone.`)) return;
+        const ok = await safeRoomsDelete(id);
+        if (ok) {
+          setStatus(`Deleted room ${name}`);
+          renderRooms();
+          // Update controller assignments when rooms are deleted
+          if (typeof renderControllerAssignments === 'function') {
+            renderControllerAssignments();
+          }
+        } else {
+          alert('Failed to delete room');
+        }
+      });
+    });
 
   renderGrowRoomOverview();
 }
@@ -6372,123 +6593,104 @@ function renderLightSetupSummary() {
   if (!summaryContainer) return;
   
   const lightSetups = STATE.lightSetups || [];
-  const rooms = STATE.rooms || [];
-  
-  if (rooms.length === 0) {
-    summaryContainer.innerHTML = '<p class="tiny" style="color:#64748b">No rooms configured yet.</p>';
-    return;
-  }
-  
-  // Create room-based summary matching Grow Rooms format
-  const roomSummaries = rooms.map(room => {
-    // Get light setups for this room
-    const roomLightSetups = lightSetups.filter(setup => 
-      setup.room === room.name || setup.room === room.id
-    );
-    
-    // Calculate light totals for this room
-    let totalLights = 0;
-    let lightDetails = [];
-    
-    if (roomLightSetups.length > 0) {
-      roomLightSetups.forEach(setup => {
-        totalLights += setup.totalFixtures || 0;
-        
-        if (setup.selectedFixtures && setup.selectedFixtures.length > 0) {
-          setup.selectedFixtures.forEach(fixture => {
-            const quantity = setup.fixtureQuantities?.[fixture.id] || 1;
-            lightDetails.push({
-              name: fixture.name || fixture.model || 'LED Fixture',
-              quantity: quantity,
-              zone: setup.zone
-            });
-          });
-        } else if (setup.fixtures && setup.fixtures.length > 0) {
-          // Fallback for older format
-          setup.fixtures.forEach(fixture => {
-            lightDetails.push({
-              name: fixture.name || 'LED Fixture',
-              quantity: fixture.count || 1,
-              zone: setup.zone
-            });
-          });
-        }
-      });
-    }
-    
-    // Build zones display from room data
-    const zones = (room.zones || []).join(', ') || '—';
-    
-    // Build light summary
-    const lightSummary = lightDetails.length > 0 
-      ? lightDetails.map(light => `${light.quantity}x ${light.name}`).join(', ')
-      : totalLights > 0 
-        ? `${totalLights} light${totalLights !== 1 ? 's' : ''}`
-        : '—';
-    
-    // Control method from light setups or room data
-    const controlMethods = [...new Set(roomLightSetups.map(setup => setup.controlMethod).filter(Boolean))];
-    const control = controlMethods.length > 0 ? controlMethods.join(', ') : (room.controlMethod || '—');
-    
-    const name = room.name || 'Unnamed Room';
-    
-    const roomId = room.id || '';
-    const editPayload = JSON.stringify(room || {}).replace(/"/g, '&quot;');
-    
-    return `
-      <div class="card" style="margin-top:8px">
-        <div class="row" style="justify-content:space-between;align-items:center">
-          <div>
-            <h3 style="margin:0">${name}</h3>
-            <div class="tiny" style="color:#475569">Zones: ${zones} • Control: ${control}</div>
-            <div class="tiny" style="color:#475569">Lights: ${lightSummary}</div>
-          </div>
-          <div class="row" style="gap:6px">
-            <button type="button" class="ghost" onclick="editLightSetup('${roomId}')">Edit</button>
-            <button type="button" class="ghost danger" data-action="del-light-setup" data-room-id="${roomId}">Delete</button>
-          </div>
-        </div>
-      </div>
-    `;
-  }).join('');
-  
-  summaryContainer.innerHTML = roomSummaries;
-  
-  // Wire up delete buttons
-  summaryContainer.querySelectorAll('[data-action="del-light-setup"]').forEach(btn => {
-    btn.addEventListener('click', async (e) => {
-      const roomId = btn.getAttribute('data-room-id');
-      const room = STATE.rooms.find(r => String(r.id) === String(roomId));
-      if (!roomId) return;
-      
-      const roomName = room?.name || roomId;
-      const lightSetupsForRoom = STATE.lightSetups.filter(setup => 
-        setup.room === room?.name || setup.room === roomId
-      );
-      
-      if (lightSetupsForRoom.length === 0) {
-        alert(`No light setups found for room "${roomName}"`);
-        return;
+  summaryContainer.innerHTML = STATE.rooms.map(r => {
+      const fixtures = (r.fixtures||[]).reduce((sum,f)=> sum + (Number(f.count)||0), 0);
+      const sensorCats = (r.sensors?.categories||[]).map(s => escapeHtml(s)).join(', ') || '—';
+      const sensorPlacements = Object.entries(r.sensors?.placements || {})
+        .map(([cat, place]) => `${escapeHtml(cat)}@${escapeHtml(place || 'room')}`)
+        .join(', ') || '—';
+      const prog = r._categoryProgress || {};
+      const badge = (st) => {
+        if (st === 'complete') return '✅ Ready';
+        if (st === 'needs-info') return '• Needs details';
+        if (st === 'needs-hub' || st === 'needs-energy' || st === 'needs-setup') return '• Needs follow-up';
+        return '';
+      };
+      const orderedCats = ['hvac','mini-split','dehumidifier','fans','vents','controllers','sensors'];
+      const statusRow = orderedCats
+        .filter(c => prog[c])
+        .map(c => {
+          const labelText = typeof roomWizard?.categoryLabel === 'function' ? roomWizard.categoryLabel(c) : c;
+          const label = escapeHtml(labelText);
+          const statusText = escapeHtml(badge(prog[c]?.status));
+          return `<span class=\"chip tiny\" title=\"${label}\">${label}: ${statusText}</span>`;
+        })
+        .join(' ');
+      const zones = (r.zones || []).map(z => escapeHtml(z)).join(', ') || '—';
+      const connectivity = r.connectivity || {};
+      const connSummary = connectivity.hasHub === null
+        ? 'Hub: ?'
+        : connectivity.hasHub
+          ? `Hub: ${connectivity.hubType ? escapeHtml(connectivity.hubType) : 'present'}${connectivity.hubIp ? ` @ ${escapeHtml(connectivity.hubIp)}` : ''}`
+          : 'Hub: none';
+      const layout = r.layout || {};
+      const layoutType = escapeHtml(layout.type || '—');
+      const name = escapeHtml(r.name || '');
+      const control = escapeHtml(r.controlMethod || '—');
+      const roomId = escapeHtml(r.id || '');
+      return `<div class=\"card\" style=\"margin-top:8px\">\n        <div class=\"row\" style=\"justify-content:space-between;align-items:center\">\n          <div>\n            <h3 style=\"margin:0\">${name}</h3>\n            <div class=\"tiny\" style=\"color:#475569\">Layout: ${layoutType} • Zones: ${zones} • Control: ${control}</div>\n            <div class=\"tiny\" style=\"color:#475569\">Sensors: ${sensorCats} • Placement: ${sensorPlacements}</div>\n            <div class=\"tiny\" style=\"color:#475569\">${connSummary}</div>\n            ${statusRow ? `<div class=\"tiny\" style=\"margin-top:4px\">${statusRow}</div>` : ''}\n          </div>\n          <div class=\"row\" style=\"gap:6px\">\n            <button type=\"button\" class=\"ghost\" data-action=\"edit-room\" data-room-id=\"${roomId}\">Edit</button>\n            <button type=\"button\" class=\"ghost danger\" data-action=\"del-room\" data-room-id=\"${roomId}\">Delete</button>\n          </div>\n        </div>\n      </div>`;
+    }).join('');
+
+  // Wire Edit actions
+  const host = summaryContainer;
+  // Delegated Edit action wiring for reliability
+  host.addEventListener('click', (e) => {
+    const btn = e.target.closest('[data-action="edit-room"]');
+    if (!btn) return;
+    const id = btn.getAttribute('data-room-id');
+    if (!id) return;
+    const room = STATE.rooms.find(r => String(r.id) === String(id));
+    if (!room) {
+      console.warn('Edit requested for unknown room id', id);
+      if (typeof showToast === 'function') {
+        showToast({ title: 'Room not found', msg: 'Unable to load room for editing.', kind: 'warn', icon: '⚠️' });
       }
-      
-      if (!confirm(`Delete all light setups for "${roomName}"? This cannot be undone.`)) return;
-      
-      // Remove all light setups for this room
-      STATE.lightSetups = STATE.lightSetups.filter(setup => 
-        setup.room !== room?.name && setup.room !== roomId
-      );
-      
-      // Re-render the summary
-      renderLightSetupSummary();
-      renderControllerAssignments();
-      showToast({ 
-        title: 'Light Setup Deleted', 
-        msg: `Removed light setup for ${roomName}`, 
-        kind: 'success', 
-        icon: '🗑️' 
-      });
+      return;
+    }
+    if (window.roomWizard && typeof window.roomWizard.open === 'function') {
+      window.roomWizard.open(room);
+      // Force modal visible as fallback
+      const modal = document.getElementById('roomModal');
+      if (modal) {
+        modal.setAttribute('aria-hidden', 'false');
+        modal.style.removeProperty('display');
+        modal.style.opacity = '1';
+        modal.style.pointerEvents = 'all';
+      }
+    } else {
+      const modal = document.getElementById('roomModal');
+      if (modal) {
+        modal.setAttribute('aria-hidden', 'false');
+        modal.style.removeProperty('display');
+        modal.style.opacity = '1';
+        modal.style.pointerEvents = 'all';
+      }
+    }
+  });
+
+  // Wire Delete actions
+  host.querySelectorAll('[data-action="del-room"]').forEach(btn => {
+    btn.addEventListener('click', async (e) => {
+      const id = btn.getAttribute('data-room-id');
+      const room = STATE.rooms.find(r => String(r.id) === String(id));
+      if (!id) return;
+      const name = room?.name || id;
+      if (!confirm(`Delete grow room “${name}”? This cannot be undone.`)) return;
+      const ok = await safeRoomsDelete(id);
+      if (ok) {
+        setStatus(`Deleted room ${name}`);
+        renderRooms();
+        // Update controller assignments when rooms are deleted
+        if (typeof renderControllerAssignments === 'function') {
+          renderControllerAssignments();
+        }
+      } else {
+        alert('Failed to delete room');
+      }
     });
   });
+
+  renderGrowRoomOverview();
 }
 
 function editLightSetup(roomId) {
@@ -10083,6 +10285,8 @@ document.addEventListener('DOMContentLoaded', async () => {
   window.deviceManagerWindow = new DeviceManagerWindow();
   // Initialize room wizard
   window.roomWizard = new RoomWizard();
+  // Ensure the New Grow Room button is always wired after any DOM changes
+  setTimeout(() => { if (window.roomWizard && typeof window.roomWizard.init === 'function') window.roomWizard.init(); }, 1000);
   // Initialize light wizard
   window.lightWizard = new LightWizard();
   window.freshLightWizard = new FreshLightWizard();
