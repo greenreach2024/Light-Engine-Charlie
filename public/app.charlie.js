@@ -3879,11 +3879,16 @@ class RoomWizard {
     // Use delegated click handling on the container so handlers are robust and not overwritten later.
     const hwHost = document.getElementById('roomHardwareCats');
     if (hwHost) {
+      // ensure baseline aria state for accessibility
+      hwHost.querySelectorAll('.chip-option').forEach(btn => {
+        if (!btn.hasAttribute('aria-pressed')) btn.setAttribute('aria-pressed', btn.hasAttribute('data-active') ? 'true' : 'false');
+      });
       hwHost.addEventListener('click', (e) => {
         const btn = e.target.closest('.chip-option');
         if (!btn || !hwHost.contains(btn)) return;
-        // Toggle visual active state
-        if (btn.hasAttribute('data-active')) btn.removeAttribute('data-active'); else btn.setAttribute('data-active','');
+        // Toggle visual active state using shared helper so class/aria stay in sync
+        const makeActive = !btn.hasAttribute('data-active');
+        this.setChipActiveState(btn, makeActive);
         // normalize selections into this.data.hardwareCats
         const active = Array.from(hwHost.querySelectorAll('.chip-option[data-active]')).map(b=>b.dataset.value);
         // Preserve selection order by tracking the sequence in data.hardwareOrder
@@ -4483,7 +4488,7 @@ class RoomWizard {
       if (hwContainer) {
         const active = this.data.hardwareCats || [];
         hwContainer.querySelectorAll('.chip-option').forEach(b => {
-          if (active.includes(b.dataset.value)) b.setAttribute('data-active', ''); else b.removeAttribute('data-active');
+          this.setChipActiveState(b, active.includes(b.dataset.value));
         });
       }
     }
@@ -5569,6 +5574,19 @@ class RoomWizard {
     return 'other';
   }
 
+  setChipActiveState(btn, isActive) {
+    if (!btn) return;
+    if (isActive) {
+      btn.setAttribute('data-active', '');
+      btn.classList.add('is-active');
+      btn.setAttribute('aria-pressed', 'true');
+    } else {
+      btn.removeAttribute('data-active');
+      btn.classList.remove('is-active');
+      btn.setAttribute('aria-pressed', 'false');
+    }
+  }
+
   ensureHardwareCategory(cat) {
     if (!cat) return;
     this.data.hardwareCats = Array.isArray(this.data.hardwareCats) ? this.data.hardwareCats : [];
@@ -5579,14 +5597,14 @@ class RoomWizard {
       const host = document.getElementById('roomHardwareCats');
       if (host) {
         const btn = host.querySelector(`.chip-option[data-value="${cat}"]`);
-        if (btn) btn.setAttribute('data-active', '');
+        if (btn) this.setChipActiveState(btn, true);
       }
       this.rebuildDynamicSteps();
     } else {
       const host = document.getElementById('roomHardwareCats');
       if (host) {
         const btn = host.querySelector(`.chip-option[data-value="${cat}"]`);
-        if (btn) btn.setAttribute('data-active', '');
+        if (btn) this.setChipActiveState(btn, true);
       }
     }
     this.updateSetupQueue();
