@@ -3570,7 +3570,7 @@ class RoomWizard {
     this.autoAdvance = false;
     // equipment-first: begin with connectivity and hardware categories for room management
     // Steps can be augmented dynamically based on selected hardware (e.g., hvac, dehumidifier, etc.)
-  this.baseSteps = ['room-info','hardware','category-setup','review'];
+    this.baseSteps = ['room-info','hardware','category-setup','sensors','location','review'];
     this.steps = this.baseSteps.slice();
     this.currentStep = 0;
     this.data = {
@@ -3645,7 +3645,7 @@ class RoomWizard {
       });
     }
     // Auto-advance hooks: room name
-    const roomNameInput = document.getElementById('roomName');
+    const roomNameInput = document.getElementById('roomInfoName');
     if (roomNameInput) {
       roomNameInput.addEventListener('input', (e) => {
         this.data.name = (e.target.value || '').trim();
@@ -4563,8 +4563,8 @@ class RoomWizard {
   silentValidateCurrentStep(){
     const step = this.steps[this.currentStep];
     switch(step){
-      case 'room-name': {
-        const v = ($('#roomName')?.value||'').trim(); return !!v; }
+      case 'room-info': {
+        const v = ($('#roomInfoName')?.value||'').trim(); return !!v; }
 
       case 'layout': return true;
       case 'zones': return Array.isArray(this.data.zones) && this.data.zones.length > 0;
@@ -4600,8 +4600,8 @@ class RoomWizard {
   validateCurrentStep(){
     const step = this.steps[this.currentStep];
     switch(step){
-      case 'room-name': {
-        const v = ($('#roomName')?.value||'').trim(); if (!v) { alert('Enter a room name'); return false; }
+      case 'room-info': {
+        const v = ($('#roomInfoName')?.value||'').trim(); if (!v) { alert('Enter a room name'); return false; }
         this.data.name = v; break; }
 
       case 'layout': {
@@ -4624,6 +4624,24 @@ class RoomWizard {
         // Persist current category form values into this.data.
         this.captureCurrentCategoryForm();
         void this.persistProgress();
+        break; }
+      case 'sensors': {
+        const container = document.getElementById('roomSensorCats');
+        if (container) {
+          const categories = Array.from(container.querySelectorAll('input[type=checkbox]:checked')).map(cb => cb.value);
+          this.data.sensors = this.data.sensors || { categories: [], placements: {} };
+          this.data.sensors.categories = categories;
+          container.querySelectorAll('.sensor-location').forEach(sel => {
+            const key = sel.getAttribute('data-sensor');
+            if (!key) return;
+            const val = sel.value || '';
+            this.data.sensors.placements[key] = val;
+          });
+        }
+        break; }
+      case 'location': {
+        const sel = document.getElementById('roomLocationSelect');
+        if (sel) this.data.location = sel.value || '';
         break; }
       case 'fixtures': {
         const needsLights = (this.data.hardwareCats || []).includes('grow-lights');
@@ -5835,6 +5853,7 @@ class RoomWizard {
       'fans': 'Fans',
       'vents': 'Vents',
       'controllers': 'Controllers',
+      'energy-monitor': 'Energy Monitor',
       'sensors': 'Sensors',
       'other': 'Other'
     };
