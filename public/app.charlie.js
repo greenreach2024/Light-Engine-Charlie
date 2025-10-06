@@ -20,6 +20,8 @@ window.openGrow3Manager = async function() {
   }
   // Show controller info at the top
   const cfg = getGrow3ControllerConfig();
+  const apiBase = `http://${cfg.address}:${cfg.port}`;
+  const SAFE_ON_HEX = '737373730000';
   body.innerHTML = `
     <h2 style="margin-top:0">Grow3 Manager</h2>
     <form id="grow3ControllerForm" style="background:#f8fafc;padding:12px 16px;border-radius:8px;margin-bottom:18px;display:flex;gap:16px;align-items:center;flex-wrap:wrap;">
@@ -28,6 +30,9 @@ window.openGrow3Manager = async function() {
       <label style="font-size:13px;">Port<br><input type="text" id="grow3ControllerPort" value="${escapeHtml(cfg.port)}" style="width:80px;"></label>
       <button type="submit" class="primary" style="margin-top:18px;">Save</button>
     </form>
+    <div class="tiny" style="color:#475569;margin-bottom:12px;">
+      Proxy summary: <code>${apiBase}/healthz</code> → Code3 controller <code>http://192.168.2.80:3000</code>. HEX format <code>[CW][WW][BL][RD][00][00]</code> (00–64).
+    </div>
     <div id="grow3DevicesLoading" style="text-align:center;padding:32px;">Loading Grow3 devices…</div>
   `;
   modal.style.display = 'flex';
@@ -45,7 +50,6 @@ window.openGrow3Manager = async function() {
   };
   // Fetch device list from controller API using config
   let devices = [];
-  let apiBase = `http://${cfg.address}:${cfg.port}`;
   try {
     const resp = await fetch(`${apiBase}/api/devicedatas`);
     if (!resp.ok) throw new Error('Controller not reachable');
@@ -72,7 +76,7 @@ window.openGrow3Manager = async function() {
               <td>${escapeHtml(dev.name||dev.model||'Grow3')}</td>
               <td>${escapeHtml(dev.id||'')}</td>
               <td class="grow3-status">${escapeHtml(dev.status||'—')}</td>
-              <td><input type="text" class="grow3-hex" value="${escapeHtml(dev.lastHex||'')}" placeholder="HEX payload" style="width:110px"></td>
+              <td><input type="text" class="grow3-hex" value="${escapeHtml(dev.value||dev.lastHex||'')}" placeholder="HEX payload" style="width:120px" maxlength="12"></td>
               <td>
                 <button class="ghost grow3-on">ON</button>
                 <button class="ghost grow3-off">OFF</button>
@@ -90,14 +94,14 @@ window.openGrow3Manager = async function() {
     btn.onclick = async function() {
       const row = btn.closest('tr');
       const id = row.getAttribute('data-id');
-      await sendGrow3Command(id, { power: 'on' }, row, apiBase);
+      await sendGrow3Command(id, { status: 'on', value: SAFE_ON_HEX }, row, apiBase);
     };
   });
   Array.from(body.querySelectorAll('.grow3-off')).forEach(btn => {
     btn.onclick = async function() {
       const row = btn.closest('tr');
       const id = row.getAttribute('data-id');
-      await sendGrow3Command(id, { power: 'off' }, row, apiBase);
+      await sendGrow3Command(id, { status: 'off', value: null }, row, apiBase);
     };
   });
   Array.from(body.querySelectorAll('.grow3-send')).forEach(btn => {
@@ -106,7 +110,7 @@ window.openGrow3Manager = async function() {
       const id = row.getAttribute('data-id');
       const hex = row.querySelector('.grow3-hex').value.trim();
       if (!hex) { window.showToast?.({ title: 'HEX required', msg: 'Enter a HEX payload.', kind: 'warn', icon: '⚠️' }); return; }
-      await sendGrow3Command(id, { hex }, row, apiBase);
+      await sendGrow3Command(id, { status: 'on', value: hex }, row, apiBase);
     };
   });
 };
@@ -120,8 +124,9 @@ async function sendGrow3Command(id, payload, row, apiBase) {
     });
     if (!resp.ok) throw new Error('Controller error');
     const data = await resp.json();
-    row.querySelector('.grow3-status').textContent = data.status || 'OK';
-    window.showToast?.({ title: 'Grow3 Updated', msg: `Device ${id} updated.`, kind: 'success', icon: '✅' });
+    row.querySelector('.grow3-status').textContent = data.status || payload.status || 'OK';
+    row.querySelector('.grow3-hex').value = typeof data.value === 'string' ? data.value : (payload.value || '');
+    window.showToast?.({ title: 'Grow3 Updated', msg: `Device ${id} → ${row.querySelector('.grow3-status').textContent}`, kind: 'success', icon: '✅' });
   } catch (e) {
     window.showToast?.({ title: 'Grow3 Error', msg: e.message, kind: 'error', icon: '❌' });
   }
@@ -3733,6 +3738,10 @@ class RoomWizard {
     console.debug('[RoomWizard.open] called. room:', room);
     // Always make the modal visible
     if (this.modal) {
+      // The close() method forces display:none so ensure we restore the
+      // flex layout every time the wizard is opened (fixes buttons that
+      // failed to reopen the wizard after the first close).
+      this.modal.style.display = 'flex';
       this.modal.setAttribute('aria-hidden', 'false');
     }
     // Always refresh the room list from STATE.farm.rooms to reflect latest Farm Registration
