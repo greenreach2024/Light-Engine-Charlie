@@ -971,9 +971,13 @@
         </div>
         
         <div id="roomSteps" style="flex:1; overflow-y:auto; min-height:0; position:relative; padding-top:16px;">
+
+          
+
           <section class="room-step" data-step="room-info">
             <p class="room-question">Name the grow room and define its zones.</p>
             <div class="farm-step__stack">
+              <div id="roomInfoError" class="tiny" style="color:#e11d48;margin-bottom:8px;display:none"></div>
               <label class="tiny" for="roomInfoName">Grow room name</label>
               <input id="roomInfoName" type="text" placeholder="e.g., Flower A" required>
               <label class="tiny" for="roomInfoZoneCount" style="margin-top:12px">Number of zones</label>
@@ -981,12 +985,10 @@
               <div id="roomInfoZoneInputs" style="margin-top:12px;display:flex;flex-direction:column;gap:8px"></div>
             </div>
           </section>
-
-          
-
           <section class="room-step" data-step="hardware">
             <p class="room-question">Which equipment are you setting up in this room?</p>
             <div class="farm-step__stack">
+              <div id="hardwareError" class="tiny" style="color:#e11d48;margin-bottom:8px;display:none"></div>
               <div class="tiny">Select all that apply</div>
               <div id="roomHardwareCats" class="chip-row" role="group" aria-label="Hardware categories">
                 <button type="button" class="chip-option" data-value="hvac">Central HVAC</button>
@@ -1017,89 +1019,7 @@
             </div>
           </section>
 
-          <section class="room-step" data-step="sensors">
-            <p class="room-question">Which sensors will monitor this room?</p>
-            <div class="farm-step__stack">
-              <div class="tiny">Categories and placement</div>
-              <div id="roomSensorCats" class="sensor-grid" role="group" aria-label="Room sensor categories">
-                <div class="sensor-config" data-sensor="tempRh">
-                  <label class="chip-option"><input type="checkbox" value="tempRh"><span>Temp/RH</span></label>
-                  <select class="sensor-location" data-sensor="tempRh">
-                    <option value="">Location…</option>
-                    <option value="room">Room</option>
-                    <option value="zone">Zone</option>
-                    <option value="canopy">Canopy</option>
-                    <option value="intake">Intake</option>
-                    <option value="exhaust">Exhaust</option>
-                    <option value="outdoors">Outdoors</option>
-                  </select>
-                  <p class="tiny" style="color:#475569">NTC thermistors give low-cost, high-sensitivity temperature data while capacitive humidity sensors stay accurate over time (<a href="https://blog.amphenol-sensors.com/industrial-blog/temperature-and-humidity-sensors-in-agriculture" target="_blank" rel="noopener">Amphenol Sensors</a>).</p>
-                </div>
-                <div class="sensor-config" data-sensor="co2">
-                  <label class="chip-option"><input type="checkbox" value="co2"><span>CO₂</span></label>
-                  <select class="sensor-location" data-sensor="co2">
-                    <option value="">Location…</option>
-                    <option value="room">Room</option>
-                    <option value="zone">Zone</option>
-                    <option value="canopy">Canopy</option>
-                    <option value="intake">Intake</option>
-                    <option value="exhaust">Exhaust</option>
-                    <option value="outdoors">Outdoors</option>
-                  </select>
-                  <p class="tiny" style="color:#475569">NDIR CO₂ sensors deliver reliable readings with strong stability and quick response for enrichment control (<a href="https://solution.seeedstudio.com/product/sensecap-solo-co2-5000-ndir-co2-sensor-supporting-modbus-rtu-rs485-and-sdi-12/" target="_blank" rel="noopener">Seeed Studio</a>).</p>
-                </div>
-                <div class="sensor-config" data-sensor="vpd">
-                  <label class="chip-option"><input type="checkbox" value="vpd"><span>Dewpoint/VPD</span></label>
-                  <select class="sensor-location" data-sensor="vpd">
-                    <option value="">Location…</option>
-                    <option value="room">Room</option>
-                    <option value="zone">Zone</option>
-                    <option value="canopy">Canopy</option>
-                    <option value="intake">Intake</option>
-                    <option value="exhaust">Exhaust</option>
-                    <option value="outdoors">Outdoors</option>
-                  </select>
-                  <p class="tiny" style="color:#475569">Pair dewpoint/VPD monitoring with canopy or intake placement to keep plants within their comfort band.</p>
-                </div>
-                <div class="sensor-config" data-sensor="ppfd">
-                  <label class="chip-option"><input type="checkbox" value="ppfd"><span>Light/PPFD</span></label>
-                  <select class="sensor-location" data-sensor="ppfd">
-                    <option value="">Location…</option>
-                    <option value="room">Room</option>
-                    <option value="zone">Zone</option>
-                    <option value="canopy">Canopy</option>
-                    <option value="intake">Intake</option>
-                    <option value="exhaust">Exhaust</option>
-                    <option value="outdoors">Outdoors</option>
-                  </select>
-                  <p class="tiny" style="color:#475569">Use canopy-mounted quantum sensors to validate PPFD and calculate DLI for each zone.</p>
-                </div>
-                <div class="sensor-config" data-sensor="energy">
-                  <label class="chip-option"><input type="checkbox" value="energy"><span>Energy/Power</span></label>
-                  <select class="sensor-location" data-sensor="energy">
-                    <option value="">Location…</option>
-                    <option value="room">Room</option>
-                    <option value="zone">Zone</option>
-                    <option value="canopy">Canopy</option>
-                    <option value="intake">Intake</option>
-                    <option value="exhaust">Exhaust</option>
-                    <option value="outdoors">Outdoors</option>
-                  </select>
-                  <p class="tiny" style="color:#475569">Tie branch CTs or smart plugs to the same zones as your loads for clean energy per-cycle insights.</p>
-                </div>
-              </div>
-              <p class="tiny" style="color:#64748b">We pre-select sensors based on fixtures and control methods; adjust placements to match your canopy map.</p>
-            </div>
-          </section>
 
-          <section class="room-step" data-step="location">
-            <p class="room-question">Which farm location does it belong to?</p>
-            <div class="farm-step__stack">
-              <label class="tiny">Location</label>
-              <select id="roomLocationSelect" style="min-width:220px"></select>
-              <p class="tiny" style="color:#64748b">Locations are pulled from your Farm registration.</p>
-            </div>
-          </section>
 
           <section class="room-step" data-step="review">
             <p class="room-question">Review this room before saving.</p>

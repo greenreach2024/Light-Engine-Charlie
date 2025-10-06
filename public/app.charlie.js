@@ -3560,6 +3560,13 @@ class DeviceManagerWindow {
 
 // --- Grow Room Wizard ---
 class RoomWizard {
+  showError(id, msg) {
+    const el = document.getElementById(id);
+    if (el) {
+      el.textContent = msg;
+      el.style.display = msg ? '' : 'none';
+    }
+  }
   constructor() {
     console.debug('[RoomWizard] constructor called');
     this.modal = $('#roomModal');
@@ -3570,7 +3577,7 @@ class RoomWizard {
     this.autoAdvance = false;
     // equipment-first: begin with connectivity and hardware categories for room management
     // Steps can be augmented dynamically based on selected hardware (e.g., hvac, dehumidifier, etc.)
-    this.baseSteps = ['room-info','hardware','category-setup','sensors','location','review'];
+  this.baseSteps = ['room-info','hardware','category-setup','review'];
     this.steps = this.baseSteps.slice();
     this.currentStep = 0;
     this.data = {
@@ -4601,8 +4608,34 @@ class RoomWizard {
     const step = this.steps[this.currentStep];
     switch(step){
       case 'room-info': {
-        const v = ($('#roomInfoName')?.value||'').trim(); if (!v) { alert('Enter a room name'); return false; }
-        this.data.name = v; break; }
+        let hasError = false;
+        const v = ($('#roomInfoName')?.value||'').trim();
+        if (!v) {
+          this.showError('roomInfoError', 'Room name is required.');
+          hasError = true;
+        } else {
+          this.showError('roomInfoError', '');
+        }
+        this.data.name = v;
+        // Also require at least one hardware category before leaving step one
+        const cats = this.data.hardwareCats || [];
+        if (!cats.length) {
+          this.showError('hardwareError', 'Select at least one hardware category.');
+          hasError = true;
+        } else {
+          this.showError('hardwareError', '');
+        }
+        if (hasError) return false;
+        break; }
+    // Clear errors on input/change
+    const roomNameInput = document.getElementById('roomInfoName');
+    if (roomNameInput) {
+      roomNameInput.addEventListener('input', () => this.showError('roomInfoError', ''));
+    }
+    const hwHost = document.getElementById('roomHardwareCats');
+    if (hwHost) {
+      hwHost.addEventListener('click', () => this.showError('hardwareError', ''));
+    }
 
       case 'layout': {
         // no strict validation
@@ -4610,13 +4643,10 @@ class RoomWizard {
       case 'zones': {
         const zones = Array.isArray(this.data.zones) ? this.data.zones : [];
         if (!zones.length) {
-          const ok = confirm('No zones defined yet. Continue without zones?');
-          if (!ok) return false;
+          return false;
         }
         break; }
       case 'hardware': {
-        const cats = this.data.hardwareCats || [];
-        if (!cats.length) { alert('Select at least one hardware category (e.g., lights, sensors)'); return false; }
         // When leaving hardware, build dynamic category queue and insert a single category-setup step if needed
         this.rebuildDynamicSteps();
         break; }
@@ -4647,22 +4677,19 @@ class RoomWizard {
         const needsLights = (this.data.hardwareCats || []).includes('grow-lights');
         const fixtures = Array.isArray(this.data.fixtures) ? this.data.fixtures : [];
         if (needsLights && fixtures.length === 0) {
-          const ok = confirm('No fixtures have been added yet. Continue without capturing them?');
-          if (!ok) return false;
+          return false;
         }
         break; }
       case 'control': {
         const needsLights = (this.data.hardwareCats || []).includes('grow-lights');
         if (!this.data.controlMethod && needsLights) {
-          const ok = confirm('No control method selected. Continue without control info?');
-          if (!ok) return false;
+          return false;
         }
         break; }
       case 'devices': {
         const smartControl = ['wifi','smart-plug','rs485'].includes(this.data.controlMethod);
         if (smartControl && !(Array.isArray(this.data.devices) && this.data.devices.length)) {
-          const ok = confirm('No connected devices were added for this control method. Continue?');
-          if (!ok) return false;
+          return false;
         }
         break; }
       case 'connectivity': {
@@ -6149,8 +6176,8 @@ class RoomWizard {
   }
 
   nextStep() {
-    // Allow moving forward without completing pages. We'll still capture soft state
-    // when possible elsewhere and validate on save or explicit actions.
+    // Require validation before advancing
+    if (!this.validateCurrentStep()) return;
     this.currentStep = Math.min(this.steps.length - 1, this.currentStep + 1);
     this.showStep(this.currentStep);
   }
@@ -8709,6 +8736,15 @@ function wireGlobalEvents() {
       const off1 = minutesToHHMM(toMinutes(on1) + Math.round((Number(c1Hours.value)||0)*60));
       const c1Dur = computeCycleDuration(on1, off1);
       const rem = Math.max(0, 24*60 - c1Dur);
+        // Set up error-clearing listeners ONCE
+        const roomNameInput = document.getElementById('roomInfoName');
+        if (roomNameInput) {
+          roomNameInput.addEventListener('input', () => this.showError('roomInfoError', ''));
+        }
+        const hwHost = document.getElementById('roomHardwareCats');
+        if (hwHost) {
+          hwHost.addEventListener('click', () => this.showError('hardwareError', ''));
+        }
       if (rem === 0) { setMode('one'); } else {
         const origH2 = Math.max(0, Math.min(24, Number(c2Hours.value)||12));
         const newH2 = Math.min(origH2, rem/60);
