@@ -3733,6 +3733,10 @@ class RoomWizard {
     console.debug('[RoomWizard.open] called. room:', room);
     // Always make the modal visible
     if (this.modal) {
+      // The close() method forces display:none so ensure we restore the
+      // flex layout every time the wizard is opened (fixes buttons that
+      // failed to reopen the wizard after the first close).
+      this.modal.style.display = 'flex';
       this.modal.setAttribute('aria-hidden', 'false');
     }
     // Always refresh the room list from STATE.farm.rooms to reflect latest Farm Registration
