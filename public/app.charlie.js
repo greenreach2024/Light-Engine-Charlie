@@ -1,25 +1,81 @@
 // --- Groups Card Room/Zone Dropdown Seeding ---
+function collectRoomsFromState() {
+  const wizardRooms = Array.isArray(STATE.rooms) ? STATE.rooms : [];
+  if (wizardRooms.length) return wizardRooms;
+  const farmRooms = Array.isArray(STATE.farm?.rooms) ? STATE.farm.rooms : [];
+  return farmRooms;
+}
+
 function seedGroupRoomZoneDropdowns() {
   const roomSel = document.getElementById('groupRoomDropdown');
   const zoneSel = document.getElementById('groupZoneDropdown');
+  const fixtureSummary = document.getElementById('groupFixtureSummary');
   if (!roomSel || !zoneSel) return;
-  // Populate rooms from STATE.farm.rooms
-  const rooms = Array.isArray(STATE.farm?.rooms) ? STATE.farm.rooms : [];
-  roomSel.innerHTML = '<option value="">Room</option>' + rooms.map(r => `<option value="${r.id}">${r.name}</option>`).join('');
-  // On room change, update zones
-  roomSel.addEventListener('change', function() {
-    const room = rooms.find(r => r.id === roomSel.value);
-    if (room) {
-      zoneSel.innerHTML = '<option value="">Zone</option>' + (room.zones||[]).map(z => `<option value="${z}">${z}</option>`).join('');
-    } else {
-      zoneSel.innerHTML = '<option value="">Zone</option>';
+  // Helper to update fixture summary for selected room/zone
+  function updateFixtureSummary() {
+    if (!fixtureSummary) return;
+    const roomId = roomSel.value;
+    const zone = zoneSel.value;
+    if (!roomId || !zone) {
+      fixtureSummary.innerHTML = '<span style="color:#64748b;font-size:13px;">Select a room and zone to view lights.</span>';
+      return;
     }
-  });
-  // Initial zone population for first room
-  if (rooms.length > 0) {
-    roomSel.value = rooms[0].id;
-    roomSel.dispatchEvent(new Event('change'));
+    const setups = (window.STATE?.lightSetups || []).filter(s => (s.room === roomId || s.room === (window.STATE?.rooms?.find(r=>r.id===roomId)?.name)) && s.zone === zone);
+    if (!setups.length) {
+      fixtureSummary.innerHTML = '<span style="color:#64748b;font-size:13px;">No lights configured for this room/zone.</span>';
+      return;
+    }
+    let html = '';
+    setups.forEach(setup => {
+      if (Array.isArray(setup.fixtures)) {
+        html += setup.fixtures.map(f => `<div style='font-size:13px;'>${escapeHtml(f.vendor||f.name||f.model||'Light')} ×${f.count||1} (${f.watts||''}W)</div>`).join('');
+      }
+    });
+    fixtureSummary.innerHTML = html || '<span style="color:#64748b;font-size:13px;">No lights found for this room/zone.</span>';
   }
+
+  const normaliseRooms = () => (collectRoomsFromState() || []).map(room => ({
+    id: room?.id || '',
+    name: room?.name || '',
+    zones: Array.isArray(room?.zones) ? room.zones : []
+  }));
+
+  const previousRoom = roomSel.value;
+  const previousZone = zoneSel.value;
+  const rooms = normaliseRooms();
+
+  roomSel.innerHTML = '<option value="">Room</option>' + rooms.map(r => `<option value="${escapeHtml(r.id)}">${escapeHtml(r.name)}</option>`).join('');
+
+  const defaultRoomId = rooms.some(r => r.id === previousRoom) ? previousRoom : (rooms[0]?.id || '');
+  if (defaultRoomId) {
+    roomSel.value = defaultRoomId;
+  }
+
+  const updateZones = (roomId, zoneToPreserve) => {
+    const currentRooms = normaliseRooms();
+    const selectedRoom = currentRooms.find(r => r.id === roomId);
+    const zones = selectedRoom ? selectedRoom.zones : [];
+    zoneSel.innerHTML = '<option value="">Zone</option>' + zones.map(z => `<option value="${escapeHtml(z)}">${escapeHtml(z)}</option>`).join('');
+    const zoneCandidate = zoneToPreserve && zones.includes(zoneToPreserve) ? zoneToPreserve : '';
+    if (zoneCandidate) {
+      zoneSel.value = zoneCandidate;
+    } else {
+      zoneSel.value = '';
+    }
+  };
+
+  updateZones(roomSel.value, previousZone);
+
+  roomSel.onchange = () => {
+    updateZones(roomSel.value, zoneSel.value);
+    updateFixtureSummary();
+  };
+  zoneSel.onchange = () => {
+    zoneSel.dataset.lastValue = zoneSel.value;
+    updateFixtureSummary();
+  };
+  // Initial summary
+  updateFixtureSummary();
 }
 
 // --- IoT System Setup Card Show/Hide Logic ---
@@ -325,6 +381,20 @@ document.addEventListener('DOMContentLoaded', function() {
 });
 // Sidebar panel state (fixes ReferenceError in strict mode)
 let ACTIVE_PANEL = 'overview';
+
+// --- Grow Room Modal Show/Hide Logic ---
+document.addEventListener('DOMContentLoaded', function() {
+  const btn = document.getElementById('btnLaunchRoom');
+  const modal = document.getElementById('roomModal');
+  const closeBtn = document.getElementById('roomModalClose');
+  if (btn && modal && closeBtn) {
+    btn.onclick = function() { modal.style.display = 'flex'; modal.setAttribute('aria-hidden', 'false'); };
+    closeBtn.onclick = function() { modal.style.display = 'none'; modal.setAttribute('aria-hidden', 'true'); };
+    // Optional: close modal on outside click
+    modal.addEventListener('click', function(e) { if (e.target === modal) { modal.style.display = 'none'; modal.setAttribute('aria-hidden', 'true'); } });
+  }
+});
+
 // --- Fallbacks for missing global helpers (standalone mode) ---
 // Utility: Group array of objects by key
 function groupBy(arr, key) {
@@ -341,7 +411,7 @@ function renderIoTDeviceCards(devices) {
   if (!list) return;
   list.innerHTML = '';
   if (!Array.isArray(devices) || !devices.length) {
-    list.innerHTML = '<p class="tiny">No IoT devices found. Click "Scan for Devices" to search.</p>';
+    list.innerHTML = '';
     return;
   }
   // Identify unknown devices: no vendor/type or not trusted/assigned/quarantined
@@ -1391,15 +1461,7 @@ class FarmWizard {
       <div><strong>Farm:</strong> ${escapeHtml(this.data.location.farmName || 'Untitled')}</div>
       <div><strong>Address:</strong> ${escapeHtml(addressParts.join(', ') || '—')}</div>
       <div><strong>Timezone:</strong> ${escapeHtml(timezone)}</div>
-      <div><strong>Contact:</strong> ${escapeHtml(this.data.contact.name || '')} ${this.data.contact.email ? `&lt;${escapeHtml(this.data.contact.email)}&gt;` : ''} ${this.data.contact.phone ? escapeHtml(this.data.contact.phone) : ''}</div>
       ${this.data.contact.website ? `<div><strong>Website:</strong> <a href="${this.data.contact.website.startsWith('http') ? escapeHtml(this.data.contact.website) : 'https://' + escapeHtml(this.data.contact.website)}" target="_blank">${escapeHtml(this.data.contact.website)}</a></div>` : ''}
-      <div><strong>Rooms:</strong> ${rooms.map(r => `${escapeHtml(r.name)} (${r.zones.length || 0} zones)`).join(', ')}</div>
-      <div><strong>Zones:</strong> ${rooms.length === 0 ? '—' : rooms.map(r => {
-        if (!r.zones || r.zones.length === 0) {
-          return `${escapeHtml(r.name)}: 0 zones`;
-        }
-        return `${escapeHtml(r.name)}: ${r.zones.length} zone${r.zones.length > 1 ? 's' : ''} — ${r.zones.map(z => escapeHtml(z)).join(', ')}`;
-      }).join('<br>')}</div>
     `;
   }
 
@@ -2961,23 +3023,23 @@ class DeviceManagerWindow {
   buildAssignmentForm(device) {
     const form = document.createElement('form');
     form.className = 'device-manager__assign-form';
-    const rooms = Array.isArray(STATE.farm?.rooms) ? STATE.farm.rooms : [];
+    let rooms = (collectRoomsFromState() || []).map(room => ({
+      id: room?.id || '',
+      name: room?.name || '',
+      zones: Array.isArray(room?.zones) ? room.zones : []
+    }));
     if (!rooms.length) {
       form.innerHTML = '<p class="tiny">Add rooms in the Farm setup to assign devices.</p>';
       return form;
     }
-    const roomOptions = rooms.map(room => `<option value="${room.id}">${escapeHtml(room.name)}</option>`).join('');
+    const roomOptions = () => rooms.map(room => `<option value="${escapeHtml(room.id)}">${escapeHtml(room.name)}</option>`).join('');
     form.innerHTML = `
       <label class="tiny">Room
-        <select name="room" required>
-          <option value="">Select room</option>
-          ${roomOptions}
-        </select>
+        <select name="room" required></select>
       </label>
       <label class="tiny">Zone
-        <select name="zone">
-          <option value="">Whole room</option>
-        </select>
+        <select name="zone"></select>
+        <button type="button" id="createNewZoneBtn" class="ghost" style="margin-left:8px;">Create New Zone</button>
       </label>
       <label class="tiny">Type
         <select name="type" required>
@@ -2992,10 +3054,84 @@ class DeviceManagerWindow {
     `;
     const roomSelect = form.querySelector('select[name="room"]');
     const zoneSelect = form.querySelector('select[name="zone"]');
-    roomSelect.addEventListener('change', () => {
-      const room = rooms.find(r => r.id === roomSelect.value);
-      zoneSelect.innerHTML = '<option value="">Whole room</option>' + (room?.zones || []).map(z => `<option value="${escapeHtml(z)}">${escapeHtml(z)}</option>`).join('');
+    const createZoneBtn = form.querySelector('#createNewZoneBtn');
+
+    // Helper to update room and zone dropdowns
+    function refreshRoomsAndZones(selectedRoomId, selectedZone) {
+      rooms = (collectRoomsFromState() || []).map(room => ({
+        id: room?.id || '',
+        name: room?.name || '',
+        zones: Array.isArray(room?.zones) ? room.zones : []
+      }));
+      roomSelect.innerHTML = '<option value="">Select room</option>' + roomOptions();
+      let roomId = selectedRoomId;
+      if (!roomId || !rooms.some(r => r.id === roomId)) {
+        roomId = rooms[0]?.id || '';
+      }
+      roomSelect.value = roomId;
+      updateZones(roomId, selectedZone);
+    }
+
+    function updateZones(roomId, zoneToPreserve) {
+      const selectedRoom = rooms.find(r => r.id === roomId);
+      const zones = selectedRoom ? selectedRoom.zones : [];
+      zoneSelect.innerHTML = '<option value="">Whole room</option>' + zones.map(z => `<option value="${escapeHtml(z)}">${escapeHtml(z)}</option>`).join('');
+      if (zoneToPreserve && zones.includes(zoneToPreserve)) {
+        zoneSelect.value = zoneToPreserve;
+      } else {
+        zoneSelect.value = '';
+      }
+    }
+
+    // Listen for state refreshes to keep lists in sync
+    window.addEventListener('farmDataChanged', () => {
+      refreshRoomsAndZones(roomSelect.value, zoneSelect.value);
     });
+
+    roomSelect.addEventListener('change', () => {
+      updateZones(roomSelect.value, '');
+    });
+
+    // Create New Zone action
+    createZoneBtn.addEventListener('click', () => {
+      const roomId = roomSelect.value;
+      if (!roomId) return alert('Select a room first');
+      const zoneName = prompt('Enter new zone name:');
+      if (!zoneName) return;
+      // Find and update the room in STATE.rooms (preferred) or STATE.farm.rooms
+      let updated = false;
+      if (Array.isArray(STATE.rooms)) {
+        const r = STATE.rooms.find(r => r.id === roomId);
+        if (r) {
+          r.zones = Array.isArray(r.zones) ? r.zones : [];
+          if (!r.zones.includes(zoneName)) {
+            r.zones.push(zoneName);
+            updated = true;
+          }
+        }
+      }
+      if (!updated && Array.isArray(STATE.farm?.rooms)) {
+        const r = STATE.farm.rooms.find(r => r.id === roomId);
+        if (r) {
+          r.zones = Array.isArray(r.zones) ? r.zones : [];
+          if (!r.zones.includes(zoneName)) {
+            r.zones.push(zoneName);
+            updated = true;
+          }
+        }
+      }
+      if (updated) {
+        showToast({ title: 'Zone added', msg: `Zone "${zoneName}" added to room.`, kind: 'success', icon: '➕' });
+        refreshRoomsAndZones(roomId, zoneName);
+        if (typeof safeRoomsSave === 'function') {
+          try { safeRoomsSave({ id: roomId }); } catch {}
+        }
+        window.dispatchEvent(new CustomEvent('farmDataChanged'));
+      } else {
+        alert('Failed to add zone.');
+      }
+    });
+
     form.addEventListener('submit', (ev) => {
       ev.preventDefault();
       const roomId = roomSelect.value;
@@ -3007,11 +3143,13 @@ class DeviceManagerWindow {
       showToast({ title: 'Device added', msg: `${device.name} mapped to ${type} in room ${rooms.find(r => r.id === roomId)?.name || roomId}`, kind: 'success', icon: '✅' });
       this.render();
     });
+
+    // If editing, pre-select values
     if (device.assignment) {
-      roomSelect.value = device.assignment.roomId || '';
-      roomSelect.dispatchEvent(new Event('change'));
-      zoneSelect.value = device.assignment.zone || '';
+      refreshRoomsAndZones(device.assignment.roomId, device.assignment.zone || '');
       form.querySelector('select[name="type"]').value = device.assignment.type || 'other';
+    } else {
+      refreshRoomsAndZones('', '');
     }
     return form;
   }
@@ -3647,7 +3785,11 @@ class RoomWizard {
     if (el) el.setAttribute('data-active', '');
     $('#roomModalProgress').textContent = `Step ${index + 1} of ${this.steps.length}`;
 
-    // Legacy footer removed: all navigation is now handled by header controls
+      // Hide legacy footer except on final step
+      const legacyFooter = this.form?.querySelector('.room-modal__footer');
+      if (legacyFooter) {
+        legacyFooter.style.display = (index === this.steps.length - 1) ? 'flex' : 'none';
+      }
 
     // Guard navigation button toggles
     const prev = $('#roomPrev');
@@ -3807,6 +3949,28 @@ class RoomWizard {
     // Track previous step for transitions
     this.previousStep = stepKey;
     
+    // Helper to render editable zone names (must be defined before any use)
+    this.renderRoomInfoZones = () => {
+      const zoneCountInput = document.getElementById('roomInfoZoneCount');
+      const zoneInputsHost = document.getElementById('roomInfoZoneInputs');
+      if (!zoneInputsHost || !zoneCountInput) return;
+      let zoneCount = Math.max(1, Math.min(12, Number(zoneCountInput.value)||1));
+      zoneInputsHost.innerHTML = '';
+      for (let i = 0; i < zoneCount; ++i) {
+        const input = document.createElement('input');
+        input.type = 'text';
+        input.value = this.data.zones && this.data.zones[i] ? this.data.zones[i] : `Zone ${i+1}`;
+        input.placeholder = `Zone ${i+1} name`;
+        input.className = 'tiny';
+        input.style.marginBottom = '2px';
+        input.oninput = (e) => {
+          this.data.zones[i] = (e.target.value || '').trim() || `Zone ${i+1}`;
+          this.updateSetupQueue();
+        };
+        zoneInputsHost.appendChild(input);
+      }
+    };
+
     if (stepKey === 'room-info') {
       // Room name and zones step
       const nameInput = document.getElementById('roomInfoName');
@@ -3842,28 +4006,6 @@ class RoomWizard {
         console.error('[RoomWizard] renderRoomInfoZones is not a function', this.renderRoomInfoZones);
       }
     }
-
-    // Helper to render editable zone names
-    this.renderRoomInfoZones = () => {
-      const zoneCountInput = document.getElementById('roomInfoZoneCount');
-      const zoneInputsHost = document.getElementById('roomInfoZoneInputs');
-      if (!zoneInputsHost || !zoneCountInput) return;
-      let zoneCount = Math.max(1, Math.min(12, Number(zoneCountInput.value)||1));
-      zoneInputsHost.innerHTML = '';
-      for (let i = 0; i < zoneCount; ++i) {
-        const input = document.createElement('input');
-        input.type = 'text';
-        input.value = this.data.zones && this.data.zones[i] ? this.data.zones[i] : `Zone ${i+1}`;
-        input.placeholder = `Zone ${i+1} name`;
-        input.className = 'tiny';
-        input.style.marginBottom = '2px';
-        input.oninput = (e) => {
-          this.data.zones[i] = (e.target.value || '').trim() || `Zone ${i+1}`;
-          this.updateSetupQueue();
-        };
-        zoneInputsHost.appendChild(input);
-      }
-    };
 
     if (stepKey === 'layout') {
       const type = this.data.layout?.type || '';
@@ -5564,9 +5706,14 @@ class RoomWizard {
     if (ok) {
       renderRooms();
       renderControllerAssignments(); // Update controller assignments when rooms change
+      if (typeof seedGroupRoomZoneDropdowns === 'function') {
+        try { seedGroupRoomZoneDropdowns(); } catch {}
+      }
+      if (typeof window !== 'undefined' && typeof window.dispatchEvent === 'function') {
+        try { window.dispatchEvent(new CustomEvent('farmDataChanged')); } catch {}
+      }
       showToast({ title:'Room saved', msg:`${this.data.name} saved`, kind:'success', icon:'✅' });
       try { localStorage.removeItem('gr.roomWizard.progress'); } catch {}
-      
       // Only close if explicitly requested and not part of a multi-room workflow
       if (shouldAutoClose && (!this.multiRoomList || this.multiRoomList.length <= 1)) {
         this.close();
@@ -5751,9 +5898,15 @@ async function loadAllData() {
   try { if (STATE.farm && Object.keys(STATE.farm).length) localStorage.setItem('gr.farm', JSON.stringify(STATE.farm)); } catch {}
   STATE.rooms = rooms?.rooms || [];
   if (deviceKB && Array.isArray(deviceKB.fixtures)) {
+    // Assign a unique id to each fixture if missing
+    deviceKB.fixtures.forEach(fixture => {
+      if (!fixture.id) {
+        fixture.id = `${fixture.vendor}__${fixture.model}`.replace(/\s+/g, '_');
+      }
+    });
     STATE.deviceKB = deviceKB;
     console.log('✅ Loaded device fixtures database:', deviceKB.fixtures.length, 'fixtures');
-    console.log('Sample fixtures:', deviceKB.fixtures.slice(0, 3).map(f => `${f.vendor} ${f.model}`));
+    console.log('Sample fixtures:', deviceKB.fixtures.slice(0, 3).map(f => `${f.vendor} ${f.model} [${f.id}]`));
   }
   if (equipmentKB && Array.isArray(equipmentKB.equipment)) {
     STATE.equipmentKB = equipmentKB;
@@ -5962,6 +6115,115 @@ function hydrateDeviceSelect() {
 }
 
 function renderGroups() {
+  // Save Plan & Schedule button logic
+  const btnSavePlanSchedule = document.getElementById('btnSavePlanSchedule');
+  if (btnSavePlanSchedule) {
+    btnSavePlanSchedule.onclick = () => {
+      const group = STATE.currentGroup;
+      if (!group) return;
+      group.plan = document.getElementById('groupPlan')?.value || '';
+      group.schedule = document.getElementById('groupSchedule')?.value || '';
+      // Persist the full group object, including updated lights array
+      const idx = STATE.groups.findIndex(g => g.id === group.id);
+      if (idx >= 0) {
+        STATE.groups[idx] = { ...group };
+        Promise.resolve(saveJSON('./data/groups.json', { groups: STATE.groups }))
+          .then(async () => {
+            // Reload groups from disk to ensure persistence
+            const groupsReloaded = await loadJSON('./data/groups.json');
+            if (groupsReloaded && Array.isArray(groupsReloaded.groups)) {
+              STATE.groups = groupsReloaded.groups;
+              // Re-select the current group by id
+              STATE.currentGroup = STATE.groups.find(g => g.id === group.id) || null;
+            }
+            renderGroups();
+            showToast('Group configuration saved and reloaded, including lights, plan, and schedule.');
+          })
+          .catch(() => {
+            showToast('Failed to save group configuration.', 'error');
+          });
+      }
+    };
+  }
+
+  // Plan spectrum/slider sync on plan change
+  const planSel = document.getElementById('groupPlan');
+  if (planSel) {
+    planSel.onchange = () => {
+      const plan = STATE.plans.find(p => p.id === planSel.value);
+      if (plan && plan.spectrum) {
+        // Update spectrum preview
+        renderPlanSpectrum(plan.spectrum);
+        // Update sliders
+        setSlider('gcw', plan.spectrum.cw);
+        setSlider('gww', plan.spectrum.ww);
+        setSlider('gbl', plan.spectrum.bl);
+        setSlider('grd', plan.spectrum.rd);
+      }
+    };
+  }
+
+  function setSlider(id, value) {
+    const slider = document.getElementById(id);
+    const num = document.getElementById(id+'v');
+    if (slider) slider.value = value;
+    if (num) num.value = value;
+  }
+  function renderPlanSpectrum(spectrum) {
+    const canvas = document.getElementById('groupPlanCanvas');
+    if (canvas && typeof renderSpectrumCanvas === 'function') {
+      const spd = computeWeightedSPD({ cw: spectrum.cw||0, ww: spectrum.ww||0, bl: spectrum.bl||0, rd: spectrum.rd||0 });
+      renderSpectrumCanvas(canvas, spd, { width: 300, height: 36 });
+    }
+  }
+  // Render light selection bar seeded by Light Setup Wizard
+  const lightSelectionBar = document.getElementById('groupLightSelectionBar');
+  if (lightSelectionBar) {
+    lightSelectionBar.innerHTML = '';
+    const groupRoomSel = document.getElementById('groupRoomDropdown');
+    const groupZoneSel = document.getElementById('groupZoneDropdown');
+    let setupLights = [];
+    if (groupRoomSel && groupZoneSel && window.STATE?.lightSetups) {
+      const roomId = groupRoomSel.value;
+      const zone = groupZoneSel.value;
+      window.STATE.lightSetups.forEach(setup => {
+        if ((setup.room === roomId || setup.room === (window.STATE?.rooms?.find(r=>r.id===roomId)?.name)) && setup.zone === zone) {
+          if (Array.isArray(setup.fixtures)) {
+            setup.fixtures.forEach(f => {
+              setupLights.push({
+                id: f.id,
+                name: f.vendor ? `${f.vendor} ${f.model}` : (f.name || f.model || 'Light'),
+                watts: f.watts,
+                count: f.count,
+                source: 'setup',
+              });
+            });
+          }
+        }
+      });
+    }
+    if (setupLights.length === 0) {
+      lightSelectionBar.innerHTML = '<span style="color:#64748b;font-size:13px;">No lights configured for this room/zone.</span>';
+    } else {
+      setupLights.forEach(light => {
+        const btn = document.createElement('button');
+        btn.type = 'button';
+        btn.className = 'ghost';
+        btn.style.marginRight = '8px';
+        btn.textContent = `${light.name} (${light.count || 1} × ${light.watts || '?'}W)`;
+        btn.onclick = () => {
+          // Add this light to the current group if not already present
+          const group = STATE.currentGroup;
+          if (!group || !Array.isArray(group.lights)) return;
+          if (!group.lights.some(l => l.id === light.id)) {
+            group.lights.push({ id: light.id, name: light.name });
+            renderGroups();
+          }
+        };
+        lightSelectionBar.appendChild(btn);
+      });
+    }
+  }
   const select = $('#groupSelect');
   if (!select) return;
   const prev = STATE.currentGroup?.id || select.value || '';
@@ -6250,7 +6512,7 @@ function editLightSetup(roomId) {
         freshLightWizard.open();
         // Pre-select the room in step 1 if possible
         setTimeout(() => {
-          const roomSelect = document.getElementById('lightSetupRoom');
+          const roomSelect = document.getElementById('freshRoomSelect');
           if (roomSelect) {
             roomSelect.value = room.name;
             // Trigger change event to update zones
@@ -6268,7 +6530,7 @@ function editLightSetup(roomId) {
     freshLightWizard.open();
     // Pre-select the room
     setTimeout(() => {
-      const roomSelect = document.getElementById('lightSetupRoom');
+      const roomSelect = document.getElementById('freshRoomSelect');
       if (roomSelect) {
         roomSelect.value = room.name;
         roomSelect.dispatchEvent(new Event('change', { bubbles: true }));
@@ -7427,11 +7689,14 @@ function wireGlobalEvents() {
     const clearBtn = document.createElement('button'); clearBtn.type='button'; clearBtn.className='ghost danger'; clearBtn.textContent='Clear roster';
     groupQuick.append(roomSel, zoneSel, applyBtn, importBtn, clearBtn);
 
-    // Helper to get rooms/zones from Grow Room setup (FarmWizard)
+    // Helper to get rooms/zones from Grow Room setup (RoomWizard)
     function getRoomsAndZones() {
-      // Try STATE.farm.rooms, fallback to []
-      const rooms = (STATE.farm && Array.isArray(STATE.farm.rooms)) ? STATE.farm.rooms : [];
-      return rooms.map(r => ({ id: r.id, name: r.name, zones: Array.isArray(r.zones) ? r.zones : [] }));
+      const rooms = (collectRoomsFromState() || []).map(r => ({
+        id: r?.id || '',
+        name: r?.name || '',
+        zones: Array.isArray(r?.zones) ? r.zones : []
+      }));
+      return rooms;
     }
 
     function populateRoomDropdown() {
@@ -7736,43 +8001,50 @@ function wireGlobalEvents() {
     if (lightList) {
       lightList.innerHTML = '';
       const ids = (group.lights || []).map(l => l.id);
-      const devices = STATE.devices.filter(d => ids.includes(d.id));
-      // NO STUB DEVICES - Only show live devices
-      const missingIds = ids.filter(id => !devices.some(d => d.id === id));
-      if (missingIds.length > 0) {
-        console.warn(`🚫 ${missingIds.length} devices not available (live devices only):`, missingIds);
-      }
-      devices.forEach(d => {
-        const card = deviceCard(d, { compact: true });
-        // Adjust spectrum canvas coloring: dynamic lights use group mix; static use plan preset
-        try {
-          const cv = card.querySelector('.device-spectrum__canvas');
-          if (cv) {
-            const meta = getDeviceMeta(d.id) || {};
-            const isDynamic = ['cwPct','wwPct','blPct','rdPct'].some(k => d[k] !== undefined) || String(meta.spectrumMode||'dynamic')==='dynamic';
-            const mix = isDynamic
-              ? computeMixAndHex(group).mix
-              : (meta.factorySpectrum || (STATE.plans.find(p=>p.id===group.plan)?.spectrum) || { cw:45, ww:45, bl:0, rd:0 });
-            const spd = computeWeightedSPD({ cw: mix.cw||0, ww: mix.ww||0, bl: mix.bl||0, rd: mix.rd||0 });
-            renderSpectrumCanvas(cv, spd, { width: 300, height: 36 });
-            card.title = isDynamic ? 'Dynamic: using driver spectrum' : 'Static: using device factory spectrum';
-          }
-        } catch {}
-        // Append a small remove button for roster management
+      // Try to get device meta from STATE.deviceKB.fixtures for details
+      const fixtures = (window.STATE?.deviceKB?.fixtures || []);
+      ids.forEach(id => {
+        const device = STATE.devices.find(d => d.id === id);
+        const fixture = fixtures.find(f => f.id === id);
+        // Compose details
+        const name = fixture ? `${fixture.vendor || ''} ${fixture.model || ''}`.trim() : (device?.deviceName || 'Light');
+        const watts = fixture?.watts || device?.watts || '?';
+        const control = fixture?.control || (device?.spectrumMode === 'dynamic' ? 'Dynamic' : 'Static');
+        const drivers = fixture?.drivers || 1;
+        const isDynamic = (fixture?.control && /dynamic|wifi|app|driver/i.test(fixture.control)) || (device && device.spectrumMode === 'dynamic');
+        const spectrum = fixture?.spectrum || {};
+        // Card markup
+        const card = document.createElement('div');
+        card.className = 'detailed-light-card';
+        card.style = 'border:1px solid #e5e7eb;border-radius:6px;padding:10px;margin-bottom:8px;background:#f8fafc;min-width:260px;max-width:340px;';
+        card.innerHTML = `
+          <div style="font-weight:600;font-size:15px;">${name}</div>
+          <div class="tiny" style="color:#64748b;">Model: <b>${fixture?.model || device?.model || ''}</b></div>
+          <div class="tiny" style="color:#64748b;">Wattage: <b>${watts}W</b></div>
+          <div class="tiny" style="color:#64748b;">Control: <b>${isDynamic ? 'Dynamic' : 'Static'}</b></div>
+          <div class="tiny" style="color:#64748b;">Drivers: <b>${drivers}</b></div>
+          ${!isDynamic ? `<div class="tiny" style="color:#64748b;">Assigned Spectrum:</div>
+            <div style="display:flex;gap:8px;align-items:center;">
+              <label style='font-size:12px;'>CW <input type='range' min='0' max='100' value='${spectrum.cw||0}' disabled style='width:60px;'></label>
+              <label style='font-size:12px;'>WW <input type='range' min='0' max='100' value='${spectrum.ww||0}' disabled style='width:60px;'></label>
+              <label style='font-size:12px;'>Blue <input type='range' min='0' max='100' value='${spectrum.bl||0}' disabled style='width:60px;'></label>
+              <label style='font-size:12px;'>Red <input type='range' min='0' max='100' value='${spectrum.rd||0}' disabled style='width:60px;'></label>
+            </div>` : ''}
+        `;
+        // Remove button
         const rm = document.createElement('button');
         rm.type = 'button'; rm.className = 'ghost'; rm.textContent = 'Remove from group';
         rm.style.marginTop = '6px';
-        rm.addEventListener('click', async () => {
-          const idx = (group.lights||[]).findIndex(x => x.id === d.id);
+        rm.onclick = async () => {
+          const idx = (group.lights||[]).findIndex(x => x.id === id);
           if (idx >= 0) {
             group.lights.splice(idx, 1);
             await saveJSON('./data/groups.json', { groups: STATE.groups });
             updateGroupUI(group);
           }
-        });
-        const wrap = document.createElement('div');
-        wrap.appendChild(card); wrap.appendChild(rm);
-        lightList.appendChild(wrap);
+        };
+        card.appendChild(rm);
+        lightList.appendChild(card);
       });
     }
     // Initialize HUD from plan when switching groups
@@ -7787,17 +8059,45 @@ function wireGlobalEvents() {
       if (ungroupedList) {
         const assigned = new Set((STATE.groups||[]).flatMap(g => (g.lights||[]).map(l=>l.id)));
         let allLights = (STATE.devices||[]).filter(d => d.type === 'light' || /light|fixture/i.test(d.deviceName||''));
-        // Fallback: if no live devices, derive candidates from device registry (device-meta)
-        // NO STUB DEVICES - Only show live devices  
-        if (!allLights.length) {
-          console.warn('🚫 No live devices available for grouping. Please ensure devices are connected and discoverable.');
+        // Also include lights from STATE.lightSetups for the selected room/zone
+        const groupRoomSel = document.getElementById('groupRoomDropdown');
+        const groupZoneSel = document.getElementById('groupZoneDropdown');
+        let setupLights = [];
+        if (groupRoomSel && groupZoneSel && window.STATE?.lightSetups) {
+          const roomId = groupRoomSel.value;
+          const zone = groupZoneSel.value;
+          window.STATE.lightSetups.forEach(setup => {
+            if ((setup.room === roomId || setup.room === (window.STATE?.rooms?.find(r=>r.id===roomId)?.name)) && setup.zone === zone) {
+              if (Array.isArray(setup.fixtures)) {
+                setup.fixtures.forEach(f => {
+                  // Synthesize a device-like object for ungrouped display
+                  if (!assigned.has(f.id)) {
+                    setupLights.push({
+                      id: f.id,
+                      deviceName: f.vendor ? `${f.vendor} ${f.model}` : (f.name || f.model || 'Light'),
+                      type: 'light',
+                      watts: f.watts,
+                      count: f.count,
+                      source: 'setup',
+                      // Add more fields as needed
+                    });
+                  }
+                });
+              }
+            }
+          });
         }
-        const ungrouped = allLights.filter(d => !assigned.has(d.id));
+        // Merge live and setup lights, dedup by id
+        const allLightsMap = new Map();
+        allLights.forEach(l => allLightsMap.set(l.id, l));
+        setupLights.forEach(l => allLightsMap.set(l.id, l));
+        const mergedLights = Array.from(allLightsMap.values());
+        const ungrouped = mergedLights.filter(d => !assigned.has(d.id));
         ungroupedList.innerHTML = '';
         if (!ungrouped.length) {
           if (ungroupedEmpty) {
             ungroupedEmpty.style.display = 'block';
-            const hasAnyKnown = allLights.length > 0;
+            const hasAnyKnown = mergedLights.length > 0;
             ungroupedEmpty.textContent = hasAnyKnown ? 'All lights are assigned to groups.' : 'No known lights yet. Pair devices or add them in Farm/Rooms.';
           }
         } else {
@@ -8531,67 +8831,117 @@ class FreshLightWizard {
   setupRoomZoneDropdowns() {
     const roomSelect = document.getElementById('freshRoomSelect');
     const zoneSelect = document.getElementById('freshZoneSelect');
-    if (!roomSelect || !zoneSelect) return;
-    roomSelect.addEventListener('change', (e) => {
-      this.data.room = e.target.value;
-      this.updateZoneDropdown(e.target.value);
+    const createZoneBtn = document.getElementById('freshCreateZone');
+    if (!roomSelect || !zoneSelect || !createZoneBtn) return;
+
+    // Helper to get normalized rooms
+    function collectRoomsFromState() {
+      // Only use STATE.rooms as canonical source
+      let createdRooms = Array.isArray(STATE.rooms) ? STATE.rooms : [];
+      return createdRooms;
+    }
+
+    // Populate rooms and zones
+
+    const refreshRoomsAndZones = (selectedRoomId, selectedZone) => {
+      const rooms = collectRoomsFromState();
+      if (!rooms.length) {
+        roomSelect.innerHTML = '<option value="">No rooms found. Add rooms in the Room Setup wizard.</option>';
+        zoneSelect.innerHTML = '<option value="">No zones</option>';
+        this.data.room = '';
+        this.data.zone = '';
+        this.updateNavigation();
+        return;
+      }
+      roomSelect.innerHTML = '<option value="">Select a room</option>' + rooms.map(room => `<option value="${room.id || room.name}">${room.name || room.id}</option>`).join('');
+      let roomId = selectedRoomId;
+      if (!roomId || !rooms.some(r => (r.id || r.name) === roomId)) {
+        roomId = rooms[0]?.id || rooms[0]?.name || '';
+      }
+      roomSelect.value = roomId;
+      updateZones(roomId, selectedZone);
+    };
+
+    const updateZones = (roomId, zoneToPreserve) => {
+      const rooms = collectRoomsFromState();
+      const selectedRoom = rooms.find(r => (r.id || r.name) === roomId);
+      const zones = selectedRoom && Array.isArray(selectedRoom.zones) ? selectedRoom.zones : [];
+      if (!zones.length) {
+        zoneSelect.innerHTML = '<option value="">No zones found. Add zones in the Room Setup wizard.</option>';
+        this.data.zone = '';
+        this.data.room = roomId;
+        this.updateNavigation();
+        return;
+      }
+      zoneSelect.innerHTML = '<option value="">Select a zone</option>' + zones.map(z => `<option value="${z}">${z}</option>`).join('');
+      let zoneValue = '';
+      if (zoneToPreserve && zones.includes(zoneToPreserve)) {
+        zoneValue = zoneToPreserve;
+      } else if (zones.length > 0) {
+        zoneValue = zones[0];
+      }
+      zoneSelect.value = zoneValue;
+      // Update wizard data
+      this.data.zone = zoneValue;
+      this.data.room = roomId;
       this.updateNavigation();
+    };
+
+    // Listen for state refreshes
+    window.addEventListener('farmDataChanged', () => {
+      refreshRoomsAndZones(roomSelect.value, zoneSelect.value);
+    });
+
+    roomSelect.addEventListener('change', (e) => {
+      updateZones(e.target.value, '');
     });
     zoneSelect.addEventListener('change', (e) => {
       this.data.zone = e.target.value;
+      this.data.room = roomSelect.value;
       this.updateNavigation();
     });
-    this.populateRooms();
-  }
 
-  populateRooms() {
-    const roomSelect = document.getElementById('freshRoomSelect');
-    if (!roomSelect) return;
-    roomSelect.innerHTML = '<option value="">Select a room</option>';
-    const farmRooms = Array.isArray(STATE.farm?.rooms) ? STATE.farm.rooms : [];
-    const createdRooms = Array.isArray(STATE.rooms) ? STATE.rooms : [];
-    const allRooms = [...farmRooms];
-    createdRooms.forEach(room => {
-      const existingRoom = allRooms.find(r => (r.id || r.name) === (room.id || room.name));
-      if (!existingRoom) allRooms.push(room);
+    // Create New Zone action
+    createZoneBtn.addEventListener('click', () => {
+      const roomId = roomSelect.value;
+      if (!roomId) return alert('Select a room first');
+      const zoneName = prompt('Enter new zone name:');
+      if (!zoneName) return;
+      let updated = false;
+      if (Array.isArray(STATE.rooms)) {
+        const r = STATE.rooms.find(r => (r.id || r.name) === roomId);
+        if (r) {
+          r.zones = Array.isArray(r.zones) ? r.zones : [];
+          if (!r.zones.includes(zoneName)) {
+            r.zones.push(zoneName);
+            updated = true;
+          }
+        }
+      }
+      if (!updated && Array.isArray(STATE.farm?.rooms)) {
+        const r = STATE.farm.rooms.find(r => (r.id || r.name) === roomId);
+        if (r) {
+          r.zones = Array.isArray(r.zones) ? r.zones : [];
+          if (!r.zones.includes(zoneName)) {
+            r.zones.push(zoneName);
+            updated = true;
+          }
+        }
+      }
+      if (updated) {
+        showToast({ title: 'Zone added', msg: `Zone "${zoneName}" added to room.`, kind: 'success', icon: '➕' });
+        refreshRoomsAndZones(roomId, zoneName);
+        if (typeof safeRoomsSave === 'function') {
+          try { safeRoomsSave({ id: roomId }); } catch {}
+        }
+        window.dispatchEvent(new CustomEvent('farmDataChanged'));
+      } else {
+        alert('Failed to add zone.');
+      }
     });
-    if (allRooms.length === 0) {
-      allRooms.push(
-        { id: 'test-room-1', name: 'Test Room 1', zones: ['Zone A', 'Zone B'] },
-        { id: 'test-room-2', name: 'Test Room 2', zones: ['Zone 1', 'Zone 2'] }
-      );
-    }
-    allRooms.forEach(room => {
-      const option = document.createElement('option');
-      option.value = room.id || room.name;
-      option.textContent = room.name || room.id;
-      roomSelect.appendChild(option);
-    });
-  }
 
-  updateZoneDropdown(roomId) {
-    const zoneSelect = document.getElementById('freshZoneSelect');
-    if (!zoneSelect) return;
-    zoneSelect.innerHTML = '<option value="">Select a zone</option>';
-    if (!roomId) return;
-    const farmRooms = Array.isArray(STATE.farm?.rooms) ? STATE.farm.rooms : [];
-    const createdRooms = Array.isArray(STATE.rooms) ? STATE.rooms : [];
-    const allRooms = [...farmRooms, ...createdRooms];
-    if (allRooms.length === 0) {
-      allRooms.push(
-        { id: 'test-room-1', name: 'Test Room 1', zones: ['Zone A', 'Zone B'] },
-        { id: 'test-room-2', name: 'Test Room 2', zones: ['Zone 1', 'Zone 2'] }
-      );
-    }
-    const selectedRoom = allRooms.find(room => (room.id || room.name) === roomId);
-    if (selectedRoom && selectedRoom.zones) {
-      selectedRoom.zones.forEach(zone => {
-        const option = document.createElement('option');
-        option.value = zone;
-        option.textContent = zone;
-        zoneSelect.appendChild(option);
-      });
-    }
+  // Initial population
+  refreshRoomsAndZones(this.data.room, this.data.zone);
   }
 
   setupFixtureSelection() {
@@ -8638,8 +8988,18 @@ class FreshLightWizard {
   }
 
   addFixture(fixtureId) {
+    if (!STATE.deviceKB || !Array.isArray(STATE.deviceKB.fixtures)) {
+      console.error('[FreshLightWizard] STATE.deviceKB.fixtures is missing or not an array');
+      alert('Fixture database not loaded. Please reload the page.');
+      return;
+    }
     const fixture = STATE.deviceKB.fixtures.find(f => f.id === fixtureId);
-    if (!fixture) return;
+    if (!fixture) {
+      console.error('[FreshLightWizard] Fixture not found for id:', fixtureId);
+      alert('Fixture not found.');
+      return;
+    }
+    if (!Array.isArray(this.data.fixtures)) this.data.fixtures = [];
     const existing = this.data.fixtures.find(f => f.id === fixtureId);
     if (existing) {
       existing.count += 1;
@@ -8658,19 +9018,28 @@ class FreshLightWizard {
 
   renderSelectedFixtures() {
     const selectedDiv = document.getElementById('freshSelectedFixtures');
-    if (this.data.fixtures.length === 0) {
+    if (!selectedDiv) {
+      console.error('[FreshLightWizard] Could not find #freshSelectedFixtures in DOM');
+      return;
+    }
+    if (!Array.isArray(this.data.fixtures) || this.data.fixtures.length === 0) {
       selectedDiv.innerHTML = '<div style="color: #64748b; font-size: 13px;">No fixtures selected yet</div>';
       return;
     }
-    selectedDiv.innerHTML = this.data.fixtures.map(fixture => `
-      <div class="fresh-selected-fixture">
-        <div>
-          <span style="font-weight: 500;">${fixture.name}</span>
-          <span style="color: #64748b; margin-left: 8px;">×${fixture.count}</span>
+    try {
+      selectedDiv.innerHTML = this.data.fixtures.map(fixture => `
+        <div class="fresh-selected-fixture">
+          <div>
+            <span style="font-weight: 500;">${fixture.vendor} ${fixture.model}</span>
+            <span style="color: #64748b; margin-left: 8px;">×${fixture.count}</span>
+          </div>
+          <button type="button" onclick="freshLightWizard.removeFixture('${fixture.id}')">Remove</button>
         </div>
-        <button type="button" onclick="freshLightWizard.removeFixture('${fixture.id}')">Remove</button>
-      </div>
-    `).join('');
+      `).join('');
+    } catch (err) {
+      console.error('[FreshLightWizard] Error rendering selected fixtures:', err);
+      selectedDiv.innerHTML = '<div style="color: #f87171; font-size: 13px;">Error rendering fixtures</div>';
+    }
   }
 
   setupControlMethod() {
@@ -8812,7 +9181,7 @@ class FreshLightWizard {
       this.modal.setAttribute('aria-hidden', 'false');
       this.currentStep = 1;
       this.showStep();
-      this.populateRooms();
+      // this.populateRooms(); // Removed: no longer exists, handled by setupRoomZoneDropdowns
     }
   }
 
@@ -8842,7 +9211,13 @@ class FreshLightWizard {
     STATE.lightSetups.push(lightSetup);
     renderLightSetupSummary();
     renderControllerAssignments();
-    const summary = `Light Setup Saved!\n\nLocation: ${this.data.room} - ${this.data.zone}\nFixtures: ${totalFixtures} lights (${totalWattage.toLocaleString()}W total)\nControl: ${this.getControlMethodName(this.data.controlMethod)}`;
+    // Look up user-friendly room name
+    let roomName = this.data.room;
+    if (STATE.rooms && Array.isArray(STATE.rooms)) {
+      const roomObj = STATE.rooms.find(r => r.id === this.data.room);
+      if (roomObj && roomObj.name) roomName = roomObj.name;
+    }
+    const summary = `Light Setup Saved!\n\nLocation: ${roomName} - ${this.data.zone}\nFixtures: ${totalFixtures} lights (${totalWattage.toLocaleString()}W total)\nControl: ${this.getControlMethodName(this.data.controlMethod)}`;
     alert(summary);
     this.close();
   }
@@ -9700,89 +10075,125 @@ function initializeSidebarNavigation() {
 
 // Ensure wireHints is defined before this handler
 document.addEventListener('DOMContentLoaded', async () => {
-  // Re-attach all card button event handlers after DOMContentLoaded
-  document.querySelectorAll('button').forEach(btn => {
-    if (btn.id && btn.id.startsWith('btn') && typeof window[btn.id + 'Handler'] === 'function') {
-      btn.addEventListener('click', window[btn.id + 'Handler']);
+  // --- UI and wizard setup: run synchronously so buttons always work ---
+  // Initialize farm wizard (single instance, always on window)
+  window.farmWizard = new FarmWizard();
+  if (window.farmWizard && typeof window.farmWizard.init === 'function') window.farmWizard.init();
+  // Initialize device manager window
+  window.deviceManagerWindow = new DeviceManagerWindow();
+  // Initialize room wizard
+  window.roomWizard = new RoomWizard();
+  // Initialize light wizard
+  window.lightWizard = new LightWizard();
+  window.freshLightWizard = new FreshLightWizard();
+  // Wire up light setup button (with retry logic)
+  function setupLightSetupButton() {
+    const lightSetupBtn = document.getElementById('btnLaunchLightSetup');
+    if (lightSetupBtn) {
+      lightSetupBtn.addEventListener('click', () => {
+        freshLightWizard.open();
+      });
+    } else {
+      setTimeout(setupLightSetupButton, 500);
     }
-  });
-  // Clean up any existing invalid img src attributes that might cause 404s
-  document.querySelectorAll('img').forEach(img => {
-    if (img.src && !img.src.startsWith('http://') && !img.src.startsWith('https://') && !img.src.startsWith('data:') && img.src.includes('.')) {
-      img.src = '';
-      img.style.display = 'none';
-    }
-  });
-
-  if (typeof wireHints === 'function') wireHints();
-  if (typeof wireGlobalEvents === 'function') wireGlobalEvents();
-  if (typeof initializeSidebarNavigation === 'function') initializeSidebarNavigation();
-
-  document.getElementById('btnLaunchPairWizard')?.addEventListener('click', () => {
-    if (typeof DEVICE_PAIR_WIZARD !== 'undefined' && DEVICE_PAIR_WIZARD?.open) DEVICE_PAIR_WIZARD.open();
-  });
-
-  document.getElementById('btnPairWizardDocs')?.addEventListener('click', () => {
-    showToast({
-      title: 'Pairing checklist',
-      msg: 'Review onboarding notes before pairing devices.',
-      kind: 'info',
-      icon: '🧭'
-    });
-  });
-
-  const profileForm = document.getElementById('profileForm');
-  if (profileForm) {
-    const nameInput = document.getElementById('profileName');
-    const roleInput = document.getElementById('profileRole');
-    const emailInput = document.getElementById('profileEmail');
-    const phoneInput = document.getElementById('profilePhone');
-    const statusEl = document.getElementById('profileStatus');
-
-    try {
-      const storedProfile = JSON.parse(localStorage.getItem('gr.profile') || 'null');
-      if (storedProfile) {
-        if (nameInput) nameInput.value = storedProfile.name || '';
-        if (roleInput) roleInput.value = storedProfile.role || '';
-        if (emailInput) emailInput.value = storedProfile.email || '';
-        if (phoneInput) phoneInput.value = storedProfile.phone || '';
-        if (statusEl) statusEl.textContent = 'Loaded from device';
-      }
-    } catch (err) {
-      console.warn('Failed to load stored profile', err);
-    }
-
-    profileForm.addEventListener('submit', (event) => {
-      event.preventDefault();
-      const payload = {
-        name: nameInput?.value?.trim() || '',
-        role: roleInput?.value?.trim() || '',
-        email: emailInput?.value?.trim() || '',
-        phone: phoneInput?.value?.trim() || ''
-      };
-      try {
-        localStorage.setItem('gr.profile', JSON.stringify(payload));
-      } catch (err) {
-        console.warn('Failed to persist profile', err);
-      }
-      if (statusEl) statusEl.textContent = 'Saved locally';
-      showToast({ title: 'Profile saved', msg: 'Profile details stored on this device.', kind: 'success', icon: '💾' });
-    });
-
-    document.getElementById('profileReset')?.addEventListener('click', () => {
-      if (nameInput) nameInput.value = '';
-      if (roleInput) roleInput.value = '';
-      if (emailInput) emailInput.value = '';
-      if (phoneInput) phoneInput.value = '';
-      try {
-        localStorage.removeItem('gr.profile');
-      } catch (err) {
-        console.warn('Failed to clear profile', err);
-      }
-      if (statusEl) statusEl.textContent = 'Profile cleared';
-      showToast({ title: 'Profile reset', msg: 'Local profile details removed.', kind: 'info', icon: '🧹' });
-    });
   }
+  setupLightSetupButton();
+  window.testFreshWizard = function() {
+    if (window.freshLightWizard) window.freshLightWizard.open();
+  };
+  // --- End UI and wizard setup ---
+
+  // Now run the rest of the async logic
+  (async function() {
+    // Re-attach all card button event handlers after DOMContentLoaded
+    document.querySelectorAll('button').forEach(btn => {
+      if (btn.id && btn.id.startsWith('btn') && typeof window[btn.id + 'Handler'] === 'function') {
+        btn.addEventListener('click', window[btn.id + 'Handler']);
+      }
+    });
+    // Clean up any existing invalid img src attributes that might cause 404s
+    document.querySelectorAll('img').forEach(img => {
+      if (img.src && !img.src.startsWith('http://') && !img.src.startsWith('https://') && !img.src.startsWith('data:') && img.src.includes('.')) {
+        img.src = '';
+        img.style.display = 'none';
+      }
+    });
+
+    if (typeof wireHints === 'function') wireHints();
+    if (typeof wireGlobalEvents === 'function') wireGlobalEvents();
+    if (typeof initializeSidebarNavigation === 'function') initializeSidebarNavigation();
+
+    document.getElementById('btnLaunchPairWizard')?.addEventListener('click', () => {
+      if (typeof DEVICE_PAIR_WIZARD !== 'undefined' && DEVICE_PAIR_WIZARD?.open) DEVICE_PAIR_WIZARD.open();
+    });
+
+    document.getElementById('btnPairWizardDocs')?.addEventListener('click', () => {
+      showToast({
+        title: 'Pairing checklist',
+        msg: 'Review onboarding notes before pairing devices.',
+        kind: 'info',
+        icon: '🧭'
+      });
+    });
+
+    const profileForm = document.getElementById('profileForm');
+    if (profileForm) {
+      const nameInput = document.getElementById('profileName');
+      const roleInput = document.getElementById('profileRole');
+      const emailInput = document.getElementById('profileEmail');
+      const phoneInput = document.getElementById('profilePhone');
+      const statusEl = document.getElementById('profileStatus');
+
+      try {
+        const storedProfile = JSON.parse(localStorage.getItem('gr.profile') || 'null');
+        if (storedProfile) {
+          if (nameInput) nameInput.value = storedProfile.name || '';
+          if (roleInput) roleInput.value = storedProfile.role || '';
+          if (emailInput) emailInput.value = storedProfile.email || '';
+          if (phoneInput) phoneInput.value = storedProfile.phone || '';
+          if (statusEl) statusEl.textContent = 'Loaded from device';
+        }
+      } catch (err) {
+        console.warn('Failed to load stored profile', err);
+      }
+
+      profileForm.addEventListener('submit', (event) => {
+        event.preventDefault();
+        const payload = {
+          name: nameInput?.value?.trim() || '',
+          role: roleInput?.value?.trim() || '',
+          email: emailInput?.value?.trim() || '',
+          phone: phoneInput?.value?.trim() || ''
+        };
+        try {
+          localStorage.setItem('gr.profile', JSON.stringify(payload));
+        } catch (err) {
+          console.warn('Failed to persist profile', err);
+        }
+        if (statusEl) statusEl.textContent = 'Saved locally';
+        showToast({ title: 'Profile saved', msg: 'Profile details stored on this device.', kind: 'success', icon: '💾' });
+      });
+
+      document.getElementById('profileReset')?.addEventListener('click', () => {
+        if (nameInput) nameInput.value = '';
+        if (roleInput) roleInput.value = '';
+        if (emailInput) emailInput.value = '';
+        if (phoneInput) phoneInput.value = '';
+        try {
+          localStorage.removeItem('gr.profile');
+        } catch (err) {
+          console.warn('Failed to clear profile', err);
+        }
+        if (statusEl) statusEl.textContent = 'Profile cleared';
+        showToast({ title: 'Profile reset', msg: 'Local profile details removed.', kind: 'info', icon: '🧹' });
+      });
+    }
+
+    // --- Main async app logic ---
+    // (was: await loadAllData();)
+    await loadAllData();
+    // ...rest of async logic continues...
+  })();
   // Load runtime config and show chip
   await loadConfig();
   // Start forwarder health polling (shows status near the config chip)
@@ -9802,19 +10213,7 @@ document.addEventListener('DOMContentLoaded', async () => {
   
 
   // --- Ensure sidebar navigation is always initialized after wizards ---
-  // Initialize farm wizard (single instance, always on window)
-  window.farmWizard = new FarmWizard();
-  if (window.farmWizard && typeof window.farmWizard.init === 'function') window.farmWizard.init();
-  // Initialize device manager window
-  window.deviceManagerWindow = new DeviceManagerWindow();
-  // Initialize room wizard
-  const roomWizard = new RoomWizard();
-  window.roomWizard = roomWizard;
-  // Initialize light wizard
-  const lightWizard = new LightWizard();
-  window.lightWizard = lightWizard;
-  const freshLightWizard = new FreshLightWizard();
-  window.freshLightWizard = freshLightWizard;
+  // (Wizards and device manager already initialized above)
   // Wire up light setup button (with retry logic)
   function setupLightSetupButton() {
     const lightSetupBtn = document.getElementById('btnLaunchLightSetup');
