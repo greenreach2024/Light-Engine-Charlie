@@ -1,11 +1,15 @@
 {
   "rooms": [
     {
-      "id": "room-mg8e7meq-mqs2",
-      "name": "Grow Room One",
+      "id": "room-brnx08",
+      "name": "Your Farm - Room 1",
       "location": "",
-      "hardwareCats": [],
-      "hardwareOrder": [],
+      "hardwareCats": [
+        "dehumidifier"
+      ],
+      "hardwareOrder": [
+        "dehumidifier"
+      ],
       "layout": {
         "type": "",
         "rows": 0,
@@ -43,7 +47,39 @@
         "scheduleId": ""
       },
       "seriesCount": 0,
-      "_categoryProgress": {}
+      "category": {
+        "dehumidifier": {
+          "selectedEquipment": [
+            {
+              "category": "dehumidifier",
+              "vendor": "Quest",
+              "model": "Quest Dual 155",
+              "capacity": "155 pints/day",
+              "control": "WiFi",
+              "count": 2
+            }
+          ],
+          "wifi": false,
+          "wired": true,
+          "count": 2,
+          "manufacturer": "Quest",
+          "model": "Quest Dual 155"
+        }
+      },
+      "_categoryProgress": {
+        "2": {
+          "selectedEquipment": [
+            {
+              "category": "dehumidifier",
+              "vendor": "Quest",
+              "model": "Quest Dual 155",
+              "capacity": "155 pints/day",
+              "control": "WiFi",
+              "count": 2
+            }
+          ]
+        }
+      }
     }
   ]
 }

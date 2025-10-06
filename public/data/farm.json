@@ -1,14 +1,6 @@
 {
-  "rooms": [
-    {
-      "id": "room-mg8e7meq-mqs2",
-      "name": "Grow Room One",
-      "zones": []
-    }
-  ],
-  "locations": [
-    "Grow Room One"
-  ],
+  "rooms": [],
+  "locations": [],
   "branding": {
     "palette": {
       "primary": "#ffffff",

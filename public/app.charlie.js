@@ -3557,6 +3557,36 @@ class DeviceManagerWindow {
 
 // --- Grow Room Wizard ---
 class RoomWizard {
+  nextStep() {
+    if (this._stepInProgress || this._blockNextStep) {
+      console.warn('[RoomWizard] nextStep: already in progress or blocked, ignoring call');
+      return;
+    }
+    this._stepInProgress = true;
+    try {
+      console.debug('[RoomWizard] nextStep called. currentStep:', this.currentStep, 'steps:', this.steps);
+      // Block nextStep if we just rebuilt steps and set currentStep (after hardware)
+      if (this._justRebuiltSteps) {
+        this._justRebuiltSteps = false;
+        this._blockNextStep = true;
+        setTimeout(() => { this._blockNextStep = false; }, 400);
+        console.debug('[RoomWizard] nextStep: blocked after dynamic step rebuild');
+        return;
+      }
+      if (!this.validateCurrentStep()) {
+        console.debug('[RoomWizard] nextStep: validation failed at', this.currentStep);
+        this.showStep(this.currentStep);
+        return;
+      }
+      const next = this.currentStep + 1;
+      if (next < this.steps.length) {
+        console.debug('[RoomWizard] nextStep: moving to', next, 'step:', this.steps[next]);
+        this.showStep(next);
+      }
+    } finally {
+      setTimeout(() => { this._stepInProgress = false; }, 200);
+    }
+  }
   showError(id, msg) {
     const el = document.getElementById(id);
     if (el) {
@@ -3896,9 +3926,15 @@ class RoomWizard {
         this.data.hardwareOrder = [...prior, ...newly];
         this.data.hardwareCats = active;
         // Debug help: visible in browser console to trace clicks
-        console.debug('[RoomWizard] hardware toggle', { value: btn.dataset.value, active });
+        console.debug('[RoomWizard] hardware toggle', { value: btn.dataset.value, active, hardwareCats: this.data.hardwareCats, hardwareOrder: this.data.hardwareOrder });
         // Recompute dynamic steps as categories change (only when we're on or past hardware step)
         this.rebuildDynamicSteps();
+        console.debug('[RoomWizard] after rebuildDynamicSteps (hardware click)', {
+          steps: this.steps,
+          currentStep: this.currentStep,
+          hardwareCats: this.data.hardwareCats,
+          categoryQueue: this.categoryQueue
+        });
         this.updateSetupQueue();
         if (active.length) this.showError('hardwareError', '');
       });
@@ -4238,6 +4274,7 @@ class RoomWizard {
   }
 
   showStep(index) {
+      console.debug('[RoomWizard] showStep called. index:', index, 'stepKey:', this.steps[index], 'steps:', this.steps);
     // Sync internal current step state
     this.currentStep = index;
 
@@ -4670,8 +4707,11 @@ class RoomWizard {
         const idxCatSetup = this.steps.indexOf('category-setup');
         if (idxCatSetup > this.currentStep) {
           this.currentStep = idxCatSetup;
-          this.showStep(this.currentStep);
-          // Return false to block the default nextStep increment (already advanced)
+          this._justRebuiltSteps = false;
+          // Immediately show the category-setup step and block further navigation until user acts
+          this._stepInProgress = true;
+          this.showStep(idxCatSetup);
+          setTimeout(() => { this._stepInProgress = false; }, 400);
           return false;
         }
         break; }
@@ -4766,12 +4806,20 @@ class RoomWizard {
 
   // Build the dynamic category steps/queue based on selected hardware
   rebuildDynamicSteps() {
+      console.debug('[RoomWizard] rebuildDynamicSteps called', {
+        hardwareCats: this.data.hardwareCats,
+        hardwareOrder: this.data.hardwareOrder,
+        baseSteps: this.baseSteps,
+        currentSteps: this.steps
+      });
     const selected = Array.isArray(this.data.hardwareCats) ? this.data.hardwareCats.slice() : [];
     // Define which categories have micro-forms; order them after hardware and before fixtures
   const formCats = selected.filter(c => ['grow-lights','hvac','mini-split','dehumidifier','fans','vents','controllers','other'].includes(c));
+      console.debug('[RoomWizard] formCats for category-setup:', formCats);
     // Preserve user selection order using hardwareOrder we maintain on toggles
     const chipOrder = (Array.isArray(this.data.hardwareOrder) ? this.data.hardwareOrder : [])
       .filter(v => formCats.includes(v));
+      console.debug('[RoomWizard] chipOrder (categoryQueue):', chipOrder);
     this.categoryQueue = chipOrder;
     // Compute new steps list: replace any existing category-setup appearances with a single placeholder when queue non-empty
     const before = this.steps.slice();
@@ -4786,9 +4834,14 @@ class RoomWizard {
       if (k === 'hardware' && this.categoryQueue.length) {
         // inject one "category-setup" placeholder right after hardware when needed
         newSteps.push('category-setup');
+        console.debug('[RoomWizard] Injected category-setup after hardware', {
+          categoryQueue: this.categoryQueue,
+          steps: newSteps
+        });
       }
     }
     this.steps = newSteps;
+    console.debug('[RoomWizard] steps after rebuild:', this.steps, 'categoryQueue:', this.categoryQueue, 'hardwareCats:', this.data.hardwareCats);
     // Reset category index if we are at/after hardware
     if (this.currentStep >= this.steps.indexOf('hardware')) {
       // Map current step: if we're in category-setup, keep categoryIndex; else reset
@@ -4796,6 +4849,7 @@ class RoomWizard {
     }
     // Update progress label to reflect potential step count change
     $('#roomModalProgress').textContent = `Step ${this.currentStep+1} of ${this.steps.length}`;
+      console.debug('[RoomWizard] categoryIndex:', this.categoryIndex, 'categoryQueue:', this.categoryQueue);
   }
 
   // Determine the current category id from categoryIndex
@@ -7000,18 +7054,19 @@ function renderLightSetupSummary() {
       }
       return;
     }
-    if (window.roomWizard && typeof window.roomWizard.open === 'function') {
-      window.roomWizard.open(room);
-      // Force modal visible as fallback
-      const modal = document.getElementById('roomModal');
-      if (modal) {
-        modal.setAttribute('aria-hidden', 'false');
-        modal.style.removeProperty('display');
-        modal.style.opacity = '1';
-        modal.style.pointerEvents = 'all';
-      }
+    // Open the Light Setup wizard, not the Grow Room wizard
+    if (window.freshLightWizard && typeof window.freshLightWizard.open === 'function') {
+      window.freshLightWizard.open();
+      // Pre-select the room in the wizard if possible
+      setTimeout(() => {
+        const roomSelect = document.getElementById('freshRoomSelect');
+        if (roomSelect) {
+          roomSelect.value = room.name;
+          roomSelect.dispatchEvent(new Event('change', { bubbles: true }));
+        }
+      }, 100);
     } else {
-      const modal = document.getElementById('roomModal');
+      const modal = document.getElementById('freshLightModal');
       if (modal) {
         modal.setAttribute('aria-hidden', 'false');
         modal.style.removeProperty('display');
@@ -8222,6 +8277,7 @@ function wireGlobalEvents() {
   const groupSelect = $('#groupSelect');
   const groupName = $('#groupName');
   const btnSaveGroup = $('#btnSaveGroup');
+  const btnGroupSave = $('#btnGroupSave');
   const btnReloadGroups = $('#btnReloadGroups');
   const groupPlan = $('#groupPlan');
   const groupSchedule = $('#groupSchedule');
@@ -8230,103 +8286,23 @@ function wireGlobalEvents() {
   const groupRosterBody = $('#groupRosterBody');
   const groupRosterEmpty = $('#groupRosterEmpty');
   const groupsStatus = $('#groupsStatus');
-  // Group-level location editor (batch)
-  const groupQuick = $('#groupQuick');
-  if (groupQuick && !groupQuick.dataset.enhanced) {
-    groupQuick.dataset.enhanced = '1';
-    // --- Room/Zone dropdowns for Groups card quick selector ---
-    const roomSel = document.createElement('select');
-    roomSel.style.minWidth = '120px';
-    roomSel.title = 'Room';
-    const zoneSel = document.createElement('select');
-    zoneSel.style.minWidth = '120px';
-    zoneSel.title = 'Zone';
-    const applyBtn = document.createElement('button'); applyBtn.type='button'; applyBtn.className='ghost'; applyBtn.textContent='Apply to Group';
-    const importBtn = document.createElement('button'); importBtn.type='button'; importBtn.className='ghost'; importBtn.textContent='Import selection'; importBtn.title = 'Import Devices panel selection as roster';
-    const clearBtn = document.createElement('button'); clearBtn.type='button'; clearBtn.className='ghost danger'; clearBtn.textContent='Clear roster';
-    groupQuick.append(roomSel, zoneSel, applyBtn, importBtn, clearBtn);
 
-    // Helper to get rooms/zones from Grow Room setup (RoomWizard)
-    function getRoomsAndZones() {
-      const rooms = (collectRoomsFromState() || []).map(r => ({
-        id: r?.id || '',
-        name: r?.name || '',
-        zones: Array.isArray(r?.zones) ? r.zones : []
-      }));
-      return rooms;
-    }
-
-    function populateRoomDropdown() {
-      const rooms = getRoomsAndZones();
-      roomSel.innerHTML = '<option value="">Room</option>' + rooms.map(r => `<option value="${r.id}">${escapeHtml(r.name)}</option>`).join('');
-      // If a room is selected, keep it selected
-      if (roomSel._lastValue && rooms.some(r => r.id === roomSel._lastValue)) {
-        roomSel.value = roomSel._lastValue;
+  // Wire up the new Save button in group card
+  if (btnGroupSave) {
+    btnGroupSave.onclick = async () => {
+      if (!STATE.currentGroup) {
+        showToast({ title: 'No group selected', msg: 'Select a group to save.', kind: 'warn', icon: '⚠️' });
+        return;
       }
-      populateZoneDropdown();
-    }
-    function populateZoneDropdown() {
-      const rooms = getRoomsAndZones();
-      const selectedRoom = rooms.find(r => r.id === roomSel.value);
-      const zones = selectedRoom ? selectedRoom.zones : [];
-      zoneSel.innerHTML = '<option value="">Zone</option>' + zones.map(z => `<option value="${escapeHtml(z)}">${escapeHtml(z)}</option>`).join('');
-      // If a zone is selected, keep it selected
-      if (zoneSel._lastValue && zones.includes(zoneSel._lastValue)) {
-        zoneSel.value = zoneSel._lastValue;
-      }
-    }
-    // Wire dropdown change events
-    roomSel.addEventListener('change', () => {
-      roomSel._lastValue = roomSel.value;
-      populateZoneDropdown();
-    });
-    zoneSel.addEventListener('change', () => {
-      zoneSel._lastValue = zoneSel.value;
-    });
-    // Initial population
-    populateRoomDropdown();
-    // Re-populate when farm data changes (after Grow Room wizard save)
-    window.addEventListener('farmDataChanged', populateRoomDropdown);
-
-    applyBtn.addEventListener('click', async () => {
-      if (!STATE.currentGroup) return alert('Select a group first');
-      const ids = (STATE.currentGroup.lights||[]).map(l=>l.id);
-      const roomId = roomSel.value;
-      const zone = zoneSel.value;
-      // Find room name for meta
-      const rooms = getRoomsAndZones();
-      const roomObj = rooms.find(r => r.id === roomId);
-      const roomName = roomObj ? roomObj.name : '';
-      ids.forEach(id => {
-        const meta = getDeviceMeta(id);
-        setDeviceMeta(id, {
-          room: roomName || meta.room,
-          zone: zone || meta.zone
-        });
-      });
-      await saveDeviceMeta();
-      renderDevices();
-      setStatus('Applied Room/Zone to group devices');
-    });
-    importBtn.addEventListener('click', async () => {
-      if (!STATE.currentGroup) return alert('Select a group first');
-      const { scope, ids } = getDevicePickState();
-      if (scope !== 'devices' || !ids.length) { showToast({ title:'Nothing to import', msg:'Switch Devices panel scope to Devices and select fixtures.', kind:'info', icon:'ℹ️' }); return; }
-      const unique = Array.from(new Set(ids));
-      STATE.currentGroup.lights = unique.map(id => ({ id, name: (STATE.devices.find(d=>d.id===id)?.deviceName)||id }));
       await saveGroups();
       updateGroupUI(STATE.currentGroup);
-      setStatus(`Imported ${unique.length} device(s) to group`);
-    });
-    clearBtn.addEventListener('click', async () => {
-      if (!STATE.currentGroup) return alert('Select a group first');
-      if (!confirm('Clear all lights from this group?')) return;
-      STATE.currentGroup.lights = [];
-      await saveGroups();
-      updateGroupUI(STATE.currentGroup);
-      setStatus('Cleared group roster');
-    });
+      showToast({ title: 'Group Saved', msg: `Group "${STATE.currentGroup.name || ''}" saved.`, kind: 'success', icon: '✅' });
+    };
   }
+  // Group-level location editor (batch)
+  // Remove mid-card groupQuick room/zone dropdowns per redesign
+  const groupQuick = $('#groupQuick');
+  if (groupQuick) groupQuick.innerHTML = '';
 
   // Spectrum HUD controls
   const gInputs = {
@@ -8564,16 +8540,76 @@ function wireGlobalEvents() {
     const lightList = document.getElementById('groupLightList');
     if (lightList) {
       lightList.innerHTML = '';
+      // Compose a merged list of all lights for this group: from STATE.devices, deviceKB.fixtures, and STATE.lightSetups for the current room/zone
       const ids = (group.lights || []).map(l => l.id);
-      // Try to get device meta from STATE.deviceKB.fixtures for details
       const fixtures = (window.STATE?.deviceKB?.fixtures || []);
+      // Get current room/zone context from dropdowns
+      const groupRoomSel = document.getElementById('groupRoomDropdown');
+      const groupZoneSel = document.getElementById('groupZoneDropdown');
+      let setupLights = [];
+      if (groupRoomSel && groupZoneSel && window.STATE?.lightSetups) {
+        const roomVal = groupRoomSel.value;
+        const zoneVal = groupZoneSel.value;
+        // Accept both room ID and room name for matching
+        const roomObj = (window.STATE?.rooms||[]).find(r => r.id === roomVal || r.name === roomVal);
+        const roomId = roomObj?.id || roomVal;
+        const roomName = roomObj?.name || roomVal;
+        window.STATE.lightSetups.forEach(setup => {
+          const setupRoomId = (window.STATE?.rooms||[]).find(r => r.id === setup.room || r.name === setup.room)?.id || setup.room;
+          const setupRoomName = (window.STATE?.rooms||[]).find(r => r.id === setup.room || r.name === setup.room)?.name || setup.room;
+          if ((setupRoomId === roomId || setupRoomName === roomName) && setup.zone === zoneVal) {
+            if (Array.isArray(setup.fixtures)) {
+              setup.fixtures.forEach(f => {
+                // Synthesize a device-like object for display
+                const synthId = f.id || `wired-${(f.vendor||f.name||'').replace(/\s+/g,'_')}-${(f.model||'').replace(/\s+/g,'_')}`;
+                setupLights.push({
+                  id: synthId,
+                  deviceName: f.vendor ? `${f.vendor} ${f.model}` : (f.name || f.model || 'Light'),
+                  type: 'light',
+                  watts: f.watts,
+                  count: f.count,
+                  source: 'setup',
+                  vendor: f.vendor,
+                  model: f.model
+                });
+              });
+            }
+          }
+        });
+      }
+      // Merge all sources for this group: STATE.devices, fixtures, and setupLights
+      const allLightsMap = new Map();
+      // Add from STATE.devices
+      STATE.devices.forEach(l => allLightsMap.set(l.id, l));
+      // Add from fixtures (if not already present)
+      fixtures.forEach(f => {
+        const fid = f.id || `wired-${(f.vendor||'').replace(/\s+/g,'_')}-${(f.model||'').replace(/\s+/g,'_')}`;
+        if (!allLightsMap.has(fid)) {
+          allLightsMap.set(fid, {
+            id: fid,
+            deviceName: f.vendor ? `${f.vendor} ${f.model}` : (f.name || f.model || 'Light'),
+            type: 'light',
+            watts: f.watts,
+            source: 'fixture',
+            vendor: f.vendor,
+            model: f.model
+          });
+        }
+      });
+      // Add from setupLights (if not already present)
+      setupLights.forEach(l => {
+        if (!allLightsMap.has(l.id)) allLightsMap.set(l.id, l);
+      });
+      // Only show lights that are in the group.lights list
       ids.forEach(id => {
+        const light = allLightsMap.get(id);
+        if (!light) return;
+        // Try to get fixture details for display
+        const fixture = fixtures.find(f => (f.id || `wired-${(f.vendor||'').replace(/\s+/g,'_')}-${(f.model||'').replace(/\s+/g,'_')}`) === id);
         const device = STATE.devices.find(d => d.id === id);
-        const fixture = fixtures.find(f => f.id === id);
-        // Compose details
-        const name = fixture ? `${fixture.vendor || ''} ${fixture.model || ''}`.trim() : (device?.deviceName || 'Light');
-        const watts = fixture?.watts || device?.watts || '?';
-        const control = fixture?.control || (device?.spectrumMode === 'dynamic' ? 'Dynamic' : 'Static');
+        const name = light.deviceName || (fixture ? `${fixture.vendor || ''} ${fixture.model || ''}`.trim() : (device?.deviceName || 'Light'));
+        const watts = fixture?.watts || light.watts || device?.watts || '?';
+        const control = fixture?.control || light.control || (device?.spectrumMode === 'dynamic' ? 'Dynamic' : 'Static');
         const drivers = fixture?.drivers || 1;
         const isDynamic = (fixture?.control && /dynamic|wifi|app|driver/i.test(fixture.control)) || (device && device.spectrumMode === 'dynamic');
         const spectrum = fixture?.spectrum || {};
@@ -8583,7 +8619,7 @@ function wireGlobalEvents() {
         card.style = 'border:1px solid #e5e7eb;border-radius:6px;padding:10px;margin-bottom:8px;background:#f8fafc;min-width:260px;max-width:340px;';
         card.innerHTML = `
           <div style="font-weight:600;font-size:15px;">${name}</div>
-          <div class="tiny" style="color:#64748b;">Model: <b>${fixture?.model || device?.model || ''}</b></div>
+          <div class="tiny" style="color:#64748b;">Model: <b>${fixture?.model || light.model || device?.model || ''}</b></div>
           <div class="tiny" style="color:#64748b;">Wattage: <b>${watts}W</b></div>
           <div class="tiny" style="color:#64748b;">Control: <b>${isDynamic ? 'Dynamic' : 'Static'}</b></div>
           <div class="tiny" style="color:#64748b;">Drivers: <b>${drivers}</b></div>
