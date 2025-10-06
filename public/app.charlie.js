@@ -3659,6 +3659,7 @@ class RoomWizard {
         // try auto-advancing if enabled and we're on the name step
         this.tryAutoAdvance();
         this.updateSetupQueue();
+        this.showError('roomInfoError', '');
       });
     }
 
@@ -3897,6 +3898,7 @@ class RoomWizard {
         // Recompute dynamic steps as categories change (only when we're on or past hardware step)
         this.rebuildDynamicSteps();
         this.updateSetupQueue();
+        if (active.length) this.showError('hardwareError', '');
       });
     }
 
@@ -4608,34 +4610,14 @@ class RoomWizard {
     const step = this.steps[this.currentStep];
     switch(step){
       case 'room-info': {
-        let hasError = false;
         const v = ($('#roomInfoName')?.value||'').trim();
         if (!v) {
           this.showError('roomInfoError', 'Room name is required.');
-          hasError = true;
-        } else {
-          this.showError('roomInfoError', '');
+          return false;
         }
+        this.showError('roomInfoError', '');
         this.data.name = v;
-        // Also require at least one hardware category before leaving step one
-        const cats = this.data.hardwareCats || [];
-        if (!cats.length) {
-          this.showError('hardwareError', 'Select at least one hardware category.');
-          hasError = true;
-        } else {
-          this.showError('hardwareError', '');
-        }
-        if (hasError) return false;
         break; }
-    // Clear errors on input/change
-    const roomNameInput = document.getElementById('roomInfoName');
-    if (roomNameInput) {
-      roomNameInput.addEventListener('input', () => this.showError('roomInfoError', ''));
-    }
-    const hwHost = document.getElementById('roomHardwareCats');
-    if (hwHost) {
-      hwHost.addEventListener('click', () => this.showError('hardwareError', ''));
-    }
 
       case 'layout': {
         // no strict validation
@@ -4647,6 +4629,17 @@ class RoomWizard {
         }
         break; }
       case 'hardware': {
+        const cats = this.data.hardwareCats || [];
+        if (!cats.length) {
+          this.showError('hardwareError', 'Select at least one hardware category.');
+          const hwHost = document.getElementById('roomHardwareCats');
+          if (hwHost && !hwHost.dataset.clearListenerAttached) {
+            hwHost.addEventListener('click', () => this.showError('hardwareError', ''));
+            hwHost.dataset.clearListenerAttached = '1';
+          }
+          return false;
+        }
+        this.showError('hardwareError', '');
         // When leaving hardware, build dynamic category queue and insert a single category-setup step if needed
         this.rebuildDynamicSteps();
         break; }
