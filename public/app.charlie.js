@@ -2016,12 +2016,9 @@ class FarmWizard {
     // 3. After farm registration completes, launch RoomWizard for room/zone setup
     if (typeof RoomWizard === 'function') {
       setTimeout(() => {
-        if (!window.roomWizard) {
-          window.roomWizard = new RoomWizard();
-        }
         // Always close/reset before opening to prevent overlap
-        if (window.roomWizard.close) window.roomWizard.close();
-        window.roomWizard.open();
+        if (window.roomWizard && window.roomWizard.close) window.roomWizard.close();
+        if (window.roomWizard && window.roomWizard.open) window.roomWizard.open();
       }, 500);
     }
   }
@@ -4490,6 +4487,32 @@ class RoomWizard {
         hwContainer.querySelectorAll('.chip-option').forEach(b => {
           this.setChipActiveState(b, active.includes(b.dataset.value));
         });
+        // Ensure event handler is attached only once
+        if (!hwContainer.dataset.listenerAttached) {
+          hwContainer.addEventListener('click', (e) => {
+            const btn = e.target.closest('.chip-option');
+            if (!btn || !hwContainer.contains(btn)) return;
+            // Toggle visual active state using shared helper so class/aria stay in sync
+            const makeActive = !btn.hasAttribute('data-active');
+            this.setChipActiveState(btn, makeActive);
+            // normalize selections into this.data.hardwareCats
+            const active = Array.from(hwContainer.querySelectorAll('.chip-option[data-active]')).map(b=>b.dataset.value);
+            // Preserve selection order by tracking the sequence in data.hardwareOrder
+            this.data.hardwareOrder = this.data.hardwareOrder || [];
+            // Rebuild order: keep prior order for any still-active, then append newly active at the end
+            const prior = Array.isArray(this.data.hardwareOrder) ? this.data.hardwareOrder.filter(v => active.includes(v)) : [];
+            const newly = active.filter(v => !prior.includes(v));
+            this.data.hardwareOrder = [...prior, ...newly];
+            this.data.hardwareCats = active;
+            // Debug help: visible in browser console to trace clicks
+            console.debug('[RoomWizard] hardware toggle', { value: btn.dataset.value, active });
+            // Recompute dynamic steps as categories change (only when we're on or past hardware step)
+            this.rebuildDynamicSteps();
+            this.updateSetupQueue();
+            if (active.length) this.showError('hardwareError', '');
+          });
+          hwContainer.dataset.listenerAttached = 'true';
+        }
       }
     }
     if (stepKey === 'category-setup') {
@@ -4641,7 +4664,16 @@ class RoomWizard {
         }
         this.showError('hardwareError', '');
         // When leaving hardware, build dynamic category queue and insert a single category-setup step if needed
+        const prevSteps = this.steps.slice();
         this.rebuildDynamicSteps();
+        // If category-setup was just inserted, advance to it
+        const idxCatSetup = this.steps.indexOf('category-setup');
+        if (idxCatSetup > this.currentStep) {
+          this.currentStep = idxCatSetup;
+          this.showStep(this.currentStep);
+          // Return false to block the default nextStep increment (already advanced)
+          return false;
+        }
         break; }
       case 'category-setup': {
         // Persist current category form values into this.data.
@@ -8747,10 +8779,7 @@ function wireGlobalEvents() {
         if (roomNameInput) {
           roomNameInput.addEventListener('input', () => this.showError('roomInfoError', ''));
         }
-        const hwHost = document.getElementById('roomHardwareCats');
-        if (hwHost) {
-          hwHost.addEventListener('click', () => this.showError('hardwareError', ''));
-        }
+        // Removed redundant event listener on #roomHardwareCats to prevent duplicate event handling
       if (rem === 0) { setMode('one'); } else {
         const origH2 = Math.max(0, Math.min(24, Number(c2Hours.value)||12));
         const newH2 = Math.min(origH2, rem/60);
