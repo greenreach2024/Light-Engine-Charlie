@@ -3659,6 +3659,7 @@ class RoomWizard {
         // try auto-advancing if enabled and we're on the name step
         this.tryAutoAdvance();
         this.updateSetupQueue();
+        this.showError('roomInfoError', '');
       });
     }
 
@@ -3878,11 +3879,16 @@ class RoomWizard {
     // Use delegated click handling on the container so handlers are robust and not overwritten later.
     const hwHost = document.getElementById('roomHardwareCats');
     if (hwHost) {
+      // ensure baseline aria state for accessibility
+      hwHost.querySelectorAll('.chip-option').forEach(btn => {
+        if (!btn.hasAttribute('aria-pressed')) btn.setAttribute('aria-pressed', btn.hasAttribute('data-active') ? 'true' : 'false');
+      });
       hwHost.addEventListener('click', (e) => {
         const btn = e.target.closest('.chip-option');
         if (!btn || !hwHost.contains(btn)) return;
-        // Toggle visual active state
-        if (btn.hasAttribute('data-active')) btn.removeAttribute('data-active'); else btn.setAttribute('data-active','');
+        // Toggle visual active state using shared helper so class/aria stay in sync
+        const makeActive = !btn.hasAttribute('data-active');
+        this.setChipActiveState(btn, makeActive);
         // normalize selections into this.data.hardwareCats
         const active = Array.from(hwHost.querySelectorAll('.chip-option[data-active]')).map(b=>b.dataset.value);
         // Preserve selection order by tracking the sequence in data.hardwareOrder
@@ -3897,6 +3903,7 @@ class RoomWizard {
         // Recompute dynamic steps as categories change (only when we're on or past hardware step)
         this.rebuildDynamicSteps();
         this.updateSetupQueue();
+        if (active.length) this.showError('hardwareError', '');
       });
     }
 
@@ -4481,7 +4488,7 @@ class RoomWizard {
       if (hwContainer) {
         const active = this.data.hardwareCats || [];
         hwContainer.querySelectorAll('.chip-option').forEach(b => {
-          if (active.includes(b.dataset.value)) b.setAttribute('data-active', ''); else b.removeAttribute('data-active');
+          this.setChipActiveState(b, active.includes(b.dataset.value));
         });
       }
     }
@@ -4608,34 +4615,14 @@ class RoomWizard {
     const step = this.steps[this.currentStep];
     switch(step){
       case 'room-info': {
-        let hasError = false;
         const v = ($('#roomInfoName')?.value||'').trim();
         if (!v) {
           this.showError('roomInfoError', 'Room name is required.');
-          hasError = true;
-        } else {
-          this.showError('roomInfoError', '');
+          return false;
         }
+        this.showError('roomInfoError', '');
         this.data.name = v;
-        // Also require at least one hardware category before leaving step one
-        const cats = this.data.hardwareCats || [];
-        if (!cats.length) {
-          this.showError('hardwareError', 'Select at least one hardware category.');
-          hasError = true;
-        } else {
-          this.showError('hardwareError', '');
-        }
-        if (hasError) return false;
         break; }
-    // Clear errors on input/change
-    const roomNameInput = document.getElementById('roomInfoName');
-    if (roomNameInput) {
-      roomNameInput.addEventListener('input', () => this.showError('roomInfoError', ''));
-    }
-    const hwHost = document.getElementById('roomHardwareCats');
-    if (hwHost) {
-      hwHost.addEventListener('click', () => this.showError('hardwareError', ''));
-    }
 
       case 'layout': {
         // no strict validation
@@ -4647,6 +4634,17 @@ class RoomWizard {
         }
         break; }
       case 'hardware': {
+        const cats = this.data.hardwareCats || [];
+        if (!cats.length) {
+          this.showError('hardwareError', 'Select at least one hardware category.');
+          const hwHost = document.getElementById('roomHardwareCats');
+          if (hwHost && !hwHost.dataset.clearListenerAttached) {
+            hwHost.addEventListener('click', () => this.showError('hardwareError', ''));
+            hwHost.dataset.clearListenerAttached = '1';
+          }
+          return false;
+        }
+        this.showError('hardwareError', '');
         // When leaving hardware, build dynamic category queue and insert a single category-setup step if needed
         this.rebuildDynamicSteps();
         break; }
@@ -4777,6 +4775,21 @@ class RoomWizard {
   getCurrentCategoryId() {
     if (this.categoryIndex < 0) return null;
     return this.categoryQueue[this.categoryIndex] || null;
+  }
+
+  ensureCategoryProgress(catId) {
+    if (!catId) return null;
+    if (!this.categoryProgress || typeof this.categoryProgress !== 'object') {
+      this.categoryProgress = {};
+    }
+    if (!this.categoryProgress[catId] || typeof this.categoryProgress[catId] !== 'object') {
+      this.categoryProgress[catId] = {};
+    }
+    const bucket = this.categoryProgress[catId];
+    if (!Array.isArray(bucket.selectedEquipment)) {
+      bucket.selectedEquipment = [];
+    }
+    return bucket;
   }
 
   // Render the micro-form for the current category
@@ -5023,7 +5036,7 @@ class RoomWizard {
     }
     if (catId === 'mini-split') {
       // Use new selectedEquipment structure  
-      const selectedEquipment = this.categoryProgress[this.currentStep]?.selectedEquipment?.filter(e => e.category === 'mini-split') || [];
+      const selectedEquipment = this.categoryProgress[catId]?.selectedEquipment || [];
       catData.selectedEquipment = selectedEquipment;
       catData.wifi = getChecked('cat-mini-split-wifi');
       catData.wired = getChecked('cat-mini-split-wired');
@@ -5037,7 +5050,7 @@ class RoomWizard {
     }
     if (catId === 'dehumidifier') {
       // Use new selectedEquipment structure
-      const selectedEquipment = this.categoryProgress[this.currentStep]?.selectedEquipment?.filter(e => e.category === 'dehumidifier') || [];
+      const selectedEquipment = this.categoryProgress[catId]?.selectedEquipment || [];
       catData.selectedEquipment = selectedEquipment;
       catData.wifi = getChecked('cat-dehu-wifi');
       catData.wired = getChecked('cat-dehu-wired');
@@ -5163,22 +5176,18 @@ class RoomWizard {
     console.log('[DEBUG] Adding equipment:', category, vendor, model);
     
     // Initialize selected equipment array if it doesn't exist
-    if (!this.categoryProgress[this.currentStep]) {
-      this.categoryProgress[this.currentStep] = {};
-    }
-    if (!this.categoryProgress[this.currentStep].selectedEquipment) {
-      this.categoryProgress[this.currentStep].selectedEquipment = [];
-    }
-    
+    const catProgress = this.ensureCategoryProgress(category);
+    if (!catProgress) return;
+
     // Check if already selected
-    const existing = this.categoryProgress[this.currentStep].selectedEquipment.find(e => 
+    const existing = catProgress.selectedEquipment.find(e =>
       e.category === category && e.vendor === vendor && e.model === model
     );
-    
+
     if (existing) {
       existing.count += 1;
     } else {
-      this.categoryProgress[this.currentStep].selectedEquipment.push({
+      catProgress.selectedEquipment.push({
         category,
         vendor,
         model,
@@ -5195,8 +5204,9 @@ class RoomWizard {
     const selectedDiv = document.getElementById(selectedElementId);
     if (!selectedDiv) return;
     
-    const selectedEquipment = this.categoryProgress[this.currentStep]?.selectedEquipment?.filter(e => e.category === category) || [];
-    
+    const catProgress = this.ensureCategoryProgress(category);
+    const selectedEquipment = catProgress?.selectedEquipment?.filter(e => e.category === category) || [];
+
     if (selectedEquipment.length === 0) {
       selectedDiv.innerHTML = `<div style="color: #64748b; font-size: 13px;">No ${category}s selected yet</div>`;
       return;
@@ -5224,9 +5234,10 @@ class RoomWizard {
   }
 
   changeEquipmentCount(category, vendor, model, delta) {
-    const selectedEquipment = this.categoryProgress[this.currentStep]?.selectedEquipment || [];
+    const catProgress = this.ensureCategoryProgress(category);
+    const selectedEquipment = catProgress?.selectedEquipment || [];
     const item = selectedEquipment.find(e => e.category === category && e.vendor === vendor && e.model === model);
-    
+
     if (item) {
       item.count = Math.max(0, item.count + delta);
       if (item.count === 0) {
@@ -5238,13 +5249,14 @@ class RoomWizard {
   }
 
   removeEquipment(category, vendor, model) {
-    if (!this.categoryProgress[this.currentStep]?.selectedEquipment) return;
-    
-    this.categoryProgress[this.currentStep].selectedEquipment = 
-      this.categoryProgress[this.currentStep].selectedEquipment.filter(e => 
+    const catProgress = this.ensureCategoryProgress(category);
+    if (!catProgress?.selectedEquipment) return;
+
+    catProgress.selectedEquipment =
+      catProgress.selectedEquipment.filter(e =>
         !(e.category === category && e.vendor === vendor && e.model === model)
       );
-    
+
     this.renderSelectedEquipment(category, `cat-${category}-selected`);
   }
 
@@ -5581,6 +5593,19 @@ class RoomWizard {
     return 'other';
   }
 
+  setChipActiveState(btn, isActive) {
+    if (!btn) return;
+    if (isActive) {
+      btn.setAttribute('data-active', '');
+      btn.classList.add('is-active');
+      btn.setAttribute('aria-pressed', 'true');
+    } else {
+      btn.removeAttribute('data-active');
+      btn.classList.remove('is-active');
+      btn.setAttribute('aria-pressed', 'false');
+    }
+  }
+
   ensureHardwareCategory(cat) {
     if (!cat) return;
     this.data.hardwareCats = Array.isArray(this.data.hardwareCats) ? this.data.hardwareCats : [];
@@ -5591,14 +5616,14 @@ class RoomWizard {
       const host = document.getElementById('roomHardwareCats');
       if (host) {
         const btn = host.querySelector(`.chip-option[data-value="${cat}"]`);
-        if (btn) btn.setAttribute('data-active', '');
+        if (btn) this.setChipActiveState(btn, true);
       }
       this.rebuildDynamicSteps();
     } else {
       const host = document.getElementById('roomHardwareCats');
       if (host) {
         const btn = host.querySelector(`.chip-option[data-value="${cat}"]`);
-        if (btn) btn.setAttribute('data-active', '');
+        if (btn) this.setChipActiveState(btn, true);
       }
     }
     this.updateSetupQueue();
