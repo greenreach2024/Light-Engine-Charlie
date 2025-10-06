@@ -879,7 +879,181 @@ function initLightsStatusUI() {
   // TODO: Replace with real lights status UI initialization if needed
   console.warn('[Stub] initLightsStatusUI called');
 }
-// Global spectrum canvas renderer (simple SPD bar visualization)
+// Spectral rendering constants
+const HEX_CHANNEL_KEYS = ['cw', 'ww', 'bl', 'rd', 'fr', 'uv'];
+const DRIVER_CHANNEL_KEYS = ['cw', 'ww', 'bl', 'rd'];
+
+const clampPercent = (value) => {
+  const n = Number(value);
+  if (!Number.isFinite(n)) return 0;
+  if (n < 0) return 0;
+  if (n > 100) return 100;
+  return n;
+};
+
+const percentToDriverByte = (value) => Math.round(clampPercent(value));
+const driverByteToPercent = (value) => clampPercent(value);
+
+function normalizeMixInput(input) {
+  const base = { cw: 0, ww: 0, bl: 0, rd: 0, fr: 0, uv: 0 };
+  if (typeof input === 'number') {
+    const pct = clampPercent(input);
+    base.cw = pct;
+    base.ww = pct;
+    return base;
+  }
+  if (typeof input === 'string') {
+    const parsed = parseHex12(input);
+    if (parsed) {
+      HEX_CHANNEL_KEYS.forEach((key) => {
+        if (typeof parsed[key] === 'number') base[key] = clampPercent(parsed[key]);
+      });
+      return base;
+    }
+  }
+  if (input && typeof input === 'object') {
+    HEX_CHANNEL_KEYS.forEach((key) => {
+      if (typeof input[key] === 'number') {
+        base[key] = clampPercent(input[key]);
+      }
+    });
+  }
+  return base;
+}
+
+function buildHex12(input) {
+  const mix = normalizeMixInput(input);
+  return HEX_CHANNEL_KEYS.map((key) => percentToDriverByte(mix[key] ?? 0)
+    .toString(16)
+    .padStart(2, '0'))
+    .join('')
+    .toUpperCase();
+}
+
+function parseHex12(hex) {
+  if (typeof hex !== 'string') return null;
+  const cleaned = hex.trim();
+  if (!/^[0-9a-fA-F]{12}$/.test(cleaned)) return null;
+  const result = {};
+  for (let i = 0; i < HEX_CHANNEL_KEYS.length; i += 1) {
+    const slice = cleaned.slice(i * 2, i * 2 + 2);
+    const byte = parseInt(slice, 16);
+    if (Number.isNaN(byte)) return null;
+    result[HEX_CHANNEL_KEYS[i]] = driverByteToPercent(byte);
+  }
+  return result;
+}
+
+const defaultCalibration = () => ({ cw: 1, ww: 1, bl: 1, rd: 1, fr: 1, uv: 1, intensity: 1 });
+
+function normalizeSpdLibrary(raw) {
+  if (!raw || !Array.isArray(raw.wavelengths)) return null;
+  const wavelengths = raw.wavelengths.slice();
+  const channels = {};
+  const sourceChannels = raw.channels || {};
+  Object.keys(sourceChannels).forEach((key) => {
+    const channel = sourceChannels[key];
+    if (!channel || !Array.isArray(channel.values)) return;
+    const values = wavelengths.map((_, index) => {
+      const v = channel.values[index];
+      return typeof v === 'number' ? v : 0;
+    });
+    channels[key] = {
+      values,
+      gamma: typeof channel.gamma === 'number' ? channel.gamma : 1,
+      efficacy: typeof channel.efficacy === 'number' ? channel.efficacy : 1,
+    };
+  });
+  return { wavelengths, channels };
+}
+
+function getDeviceCalibration(deviceId) {
+  const cache = STATE._calibrationCache || (STATE._calibrationCache = new Map());
+  if (deviceId && cache.has(deviceId)) {
+    const cached = cache.get(deviceId);
+    return { ...cached };
+  }
+  const result = defaultCalibration();
+  if (!deviceId) return result;
+  const entries = Array.isArray(STATE.calibrations) ? STATE.calibrations : [];
+  let touched = false;
+  entries.forEach((entry) => {
+    if (!entry || entry.applied === false) return;
+    const gains = entry.gains?.[deviceId];
+    if (!gains) return;
+    touched = true;
+    HEX_CHANNEL_KEYS.forEach((key) => {
+      if (typeof gains[key] === 'number') {
+        result[key] *= gains[key];
+      }
+    });
+    if (typeof gains.intensity === 'number') {
+      result.intensity *= gains.intensity;
+    }
+  });
+  cache.set(deviceId, { ...result });
+  return result;
+}
+
+function aggregateCalibrations(deviceIds = []) {
+  if (!Array.isArray(deviceIds) || deviceIds.length === 0) {
+    return defaultCalibration();
+  }
+  const sum = defaultCalibration();
+  deviceIds.forEach((id) => {
+    const gains = getDeviceCalibration(id);
+    HEX_CHANNEL_KEYS.forEach((key) => {
+      sum[key] += gains[key];
+    });
+    sum.intensity += gains.intensity;
+  });
+  const count = deviceIds.length;
+  HEX_CHANNEL_KEYS.forEach((key) => {
+    sum[key] /= count;
+  });
+  sum.intensity /= count;
+  return sum;
+}
+
+function applyCalibrationToMix(mix, calibration) {
+  const base = normalizeMixInput(mix);
+  const gains = calibration || defaultCalibration();
+  const intensity = typeof gains.intensity === 'number' ? gains.intensity : 1;
+  const result = { ...base };
+  HEX_CHANNEL_KEYS.forEach((key) => {
+    const gain = (typeof gains[key] === 'number' ? gains[key] : 1) * intensity;
+    result[key] = clampPercent(result[key] * gain);
+  });
+  return result;
+}
+
+function buildDeviceHexForMix(mix, deviceId) {
+  const calibration = getDeviceCalibration(deviceId);
+  const calibratedMix = applyCalibrationToMix(mix, calibration);
+  const hex = buildHex12(calibratedMix);
+  return { hex, mix: calibratedMix, calibration };
+}
+
+function hydrateDeviceDriverState() {
+  if (!Array.isArray(STATE.devices)) return;
+  STATE.devices = STATE.devices.map((device) => {
+    if (!device || typeof device !== 'object') return device;
+    const copy = { ...device };
+    const candidates = [copy.lastHex, copy.value, copy.hex12, copy.hex];
+    for (const candidate of candidates) {
+      const parsed = parseHex12(candidate);
+      if (parsed) {
+        copy.driverHex = candidate.toUpperCase();
+        copy.driverMix = parsed;
+        copy.calibratedDriverMix = applyCalibrationToMix(parsed, getDeviceCalibration(copy.id));
+        break;
+      }
+    }
+    return copy;
+  });
+}
+
+// Global spectrum canvas renderer (simple SPD visualization)
 function renderSpectrumCanvas(canvas, spd, opts = {}) {
   if (!canvas || !canvas.getContext) return;
   const ctx = canvas.getContext('2d');
@@ -888,48 +1062,119 @@ function renderSpectrumCanvas(canvas, spd, opts = {}) {
   canvas.width = width;
   canvas.height = height;
   ctx.clearRect(0, 0, width, height);
-  // If spd is an array, draw as a spectrum; else, draw bars for cw, ww, bl, rd
-  if (Array.isArray(spd) && spd.length > 0) {
-    // Draw spectrum as a line
-    ctx.beginPath();
-    ctx.moveTo(0, height);
-    for (let i = 0; i < spd.length; i++) {
-      const x = (i / (spd.length - 1)) * width;
-      const y = height - (spd[i] / Math.max(...spd)) * height;
-      ctx.lineTo(x, y);
+  ctx.fillStyle = '#f1f5f9';
+  ctx.fillRect(0, 0, width, height);
+
+  const resolveSeries = (value) => {
+    if (Array.isArray(value) && value.length > 1) return value;
+    if (value && typeof value === 'object') {
+      if (Array.isArray(value.display) && value.display.length > 1) return value.display;
+      if (Array.isArray(value.samples) && value.samples.length > 1) return value.samples;
     }
-    ctx.lineTo(width, height);
-    ctx.closePath();
-    ctx.fillStyle = 'rgba(100, 116, 139, 0.5)';
-    ctx.fill();
-    ctx.strokeStyle = '#64748b';
-    ctx.stroke();
-  } else if (typeof spd === 'object' && spd !== null) {
-    // Draw bars for cw, ww, bl, rd
-    const keys = ['cw', 'ww', 'bl', 'rd'];
-    const colors = ['#e0e7ef', '#fde68a', '#60a5fa', '#f87171'];
-    const max = Math.max(...keys.map(k => spd[k] || 0), 1);
-    const barWidth = width / keys.length;
-    keys.forEach((k, i) => {
-      const val = spd[k] || 0;
-      const barHeight = (val / max) * (height - 10);
-      ctx.fillStyle = colors[i];
-      ctx.fillRect(i * barWidth + 8, height - barHeight - 4, barWidth - 16, barHeight);
-      ctx.fillStyle = '#222';
-      ctx.font = '10px sans-serif';
-      ctx.fillText(k.toUpperCase(), i * barWidth + 10, height - 2);
-    });
-  } else {
-    ctx.fillStyle = '#e0e7ef';
-    ctx.fillRect(0, 0, width, height);
-    ctx.fillStyle = '#64748b';
-    ctx.fillText('No spectrum data', 10, 20);
+    return null;
+  };
+
+  const series = resolveSeries(spd);
+  if (series) {
+    const maxVal = Math.max(...series);
+    const values = maxVal > 0 ? series.map((v) => v / maxVal) : series.slice();
+    if (values.length > 1) {
+      ctx.beginPath();
+      ctx.moveTo(0, height - 2);
+      values.forEach((v, index) => {
+        const x = (index / (values.length - 1)) * width;
+        const y = height - 2 - v * (height - 6);
+        ctx.lineTo(x, y);
+      });
+      ctx.lineTo(width, height - 2);
+      ctx.lineTo(width, height);
+      ctx.lineTo(0, height);
+      ctx.closePath();
+      const gradient = ctx.createLinearGradient(0, 0, width, 0);
+      gradient.addColorStop(0.0, '#0ea5e9');
+      gradient.addColorStop(0.18, '#38bdf8');
+      gradient.addColorStop(0.36, '#22d3ee');
+      gradient.addColorStop(0.54, '#34d399');
+      gradient.addColorStop(0.72, '#facc15');
+      gradient.addColorStop(0.86, '#fb923c');
+      gradient.addColorStop(1.0, '#ef4444');
+      ctx.fillStyle = gradient;
+      ctx.fill();
+      ctx.strokeStyle = '#1e293b';
+      ctx.lineWidth = 1.25;
+      ctx.stroke();
+      return;
+    }
   }
+
+  if (spd && typeof spd === 'object') {
+    const mix = spd.mix || spd;
+    const keys = DRIVER_CHANNEL_KEYS;
+    const colors = ['#e0e7ef', '#fde68a', '#60a5fa', '#f87171'];
+    const max = Math.max(...keys.map((key) => mix[key] || 0), 1);
+    const barWidth = width / keys.length;
+    keys.forEach((key, index) => {
+      const val = mix[key] || 0;
+      const barHeight = (val / max) * (height - 12);
+      ctx.fillStyle = colors[index];
+      ctx.fillRect(index * barWidth + 8, height - barHeight - 6, barWidth - 16, barHeight);
+      ctx.fillStyle = '#1f2937';
+      ctx.font = '10px sans-serif';
+      ctx.fillText(key.toUpperCase(), index * barWidth + 10, height - 2);
+    });
+    return;
+  }
+
+  ctx.fillStyle = '#64748b';
+  ctx.font = '12px sans-serif';
+  ctx.fillText('No spectrum data', 10, Math.max(16, height / 2));
 }
-// Global SPD computation stub
-function computeWeightedSPD(mix) {
-  // TODO: Replace with real SPD calculation logic if needed
-  return { spd: [], ...mix };
+
+function computeWeightedSPD(mix, opts = {}) {
+  const baseMix = normalizeMixInput(mix);
+  const deviceIds = Array.isArray(opts.deviceIds) ? opts.deviceIds : [];
+  const calibration = aggregateCalibrations(deviceIds);
+  const calibratedMix = applyCalibrationToMix(baseMix, calibration);
+  const library = STATE?.spdLibrary;
+  const wavelengths = Array.isArray(library?.wavelengths) ? library.wavelengths.slice() : [];
+  const samples = wavelengths.length ? new Array(wavelengths.length).fill(0) : [];
+  const weights = {};
+
+  DRIVER_CHANNEL_KEYS.forEach((key) => {
+    const pct = calibratedMix[key] ?? 0;
+    const channel = library?.channels?.[key];
+    const gamma = channel?.gamma ?? 1;
+    const efficacy = channel?.efficacy ?? 1;
+    const response = Math.pow(pct / 100, gamma);
+    const weight = response * efficacy;
+    weights[key] = weight;
+    if (Array.isArray(channel?.values)) {
+      channel.values.forEach((value, index) => {
+        if (index < samples.length) samples[index] += weight * value;
+      });
+    }
+  });
+
+  let display = samples.slice();
+  const normaliseMode = opts.normalise || 'relative';
+  if (normaliseMode === 'relative') {
+    const max = Math.max(...display, 0);
+    if (max > 0) display = display.map((v) => v / max);
+  } else if (normaliseMode === 'area') {
+    const area = display.reduce((acc, v) => acc + v, 0);
+    if (area > 0) display = display.map((v) => v / area);
+  }
+
+  return {
+    wavelengths,
+    samples,
+    display,
+    mix: calibratedMix,
+    requestedMix: baseMix,
+    calibration,
+    weights,
+    deviceCount: deviceIds.length,
+  };
 }
 // Global farm normalization stub
 function normalizeFarmDoc(farm) {
@@ -6071,12 +6316,13 @@ async function loadAllData() {
     }));
     
     // Load static data files
-    const [groups, schedules, plans, environment, calibrations, deviceMeta, deviceKB, equipmentKB, deviceManufacturers, farm, rooms, switchbotDevices] = await Promise.all([
+    const [groups, schedules, plans, environment, calibrations, spdLibrary, deviceMeta, deviceKB, equipmentKB, deviceManufacturers, farm, rooms, switchbotDevices] = await Promise.all([
       loadJSON('./data/groups.json'),
       loadJSON('./data/schedules.json'),
       loadJSON('./data/plans.json'),
       api('/env'),
       loadJSON('./data/calibration.json'),
+      loadJSON('./data/spd-library.json'),
       loadJSON('./data/device-meta.json'),
         loadJSON('./data/device-kb.json'),
         loadJSON('./data/equipment-kb.json'),
@@ -6091,6 +6337,14 @@ async function loadAllData() {
     STATE.plans = plans?.plans || [];
   STATE.environment = environment?.zones || [];
     STATE.calibrations = calibrations?.calibrations || [];
+    STATE._calibrationCache = new Map();
+    STATE.spdLibrary = normalizeSpdLibrary(spdLibrary);
+    if (STATE.spdLibrary) {
+      console.log('✅ Loaded SPD library:', STATE.spdLibrary.wavelengths.length, 'bins');
+    } else {
+      console.warn('⚠️ SPD library missing or invalid');
+    }
+    hydrateDeviceDriverState();
   STATE.deviceMeta = deviceMeta?.devices || {};
   STATE.switchbotDevices = switchbotDevices?.devices || [];
   const rawFarm = farm || (() => { try { return JSON.parse(localStorage.getItem('gr.farm') || 'null'); } catch { return null; } })() || {};
@@ -6372,7 +6626,13 @@ function renderGroups() {
   function renderPlanSpectrum(spectrum) {
     const canvas = document.getElementById('groupPlanCanvas');
     if (canvas && typeof renderSpectrumCanvas === 'function') {
-      const spd = computeWeightedSPD({ cw: spectrum.cw||0, ww: spectrum.ww||0, bl: spectrum.bl||0, rd: spectrum.rd||0 });
+      const deviceIds = Array.isArray(STATE.currentGroup?.lights)
+        ? STATE.currentGroup.lights.map((l) => l.id).filter(Boolean)
+        : [];
+      const spd = computeWeightedSPD(
+        { cw: spectrum.cw||0, ww: spectrum.ww||0, bl: spectrum.bl||0, rd: spectrum.rd||0 },
+        { deviceIds }
+      );
       renderSpectrumCanvas(canvas, spd, { width: 300, height: 36 });
     }
   }
@@ -7831,9 +8091,11 @@ function wireGlobalEvents() {
   // Global device controls
   $('#refresh')?.addEventListener('click', loadAllData);
   $('#allOn')?.addEventListener('click', async () => {
-    const promises = STATE.devices.map(device => 
-      patch(device.id, {status: "on", value: buildHex12(45)})
-    );
+    const payloadMix = normalizeMixInput(45);
+    const promises = STATE.devices.map((device) => {
+      const entry = buildDeviceHexForMix(payloadMix, device.id);
+      return patch(device.id, { status: 'on', value: entry.hex });
+    });
     await Promise.all(promises);
     setStatus("All devices ON (Safe mode)");
     showToast({title:'All ON', msg:'Sent safe ON to all devices', kind:'success', icon:'✅'});
@@ -8010,8 +8272,15 @@ function wireGlobalEvents() {
     const scaled = hud.lock ? scaleMix(splitMix, hud.master) : { ...splitMix };
     const clamp01 = v => Math.max(0, Math.min(100, Math.round(Number(v)||0)));
     const finalMix = { cw: clamp01(scaled.cw), ww: clamp01(scaled.ww), bl: clamp01(scaled.bl), rd: clamp01(scaled.rd) };
-    const hex12 = buildHex12({ ...finalMix, fr: 0, uv: 0 });
-    return { mix: finalMix, hex12 };
+    const payloadMix = { ...finalMix, fr: 0, uv: 0 };
+    const deviceIds = Array.isArray(group?.lights) ? group.lights.map((l) => l.id).filter(Boolean) : [];
+    const perDevice = {};
+    deviceIds.forEach((id) => {
+      const details = buildDeviceHexForMix(payloadMix, id);
+      perDevice[id] = details;
+    });
+    const hex12 = buildHex12(payloadMix);
+    return { mix: finalMix, hex12, perDevice, deviceIds };
   }
   // HUD helpers
   function setHUD(values = {}) {
@@ -8064,8 +8333,8 @@ function wireGlobalEvents() {
     const host = document.getElementById('groupSpectrumPreview');
     if (!host) return;
     host.innerHTML = '';
-    const { mix } = computeMixAndHex(group);
-    const spd = computeWeightedSPD(mix);
+    const { mix, deviceIds } = computeMixAndHex(group);
+    const spd = computeWeightedSPD(mix, { deviceIds });
     const cv = document.createElement('canvas');
     cv.className = 'group-spectrum__canvas';
     host.appendChild(cv);
@@ -8090,7 +8359,7 @@ function wireGlobalEvents() {
         const planSpec = plan?.spectrum || { cw: 45, ww: 45, bl: 0, rd: 0 };
         const planSpd = computeWeightedSPD({
           cw: Number(planSpec.cw||0), ww: Number(planSpec.ww||0), bl: Number(planSpec.bl||0), rd: Number(planSpec.rd||0)
-        });
+        }, { deviceIds });
         const pW = 260;
         const pH = 90;
         renderSpectrumCanvas(planCv, planSpd, { width: pW, height: pH });
@@ -8319,7 +8588,7 @@ function wireGlobalEvents() {
                 const mix = isDynamic
                   ? computeMixAndHex(group).mix
                   : (meta.factorySpectrum || (STATE.plans.find(p=>p.id===group.plan)?.spectrum) || { cw:45, ww:45, bl:0, rd:0 });
-                const spd = computeWeightedSPD({ cw: mix.cw||0, ww: mix.ww||0, bl: mix.bl||0, rd: mix.rd||0 });
+                const spd = computeWeightedSPD({ cw: mix.cw||0, ww: mix.ww||0, bl: mix.bl||0, rd: mix.rd||0 }, { deviceIds: [d.id] });
                 renderSpectrumCanvas(cv, spd, { width: 300, height: 36 });
                 card.title = isDynamic ? 'Dynamic: using driver spectrum' : 'Static: using device factory spectrum';
               }
@@ -8753,11 +9022,16 @@ function wireGlobalEvents() {
     const targets = STATE.devices.filter(d=>ids.includes(d.id));
     const online = targets.filter(d=>d.online);
     if (!online.length) { setStatus('No online devices to power ON'); showToast({title:'No devices online', msg:'Skipped group power ON. All devices offline.', kind:'warn', icon:'⚠️'}); return; }
-    const hex = buildHex12(45);
-    await Promise.all(online.map(d => patch(d.id, { status: 'on', value: hex })));
+    const payloadMix = normalizeMixInput(45);
+    const commands = online.map((d) => ({ device: d, entry: buildDeviceHexForMix(payloadMix, d.id) }));
+    await Promise.all(commands.map(({ device, entry }) => patch(device.id, { status: 'on', value: entry.hex })));
+    const uniqueHexes = new Set(commands.map(({ entry }) => entry.hex));
+    const summaryHex = uniqueHexes.size <= 1
+      ? (uniqueHexes.values().next().value || buildHex12(payloadMix))
+      : `${uniqueHexes.size} payloads`;
     const chip = document.getElementById('groupSpectraChip');
-    if (chip) chip.setAttribute('title', `Last payload: ${hex}`);
-    document.getElementById('groupLastHex')?.replaceChildren(document.createTextNode(`Last payload: ${hex}`));
+    if (chip) chip.setAttribute('title', `Last payload: ${summaryHex}`);
+    document.getElementById('groupLastHex')?.replaceChildren(document.createTextNode(`Last payload: ${summaryHex}`));
     setStatus(`Powered ON ${online.length} device(s)`);
     showToast({title:'Powered ON', msg:`Sent safe ON to ${online.length} device(s)`, kind:'success', icon:'✅'});
   });
@@ -8788,7 +9062,7 @@ function wireGlobalEvents() {
 
   $('#grpApply')?.addEventListener('click', async () => {
     if (!STATE.currentGroup) return alert('Select a group first');
-    const { mix, hex12 } = computeMixAndHex(STATE.currentGroup);
+    const { mix, hex12, deviceIds } = computeMixAndHex(STATE.currentGroup);
     const hex = hex12;
     const live = !!document.getElementById('grpLiveToggle')?.checked;
     const ids = (STATE.currentGroup.lights||[]).map(l=>l.id);
@@ -8798,15 +9072,23 @@ function wireGlobalEvents() {
     if (live && !online.length) { setStatus('No online devices to apply spectrum'); showToast({title:'No devices online', msg:'Skipped Apply Spectrum. All devices offline.', kind:'warn', icon:'⚠️'}); return; }
     // Guardrail: basic power-cap autoscale (if any channel > 100, clamp and notify)
     const over = ['cw','ww','bl','rd'].filter(k => mix[k] > 100);
-    let appliedHex = hex;
+    let scaledMix = { ...mix };
     if (over.length) {
-      const scaled = { ...mix };
-      over.forEach(k => scaled[k] = 100);
-      appliedHex = buildHex12({ ...scaled, fr: 0, uv: 0 });
+      over.forEach((k) => { scaledMix[k] = 100; });
       showToast({title:'Autoscaled to cap', msg:`Channels ${over.join(', ')} capped at 100%.`, kind:'info', icon:'ℹ️'});
     }
+    const payloadMix = { ...scaledMix, fr: 0, uv: 0 };
+    const targetIds = (deviceIds && deviceIds.length ? deviceIds : online.map((d) => d.id)).filter(Boolean);
+    const commandMap = new Map();
+    targetIds.forEach((id) => {
+      const entry = buildDeviceHexForMix(payloadMix, id);
+      commandMap.set(id, entry);
+    });
     if (live) {
-      await Promise.all(online.map(d => patch(d.id, { status: 'on', value: appliedHex })));
+      await Promise.all(online.map((d) => {
+        const entry = commandMap.get(d.id) || buildDeviceHexForMix(payloadMix, d.id);
+        return patch(d.id, { status: 'on', value: entry.hex });
+      }));
       setStatus(`Applied spectrum to ${online.length} device(s)${offline.length?`, skipped ${offline.length} offline`:''}`);
       if (offline.length) {
         showToast({title:'Skipped offline devices', msg:`${offline.length} device(s) were offline and skipped.`, kind:'warn', icon:'⚠️'});
@@ -8824,8 +9106,13 @@ function wireGlobalEvents() {
       }
     }
     const chip = document.getElementById('groupSpectraChip');
-    if (chip) chip.setAttribute('title', `Last payload: ${appliedHex}`);
-    document.getElementById('groupLastHex')?.replaceChildren(document.createTextNode(`Last payload: ${appliedHex}`));
+    const uniqueHexes = new Set();
+    commandMap.forEach((entry) => uniqueHexes.add(entry.hex));
+    const summaryHex = uniqueHexes.size <= 1
+      ? (uniqueHexes.values().next().value || hex)
+      : `${uniqueHexes.size} payloads`;
+    if (chip) chip.setAttribute('title', `Last payload: ${summaryHex}`);
+    document.getElementById('groupLastHex')?.replaceChildren(document.createTextNode(`Last payload: ${summaryHex}`));
   });
 
 
