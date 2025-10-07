@@ -8664,22 +8664,32 @@ function wireGlobalEvents() {
         const groupZoneSel = document.getElementById('groupZoneDropdown');
         let setupLights = [];
         if (groupRoomSel && groupZoneSel && window.STATE?.lightSetups) {
-          const roomId = groupRoomSel.value;
-          const zone = groupZoneSel.value;
+          const roomVal = groupRoomSel.value;
+          const zoneVal = groupZoneSel.value;
+          const roomObj = (window.STATE?.rooms||[]).find(r => r.id === roomVal || r.name === roomVal);
+          const roomId = roomObj?.id || roomVal;
+          const roomName = roomObj?.name || roomVal;
           window.STATE.lightSetups.forEach(setup => {
-            if ((setup.room === roomId || setup.room === (window.STATE?.rooms?.find(r=>r.id===roomId)?.name)) && setup.zone === zone) {
+            const setupRoomObj = (window.STATE?.rooms||[]).find(r => r.id === setup.room || r.name === setup.room);
+            const setupRoomId = setupRoomObj?.id || setup.room;
+            const setupRoomName = setupRoomObj?.name || setup.room;
+            const matchesRoom = (setupRoomId && setupRoomId === roomId) || (setupRoomName && setupRoomName === roomName);
+            const matchesZone = String(setup.zone || '') === String(zoneVal || '');
+            if (matchesRoom && matchesZone) {
               if (Array.isArray(setup.fixtures)) {
                 setup.fixtures.forEach(f => {
                   // Synthesize a device-like object for ungrouped display
-                  if (!assigned.has(f.id)) {
+                  const synthId = f.id || `wired-${(f.vendor||f.name||'').replace(/\s+/g,'_')}-${(f.model||'').replace(/\s+/g,'_')}`;
+                  if (!assigned.has(synthId)) {
                     setupLights.push({
-                      id: f.id,
+                      id: synthId,
                       deviceName: f.vendor ? `${f.vendor} ${f.model}` : (f.name || f.model || 'Light'),
                       type: 'light',
                       watts: f.watts,
                       count: f.count,
                       source: 'setup',
-                      // Add more fields as needed
+                      vendor: f.vendor,
+                      model: f.model
                     });
                   }
                 });
