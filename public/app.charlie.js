@@ -6877,9 +6877,19 @@ function renderRooms() {
       const zones = (r.zones || []).map(z => escapeHtml(z)).join(', ') || '—';
       const name = escapeHtml(r.name || '');
       const controlCount = Array.isArray(r.controllers) ? r.controllers.length : (r.controlMethod ? 1 : 0);
-      const fixtures = (r.fixtures||[]);
-      const numLights = fixtures.reduce((sum,f)=> sum + (Number(f.count)||0), 0);
-      const lightsList = fixtures.length ? fixtures.map(f => `${escapeHtml(f.vendor||f.name||f.model||'Light')} ×${f.count||1}`).join(', ') : '—';
+      // Aggregate lights from STATE.lightSetups for this room
+      const roomLightSetups = (window.STATE?.lightSetups || []).filter(setup => String(setup.room) === String(r.id) || String(setup.room) === String(r.name));
+      let lightMap = {};
+      let numLights = 0;
+      roomLightSetups.forEach(setup => {
+        (setup.fixtures || []).forEach(f => {
+          const key = (f.vendor||f.name||f.model||'Light');
+          if (!lightMap[key]) lightMap[key] = 0;
+          lightMap[key] += Number(f.count)||1;
+          numLights += Number(f.count)||1;
+        });
+      });
+      const lightsList = Object.keys(lightMap).length ? Object.entries(lightMap).map(([k,v]) => `${escapeHtml(k)} ×${v}`).join(', ') : '—';
       const roomId = escapeHtml(r.id || '');
       return `<div class="card" style="margin-top:8px">
         <div class="row" style="justify-content:space-between;align-items:center">
