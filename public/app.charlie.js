@@ -805,7 +805,22 @@ async function safeRoomsDelete(roomId) {
   const after = STATE.rooms.length;
   if (after === before) return false; // nothing deleted
   const ok = await safeRoomsSave();
+  if (ok) {
+    // Reload rooms from backend to ensure UI is in sync
+    await loadRoomsFromBackend();
+    renderRooms();
+  }
   return ok;
+// Helper to reload rooms from backend
+async function loadRoomsFromBackend() {
+  try {
+    const resp = await fetch('/data/rooms.json');
+    if (resp.ok) {
+      const data = await resp.json();
+      STATE.rooms = data.rooms || [];
+    }
+  } catch (e) { console.warn('Failed to reload rooms:', e); }
+}
 }
 
 async function safeRoomsSave() {
@@ -9858,7 +9873,9 @@ class FreshLightWizard {
     }
     const summary = `Light Setup Saved!\n\nLocation: ${roomName} - ${this.data.zone}\nFixtures: ${totalFixtures} lights (${totalWattage.toLocaleString()}W total)\nControl: ${this.getControlMethodName(this.data.controlMethod)}`;
     alert(summary);
-    this.close();
+  this.close();
+  // After closing wizard, reload rooms and re-render
+  setTimeout(async () => { await loadRoomsFromBackend(); renderRooms(); }, 300);
   }
 }
   
