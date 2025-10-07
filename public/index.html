@@ -520,6 +520,35 @@
             <div id="groupSpectrumPreview" class="group-spectrum" aria-live="polite" style="margin:6px 0 8px"></div>
             <div id="groupSchedulePreview" class="schedule-preview schedule-preview--group" aria-live="polite"></div>
 
+            <div class="group-info-grid">
+              <section id="groupPlanInfoCard" class="group-info-card" aria-live="polite">
+                <header class="group-info-card__header">
+                  <div>
+                    <h3 id="groupPlanInfoTitle">Plan information</h3>
+                    <p id="groupPlanInfoSubtitle" class="tiny text-muted">Select a plan to view spectrum targets.</p>
+                  </div>
+                </header>
+                <div class="group-info-card__body">
+                  <canvas id="groupPlanInfoCanvas" class="group-info-card__canvas" width="320" height="100" role="img" aria-label="Plan spectrum preview"></canvas>
+                  <dl id="groupPlanInfoMetrics" class="group-info-card__metrics"></dl>
+                </div>
+              </section>
+
+              <section id="groupLightInfoCard" class="group-info-card" aria-live="polite">
+                <header class="group-info-card__header">
+                  <div>
+                    <h3 id="groupLightInfoTitle">Current mix</h3>
+                    <p id="groupLightInfoSubtitle" class="tiny text-muted">Add lights to preview live control options.</p>
+                  </div>
+                </header>
+                <div class="group-info-card__body">
+                  <canvas id="groupLightInfoCanvas" class="group-info-card__canvas" width="320" height="100" role="img" aria-label="Current spectrum preview"></canvas>
+                  <dl id="groupLightInfoMetrics" class="group-info-card__metrics"></dl>
+                  <p id="groupLightInfoMode" class="tiny text-muted" aria-live="polite"></p>
+                </div>
+              </section>
+            </div>
+
             <!-- Inline Group Schedule Editor (appears when editing a group's schedule) -->
             <div id="groupScheduleEditor" class="group-schedule-editor" style="display:none;margin-top:8px">
               <div class="row row--gap-sm row--center row--wrap">
@@ -569,7 +598,10 @@
             <div class="group-roster-card" id="ungroupedLightsCard">
               <div class="row row--between row--center mb-xs">
                 <h3 style="margin:0;font-size:15px;color:#0f172a">Ungrouped Lights</h3>
-                <span id="ungroupedStatus" class="tiny" aria-live="polite"></span>
+                <div class="row row--gap-xs row--center">
+                  <span id="ungroupedStatus" class="tiny" aria-live="polite"></span>
+                  <button id="btnImportFixtures" type="button" class="ghost tiny">Import fixtures</button>
+                </div>
               </div>
               <div id="ungroupedList" class="grid cols-3" aria-live="polite"></div>
               <p id="ungroupedEmpty" class="tiny" style="display:none">All lights are assigned to groups.</p>
