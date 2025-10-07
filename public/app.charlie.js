@@ -214,13 +214,130 @@ function seedGroupRoomZoneDropdowns() {
   roomSel.onchange = () => {
     updateZones(roomSel.value, zoneSel.value);
     updateFixtureSummary();
+    if (STATE.currentGroup) {
+      try { updateGroupUI(STATE.currentGroup); } catch (e) { console.warn('Failed to refresh group UI after room change', e); }
+    }
   };
   zoneSel.onchange = () => {
     zoneSel.dataset.lastValue = zoneSel.value;
     updateFixtureSummary();
+    if (STATE.currentGroup) {
+      try { updateGroupUI(STATE.currentGroup); } catch (e) { console.warn('Failed to refresh group UI after zone change', e); }
+    }
   };
   // Initial summary
   updateFixtureSummary();
+}
+
+function buildFixtureSyntheticId(fixture) {
+  if (!fixture || typeof fixture !== 'object') return '';
+  if (fixture.id) return String(fixture.id);
+  const vendor = String(fixture.vendor || fixture.name || '').trim().replace(/\s+/g, '_');
+  const model = String(fixture.model || '').trim().replace(/\s+/g, '_');
+  if (!vendor && !model) return '';
+  return `wired-${vendor || 'fixture'}-${model || 'light'}`;
+}
+
+function findFixtureById(id) {
+  if (!id || !Array.isArray(STATE.deviceKB?.fixtures)) return null;
+  return STATE.deviceKB.fixtures.find((fixture) => {
+    const synthetic = buildFixtureSyntheticId(fixture);
+    return String(fixture.id || '').toLowerCase() === String(id).toLowerCase() || synthetic.toLowerCase() === String(id).toLowerCase();
+  }) || null;
+}
+
+function findSetupFixtureById(id) {
+  if (!id || !Array.isArray(window.STATE?.lightSetups)) return null;
+  for (const setup of window.STATE.lightSetups) {
+    if (!Array.isArray(setup.fixtures)) continue;
+    const match = setup.fixtures.find((fixture) => {
+      const synthetic = fixture.id || buildFixtureSyntheticId(fixture);
+      return synthetic && String(synthetic).toLowerCase() === String(id).toLowerCase();
+    });
+    if (match) {
+      return { fixture: match, setup };
+    }
+  }
+  return null;
+}
+
+function getDeviceMeta(id) {
+  if (!id) return null;
+  const fromMeta = STATE.deviceMeta?.[id];
+  if (fromMeta) return fromMeta;
+  const fromDevices = Array.isArray(STATE.devices) ? STATE.devices.find((device) => device.id === id) : null;
+  if (fromDevices) return fromDevices;
+  const fromFixtures = findFixtureById(id);
+  if (fromFixtures) {
+    const control = String(fromFixtures.control || '').toLowerCase();
+    const inferredMode = control.includes('api') || control.includes('lan') || control.includes('dynamic')
+      ? 'dynamic'
+      : 'static';
+    return {
+      ...fromFixtures,
+      vendor: fromFixtures.vendor || fromFixtures.name || '',
+      model: fromFixtures.model || fromFixtures.name || '',
+      spectrumMode: inferredMode,
+      factorySpectrum: fromFixtures.spectrum || null,
+    };
+  }
+  return null;
+}
+
+function computeChannelPercentages(mix) {
+  const channels = ['cw', 'ww', 'bl', 'rd'];
+  const totals = channels.reduce((acc, key) => acc + Math.max(0, Number(mix?.[key] || 0)), 0);
+  const safeTotal = totals > 0 ? totals : 1;
+  const pct = {};
+  channels.forEach((key) => {
+    const value = Math.max(0, Number(mix?.[key] || 0));
+    pct[key] = (value / safeTotal) * 100;
+  });
+  return { percentages: pct, total: totals };
+}
+
+function resolveEnvironmentTargets(roomId, zoneValue) {
+  const envZones = Array.isArray(STATE.environment) ? STATE.environment : [];
+  if (!envZones.length) return null;
+  const rooms = collectRoomsFromState();
+  const room = rooms.find((r) => r.id === roomId || r.name === roomId) || null;
+  const candidates = [];
+  if (zoneValue) candidates.push(String(zoneValue));
+  if (room?.name) candidates.push(String(room.name));
+  if (roomId) candidates.push(String(roomId));
+  const lowerCandidates = candidates.map((value) => value.toLowerCase());
+  const match = envZones.find((zone) => {
+    const keys = [zone.id, zone.name, zone.location].filter(Boolean).map((value) => String(value).toLowerCase());
+    return keys.some((value) => lowerCandidates.includes(value));
+  });
+  if (!match) return null;
+  return {
+    temp: match.sensors?.tempC?.setpoint || null,
+    rh: match.sensors?.rh?.setpoint || null,
+  };
+}
+
+function formatSetpointRange(range, unit) {
+  if (!range || (range.min == null && range.max == null)) return '—';
+  const formatValue = (value) =>
+    value == null || Number.isNaN(Number(value)) ? null : Number(value).toFixed(unit === '°C' ? 1 : 0);
+  const min = formatValue(range.min);
+  const max = formatValue(range.max);
+  if (min && max) {
+    if (min === max) return `${min}${unit}`;
+    return `${min}–${max}${unit}`;
+  }
+  if (min) return `${min}${unit}`;
+  if (max) return `${max}${unit}`;
+  return '—';
+}
+
+function clearCanvas(canvas) {
+  if (!canvas) return;
+  const ctx = canvas.getContext('2d');
+  if (ctx) {
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
+  }
 }
 
 // --- IoT System Setup Card Show/Hide Logic ---
@@ -8227,6 +8344,18 @@ function renderPlansPanel() {
   });
 
   renderGrowRoomOverview();
+  if (STATE.currentGroup) {
+    try {
+      if (typeof window.updateGroupPlanInfoCard === 'function') {
+        window.updateGroupPlanInfoCard(STATE.currentGroup);
+      }
+      if (typeof window.updateGroupLightInfoCard === 'function') {
+        window.updateGroupLightInfoCard(STATE.currentGroup);
+      }
+    } catch (e) {
+      console.warn('Failed to refresh group cards after plan update', e);
+    }
+  }
 }
 
 // --- Config banner and modal helpers ---
@@ -8373,6 +8502,7 @@ function wireGlobalEvents() {
   const groupRosterBody = $('#groupRosterBody');
   const groupRosterEmpty = $('#groupRosterEmpty');
   const groupsStatus = $('#groupsStatus');
+  const btnImportFixtures = $('#btnImportFixtures');
 
   // Wire up the new Save button in group card
   if (btnGroupSave) {
@@ -8385,6 +8515,21 @@ function wireGlobalEvents() {
       updateGroupUI(STATE.currentGroup);
       showToast({ title: 'Group Saved', msg: `Group "${STATE.currentGroup.name || ''}" saved.`, kind: 'success', icon: '✅' });
     };
+  }
+  if (btnImportFixtures) {
+    btnImportFixtures.addEventListener('click', () => {
+      if (window.freshLightWizard && typeof window.freshLightWizard.open === 'function') {
+        window.freshLightWizard.open();
+        showToast({ title: 'Import fixtures', msg: 'Use the Light Setup wizard to add fixtures. New fixtures appear in Ungrouped Lights.', kind: 'info', icon: '💡' });
+      } else {
+        const lightSetupNav = document.querySelector('[data-sidebar-link][data-target="light-setup"]');
+        if (lightSetupNav instanceof HTMLElement) {
+          lightSetupNav.click();
+        } else {
+          alert('Open Light Setup to import fixtures into your farm.');
+        }
+      }
+    });
   }
   // Group-level location editor (batch)
   // Remove mid-card groupQuick room/zone dropdowns per redesign
@@ -8434,6 +8579,158 @@ function wireGlobalEvents() {
     const hex12 = buildHex12(payloadMix);
     return { mix: finalMix, hex12, perDevice, deviceIds };
   }
+
+  function setHudLocked(locked) {
+    const inputs = [gInputs.master, gInputs.masterV, gInputs.cw, gInputs.cwV, gInputs.ww, gInputs.wwV, gInputs.bl, gInputs.blV, gInputs.rd, gInputs.rdV, gInputs.lock];
+    inputs.forEach((input) => {
+      if (!input) return;
+      input.disabled = !!locked;
+      if (locked) input.setAttribute('aria-disabled', 'true');
+      else input.removeAttribute('aria-disabled');
+    });
+    const panel = document.getElementById('groupsPanel');
+    if (panel) panel.classList.toggle('group-hud-locked', !!locked);
+  }
+
+  function updateGroupPlanInfoCard(group) {
+    const card = document.getElementById('groupPlanInfoCard');
+    if (!card) return;
+    const title = document.getElementById('groupPlanInfoTitle');
+    const subtitle = document.getElementById('groupPlanInfoSubtitle');
+    const canvas = document.getElementById('groupPlanInfoCanvas');
+    const metrics = document.getElementById('groupPlanInfoMetrics');
+    const plan = group ? STATE.plans.find((p) => p.id === group.plan) : null;
+    if (!plan) {
+      card.classList.add('is-empty');
+      if (title) title.textContent = 'Plan information';
+      if (subtitle) subtitle.textContent = 'Select a plan to view spectrum targets.';
+      if (metrics) metrics.innerHTML = '';
+      clearCanvas(canvas);
+      return;
+    }
+    card.classList.remove('is-empty');
+    if (title) title.textContent = `Plan: ${plan.name || 'Untitled'}`;
+    const cropStage = [plan.crop, plan.stage].filter(Boolean).join(' • ');
+    if (subtitle) {
+      subtitle.textContent = cropStage || plan.description || 'Spectrum targets from the selected plan.';
+    }
+    const spectrum = plan.spectrum || { cw: 45, ww: 45, bl: 0, rd: 0 };
+    const { percentages } = computeChannelPercentages(spectrum);
+    const photoperiod = Number(plan.photoperiod || 12);
+    const ppfd = Number(plan.ppfd || 0);
+    const dli = plan.dli != null ? Number(plan.dli) : (ppfd > 0 ? (ppfd * 3600 * photoperiod) / 1e6 : 0);
+    const roomSel = document.getElementById('groupRoomDropdown');
+    const zoneSel = document.getElementById('groupZoneDropdown');
+    const targets = resolveEnvironmentTargets(roomSel?.value || '', zoneSel?.value || '');
+    if (metrics) {
+      const items = [
+        { label: 'Cool white', value: `${percentages.cw.toFixed(0)}%` },
+        { label: 'Warm white', value: `${percentages.ww.toFixed(0)}%` },
+        { label: 'Blue', value: `${percentages.bl.toFixed(0)}%` },
+        { label: 'Red', value: `${percentages.rd.toFixed(0)}%` },
+        { label: 'PPFD', value: ppfd ? `${ppfd.toFixed(0)} µmol·m⁻²·s⁻¹` : '—' },
+        { label: 'Photoperiod', value: photoperiod ? `${photoperiod.toFixed(1)} h` : '—' },
+        { label: 'DLI', value: dli ? `${dli.toFixed(2)} mol·m⁻²·d⁻¹` : '—' },
+      ];
+      if (targets?.temp) {
+        items.push({ label: 'Temp target', value: formatSetpointRange(targets.temp, '°C') });
+      }
+      if (targets?.rh) {
+        items.push({ label: 'Humidity target', value: formatSetpointRange(targets.rh, '%') });
+      }
+      metrics.innerHTML = items
+        .map((item) => `<dt>${escapeHtml(item.label)}</dt><dd>${escapeHtml(item.value)}</dd>`)
+        .join('');
+    }
+    if (canvas && typeof renderSpectrumCanvas === 'function') {
+      const mix = { cw: Number(spectrum.cw || 0), ww: Number(spectrum.ww || 0), bl: Number(spectrum.bl || 0), rd: Number(spectrum.rd || 0) };
+      const deviceIds = Array.isArray(group?.lights) ? group.lights.map((l) => l.id).filter(Boolean) : [];
+      const spd = computeWeightedSPD(mix, { deviceIds });
+      renderSpectrumCanvas(canvas, spd, { width: canvas.width, height: canvas.height });
+    }
+  }
+
+  function updateGroupLightInfoCard(group) {
+    const card = document.getElementById('groupLightInfoCard');
+    if (!card) return;
+    const title = document.getElementById('groupLightInfoTitle');
+    const subtitle = document.getElementById('groupLightInfoSubtitle');
+    const canvas = document.getElementById('groupLightInfoCanvas');
+    const metrics = document.getElementById('groupLightInfoMetrics');
+    const modeLabel = document.getElementById('groupLightInfoMode');
+    if (!group || !Array.isArray(group.lights) || group.lights.length === 0) {
+      card.classList.add('is-empty');
+      if (title) title.textContent = 'Current mix';
+      if (subtitle) subtitle.textContent = 'Add lights to preview live control options.';
+      if (metrics) metrics.innerHTML = '';
+      if (modeLabel) modeLabel.textContent = 'Control mode: Locked until lights are assigned.';
+      clearCanvas(canvas);
+      setHudLocked(true);
+      return;
+    }
+    const resolvedLights = group.lights.map((entry) => {
+      const meta = getDeviceMeta(entry.id) || {};
+      const setup = findSetupFixtureById(entry.id);
+      const fromSetup = setup?.fixture || null;
+      const spectrum = meta.factorySpectrum || meta.spectrum || fromSetup?.spectrum || null;
+      const controlRaw = [meta.control, fromSetup?.control, meta.transport, meta.protocol].filter(Boolean).join(' ').toLowerCase();
+      const spectrumMode = String(meta.spectrumMode || '').toLowerCase();
+      const isDynamic = spectrumMode === 'dynamic' || /dynamic|api|lan|wifi|grow3|driver/.test(controlRaw);
+      const name = entry.name || meta.deviceName || `${meta.vendor || fromSetup?.vendor || ''} ${meta.model || fromSetup?.model || ''}`.trim();
+      return {
+        id: entry.id,
+        name: name || entry.id,
+        dynamic: isDynamic,
+        spectrum,
+        source: setup ? 'setup' : (meta.vendor || meta.model ? 'device' : 'unknown')
+      };
+    });
+    const dynamicCount = resolvedLights.filter((light) => light.dynamic).length;
+    const staticCount = resolvedLights.length - dynamicCount;
+    const mixInfo = computeMixAndHex(group);
+    const { percentages } = computeChannelPercentages(mixInfo.mix);
+    card.classList.remove('is-empty');
+    if (title) title.textContent = `Current mix • ${resolvedLights.length} light${resolvedLights.length === 1 ? '' : 's'}`;
+    if (subtitle) {
+      const primary = resolvedLights[0];
+      subtitle.textContent = primary ? primary.name : 'Active fixture mix';
+    }
+    if (metrics) {
+      const items = [
+        { label: 'Cool white', value: `${percentages.cw.toFixed(0)}%` },
+        { label: 'Warm white', value: `${percentages.ww.toFixed(0)}%` },
+        { label: 'Blue', value: `${percentages.bl.toFixed(0)}%` },
+        { label: 'Red', value: `${percentages.rd.toFixed(0)}%` },
+        { label: 'Dynamic', value: dynamicCount ? `${dynamicCount}` : '0' },
+        { label: 'Static', value: staticCount ? `${staticCount}` : '0' },
+      ];
+      metrics.innerHTML = items
+        .map((item) => `<dt>${escapeHtml(item.label)}</dt><dd>${escapeHtml(item.value)}</dd>`)
+        .join('');
+    }
+    const shouldLock = resolvedLights.length > 0 && dynamicCount === 0;
+    if (modeLabel) {
+      modeLabel.textContent = shouldLock
+        ? 'Control mode: Locked to factory spectrum (static fixtures detected).'
+        : 'Control mode: Spectrum controls unlocked for dynamic fixtures.';
+    }
+    setHudLocked(shouldLock);
+    if (canvas && typeof renderSpectrumCanvas === 'function') {
+      const spd = computeWeightedSPD({
+        cw: Number(mixInfo.mix.cw || 0),
+        ww: Number(mixInfo.mix.ww || 0),
+        bl: Number(mixInfo.mix.bl || 0),
+        rd: Number(mixInfo.mix.rd || 0)
+      }, { deviceIds: mixInfo.deviceIds });
+      renderSpectrumCanvas(canvas, spd, { width: canvas.width, height: canvas.height });
+    }
+  }
+
+  window.refreshGroupLightInfoCard = () => {
+    if (STATE.currentGroup) updateGroupLightInfoCard(STATE.currentGroup);
+  };
+  window.updateGroupPlanInfoCard = updateGroupPlanInfoCard;
+  window.updateGroupLightInfoCard = updateGroupLightInfoCard;
   // HUD helpers
   function setHUD(values = {}) {
     try {
@@ -8532,12 +8829,22 @@ function wireGlobalEvents() {
         setHUD({ cw: scaled.cw, ww: scaled.ww, bl: scaled.bl, rd: scaled.rd });
       }
       // Always update spectrum preview on master change
-      if (STATE.currentGroup) renderGroupSpectrumPreview(STATE.currentGroup);
+      if (STATE.currentGroup) {
+        renderGroupSpectrumPreview(STATE.currentGroup);
+        if (typeof window.refreshGroupLightInfoCard === 'function') window.refreshGroupLightInfoCard();
+      }
     });
   }
   // Also update preview when any channel slider changes
   ;[gInputs.cw, gInputs.ww, gInputs.bl, gInputs.rd, gInputs.lock].forEach(inp => {
-    try { inp?.addEventListener('input', () => { if (STATE.currentGroup) renderGroupSpectrumPreview(STATE.currentGroup); }); } catch {}
+    try {
+      inp?.addEventListener('input', () => {
+        if (STATE.currentGroup) {
+          renderGroupSpectrumPreview(STATE.currentGroup);
+          if (typeof window.refreshGroupLightInfoCard === 'function') window.refreshGroupLightInfoCard();
+        }
+      });
+    } catch {}
   });
   // Render the selected group's UI and helpers
   function updateGroupUI(group) {
@@ -8566,6 +8873,9 @@ function wireGlobalEvents() {
       if (ungroupedList) ungroupedList.innerHTML = '';
       if (ungroupedStatus) ungroupedStatus.textContent = '';
       if (ungroupedEmpty) ungroupedEmpty.style.display = 'none';
+      updateGroupPlanInfoCard(null);
+      updateGroupLightInfoCard(null);
+      setHudLocked(true);
       return;
     }
     if (groupPlan) groupPlan.value = group.plan || '';
@@ -8740,6 +9050,8 @@ function wireGlobalEvents() {
   setHUD({ master: 60, ...spec });
   // After seeding HUD, render preview
   renderGroupSpectrumPreview(group);
+  updateGroupPlanInfoCard(group);
+  updateGroupLightInfoCard(group);
 
     // Ungrouped lights list with Add buttons
     try {
@@ -8835,7 +9147,21 @@ function wireGlobalEvents() {
   }
   // Expose for callers outside this scope
   window.updateGroupUI = updateGroupUI;
-  
+
+  window.addEventListener('lightSetupsChanged', () => {
+    try { seedGroupRoomZoneDropdowns(); } catch (e) { console.warn('Failed to reseed room/zone dropdowns after light setup change', e); }
+    if (STATE.currentGroup) {
+      try { updateGroupUI(STATE.currentGroup); } catch (e) { console.warn('Failed to refresh group UI after light setup change', e); }
+    }
+  });
+
+  window.addEventListener('farmDataChanged', () => {
+    try { seedGroupRoomZoneDropdowns(); } catch (e) { console.warn('Failed to reseed room/zone dropdowns after farm change', e); }
+    if (STATE.currentGroup) {
+      try { updateGroupUI(STATE.currentGroup); } catch (e) { console.warn('Failed to refresh group UI after farm change', e); }
+    }
+  });
+
 
   function openScheduleEditorForGroup(groupId) {
     STATE.editingGroupId = groupId;

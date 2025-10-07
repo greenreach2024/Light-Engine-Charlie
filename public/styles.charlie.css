@@ -1828,6 +1828,87 @@ input[type="checkbox"] {
   font-weight: 500;
 }
 
+.group-info-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+  gap: 16px;
+  margin: 12px 0;
+}
+
+.group-info-card {
+  background: var(--gr-surface, #ffffff);
+  border: 1px solid var(--gr-border, #E5E7EB);
+  border-radius: 8px;
+  padding: 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.group-info-card__header h3 {
+  margin: 0;
+  font-size: 0.95rem;
+  color: var(--dark, #0f172a);
+}
+
+.group-info-card__header p {
+  margin: 2px 0 0;
+}
+
+.group-info-card__body {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.group-info-card__canvas {
+  width: 100%;
+  height: 100px;
+  border-radius: 6px;
+  background: var(--gr-bg, #F8FAFC);
+}
+
+.group-info-card__metrics {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(120px, 1fr));
+  gap: 8px 12px;
+  margin: 0;
+}
+
+.group-info-card__metrics dt {
+  font-size: 0.7rem;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: #64748b;
+  margin: 0;
+}
+
+.group-info-card__metrics dd {
+  margin: 0;
+  font-size: 0.9rem;
+  font-weight: 500;
+  color: var(--dark, #0f172a);
+}
+
+.group-info-card.is-empty {
+  opacity: 0.7;
+}
+
+.group-info-card__body .tiny.text-muted {
+  margin-top: 0;
+}
+
+.group-hud-locked .kv,
+.group-hud-locked .kv input,
+.group-hud-locked .kv label,
+.group-hud-locked .kv span {
+  opacity: 0.55;
+}
+
+.group-hud-locked input:disabled {
+  cursor: not-allowed;
+}
+
 .group-roster-card {
   background: var(--gr-surface, white);
   border: 1px solid var(--gr-border, #E5E7EB);
