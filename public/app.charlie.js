@@ -1,24 +1,3 @@
-// --- Splash Card Loader ---
-function showSplashCard() {
-  fetch('splash-card.html').then(r => r.text()).then(html => {
-    const splash = document.createElement('div');
-    splash.innerHTML = html;
-    document.body.appendChild(splash.firstElementChild);
-    setTimeout(() => {
-      const el = document.getElementById('splashCard');
-      if (el) {
-        el.style.opacity = '0';
-        setTimeout(() => el.remove(), 500);
-      }
-    }, 4000);
-  });
-}
-
-if (document.readyState === 'loading') {
-  document.addEventListener('DOMContentLoaded', showSplashCard);
-} else {
-  showSplashCard();
-}
 // --- Grow3 Manager Modal Logic with Controller Info ---
 function getGrow3ControllerConfig() {
   let config = { name: 'Grow3 Controller', address: '127.0.0.1', port: '8091' };
