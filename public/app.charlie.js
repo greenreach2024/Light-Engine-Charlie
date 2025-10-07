@@ -1506,16 +1506,128 @@ function renderScheduleBar(canvas, cycles) {
   ctx.strokeStyle = '#64748b';
   ctx.strokeRect(0, 0, width, height);
 }
-// Global stub: validate a schedule (mode, cycles)
+// Compute duration in minutes for a single cycle (wraps across midnight)
+function computeCycleDuration(on, off) {
+  const start = toMinutes(on);
+  const end = toMinutes(off);
+  if (!Number.isFinite(start) || !Number.isFinite(end)) return 0;
+  let diff = end - start;
+  if (diff < 0) diff += 1440;
+  if (diff < 0) diff = 0;
+  if (diff > 1440) diff = 1440;
+  if (start === end) {
+    // Ambiguous case (either 0 h or 24 h). Treat as 0 so editor can surface it.
+    return 0;
+  }
+  return diff;
+}
+
+function buildCycleSegments(on, off) {
+  const startRaw = toMinutes(on);
+  const endRaw = toMinutes(off);
+  if (!Number.isFinite(startRaw) || !Number.isFinite(endRaw)) return [];
+  let duration = endRaw - startRaw;
+  if (duration < 0) duration += 1440;
+  if (duration <= 0) return [];
+  if (duration > 1440) duration = 1440;
+  const start = ((startRaw % 1440) + 1440) % 1440;
+  const end = start + duration;
+  if (end <= 1440) {
+    return [{ start, end }];
+  }
+  const overflow = end - 1440;
+  return [
+    { start, end: 1440 },
+    { start: 0, end: Math.min(overflow, 1440) }
+  ];
+}
+
+// Validate a schedule and compute totals
 function validateSchedule(mode, cycles) {
-  // TODO: Replace with real validation logic if needed
-  // For now, always return no errors and totals as 0
-  return {
-    errors: [],
-    onTotal: 0,
-    offTotal: 0,
-    overlapTrim: 0
-  };
+  const errors = [];
+  const normalizedMode = mode === 'two' ? 'two' : 'one';
+  const cycleList = Array.isArray(cycles) ? cycles.filter(Boolean) : [];
+  if (!cycleList.length) {
+    errors.push('Add at least one cycle.');
+  }
+  if (normalizedMode !== 'two' && cycleList.length > 1) {
+    errors.push('Only the first cycle is used in single-cycle mode.');
+  }
+
+  const segments = [];
+  let totalRaw = 0;
+  cycleList.forEach((cycle, idx) => {
+    const on = typeof cycle.on === 'string' ? cycle.on : '';
+    const off = typeof cycle.off === 'string' ? cycle.off : '';
+    if (!on || !off || !/^\d{2}:\d{2}$/.test(on) || !/^\d{2}:\d{2}$/.test(off)) {
+      errors.push(`Cycle ${idx + 1} has invalid on/off times.`);
+      return;
+    }
+    const duration = computeCycleDuration(on, off);
+    if (duration <= 0) {
+      errors.push(`Cycle ${idx + 1} duration is 0 h.`);
+      return;
+    }
+    const segs = buildCycleSegments(on, off);
+    segs.forEach((seg) => {
+      const span = Math.max(0, Math.min(1440, seg.end) - Math.max(0, seg.start));
+      if (span > 0) {
+        segments.push({ start: Math.max(0, Math.min(1440, seg.start)), end: Math.max(0, Math.min(1440, seg.end)) });
+        totalRaw += span;
+      }
+    });
+  });
+
+  segments.sort((a, b) => a.start - b.start);
+  let onTotal = 0;
+  if (segments.length) {
+    let currentStart = segments[0].start;
+    let currentEnd = segments[0].end;
+    for (let i = 1; i < segments.length; i += 1) {
+      const seg = segments[i];
+      if (seg.start <= currentEnd) {
+        currentEnd = Math.max(currentEnd, seg.end);
+      } else {
+        onTotal += currentEnd - currentStart;
+        currentStart = seg.start;
+        currentEnd = seg.end;
+      }
+    }
+    onTotal += currentEnd - currentStart;
+  }
+  const overlapTrim = Math.max(0, totalRaw - onTotal);
+  if (onTotal > 1440) {
+    errors.push('Total ON time exceeds 24 h.');
+    onTotal = 1440;
+  }
+  const offTotal = Math.max(0, 1440 - Math.min(onTotal, 1440));
+  return { errors, onTotal, offTotal, overlapTrim };
+}
+
+function getDailyOnMinutes(schedule) {
+  if (!schedule || typeof schedule !== 'object') return 0;
+  const { onTotal } = validateSchedule(schedule.mode, schedule.cycles);
+  return Math.max(0, onTotal);
+}
+
+function getDailyOnHours(schedule) {
+  return getDailyOnMinutes(schedule) / 60;
+}
+
+function scheduleSummary(schedule) {
+  if (!schedule || typeof schedule !== 'object') return 'No schedule';
+  const cycles = Array.isArray(schedule.cycles) ? schedule.cycles.filter(Boolean) : [];
+  if (!cycles.length) return 'No schedule';
+  const totalHours = getDailyOnHours(schedule);
+  const totalLabel = `${totalHours.toFixed(1).replace(/\.0$/, '')} h on`;
+  const parts = cycles.map((cycle, idx) => {
+    const on = typeof cycle.on === 'string' ? cycle.on : '--:--';
+    const off = typeof cycle.off === 'string' ? cycle.off : '--:--';
+    const duration = computeCycleDuration(on, off) / 60;
+    const durLabel = duration > 0 ? ` (${duration.toFixed(1).replace(/\.0$/, '')} h)` : '';
+    return `C${idx + 1}: ${on}–${off}${durLabel}`;
+  });
+  return `${totalLabel} • ${parts.join(', ')}`;
 }
 // Global helper: convert HH:MM string to minutes since midnight
 function toMinutes(hhmm) {
