@@ -934,19 +934,327 @@ if (typeof window.showToast !== 'function') {
   };
 }
 
-if (typeof window.applyTheme !== 'function') {
-  window.applyTheme = function(themeObj) {
-    // Enhanced CSS variable applier: sets both --primary and --gr-primary, etc.
-    if (!themeObj || typeof themeObj !== 'object') return;
-    const root = document.documentElement;
-    for (const [k, v] of Object.entries(themeObj)) {
-      if (typeof v === 'string') {
-        // Set --primary, --accent, etc.
-        root.style.setProperty(`--${k.replace(/^--/, '')}`, v);
-        // Also set --gr-primary, --gr-accent, etc. for compatibility
-        root.style.setProperty(`--gr-${k.replace(/^--|^gr-/, '')}`, v);
+function clamp(value, min, max) {
+  return Math.min(Math.max(value, min), max);
+}
+
+function normalizeHexColor(input) {
+  if (!input || typeof input !== 'string') return null;
+  let value = input.trim();
+  if (!value) return null;
+  if (value.startsWith('#')) value = value.slice(1);
+  if (/^[0-9a-f]{3}$/i.test(value)) {
+    value = value.split('').map(ch => ch + ch).join('');
+  } else if (/^[0-9a-f]{4}$/i.test(value)) {
+    const [r, g, b] = value.split('').slice(0, 3);
+    value = [r, g, b].map(ch => ch + ch).join('');
+  } else if (/^[0-9a-f]{6}$/i.test(value)) {
+    // already correct length
+  } else if (/^[0-9a-f]{8}$/i.test(value)) {
+    value = value.slice(0, 6);
+  } else {
+    const rgbMatch = input.trim().match(/rgba?\(([^)]+)\)/i);
+    if (rgbMatch) {
+      const parts = rgbMatch[1].split(',').map(p => p.trim());
+      if (parts.length >= 3) {
+        const [r, g, b] = parts;
+        const to255 = (component) => {
+          if (component.includes('%')) {
+            const pct = parseFloat(component) || 0;
+            return clamp(Math.round((pct / 100) * 255), 0, 255);
+          }
+          return clamp(Math.round(parseFloat(component) || 0), 0, 255);
+        };
+        const rgb = [to255(r), to255(g), to255(b)]
+          .map(num => num.toString(16).padStart(2, '0'))
+          .join('');
+        return `#${rgb.toUpperCase()}`;
       }
     }
+    return null;
+  }
+  return `#${value.toUpperCase()}`;
+}
+
+function hexToRgb(hex) {
+  const normalized = normalizeHexColor(hex);
+  if (!normalized) return { r: 0, g: 0, b: 0 };
+  const value = normalized.slice(1);
+  return {
+    r: parseInt(value.slice(0, 2), 16),
+    g: parseInt(value.slice(2, 4), 16),
+    b: parseInt(value.slice(4, 6), 16)
+  };
+}
+
+function rgbToHex({ r, g, b }) {
+  return `#${[r, g, b].map(c => clamp(Math.round(c), 0, 255).toString(16).padStart(2, '0')).join('').toUpperCase()}`;
+}
+
+function relativeLuminance(hex) {
+  const { r, g, b } = hexToRgb(hex);
+  const srgb = [r, g, b].map(channel => {
+    const v = channel / 255;
+    return v <= 0.03928 ? v / 12.92 : Math.pow((v + 0.055) / 1.055, 2.4);
+  });
+  return 0.2126 * srgb[0] + 0.7152 * srgb[1] + 0.0722 * srgb[2];
+}
+
+function contrastRatio(hexA, hexB) {
+  const lumA = relativeLuminance(hexA);
+  const lumB = relativeLuminance(hexB);
+  const brightest = Math.max(lumA, lumB);
+  const darkest = Math.min(lumA, lumB);
+  return (brightest + 0.05) / (darkest + 0.05);
+}
+
+function mixColors(hexA, hexB, amount = 0.5) {
+  const t = clamp(amount, 0, 1);
+  const colorA = hexToRgb(hexA);
+  const colorB = hexToRgb(hexB);
+  return rgbToHex({
+    r: Math.round(colorA.r + (colorB.r - colorA.r) * t),
+    g: Math.round(colorA.g + (colorB.g - colorA.g) * t),
+    b: Math.round(colorA.b + (colorB.b - colorA.b) * t)
+  });
+}
+
+function hexToRgba(hex, alpha) {
+  const { r, g, b } = hexToRgb(hex);
+  return `rgba(${r}, ${g}, ${b}, ${clamp(alpha, 0, 1)})`;
+}
+
+function adjustColorForContrast(color, textColor, threshold = 4.5) {
+  const base = normalizeHexColor(color) || '#000000';
+  const text = normalizeHexColor(textColor) || '#000000';
+  if (contrastRatio(base, text) >= threshold) return base;
+  const targetPrimary = text === '#FFFFFF' ? '#000000' : '#FFFFFF';
+  let best = base;
+  let bestRatio = contrastRatio(best, text);
+  for (let i = 1; i <= 20; i += 1) {
+    const amount = i / 20;
+    const candidate = mixColors(base, targetPrimary, amount);
+    const ratio = contrastRatio(candidate, text);
+    if (ratio > bestRatio) {
+      best = candidate;
+      bestRatio = ratio;
+    }
+    if (ratio >= threshold) return candidate;
+  }
+  const targetSecondary = targetPrimary === '#000000' ? '#FFFFFF' : '#000000';
+  for (let i = 1; i <= 20; i += 1) {
+    const amount = i / 20;
+    const candidate = mixColors(base, targetSecondary, amount);
+    const ratio = contrastRatio(candidate, text);
+    if (ratio > bestRatio) {
+      best = candidate;
+      bestRatio = ratio;
+    }
+    if (ratio >= threshold) return candidate;
+  }
+  return best;
+}
+
+function ensureColorContrast(color, candidateTexts, threshold) {
+  let base = normalizeHexColor(color) || '#0D7D7D';
+  let bestText = normalizeHexColor(candidateTexts?.[0]) || '#FFFFFF';
+  let bestRatio = contrastRatio(base, bestText);
+
+  candidateTexts.forEach(candidate => {
+    const textColor = normalizeHexColor(candidate);
+    if (!textColor) return;
+    const ratio = contrastRatio(base, textColor);
+    if (ratio > bestRatio) {
+      bestText = textColor;
+      bestRatio = ratio;
+    }
+  });
+
+  if (bestRatio < threshold) {
+    let adjusted = adjustColorForContrast(base, bestText, threshold);
+    let adjustedRatio = contrastRatio(adjusted, bestText);
+    if (adjustedRatio >= threshold) {
+      return { color: adjusted, text: bestText };
+    }
+    candidateTexts.forEach(candidate => {
+      const textColor = normalizeHexColor(candidate);
+      if (!textColor) return;
+      const candidateColor = adjustColorForContrast(base, textColor, threshold);
+      const ratio = contrastRatio(candidateColor, textColor);
+      if (ratio > adjustedRatio) {
+        adjusted = candidateColor;
+        adjustedRatio = ratio;
+        bestText = textColor;
+      }
+    });
+    if (adjustedRatio >= threshold) {
+      return { color: adjusted, text: bestText };
+    }
+    const fallbackText = contrastRatio(base, '#000000') >= contrastRatio(base, '#FFFFFF') ? '#000000' : '#FFFFFF';
+    base = adjustColorForContrast(base, fallbackText, threshold);
+    bestText = fallbackText;
+  }
+
+  return { color: base, text: bestText };
+}
+
+function ensureBackgroundContrast(background, candidateTexts, threshold) {
+  let bg = normalizeHexColor(background) || '#F7FAFA';
+  let bestText = normalizeHexColor(candidateTexts?.[0]) || '#0B1220';
+  let bestRatio = contrastRatio(bg, bestText);
+
+  candidateTexts.forEach(candidate => {
+    const textColor = normalizeHexColor(candidate);
+    if (!textColor) return;
+    const ratio = contrastRatio(bg, textColor);
+    if (ratio > bestRatio) {
+      bestText = textColor;
+      bestRatio = ratio;
+    }
+  });
+
+  if (bestRatio < threshold) {
+    bg = adjustColorForContrast(bg, bestText, threshold);
+    bestRatio = contrastRatio(bg, bestText);
+  }
+
+  if (bestRatio < threshold) {
+    ['#000000', '#111111', '#ffffff'].forEach(candidate => {
+      const ratio = contrastRatio(bg, candidate);
+      if (ratio > bestRatio) {
+        bestText = candidate;
+        bestRatio = ratio;
+      }
+    });
+    if (bestRatio < threshold) {
+      bg = adjustColorForContrast(bg, bestText, threshold);
+      bestRatio = contrastRatio(bg, bestText);
+    }
+  }
+
+  return { background: bg, text: bestText, ratio: bestRatio };
+}
+
+function sanitizeBrandPalette(rawPalette = {}) {
+  const palette = rawPalette && typeof rawPalette === 'object' && !Array.isArray(rawPalette)
+    ? rawPalette
+    : {};
+
+  const baseBackground = normalizeHexColor(palette.background || palette.bg) || '#F7FAFA';
+  const baseText = normalizeHexColor(palette.text) || '#0B1220';
+  const backgroundPair = ensureBackgroundContrast(baseBackground, [baseText, '#0B1220', '#111827', '#111111', '#ffffff'], 4.5);
+  const background = backgroundPair.background;
+  const text = backgroundPair.text;
+
+  const surface = normalizeHexColor(palette.surface) || mixColors(background, '#FFFFFF', 0.08);
+  const muted = normalizeHexColor(palette.muted) || mixColors(text, background, 0.55);
+
+  const primaryPair = ensureColorContrast(
+    palette.primary || '#0D7D7D',
+    [text, '#FFFFFF', '#0B1220', '#111111'],
+    4.5
+  );
+  const primary = primaryPair.color;
+  const onPrimary = primaryPair.text;
+
+  const accentPair = ensureColorContrast(
+    palette.accent || '#64C7C7',
+    [text, onPrimary, '#FFFFFF', '#0B1220'],
+    4.5
+  );
+  const accent = accentPair.color;
+  const onAccent = accentPair.text;
+
+  let border = normalizeHexColor(palette.border);
+  if (!border) border = mixColors(primary, background, 0.65);
+  if (contrastRatio(border, background) < 1.35) {
+    border = mixColors(primary, text, 0.6);
+  }
+  const borderStrong = mixColors(primary, text, 0.45);
+  const borderSubtle = mixColors(background, text, 0.92);
+  const highlight = normalizeHexColor(palette.highlight) || mixColors(accent, '#FFFFFF', 0.25);
+
+  const primaryHover = mixColors(primary, '#000000', 0.12);
+  const primaryActive = mixColors(primary, '#000000', 0.2);
+  const primarySoft = mixColors(primary, '#FFFFFF', 0.85);
+  const accentHover = mixColors(accent, '#000000', 0.12);
+  const accentSoft = mixColors(accent, '#FFFFFF', 0.85);
+
+  const shadow = `0 1px 3px 0 ${hexToRgba(primary, 0.16)}, 0 1px 2px -1px ${hexToRgba(primary, 0.12)}`;
+  const shadowLg = `0 10px 15px -3px ${hexToRgba(primary, 0.22)}, 0 4px 6px -4px ${hexToRgba(primary, 0.14)}`;
+  const focusRing = `0 0 0 3px ${hexToRgba(accent, 0.35)}`;
+
+  return {
+    primary,
+    primaryHover,
+    primaryActive,
+    primarySoft,
+    accent,
+    accentHover,
+    accentSoft,
+    background,
+    surface,
+    border,
+    borderStrong,
+    borderSubtle,
+    text,
+    muted,
+    highlight,
+    onPrimary,
+    onAccent,
+    shadow,
+    shadowLg,
+    focusRing
+  };
+}
+
+if (typeof window.sanitizeBrandPalette !== 'function') {
+  window.sanitizeBrandPalette = sanitizeBrandPalette;
+}
+
+if (typeof window.applyTheme !== 'function') {
+  window.applyTheme = function(themeObj = {}, options = {}) {
+    const rawPalette = themeObj && themeObj.palette ? themeObj.palette : themeObj;
+    const sanitized = sanitizeBrandPalette(rawPalette || {});
+    const root = document.documentElement;
+    const tokens = {
+      '--gr-bg': sanitized.background,
+      '--gr-surface': sanitized.surface,
+      '--gr-border': sanitized.border,
+      '--gr-border-strong': sanitized.borderStrong,
+      '--gr-border-subtle': sanitized.borderSubtle,
+      '--gr-text': sanitized.text,
+      '--gr-muted': sanitized.muted,
+      '--gr-primary': sanitized.primary,
+      '--gr-primary-hover': sanitized.primaryHover,
+      '--gr-primary-active': sanitized.primaryActive,
+      '--gr-primary-soft': sanitized.primarySoft,
+      '--gr-accent': sanitized.accent,
+      '--gr-accent-hover': sanitized.accentHover,
+      '--gr-accent-soft': sanitized.accentSoft,
+      '--gr-highlight': sanitized.highlight,
+      '--gr-shadow': sanitized.shadow,
+      '--gr-shadow-lg': sanitized.shadowLg,
+      '--gr-focus-ring': sanitized.focusRing,
+      '--gr-on-primary': sanitized.onPrimary,
+      '--gr-on-accent': sanitized.onAccent,
+      '--gr-button-text': sanitized.onPrimary
+    };
+
+    Object.entries(tokens).forEach(([key, value]) => {
+      if (value) root.style.setProperty(key, value);
+    });
+
+    const fontFamily = options.fontFamily || themeObj.fontFamily || (themeObj.palette && themeObj.palette.fontFamily) || '';
+    if (fontFamily) {
+      root.style.setProperty('--gr-font', fontFamily);
+    }
+    if (options.logoHeight) {
+      root.style.setProperty('--gr-logo-height', options.logoHeight);
+    }
+
+    window.GR_LAST_THEME = sanitized;
+    return sanitized;
   };
 }
 
@@ -2952,10 +3260,24 @@ class FarmWizard {
 
   updateBrandingPreview() {
     console.log('updateBrandingPreview called');
-    const primary = document.getElementById('primaryColor').value;
-    const accent = document.getElementById('accentColor').value;
-    const background = document.getElementById('backgroundColor').value;
-    const text = document.getElementById('textColor').value;
+    const paletteInputs = {
+      primary: document.getElementById('primaryColor').value,
+      accent: document.getElementById('accentColor').value,
+      background: document.getElementById('backgroundColor').value,
+      text: document.getElementById('textColor').value
+    };
+    const sanitizedPalette = sanitizeBrandPalette(paletteInputs);
+
+    // Keep inputs in sync with sanitized palette to reflect contrast adjustments
+    document.getElementById('primaryColor').value = sanitizedPalette.primary;
+    document.getElementById('accentColor').value = sanitizedPalette.accent;
+    document.getElementById('backgroundColor').value = sanitizedPalette.background;
+    document.getElementById('textColor').value = sanitizedPalette.text;
+
+    const primary = sanitizedPalette.primary;
+    const accent = sanitizedPalette.accent;
+    const background = sanitizedPalette.background;
+    const text = sanitizedPalette.text;
     const logoUrl = document.getElementById('logoUrl').value;
     const fontFamily = document.getElementById('fontFamily').value;
     const farmName = document.getElementById('farmNameInput').value;
@@ -2967,9 +3289,10 @@ class FarmWizard {
     const previewContainer = document.getElementById('brandingLivePreview');
     if (previewContainer) {
       // Apply colors directly to the preview container
-      previewContainer.style.borderColor = accent;
+      previewContainer.style.borderColor = sanitizedPalette.border;
       previewContainer.style.backgroundColor = background;
       previewContainer.style.borderWidth = '3px'; // Make border more visible
+      previewContainer.style.boxShadow = sanitizedPalette.shadow;
       console.log('Updated preview container with background:', background, 'border:', accent);
     }
     
@@ -3013,13 +3336,14 @@ class FarmWizard {
       previewFarmName.textContent = farmName || 'Your Farm';
       previewFarmName.style.color = text;
       previewFarmName.style.fontFamily = fontFamily || 'inherit';
+      previewFarmName.style.textShadow = sanitizedPalette.shadow ? `0 1px 2px ${hexToRgba(sanitizedPalette.primary, 0.15)}` : '';
       previewFarmName.style.fontWeight = 'bold'; // Make more visible
       console.log('Updated farm name preview with color:', text, 'font:', fontFamily);
     }
-    
+
     if (previewTagline) {
       previewTagline.textContent = tagline || 'Growing with technology';
-      previewTagline.style.color = primary;
+      previewTagline.style.color = accent;
       previewTagline.style.fontFamily = fontFamily || 'inherit';
       console.log('Updated tagline preview with color:', primary, 'font:', fontFamily);
     }
@@ -3041,15 +3365,21 @@ class FarmWizard {
       const farmName = document.getElementById('farmNameInput')?.value;
       const tagline = document.getElementById('taglineInput')?.value;
       
+      const paletteInputs = {
+        primary: document.getElementById('primaryColor')?.value || '#0D7D7D',
+        accent: document.getElementById('accentColor')?.value || '#64C7C7',
+        background: document.getElementById('backgroundColor')?.value || '#F7FAFA',
+        text: document.getElementById('textColor')?.value || '#0B1220'
+      };
+      const sanitizedPalette = sanitizeBrandPalette(paletteInputs);
+
+      document.getElementById('primaryColor').value = sanitizedPalette.primary;
+      document.getElementById('accentColor').value = sanitizedPalette.accent;
+      document.getElementById('backgroundColor').value = sanitizedPalette.background;
+      document.getElementById('textColor').value = sanitizedPalette.text;
+
       const branding = {
-        palette: {
-          primary: document.getElementById('primaryColor')?.value || '#0D7D7D',
-          accent: document.getElementById('accentColor')?.value || '#64C7C7',
-          background: document.getElementById('backgroundColor')?.value || '#F7FAFA',
-          surface: '#FFFFFF',
-          border: '#DCE5E5',
-          text: document.getElementById('textColor')?.value || '#0B1220'
-        },
+        palette: sanitizedPalette,
         logo: document.getElementById('logoUrl')?.value || '',
         tagline: tagline || 'Growing with technology',
         fontFamily: document.getElementById('fontFamily')?.value || '',
@@ -3103,13 +3433,22 @@ class FarmWizard {
     const farmName = document.getElementById('farmNameInput').value;
     const tagline = document.getElementById('taglineInput').value;
     
+    const paletteInputs = {
+      primary: document.getElementById('primaryColor').value,
+      accent: document.getElementById('accentColor').value,
+      background: document.getElementById('backgroundColor').value,
+      text: document.getElementById('textColor').value
+    };
+    const sanitizedPalette = sanitizeBrandPalette(paletteInputs);
+
+    // Reflect sanitized palette back into the inputs so the user sees the accessible variant
+    document.getElementById('primaryColor').value = sanitizedPalette.primary;
+    document.getElementById('accentColor').value = sanitizedPalette.accent;
+    document.getElementById('backgroundColor').value = sanitizedPalette.background;
+    document.getElementById('textColor').value = sanitizedPalette.text;
+
     const branding = {
-      palette: {
-  primary: document.getElementById('primaryColor').value,
-  accent: document.getElementById('accentColor').value,
-  border: document.getElementById('accentColor').value,
-  text: document.getElementById('textColor').value
-      },
+      palette: sanitizedPalette,
       logo: document.getElementById('logoUrl').value,
       tagline: tagline || 'Growing with technology',
       fontFamily: document.getElementById('fontFamily').value,
@@ -3322,19 +3661,14 @@ class FarmWizard {
       console.log('🎨 Website branding data received:', data);
       
       if (data.ok && data.palette) {
-        // Update the form inputs with extracted data
-        if (data.palette.primary) {
-          document.getElementById('primaryColor').value = data.palette.primary;
-        }
-        if (data.palette.accent) {
-          document.getElementById('accentColor').value = data.palette.accent;
-        }
-        if (data.palette.background) {
-          document.getElementById('backgroundColor').value = data.palette.background;
-        }
-        if (data.palette.text) {
-          document.getElementById('textColor').value = data.palette.text;
-        }
+        const sanitizedPalette = sanitizeBrandPalette(data.palette);
+
+        // Update the form inputs with the sanitized data to enforce contrast requirements
+        document.getElementById('primaryColor').value = sanitizedPalette.primary;
+        document.getElementById('accentColor').value = sanitizedPalette.accent;
+        document.getElementById('backgroundColor').value = sanitizedPalette.background;
+        document.getElementById('textColor').value = sanitizedPalette.text;
+
         if (data.logo) {
           document.getElementById('logoUrl').value = data.logo;
         }
@@ -3370,8 +3704,8 @@ class FarmWizard {
         // At least try to set the logo if we have it
         if (data.logo) {
           document.getElementById('logoUrl').value = data.logo;
-          this.updateBrandingPreview();
         }
+        this.updateBrandingPreview();
       }
     } catch (error) {
       console.error('🎨 Error fetching website branding:', error);
