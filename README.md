@@ -64,6 +64,16 @@ The script checks:
 - GET /index.html
 - POST /data/device-meta.json (dry-run to temp file)
 
+### Operator quick test
+
+Before exercising Groups controls, run the combined preflight and scale probe helper:
+
+```bash
+./scripts/preflight-scale-probe.sh
+```
+
+The script executes the "preflight five" checks, validates CORS handling, and determines whether the controller expects `00-64` or `00-FF` channel scales. See [`docs/operator-quick-test.md`](docs/operator-quick-test.md) for details and manual follow-up steps.
+
 ### Pre-AI Automation Layer
 
 The pre-AI automation layer orchestrates smart plugs using real-time sensor data. It exposes REST endpoints on the primary Node.js server and persists telemetry for future ML training.
