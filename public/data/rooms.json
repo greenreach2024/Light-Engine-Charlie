@@ -80,63 +80,6 @@
           ]
         }
       }
-    },
-    {
-      "id": "room-fcc934",
-      "name": "My farm - Room 1",
-      "location": "",
-      "hardwareCats": [
-        "dehumidifier"
-      ],
-      "hardwareOrder": [
-        "dehumidifier"
-      ],
-      "layout": {
-        "type": "",
-        "rows": 0,
-        "racks": 0,
-        "levels": 0
-      },
-      "zones": [
-        "Zone 1"
-      ],
-      "fixtures": [],
-      "controlMethod": null,
-      "devices": [],
-      "sensors": {
-        "categories": [],
-        "placements": {}
-      },
-      "energy": "",
-      "energyHours": 0,
-      "targetPpfd": 0,
-      "photoperiod": 0,
-      "connectivity": {
-        "hasHub": null,
-        "hubType": "",
-        "hubIp": "",
-        "cloudTenant": "Azure"
-      },
-      "roles": {
-        "admin": [],
-        "operator": [],
-        "viewer": []
-      },
-      "grouping": {
-        "groups": [],
-        "planId": "",
-        "scheduleId": ""
-      },
-      "seriesCount": 0,
-      "category": {
-        "dehumidifier": {
-          "selectedEquipment": [],
-          "wifi": false,
-          "wired": false,
-          "count": 0
-        }
-      },
-      "_categoryProgress": {}
     }
   ]
 }

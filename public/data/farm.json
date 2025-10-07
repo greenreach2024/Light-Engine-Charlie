@@ -3,10 +3,26 @@
   "locations": [],
   "branding": {
     "palette": {
-      "primary": "#0d7d7d",
-      "accent": "#64c7c7",
-      "border": "#64c7c7",
-      "text": "#0b1220"
+      "primary": "#0D7D7D",
+      "primaryHover": "#0B6E6E",
+      "primaryActive": "#0A6464",
+      "primarySoft": "#DBECEC",
+      "accent": "#64C7C7",
+      "accentHover": "#58AFAF",
+      "accentSoft": "#E8F7F7",
+      "background": "#F7FAFA",
+      "surface": "#F8FAFA",
+      "border": "#A5CECE",
+      "borderStrong": "#0F4C4C",
+      "borderSubtle": "#232424",
+      "text": "#111111",
+      "muted": "#909191",
+      "highlight": "#8BD5D5",
+      "onPrimary": "#FFFFFF",
+      "onAccent": "#111111",
+      "shadow": "0 1px 3px 0 rgba(13, 125, 125, 0.16), 0 1px 2px -1px rgba(13, 125, 125, 0.12)",
+      "shadowLg": "0 10px 15px -3px rgba(13, 125, 125, 0.22), 0 4px 6px -4px rgba(13, 125, 125, 0.14)",
+      "focusRing": "0 0 0 3px rgba(100, 199, 199, 0.35)"
     },
     "logo": "",
     "tagline": "Growing with technology",
@@ -17,14 +33,14 @@
   "tagline": "Growing with technology",
   "logo": "",
   "farmName": "My farm",
-  "address": "St Lawrence Avenue",
-  "city": "Kingston",
+  "address": "King Street East",
+  "city": "Gananoque",
   "state": "Ontario",
-  "postalCode": "K7L 4V1",
+  "postalCode": "K7G 2Y5",
   "timezone": "America/Toronto",
   "coordinates": {
-    "lat": 44.2586221303685,
-    "lng": -76.37257158740066
+    "lat": 44.327912152483194,
+    "lng": -76.16342763728883
   },
   "contact": {
     "name": "Pege",
