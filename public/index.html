@@ -48,6 +48,9 @@
         <button type="button" class="sidebar-link" data-sidebar-link data-group="control-devices" data-target="iot-devices">
           IoT Devices
         </button>
+        <button type="button" class="sidebar-link" data-sidebar-link data-group="control-devices" data-target="smart-plugs">
+          Smart Plugs
+        </button>
         <button type="button" class="sidebar-link" data-sidebar-link data-group="control-devices" data-target="control-assignments">
           Control Assignments
         </button>
@@ -103,6 +106,11 @@
                 <div class="row row--gap-lg row--center top-card__status">
                   <div class="text-right">
                     <h1 id="lightEngineTitle" class="top-card__title">Light Engine Charlie</h1>
+                    <div class="automation-indicator" id="automationIndicator" aria-live="polite">
+                      <span class="automation-indicator__dot" aria-hidden="true"></span>
+                      <span class="automation-indicator__label">Centralized Automation</span>
+                      <span class="automation-indicator__status" id="automationIndicatorStatus">Idle</span>
+                    </div>
                     <div id="communicationStatus" class="tiny text-muted top-card__status-text">System Online</div>
                   </div>
                 </div>
@@ -365,6 +373,21 @@
               <div id="unknownDevicesTable" style="margin-bottom:24px;"></div>
               <!-- IoT device cards by manufacturer will be loaded here -->
             </div>
+          </section>
+
+          <section id="smartPlugsPanel" class="card" data-panel="smart-plugs">
+            <div class="row row--between row--center">
+              <h2 style="margin:0">Smart Plugs</h2>
+              <div class="row row--gap-xs">
+                <button id="btnRefreshSmartPlugs" type="button" class="ghost">Refresh</button>
+                <button id="btnDiscoverSmartPlugs" type="button" class="primary">Discover</button>
+              </div>
+            </div>
+            <p class="tiny" style="margin:8px 0 16px;color:#475569;max-width:720px;">
+              Manage Shelly, Kasa, Tasmota, and SwitchBot plugs that control HVAC, dehumidifiers, and circulation fans. Toggle power, inspect live wattage, and attach rule guardrails per room scope.
+            </p>
+            <div id="smartPlugsAlert" class="alert" role="status" aria-live="polite" hidden></div>
+            <div class="table" id="smartPlugsTable" role="region" aria-live="polite"></div>
           </section>
 
           <section id="controllerAssignmentsPanel" class="card card--panel" data-panel="control-assignments" style="margin-top:24px;">

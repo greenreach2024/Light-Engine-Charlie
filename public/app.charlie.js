@@ -1859,6 +1859,12 @@ const $$ = (s, r=document)=>r.querySelectorAll(s);
 const setStatus = m => { const el=$("#status"); if(el) el.textContent = m; };
 //
 
+STATE.smartPlugs = Array.isArray(STATE.smartPlugs) ? STATE.smartPlugs : [];
+STATE.preAutomationRules = Array.isArray(STATE.preAutomationRules) ? STATE.preAutomationRules : [];
+STATE.preAutomationEnv = STATE.preAutomationEnv || { scopes: {} };
+STATE.preAutomationAlert = null;
+STATE.environment = Array.isArray(STATE.environment) ? STATE.environment : [];
+
 // ...existing code...
 class FarmWizard {
   // Map step names to user-friendly titles
@@ -8605,6 +8611,219 @@ function renderGrowRoomOverview() {
   gridEl.innerHTML = cards.join('');
 }
 
+function updateAutomationIndicator(status = {}) {
+  const indicator = document.getElementById('automationIndicator');
+  const statusEl = document.getElementById('automationIndicatorStatus');
+  if (!indicator || !statusEl) return;
+
+  indicator.classList.remove('is-active', 'is-idle', 'is-alert');
+
+  if (status.error) {
+    indicator.classList.add('is-alert');
+    statusEl.textContent = status.error;
+    return;
+  }
+
+  const managedZones = (STATE.environment || []).filter(zone => zone.meta?.managedByPlugs);
+  const hasRules = (STATE.preAutomationRules || []).length > 0;
+
+  if (managedZones.length > 0) {
+    indicator.classList.add('is-active');
+    statusEl.textContent = managedZones.length === 1
+      ? 'Managing 1 zone'
+      : `Managing ${managedZones.length} zones`;
+  } else if (hasRules) {
+    indicator.classList.add('is-idle');
+    statusEl.textContent = 'Armed';
+  } else {
+    indicator.classList.add('is-idle');
+    statusEl.textContent = 'Idle';
+  }
+}
+
+function formatPower(powerW) {
+  if (typeof powerW !== 'number' || Number.isNaN(powerW)) return '—';
+  if (powerW >= 1000) {
+    return `${(powerW / 1000).toFixed(2)} kW`;
+  }
+  return `${powerW.toFixed(1)} W`;
+}
+
+function renderSmartPlugs() {
+  const container = document.getElementById('smartPlugsTable');
+  if (!container) return;
+
+  const plugs = Array.isArray(STATE.smartPlugs) ? STATE.smartPlugs : [];
+  const rules = Array.isArray(STATE.preAutomationRules) ? STATE.preAutomationRules : [];
+
+  if (!plugs.length) {
+    container.innerHTML = '<p class="tiny text-muted">No smart plugs discovered yet. Use Discover to scan Shelly, Kasa, SwitchBot, and Tasmota devices.</p>';
+    return;
+  }
+
+  const rows = plugs.map((plug) => {
+    const state = plug.state || {};
+    const ruleMatches = rules.filter((rule) => Array.isArray(rule.actions) && rule.actions.some((action) => action.plugId === plug.id));
+    const ruleIds = ruleMatches.map((rule) => rule.id);
+    const vendorLabel = plug.vendor ? plug.vendor.charAt(0).toUpperCase() + plug.vendor.slice(1) : 'Plug';
+    const online = state.online !== false;
+    const on = Boolean(state.on);
+    const statusBadge = `<span class="badge-rule ${online ? '' : 'offline'}">${online ? (on ? 'ON' : 'OFF') : 'Offline'}</span>`;
+    const select = rules.length
+      ? `<select data-plug-rule-select data-plug-id="${plug.id}" multiple size="${Math.min(4, Math.max(2, rules.length))}" aria-label="Assign rules to ${plug.name || plug.id}">
+          ${rules.map((rule) => `<option value="${rule.id}" ${ruleIds.includes(rule.id) ? 'selected' : ''}>${rule.name}</option>`).join('')}
+        </select>
+        <div class="tiny text-muted" style="margin-top:4px;">Hold Ctrl/Cmd to multi-select.</div>`
+      : '<span class="tiny text-muted">No rules defined</span>';
+
+    const ruleSummary = ruleMatches.length
+      ? ruleMatches.map((rule) => rule.name).join(', ')
+      : '—';
+
+    return `
+      <tr data-plug-row="${plug.id}">
+        <td>
+          <div style="font-weight:600;">${plug.name || plug.id}</div>
+          <div class="tiny text-muted">${vendorLabel}${plug.model ? ` • ${plug.model}` : ''}</div>
+        </td>
+        <td class="smart-plug-power">${formatPower(state.powerW)}</td>
+        <td>${statusBadge}</td>
+        <td>
+          <div class="smart-plug-toggle">
+            <button type="button" class="ghost" data-plug-toggle data-plug-id="${plug.id}" data-state="on">On</button>
+            <button type="button" class="ghost" data-plug-toggle data-plug-id="${plug.id}" data-state="off">Off</button>
+            <button type="button" class="ghost" data-plug-refresh data-plug-id="${plug.id}">Refresh</button>
+          </div>
+        </td>
+        <td>
+          ${select}
+        </td>
+        <td class="tiny">${ruleSummary}</td>
+      </tr>
+    `;
+  }).join('');
+
+  container.innerHTML = `
+    <table>
+      <thead>
+        <tr>
+          <th scope="col">Plug</th>
+          <th scope="col">Power</th>
+          <th scope="col">State</th>
+          <th scope="col">Control</th>
+          <th scope="col">Rule Assignment</th>
+          <th scope="col">Summary</th>
+        </tr>
+      </thead>
+      <tbody>${rows}</tbody>
+    </table>
+  `;
+}
+
+function setSmartPlugsAlert(message, kind = 'info') {
+  const alertEl = document.getElementById('smartPlugsAlert');
+  if (!alertEl) return;
+  if (!message) {
+    alertEl.hidden = true;
+    alertEl.classList.remove('is-error', 'is-success');
+    alertEl.textContent = '';
+    return;
+  }
+  alertEl.hidden = false;
+  alertEl.textContent = message;
+  alertEl.classList.remove('is-error', 'is-success');
+  if (kind === 'error') {
+    alertEl.classList.add('is-error');
+  } else if (kind === 'success') {
+    alertEl.classList.add('is-success');
+  }
+}
+
+async function loadPreAutomationRules() {
+  try {
+    const payload = await api('/rules');
+    STATE.preAutomationRules = Array.isArray(payload?.rules) ? payload.rules : [];
+  } catch (error) {
+    STATE.preAutomationRules = [];
+    console.warn('Failed to load automation rules', error);
+  }
+}
+
+async function loadSmartPlugs({ silent } = {}) {
+  try {
+    const payload = await api('/plugs');
+    STATE.smartPlugs = Array.isArray(payload?.plugs) ? payload.plugs : [];
+    renderSmartPlugs();
+    if (!silent) {
+      setSmartPlugsAlert(`Discovered ${STATE.smartPlugs.length} smart plug${STATE.smartPlugs.length === 1 ? '' : 's'} at ${new Date().toLocaleTimeString()}.`, 'success');
+    }
+  } catch (error) {
+    if (!silent) {
+      setSmartPlugsAlert(`Smart plug refresh failed: ${error.message}`, 'error');
+    }
+    console.warn('Failed to load smart plugs', error);
+  }
+}
+
+async function discoverSmartPlugs() {
+  setSmartPlugsAlert('Running network discovery…');
+  try {
+    const payload = await api('/plugs/discover', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({}) });
+    STATE.smartPlugs = Array.isArray(payload?.plugs) ? payload.plugs : [];
+    renderSmartPlugs();
+    setSmartPlugsAlert(`Discovery complete • ${STATE.smartPlugs.length} plug${STATE.smartPlugs.length === 1 ? '' : 's'} online`, 'success');
+  } catch (error) {
+    setSmartPlugsAlert(`Discovery failed: ${error.message}`, 'error');
+    console.warn('Smart plug discovery error', error);
+  }
+}
+
+async function assignPlugRules(plugId, ruleIds) {
+  try {
+    await api(`/plugs/${encodeURIComponent(plugId)}/rules`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ ruleIds, action: { set: 'on' } })
+    });
+    await loadPreAutomationRules();
+    updateAutomationIndicator();
+    renderSmartPlugs();
+    setSmartPlugsAlert(`Updated rules for ${plugId}`, 'success');
+  } catch (error) {
+    setSmartPlugsAlert(`Failed to update rules for ${plugId}: ${error.message}`, 'error');
+  }
+}
+
+async function toggleSmartPlug(plugId, desiredState) {
+  try {
+    setSmartPlugsAlert(`Turning ${plugId} ${desiredState ? 'on' : 'off'}…`);
+    await api(`/plugs/${encodeURIComponent(plugId)}/state`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ set: desiredState ? 'on' : 'off' })
+    });
+    await loadSmartPlugs({ silent: true });
+    setSmartPlugsAlert(`${plugId} is now ${desiredState ? 'ON' : 'OFF'}`, 'success');
+  } catch (error) {
+    setSmartPlugsAlert(`Failed to toggle ${plugId}: ${error.message}`, 'error');
+  }
+}
+
+async function refreshSmartPlug(plugId) {
+  try {
+    if (plugId) {
+      setSmartPlugsAlert(`Refreshing ${plugId}…`);
+    }
+    await loadSmartPlugs({ silent: true });
+    if (plugId) {
+      setSmartPlugsAlert(`Latest telemetry loaded for ${plugId}`, 'success');
+    }
+  } catch (error) {
+    console.warn('Smart plug refresh error', error);
+    setSmartPlugsAlert(`Refresh failed: ${error.message}`, 'error');
+  }
+}
+
 function renderEnvironment() {
   const container = document.getElementById('envZones');
   if (!container) return;
@@ -8612,7 +8831,7 @@ function renderEnvironment() {
   container.innerHTML = STATE.environment.map(zone => `
     <div class="env-zone" data-zone-id="${zone.id}">
       <div class="env-zone__header">
-        <h3 class="env-zone__name">${zone.name}</h3>
+        <h3 class="env-zone__name">${zone.name}${zone.meta?.managedByPlugs ? '<span class="env-zone__badge">Managed by Plugs</span>' : ''}</h3>
         <div class="env-zone__status" title="${zone.meta?.source ? `Source: ${zone.meta.source}` : 'Source unknown'}${typeof zone.meta?.battery === 'number' ? ` • Battery: ${zone.meta.battery}%` : ''}${typeof zone.meta?.rssi === 'number' ? ` • RSSI: ${zone.meta.rssi} dBm` : ''}">
           <span class="env-status-dot"></span>
           <span class="tiny">${zone.meta?.source || '—'}${typeof zone.meta?.battery === 'number' ? ` • ${zone.meta.battery}%` : ''}${typeof zone.meta?.rssi === 'number' ? ` • ${zone.meta.rssi} dBm` : ''}</span>
@@ -8661,18 +8880,21 @@ function renderEnvironment() {
   });
 
   renderGrowRoomOverview();
+  updateAutomationIndicator();
 }
 
 // Environment polling and actions
 let ENV_POLL_TIMER = null;
 async function reloadEnvironment() {
   try {
-    const env = await api('/env');
-    STATE.environment = env?.zones || [];
+    const payload = await api('/env');
+    STATE.preAutomationEnv = payload?.env || { scopes: {} };
+    STATE.environment = Array.isArray(payload?.zones) ? payload.zones : [];
     renderEnvironment();
     $('#envStatus')?.replaceChildren(document.createTextNode(`Updated ${new Date().toLocaleTimeString()}`));
   } catch (e) {
     $('#envStatus')?.replaceChildren(document.createTextNode(`Env load failed: ${e.message}`));
+    updateAutomationIndicator({ error: 'Offline' });
   }
 }
 function startEnvPolling(intervalMs = 10000) {
@@ -11925,6 +12147,45 @@ document.addEventListener('DOMContentLoaded', async () => {
         icon: '🧭'
       });
     });
+
+    document.getElementById('btnRefreshSmartPlugs')?.addEventListener('click', () => loadSmartPlugs());
+    document.getElementById('btnDiscoverSmartPlugs')?.addEventListener('click', () => discoverSmartPlugs());
+
+    const smartPlugTable = document.getElementById('smartPlugsTable');
+    if (smartPlugTable) {
+      smartPlugTable.addEventListener('click', (event) => {
+        const target = event.target;
+        if (!(target instanceof HTMLElement)) return;
+        if (target.matches('[data-plug-toggle]')) {
+          const plugId = target.getAttribute('data-plug-id');
+          const desired = target.getAttribute('data-state') === 'on';
+          if (plugId) {
+            toggleSmartPlug(plugId, desired);
+          }
+        } else if (target.matches('[data-plug-refresh]')) {
+          const plugId = target.getAttribute('data-plug-id');
+          if (plugId) {
+            refreshSmartPlug(plugId);
+          }
+        }
+      });
+
+      smartPlugTable.addEventListener('change', (event) => {
+        const target = event.target;
+        if (!(target instanceof HTMLSelectElement)) return;
+        if (target.matches('[data-plug-rule-select]')) {
+          const plugId = target.getAttribute('data-plug-id');
+          if (!plugId) return;
+          const selected = Array.from(target.selectedOptions).map((option) => option.value);
+          assignPlugRules(plugId, selected);
+        }
+      });
+    }
+
+    await loadPreAutomationRules();
+    await loadSmartPlugs({ silent: true });
+    await reloadEnvironment();
+    startEnvPolling();
 
     const profileForm = document.getElementById('profileForm');
     if (profileForm) {
