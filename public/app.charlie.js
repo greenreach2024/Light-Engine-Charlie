@@ -296,6 +296,66 @@ function computeChannelPercentages(mix) {
   return { percentages: pct, total: totals };
 }
 
+function deriveDeviceId(device, fallbackIndex = 0) {
+  if (!device || typeof device !== 'object') {
+    return `device-${fallbackIndex + 1}`;
+  }
+  const candidates = [
+    device.id,
+    device.device_id,
+    device.deviceId,
+    device.mac,
+    device.address,
+    device.serial,
+    device.uuid,
+    device._id
+  ];
+  for (const candidate of candidates) {
+    if (candidate == null) continue;
+    const text = String(candidate).trim();
+    if (text) return text;
+  }
+  return `device-${fallbackIndex + 1}`;
+}
+
+function deriveDeviceName(device, fallbackId = '') {
+  if (!device || typeof device !== 'object') {
+    return fallbackId || 'Unknown device';
+  }
+  const candidates = [
+    device.deviceName,
+    device.name,
+    device.label,
+    device.alias,
+    device.description
+  ];
+  for (const candidate of candidates) {
+    if (candidate == null) continue;
+    const text = String(candidate).trim();
+    if (text) return text;
+  }
+  const vendor = typeof device.vendor === 'string' ? device.vendor.trim() : '';
+  const model = typeof device.model === 'string' ? device.model.trim() : '';
+  const combined = [vendor, model].filter(Boolean).join(' ').trim();
+  if (combined) return combined;
+  return fallbackId || 'Unknown device';
+}
+
+function formatDelta(delta, unit = '', precision = 0) {
+  if (delta == null || !Number.isFinite(delta)) return null;
+  const factor = Math.pow(10, precision);
+  const rounded = Math.round(delta * factor) / factor;
+  const threshold = precision === 0 ? 0.5 : 0.5 / factor;
+  if (Math.abs(rounded) < threshold) return `±0${unit}`;
+  const sign = rounded > 0 ? '+' : '';
+  return `${sign}${rounded.toFixed(precision)}${unit}`;
+}
+
+function formatValueWithDelta(value, deltaText) {
+  if (!deltaText) return value;
+  return `${value} (${deltaText})`;
+}
+
 function resolveEnvironmentTargets(roomId, zoneValue) {
   const envZones = Array.isArray(STATE.environment) ? STATE.environment : [];
   if (!envZones.length) return null;
@@ -6656,10 +6716,29 @@ async function loadAllData() {
     }
     
     // Ensure all devices have proper online status for research mode
-    STATE.devices = STATE.devices.map(device => ({
-      ...device,
-      online: device.online !== false // Default to true unless explicitly false
-    }));
+    STATE.devices = STATE.devices.map((device, index) => {
+      if (!device || typeof device !== 'object') {
+        const fallbackId = deriveDeviceId(null, index);
+        return {
+          id: fallbackId,
+          deviceName: fallbackId,
+          name: fallbackId,
+          online: true
+        };
+      }
+      const copy = { ...device };
+      const id = deriveDeviceId(copy, index);
+      copy.id = id;
+      const friendlyName = deriveDeviceName(copy, id);
+      if (!copy.deviceName || !String(copy.deviceName).trim()) {
+        copy.deviceName = friendlyName;
+      }
+      if (!copy.name || !String(copy.name).trim()) {
+        copy.name = friendlyName;
+      }
+      copy.online = copy.online !== false;
+      return copy;
+    });
     
     // Load static data files
     const [groups, schedules, plans, environment, calibrations, spdLibrary, deviceMeta, deviceKB, equipmentKB, deviceManufacturers, farm, rooms, switchbotDevices] = await Promise.all([
@@ -8689,6 +8768,23 @@ function wireGlobalEvents() {
     const staticCount = resolvedLights.length - dynamicCount;
     const mixInfo = computeMixAndHex(group);
     const { percentages } = computeChannelPercentages(mixInfo.mix);
+    const plan = group ? STATE.plans.find((p) => p.id === group.plan) : null;
+    const planSpectrum = plan?.spectrum || { cw: 45, ww: 45, bl: 0, rd: 0 };
+    const { percentages: planPercentages } = computeChannelPercentages(planSpectrum);
+    const hud = readHUD();
+    const masterValue = Number.isFinite(Number(hud.master)) ? Number(hud.master) : 100;
+    const masterPct = Math.max(0, Math.min(100, masterValue));
+    const intensityScale = plan ? (hud.lock ? masterPct / 100 : 1) : 1;
+    const planPhotoperiod = Number(plan?.photoperiod || 12);
+    const planPpfd = Number(plan?.ppfd || 0);
+    const planDliValue = plan
+      ? (plan.dli != null
+          ? Number(plan.dli)
+          : (planPpfd > 0 ? (planPpfd * 3600 * planPhotoperiod) / 1e6 : 0))
+      : null;
+    const activePhotoperiod = planPhotoperiod;
+    const actualPpfd = planPpfd ? planPpfd * intensityScale : 0;
+    const actualDli = actualPpfd > 0 && activePhotoperiod > 0 ? (actualPpfd * 3600 * activePhotoperiod) / 1e6 : 0;
     card.classList.remove('is-empty');
     if (title) title.textContent = `Current mix • ${resolvedLights.length} light${resolvedLights.length === 1 ? '' : 's'}`;
     if (subtitle) {
@@ -8705,16 +8801,48 @@ function wireGlobalEvents() {
       }
     }
     if (metrics) {
+      const hasPlan = !!plan;
       const items = [
-        { label: 'Cool white', value: `${percentages.cw.toFixed(0)}%` },
-        { label: 'Warm white', value: `${percentages.ww.toFixed(0)}%` },
-        { label: 'Blue', value: `${percentages.bl.toFixed(0)}%` },
-        { label: 'Red', value: `${percentages.rd.toFixed(0)}%` },
-        { label: 'Dynamic', value: dynamicCount ? `${dynamicCount}` : '0' },
-        { label: 'Static', value: staticCount ? `${staticCount}` : '0' },
+        {
+          label: 'Cool white',
+          value: `${percentages.cw.toFixed(0)}%`,
+          delta: hasPlan ? formatDelta(percentages.cw - planPercentages.cw, '%') : null
+        },
+        {
+          label: 'Warm white',
+          value: `${percentages.ww.toFixed(0)}%`,
+          delta: hasPlan ? formatDelta(percentages.ww - planPercentages.ww, '%') : null
+        },
+        {
+          label: 'Blue',
+          value: `${percentages.bl.toFixed(0)}%`,
+          delta: hasPlan ? formatDelta(percentages.bl - planPercentages.bl, '%') : null
+        },
+        {
+          label: 'Red',
+          value: `${percentages.rd.toFixed(0)}%`,
+          delta: hasPlan ? formatDelta(percentages.rd - planPercentages.rd, '%') : null
+        },
+        {
+          label: 'PPFD',
+          value: actualPpfd ? `${actualPpfd.toFixed(0)} µmol·m⁻²·s⁻¹` : '—',
+          delta: hasPlan ? formatDelta(actualPpfd - planPpfd, ' µmol·m⁻²·s⁻¹') : null
+        },
+        {
+          label: 'Photoperiod',
+          value: activePhotoperiod ? `${activePhotoperiod.toFixed(1)} h` : '—',
+          delta: hasPlan ? formatDelta(activePhotoperiod - planPhotoperiod, ' h', 1) : null
+        },
+        {
+          label: 'DLI',
+          value: actualDli ? `${actualDli.toFixed(2)} mol·m⁻²·d⁻¹` : '—',
+          delta: hasPlan ? formatDelta(actualDli - (planDliValue ?? 0), ' mol·m⁻²·d⁻¹', 2) : null
+        },
+        { label: 'Dynamic fixtures', value: dynamicCount ? `${dynamicCount}` : '0', delta: null },
+        { label: 'Static fixtures', value: staticCount ? `${staticCount}` : '0', delta: null }
       ];
       metrics.innerHTML = items
-        .map((item) => `<dt>${escapeHtml(item.label)}</dt><dd>${escapeHtml(item.value)}</dd>`)
+        .map((item) => `<dt>${escapeHtml(item.label)}</dt><dd>${escapeHtml(formatValueWithDelta(item.value, item.delta))}</dd>`)
         .join('');
     }
     const shouldLock = resolvedLights.length > 0 && dynamicCount === 0;
