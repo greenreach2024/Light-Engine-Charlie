@@ -1722,7 +1722,45 @@ class FarmWizard {
       return;
     }
     host.innerHTML = '';
+    // Unify summary logic with Light Setup summary
+    const lightSetups = window.STATE?.lightSetups || [];
     this.data.rooms.forEach(room => {
+      // Gather zones from room and light setups (match by id or name)
+      let zones = new Set(Array.isArray(room.zones) ? room.zones : []);
+      let controls = new Set();
+      let lights = {};
+      let numLights = 0;
+      lightSetups.forEach(setup => {
+        if (
+          String(setup.room) === String(room.id) ||
+          String(setup.room) === String(room.name)
+        ) {
+          if (setup.zone) zones.add(setup.zone);
+          if (setup.controlMethod && setup.controlMethod !== '0' && setup.controlMethod !== 0) controls.add(setup.controlMethod);
+          (setup.fixtures||[]).forEach(f => {
+            const key = f.vendor||f.name||f.model||'Light';
+            if (!lights[key]) lights[key] = 0;
+            lights[key] += Number(f.count)||1;
+            numLights += Number(f.count)||1;
+          });
+        }
+      });
+      // If no controls found, check for controlMethod in room object
+      if (controls.size === 0 && room.controlMethod) controls.add(room.controlMethod);
+      const zoneNames = Array.from(zones).join(', ') || '—';
+      const controlsList = controls.size ? Array.from(controls).join(', ') : '—';
+      const lightsList = Object.keys(lights).length ? Object.entries(lights).map(([k,v]) => `${escapeHtml(k)} ×${v}`).join(', ') : '—';
+      // Equipment summary (if present)
+      let equipmentList = '—';
+      if (Array.isArray(room.equipment) && room.equipment.length) {
+        const eqMap = {};
+        room.equipment.forEach(eq => {
+          const key = eq.category || eq.type || eq.name || 'Equipment';
+          if (!eqMap[key]) eqMap[key] = 0;
+          eqMap[key] += Number(eq.count)||1;
+        });
+        equipmentList = Object.entries(eqMap).map(([k,v]) => `${escapeHtml(k)} ×${v}`).join(', ');
+      }
       const card = document.createElement('div');
       card.className = 'farm-room-card';
       card.innerHTML = `
@@ -1730,7 +1768,13 @@ class FarmWizard {
           <strong>${escapeHtml(room.name)}</strong>
           <button type="button" class="ghost tiny" data-action="remove-room" data-room="${room.id}">Remove</button>
         </div>
-        <div class="farm-room-card__zones" data-room="${room.id}">${room.zones.map(z => `<span class="chip tiny" data-zone="${escapeHtml(z)}">${escapeHtml(z)} <button type="button" data-action="remove-zone" data-room="${room.id}" data-zone="${escapeHtml(z)}">×</button></span>`).join('')}</div>
+        <div class="farm-room-card__summary" data-room="${room.id}">
+          <div class="tiny"><b>Zones:</b> ${zoneNames}</div>
+          <div class="tiny"><b>Controls:</b> ${controlsList}</div>
+          <div class="tiny"><b>Lights:</b> ${numLights} (${lightsList})</div>
+          <div class="tiny"><b>Equipment:</b> ${equipmentList}</div>
+        </div>
+        <div class="farm-room-card__zones" data-room="${room.id}" style="margin-top:6px">${Array.from(zones).map(z => `<span class="chip tiny" data-zone="${escapeHtml(z)}">${escapeHtml(z)} <button type="button" data-action="remove-zone" data-room="${room.id}" data-zone="${escapeHtml(z)}">×</button></span>`).join('')}</div>
         <div class="row" style="gap:6px;flex-wrap:wrap;margin-top:8px">
           <input type="text" class="tiny farm-zone-input" data-room="${room.id}" placeholder="Add zone">
           <button type="button" class="ghost tiny" data-action="add-zone" data-room="${room.id}">Add zone</button>
@@ -3587,7 +3631,7 @@ class DeviceManagerWindow {
 
 // --- Grow Room Wizard ---
 class RoomWizard {
-  nextStep() {
+  renderRoomsEditor() {
     if (this._stepInProgress || this._blockNextStep) {
       console.warn('[RoomWizard] nextStep: already in progress or blocked, ignoring call');
       return;
@@ -3628,6 +3672,11 @@ class RoomWizard {
     console.debug('[RoomWizard] constructor called');
     this.modal = $('#roomModal');
     this.form = $('#roomWizardForm');
+    // Listen for global lightSetupsChanged event to re-render summary
+    if (!this._lightSetupsListener) {
+      this._lightSetupsListener = () => this.renderRoomsEditor();
+      window.addEventListener('lightSetupsChanged', this._lightSetupsListener);
+    }
     // Auto-advance behavior: when a required field for a step is completed,
     // the wizard will advance automatically. Can be disabled if needed.
     // Default to manual navigation so you can review each page without being blocked
@@ -7018,105 +7067,123 @@ function renderLightSetups() {
 function renderLightSetupSummary() {
   const summaryContainer = document.getElementById('lightSetupSummary');
   if (!summaryContainer) return;
-  
-  const lightSetups = STATE.lightSetups || [];
-  summaryContainer.innerHTML = STATE.rooms.map(r => {
-      const fixtures = (r.fixtures||[]).reduce((sum,f)=> sum + (Number(f.count)||0), 0);
-      const sensorCats = (r.sensors?.categories||[]).map(s => escapeHtml(s)).join(', ') || '—';
-      const sensorPlacements = Object.entries(r.sensors?.placements || {})
-        .map(([cat, place]) => `${escapeHtml(cat)}@${escapeHtml(place || 'room')}`)
-        .join(', ') || '—';
-      const prog = r._categoryProgress || {};
-      const badge = (st) => {
-        if (st === 'complete') return '✅ Ready';
-        if (st === 'needs-info') return '• Needs details';
-        if (st === 'needs-hub' || st === 'needs-energy' || st === 'needs-setup') return '• Needs follow-up';
-        return '';
-      };
-      const orderedCats = ['hvac','mini-split','dehumidifier','fans','vents','controllers','sensors'];
-      const statusRow = orderedCats
-        .filter(c => prog[c])
-        .map(c => {
-          const labelText = typeof roomWizard?.categoryLabel === 'function' ? roomWizard.categoryLabel(c) : c;
-          const label = escapeHtml(labelText);
-          const statusText = escapeHtml(badge(prog[c]?.status));
-          return `<span class=\"chip tiny\" title=\"${label}\">${label}: ${statusText}</span>`;
-        })
-        .join(' ');
-      const zones = (r.zones || []).map(z => escapeHtml(z)).join(', ') || '—';
-      const connectivity = r.connectivity || {};
-      const connSummary = connectivity.hasHub === null
-        ? 'Hub: ?'
-        : connectivity.hasHub
-          ? `Hub: ${connectivity.hubType ? escapeHtml(connectivity.hubType) : 'present'}${connectivity.hubIp ? ` @ ${escapeHtml(connectivity.hubIp)}` : ''}`
-          : 'Hub: none';
-      const layout = r.layout || {};
-      const layoutType = escapeHtml(layout.type || '—');
-      const name = escapeHtml(r.name || '');
-      const control = escapeHtml(r.controlMethod || '—');
-      const roomId = escapeHtml(r.id || '');
-      return `<div class=\"card\" style=\"margin-top:8px\">\n        <div class=\"row\" style=\"justify-content:space-between;align-items:center\">\n          <div>\n            <h3 style=\"margin:0\">${name}</h3>\n            <div class=\"tiny\" style=\"color:#475569\">Layout: ${layoutType} • Zones: ${zones} • Control: ${control}</div>\n            <div class=\"tiny\" style=\"color:#475569\">Sensors: ${sensorCats} • Placement: ${sensorPlacements}</div>\n            <div class=\"tiny\" style=\"color:#475569\">${connSummary}</div>\n            ${statusRow ? `<div class=\"tiny\" style=\"margin-top:4px\">${statusRow}</div>` : ''}\n          </div>\n          <div class=\"row\" style=\"gap:6px\">\n            <button type=\"button\" class=\"ghost\" data-action=\"edit-room\" data-room-id=\"${roomId}\">Edit</button>\n            <button type=\"button\" class=\"ghost danger\" data-action=\"del-room\" data-room-id=\"${roomId}\">Delete</button>\n          </div>\n        </div>\n      </div>`;
-    }).join('');
+  // Listen for global lightSetupsChanged event to re-render summary
+  if (!window._lightSetupSummaryListener) {
+    window._lightSetupSummaryListener = () => renderLightSetupSummary();
+    window.addEventListener('lightSetupsChanged', window._lightSetupSummaryListener);
+  }
 
-  // Wire Edit actions
-  const host = summaryContainer;
-  // Delegated Edit action wiring for reliability
-  host.addEventListener('click', (e) => {
-    const btn = e.target.closest('[data-action="edit-room"]');
-    if (!btn) return;
-    const id = btn.getAttribute('data-room-id');
-    if (!id) return;
-    const room = STATE.rooms.find(r => String(r.id) === String(id));
-    if (!room) {
-      console.warn('Edit requested for unknown room id', id);
-      if (typeof showToast === 'function') {
-        showToast({ title: 'Room not found', msg: 'Unable to load room for editing.', kind: 'warn', icon: '⚠️' });
+  // Group light setups by room (id or name)
+  const lightSetups = STATE.lightSetups || [];
+  // Map: roomId -> { name, zones, controls, lights }
+  const roomMap = {};
+  lightSetups.forEach(setup => {
+    const roomKey = String(setup.room);
+    if (!roomMap[roomKey]) {
+      // Try to find room name from STATE.rooms
+      let roomName = roomKey;
+      let zones = [];
+      const roomObj = (STATE.rooms||[]).find(r => String(r.id) === roomKey || String(r.name) === roomKey);
+      if (roomObj) {
+        roomName = roomObj.name || roomKey;
+        zones = Array.isArray(roomObj.zones) ? roomObj.zones.slice() : [];
+      }
+      roomMap[roomKey] = {
+        id: roomKey,
+        name: roomName,
+        zones: new Set(zones),
+        controls: new Set(),
+        lights: {},
+        totalLights: 0
+      };
+    }
+    // Add zones from setup
+    if (setup.zone) roomMap[roomKey].zones.add(setup.zone);
+    // Add control method
+    if (setup.controlMethod) roomMap[roomKey].controls.add(setup.controlMethod);
+    // Add lights
+    (setup.fixtures||[]).forEach(f => {
+      const key = f.vendor||f.name||f.model||'Light';
+      if (!roomMap[roomKey].lights[key]) roomMap[roomKey].lights[key] = 0;
+      roomMap[roomKey].lights[key] += Number(f.count)||1;
+      roomMap[roomKey].totalLights += Number(f.count)||1;
+    });
+  });
+
+  // Render summary cards for each room in roomMap
+  summaryContainer.innerHTML = Object.values(roomMap).map(room => {
+    const zones = Array.from(room.zones).join(', ') || '—';
+    const controls = Array.from(room.controls).join(', ') || '—';
+    const lightsList = Object.keys(room.lights).length ? Object.entries(room.lights).map(([k,v]) => `${escapeHtml(k)} ×${v}`).join(', ') : '—';
+    const name = escapeHtml(room.name || room.id);
+    const roomId = escapeHtml(room.id);
+    return `<div class="card" style="margin-top:8px">
+      <div class="row" style="justify-content:space-between;align-items:center">
+        <div>
+          <h3 style="margin:0">${name}</h3>
+          <div class="tiny" style="color:#475569">Zones: ${zones} • Controls: ${controls}</div>
+          <div class="tiny" style="color:#475569">Lights: ${room.totalLights} (${lightsList})</div>
+        </div>
+        <div class="row" style="gap:6px">
+          <button type="button" class="ghost" data-action="edit-room" data-room-id="${roomId}">Edit</button>
+          <button type="button" class="ghost danger" data-action="del-room" data-room-id="${roomId}">Delete</button>
+        </div>
+      </div>
+    </div>`;
+  }).join('');
+
+  // Wire Edit and Delete actions (delegated)
+  summaryContainer.onclick = async function(e) {
+    const editBtn = e.target.closest('[data-action="edit-room"]');
+    if (editBtn) {
+      const id = editBtn.getAttribute('data-room-id');
+      if (!id) return;
+      const room = (STATE.rooms||[]).find(r => String(r.id) === String(id) || String(r.name) === String(id));
+      if (!room) {
+        if (typeof showToast === 'function') showToast({ title: 'Room not found', msg: 'Unable to load room for editing.', kind: 'warn', icon: '⚠️' });
+        return;
+      }
+      if (window.freshLightWizard && typeof window.freshLightWizard.open === 'function') {
+        window.freshLightWizard.open();
+        setTimeout(() => {
+          const roomSelect = document.getElementById('freshRoomSelect');
+          if (roomSelect) {
+            roomSelect.value = room.name;
+            roomSelect.dispatchEvent(new Event('change', { bubbles: true }));
+          }
+        }, 100);
+      } else {
+        const modal = document.getElementById('freshLightModal');
+        if (modal) {
+          modal.setAttribute('aria-hidden', 'false');
+          modal.style.removeProperty('display');
+          modal.style.opacity = '1';
+          modal.style.pointerEvents = 'all';
+        }
       }
       return;
     }
-    // Open the Light Setup wizard, not the Grow Room wizard
-    if (window.freshLightWizard && typeof window.freshLightWizard.open === 'function') {
-      window.freshLightWizard.open();
-      // Pre-select the room in the wizard if possible
-      setTimeout(() => {
-        const roomSelect = document.getElementById('freshRoomSelect');
-        if (roomSelect) {
-          roomSelect.value = room.name;
-          roomSelect.dispatchEvent(new Event('change', { bubbles: true }));
-        }
-      }, 100);
-    } else {
-      const modal = document.getElementById('freshLightModal');
-      if (modal) {
-        modal.setAttribute('aria-hidden', 'false');
-        modal.style.removeProperty('display');
-        modal.style.opacity = '1';
-        modal.style.pointerEvents = 'all';
-      }
-    }
-  });
-
-  // Wire Delete actions
-  host.querySelectorAll('[data-action="del-room"]').forEach(btn => {
-    btn.addEventListener('click', async (e) => {
-      const id = btn.getAttribute('data-room-id');
-      const room = STATE.rooms.find(r => String(r.id) === String(id));
+    const delBtn = e.target.closest('[data-action="del-room"]');
+    if (delBtn) {
+      const id = delBtn.getAttribute('data-room-id');
       if (!id) return;
+      const room = (STATE.rooms||[]).find(r => String(r.id) === String(id) || String(r.name) === String(id));
       const name = room?.name || id;
       if (!confirm(`Delete grow room “${name}”? This cannot be undone.`)) return;
-      const ok = await safeRoomsDelete(id);
-      if (ok) {
-        setStatus(`Deleted room ${name}`);
-        renderRooms();
-        // Update controller assignments when rooms are deleted
-        if (typeof renderControllerAssignments === 'function') {
-          renderControllerAssignments();
-        }
-      } else {
-        alert('Failed to delete room');
-      }
-    });
-  });
+      // Remove from STATE.rooms
+      if (STATE.rooms) STATE.rooms = STATE.rooms.filter(r => String(r.id) !== String(id) && String(r.name) !== String(id));
+      // Remove from STATE.lightSetups
+      if (STATE.lightSetups) STATE.lightSetups = STATE.lightSetups.filter(setup => String(setup.room) !== String(id) && String(setup.room) !== name);
+      // Save and re-render
+      await safeRoomsSave();
+      window.dispatchEvent(new CustomEvent('lightSetupsChanged'));
+      renderLightSetupSummary();
+      renderRooms();
+      if (typeof renderControllerAssignments === 'function') renderControllerAssignments();
+      setStatus(`Deleted room ${name}`);
+      return;
+    }
+  };
 
   renderGrowRoomOverview();
 }
@@ -9863,6 +9930,7 @@ class FreshLightWizard {
       createdAt: new Date().toISOString()
     };
     STATE.lightSetups.push(lightSetup);
+    window.dispatchEvent(new CustomEvent('lightSetupsChanged'));
     renderLightSetupSummary();
     renderControllerAssignments();
     // Look up user-friendly room name

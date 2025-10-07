@@ -6,22 +6,192 @@
 [HPM] Proxy created: /  -> http://100.65.187.59:8089
 [HPM] Subscribed to http-proxy events: [ 'proxyReq', 'error', 'close' ]
 [charlie] running http://127.0.0.1:8091 → http://100.65.187.59:8089
-[HPM] Router new target: http://100.65.187.59:8089 -> "http://100.65.187.59:8089"
-[HPM] GET /api/status -> http://100.65.187.59:8089
-(node:20749) [DEP0060] DeprecationWarning: The `util._extend` API is deprecated. Please use Object.assign() instead.
-(Use `node --trace-deprecation ...` to show where the warning was created)
-[→] GET /api/status -> http://100.65.187.59:8089/api/status
 ⚠️  404 Not Found: GET /apple-touch-icon-precomposed.png
 ⚠️  404 Not Found: GET /apple-touch-icon.png
-⚠️  404 Not Found: GET /favicon.ico
-[HPM] Router new target: http://100.65.187.59:8089 -> "http://100.65.187.59:8089"
-[HPM] GET /api/lights/status -> http://100.65.187.59:8089
-[→] GET /api/lights/status -> http://100.65.187.59:8089/api/lights/status
+[charlie] Fetching status for device: 3C8427B1316E
+[switchbot] Rate limiting: waiting 3822ms before next request
+[charlie] Fetching status for device: 3C8427B1E392
+[switchbot] Rate limiting: waiting 1824ms before next request
+[charlie] Fetching status for device: 3C8427B1ECDA
+[switchbot] Rate limiting: waiting 5829ms before next request
+[charlie] Fetching status for device: 3C8427B1316E
+[charlie] Fetching status for device: 3C8427B1E392
+[charlie] Fetching status for device: 3C8427B1ECDA
+[charlie] Fetching status for device: 3C8427B1316E
+[charlie] Fetching status for device: 3C8427B1E392
+[charlie] Fetching status for device: 3C8427B1ECDA
 ⚠️  404 Not Found: GET /apple-touch-icon-precomposed.png
 ⚠️  404 Not Found: GET /apple-touch-icon.png
-⚠️  404 Not Found: GET /favicon.ico
-⚠️  404 Not Found: GET /favicon.ico
-[HPM] Router new target: http://100.65.187.59:8089 -> "http://100.65.187.59:8089"
-[HPM] GET /api/lights/status -> http://100.65.187.59:8089
-[→] GET /api/lights/status -> http://100.65.187.59:8089/api/lights/status
-🛑 Received SIGTERM, shutting down gracefully
+⚠️  404 Not Found: GET /apple-touch-icon-precomposed.png
+⚠️  404 Not Found: GET /apple-touch-icon.png
+⚠️  404 Not Found: GET /apple-touch-icon-precomposed.png
+⚠️  404 Not Found: GET /apple-touch-icon.png
+[charlie] Fetching status for device: 3C8427B1316E
+[charlie] Fetching status for device: 3C8427B1E392
+[charlie] Fetching status for device: 3C8427B1ECDA
+⚠️  404 Not Found: GET /apple-touch-icon-precomposed.png
+⚠️  404 Not Found: GET /apple-touch-icon.png
+[charlie] Fetching status for device: 3C8427B1316E
+[charlie] Fetching status for device: 3C8427B1E392
+[switchbot] Rate limiting: waiting 4000ms before next request
+[charlie] Fetching status for device: 3C8427B1ECDA
+[switchbot] Rate limiting: waiting 1998ms before next request
+[charlie] Fetching status for device: 3C8427B1316E
+[charlie] Fetching status for device: 3C8427B1E392
+[charlie] Fetching status for device: 3C8427B1ECDA
+[charlie] Fetching status for device: 3C8427B1316E
+[charlie] Fetching status for device: 3C8427B1E392
+[charlie] Fetching status for device: 3C8427B1ECDA
+[charlie] Fetching status for device: 3C8427B1316E
+[charlie] Fetching status for device: 3C8427B1E392
+[switchbot] Rate limiting: waiting 4002ms before next request
+[charlie] Fetching status for device: 3C8427B1ECDA
+[switchbot] Rate limiting: waiting 2002ms before next request
+[charlie] Fetching status for device: 3C8427B1316E
+[charlie] Fetching status for device: 3C8427B1E392
+[charlie] Fetching status for device: 3C8427B1ECDA
+[charlie] Fetching status for device: 3C8427B1316E
+[charlie] Fetching status for device: 3C8427B1E392
+[switchbot] Rate limiting: waiting 4001ms before next request
+[charlie] Fetching status for device: 3C8427B1ECDA
+[switchbot] Rate limiting: waiting 2002ms before next request
+[charlie] Fetching status for device: 3C8427B1316E
+[switchbot] Rate limiting: waiting 3830ms before next request
+[charlie] Fetching status for device: 3C8427B1E392
+[switchbot] Rate limiting: waiting 1832ms before next request
+[charlie] Fetching status for device: 3C8427B1ECDA
+[switchbot] Rate limiting: waiting 5826ms before next request
+[charlie] Fetching status for device: 3C8427B1316E
+[charlie] Fetching status for device: 3C8427B1E392
+[switchbot] Rate limiting: waiting 4001ms before next request
+[charlie] Fetching status for device: 3C8427B1ECDA
+[switchbot] Rate limiting: waiting 2001ms before next request
+[charlie] Fetching status for device: 3C8427B1316E
+[switchbot] Rate limiting: waiting 3797ms before next request
+[charlie] Fetching status for device: 3C8427B1E392
+[switchbot] Rate limiting: waiting 1797ms before next request
+[charlie] Fetching status for device: 3C8427B1ECDA
+[switchbot] Rate limiting: waiting 5779ms before next request
+[charlie] Fetching status for device: 3C8427B1316E
+[charlie] Fetching status for device: 3C8427B1E392
+[switchbot] Rate limiting: waiting 3999ms before next request
+[charlie] Fetching status for device: 3C8427B1ECDA
+[switchbot] Rate limiting: waiting 1999ms before next request
+[charlie] Fetching status for device: 3C8427B1316E
+[charlie] Fetching status for device: 3C8427B1E392
+[charlie] Fetching status for device: 3C8427B1ECDA
+⚠️  404 Not Found: GET /apple-touch-icon-precomposed.png
+⚠️  404 Not Found: GET /apple-touch-icon.png
+[charlie] Fetching status for device: 3C8427B1316E
+[switchbot] Rate limiting: waiting 3824ms before next request
+[charlie] Fetching status for device: 3C8427B1E392
+[switchbot] Rate limiting: waiting 1824ms before next request
+[charlie] Fetching status for device: 3C8427B1ECDA
+[switchbot] Rate limiting: waiting 5832ms before next request
+[charlie] Fetching status for device: 3C8427B1316E
+[charlie] Fetching status for device: 3C8427B1E392
+[charlie] Fetching status for device: 3C8427B1ECDA
+[charlie] Fetching status for device: 3C8427B1316E
+[charlie] Fetching status for device: 3C8427B1E392
+[charlie] Fetching status for device: 3C8427B1ECDA
+[charlie] Fetching status for device: 3C8427B1316E
+[charlie] Fetching status for device: 3C8427B1E392
+[switchbot] Rate limiting: waiting 4000ms before next request
+[charlie] Fetching status for device: 3C8427B1ECDA
+[switchbot] Rate limiting: waiting 2001ms before next request
+[charlie] Fetching status for device: 3C8427B1316E
+[charlie] Fetching status for device: 3C8427B1E392
+[charlie] Fetching status for device: 3C8427B1ECDA
+[charlie] Fetching status for device: 3C8427B1316E
+[charlie] Fetching status for device: 3C8427B1E392
+[charlie] Fetching status for device: 3C8427B1ECDA
+[charlie] Fetching status for device: 3C8427B1316E
+[charlie] Fetching status for device: 3C8427B1E392
+[switchbot] Rate limiting: waiting 4004ms before next request
+[charlie] Fetching status for device: 3C8427B1ECDA
+[switchbot] Rate limiting: waiting 2001ms before next request
+[charlie] Fetching status for device: 3C8427B1316E
+[charlie] Fetching status for device: 3C8427B1E392
+[charlie] Fetching status for device: 3C8427B1ECDA
+🔍 Starting live device discovery on greenreach network...
+🔍 Scanning network range 192.168.2.0/24 for IoT devices...
+[charlie] Fetching status for device: 3C8427B1316E
+[charlie] Fetching status for device: 3C8427B1316E
+✅ Discovery complete: Found 5 live devices
+[charlie] Fetching status for device: 3C8427B1E392
+[charlie] Fetching status for device: 3C8427B1ECDA
+[charlie] Fetching status for device: 3C8427B1316E
+[charlie] Fetching status for device: 3C8427B1E392
+[switchbot] Rate limiting: waiting 4003ms before next request
+[charlie] Fetching status for device: 3C8427B1ECDA
+[switchbot] Rate limiting: waiting 2003ms before next request
+[charlie] Fetching status for device: 3C8427B1316E
+[charlie] Fetching status for device: 3C8427B1E392
+[charlie] Fetching status for device: 3C8427B1ECDA
+[charlie] Fetching status for device: 3C8427B1316E
+[charlie] Fetching status for device: 3C8427B1E392
+[charlie] Fetching status for device: 3C8427B1ECDA
+[charlie] Fetching status for device: 3C8427B1316E
+[charlie] Fetching status for device: 3C8427B1E392
+[charlie] Fetching status for device: 3C8427B1ECDA
+[charlie] Fetching status for device: 3C8427B1316E
+[charlie] Fetching status for device: 3C8427B1E392
+[switchbot] Rate limiting: waiting 3997ms before next request
+🔍 Starting live device discovery on greenreach network...
+[charlie] Fetching status for device: 3C8427B1ECDA
+[switchbot] Rate limiting: waiting 2000ms before next request
+🔍 Scanning network range 192.168.2.0/24 for IoT devices...
+✅ Discovery complete: Found 8 live devices
+[charlie] Fetching status for device: 3C8427B1316E
+[charlie] Fetching status for device: 3C8427B1E392
+[charlie] Fetching status for device: 3C8427B1ECDA
+[charlie] Fetching status for device: 3C8427B1316E
+[charlie] Fetching status for device: 3C8427B1E392
+[charlie] Fetching status for device: 3C8427B1ECDA
+[charlie] Fetching status for device: 3C8427B1316E
+[charlie] Fetching status for device: 3C8427B1E392
+[charlie] Fetching status for device: 3C8427B1ECDA
+[charlie] Fetching status for device: 3C8427B1316E
+[charlie] Fetching status for device: 3C8427B1E392
+[switchbot] Rate limiting: waiting 4003ms before next request
+[charlie] Fetching status for device: 3C8427B1ECDA
+[switchbot] Rate limiting: waiting 2004ms before next request
+[charlie] Fetching status for device: 3C8427B1316E
+[charlie] Fetching status for device: 3C8427B1E392
+[charlie] Fetching status for device: 3C8427B1ECDA
+[charlie] Fetching status for device: 3C8427B1316E
+[charlie] Fetching status for device: 3C8427B1E392
+[switchbot] Rate limiting: waiting 4003ms before next request
+[charlie] Fetching status for device: 3C8427B1ECDA
+[switchbot] Rate limiting: waiting 2001ms before next request
+[charlie] Fetching status for device: 3C8427B1316E
+[charlie] Fetching status for device: 3C8427B1E392
+[charlie] Fetching status for device: 3C8427B1ECDA
+[charlie] Fetching status for device: 3C8427B1316E
+[switchbot] Rate limiting: waiting 3825ms before next request
+[charlie] Fetching status for device: 3C8427B1E392
+[switchbot] Rate limiting: waiting 1825ms before next request
+[charlie] Fetching status for device: 3C8427B1ECDA
+[switchbot] Rate limiting: waiting 5823ms before next request
+[charlie] Fetching status for device: 3C8427B1316E
+[charlie] Fetching status for device: 3C8427B1E392
+[charlie] Fetching status for device: 3C8427B1ECDA
+[charlie] Fetching status for device: 3C8427B1316E
+[charlie] Fetching status for device: 3C8427B1E392
+[switchbot] Rate limiting: waiting 4001ms before next request
+[charlie] Fetching status for device: 3C8427B1ECDA
+[switchbot] Rate limiting: waiting 2004ms before next request
+[charlie] Fetching status for device: 3C8427B1316E
+[switchbot] Rate limiting: waiting 3834ms before next request
+[charlie] Fetching status for device: 3C8427B1E392
+[switchbot] Rate limiting: waiting 1838ms before next request
+[charlie] Fetching status for device: 3C8427B1ECDA
+[switchbot] Rate limiting: waiting 5827ms before next request
+⚠️  404 Not Found: GET /apple-touch-icon-precomposed.png
+⚠️  404 Not Found: GET /apple-touch-icon.png
+[charlie] Fetching status for device: 3C8427B1316E
+[switchbot] Rate limiting: waiting 3841ms before next request
+[charlie] Fetching status for device: 3C8427B1E392
+[switchbot] Rate limiting: waiting 1841ms before next request
+[charlie] Fetching status for device: 3C8427B1ECDA
+[switchbot] Rate limiting: waiting 5780ms before next request
