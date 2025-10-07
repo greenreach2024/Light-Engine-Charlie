@@ -4923,16 +4923,6 @@ app.post('/setup/wizards/:wizardId/execute-validated', async (req, res) => {
   }
 });
 
-// 404 handler for undefined routes
-app.use((req, res) => {
-  console.warn(`⚠️  404 Not Found: ${req.method} ${req.url}`);
-  res.status(404).json({
-    error: 'Not Found',
-    message: `Route ${req.method} ${req.url} not found`,
-    timestamp: new Date().toISOString()
-  });
-});
-
 // Get wizard execution status
 app.get('/setup/wizards/:wizardId/status', async (req, res) => {
   try {
@@ -4988,14 +4978,14 @@ app.post('/discovery/suggest-wizards', async (req, res) => {
         error: 'devices array is required'
       });
     }
-    
+
     const suggestions = buildWizardSuggestionsFromDevices(devices);
 
     res.json({
       success: true,
       suggestions
     });
-    
+
   } catch (error) {
     console.error('Error suggesting wizards:', error);
     res.status(500).json({
@@ -5003,6 +4993,16 @@ app.post('/discovery/suggest-wizards', async (req, res) => {
       error: error.message
     });
   }
+});
+
+// 404 handler for undefined routes (must be registered after all routes)
+app.use((req, res) => {
+  console.warn(`⚠️  404 Not Found: ${req.method} ${req.url}`);
+  res.status(404).json({
+    error: 'Not Found',
+    message: `Route ${req.method} ${req.url} not found`,
+    timestamp: new Date().toISOString()
+  });
 });
 
 // Start the server after all routes are defined when executed directly
