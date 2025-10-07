@@ -229,6 +229,88 @@ function seedGroupRoomZoneDropdowns() {
   updateFixtureSummary();
 }
 
+function resolveRoomReference(roomValue) {
+  const text = typeof roomValue === 'string' ? roomValue.trim() : '';
+  if (!text) {
+    return { id: '', name: '' };
+  }
+  const rooms = collectRoomsFromState() || [];
+  const match = rooms.find((room) => room && (room.id === text || room.name === text));
+  if (match) {
+    return {
+      id: match.id || text,
+      name: match.name || match.id || text,
+    };
+  }
+  return { id: text, name: text };
+}
+
+function collectSetupLightsForRoomZone(roomValue, zoneValue) {
+  const zone = typeof zoneValue === 'string' ? zoneValue.trim() : '';
+  if (!zone) return [];
+  const { id: roomId, name: roomName } = resolveRoomReference(roomValue);
+  if (!roomId && !roomName) return [];
+  const setups = Array.isArray(window.STATE?.lightSetups) ? window.STATE.lightSetups : [];
+  const results = [];
+  setups.forEach((setup) => {
+    if (!setup || typeof setup !== 'object') return;
+    if (!Array.isArray(setup.fixtures) || !setup.fixtures.length) return;
+    const { id: setupRoomId, name: setupRoomName } = resolveRoomReference(setup.room);
+    const matchesRoom =
+      (setupRoomId && (setupRoomId === roomId || setupRoomId === roomName)) ||
+      (setupRoomName && (setupRoomName === roomId || setupRoomName === roomName));
+    if (!matchesRoom) return;
+    if (String(setup.zone || '').trim() !== zone) return;
+    const setupId = typeof setup.id === 'string' && setup.id ? setup.id : null;
+    setup.fixtures.forEach((fixture, fixtureIndex) => {
+      if (!fixture || typeof fixture !== 'object') return;
+      const baseId = fixture.id || buildFixtureSyntheticId(fixture) || `fixture-${fixtureIndex + 1}`;
+      const label = firstNonEmptyString(
+        fixture.deviceName,
+        fixture.name,
+        formatVendorModel(fixture.vendor, fixture.model),
+        fixture.model,
+        fixture.vendor,
+        'Light'
+      );
+      const count = Math.max(1, Number(fixture.count) || 1);
+      for (let instance = 0; instance < count; instance += 1) {
+        const instanceSuffix = count > 1 ? `-${instance + 1}` : '';
+        const instanceId = `setup:${setupId || baseId}:${baseId}${instanceSuffix}:${roomId || roomName}:${zone}`;
+        results.push({
+          id: instanceId,
+          device_id: instanceId,
+          name: label,
+          deviceName: label,
+          type: 'light',
+          vendor: fixture.vendor || '',
+          model: fixture.model || '',
+          watts: fixture.watts,
+          source: 'setup',
+          count: 1,
+          roomId,
+          roomName,
+          zone,
+          setupId,
+          fixtureId: fixture.id || baseId,
+          countIndex: instance + 1,
+          countTotal: count,
+        });
+      }
+    });
+  });
+  return results;
+}
+
+function getSelectedGroupRoomZone() {
+  const roomSel = document.getElementById('groupRoomDropdown');
+  const zoneSel = document.getElementById('groupZoneDropdown');
+  const roomValue = roomSel ? roomSel.value : '';
+  const zoneValue = zoneSel ? zoneSel.value : '';
+  const { id: roomId, name: roomName } = resolveRoomReference(roomValue);
+  return { roomId, roomName, rawRoom: roomValue, zone: zoneValue ? zoneValue.trim() : '' };
+}
+
 function buildFixtureSyntheticId(fixture) {
   if (!fixture || typeof fixture !== 'object') return '';
   if (fixture.id) return String(fixture.id);
@@ -9853,11 +9935,30 @@ function wireGlobalEvents() {
             }
           });
         }
+        const { rawRoom: selectedRoomValue, roomId: selectedRoomId, roomName: selectedRoomName, zone: selectedZone } =
+          getSelectedGroupRoomZone();
+        const setupLights = collectSetupLightsForRoomZone(
+          selectedRoomValue || selectedRoomId || selectedRoomName,
+          selectedZone
+        );
+        setupLights.forEach((light) => {
+          if (light && light.id && !merged.has(light.id)) {
+            merged.set(light.id, light);
+          }
+        });
         const ungrouped = Array.from(merged.values()).filter((device) => device.id && !assignedSet.has(device.id));
-        ungroupedList.innerHTML = ungrouped
-          .map((light) => `<li>${escapeHtml(resolveLightNameFromState(light.id, light))}</li>`)
-          .join('');
-        if (ungroupedEmpty) ungroupedEmpty.style.display = ungrouped.length ? 'none' : 'block';
+        if (!selectedZone && setupLights.length === 0) {
+          ungroupedList.innerHTML = '';
+          if (ungroupedEmpty) {
+            ungroupedEmpty.style.display = 'block';
+            ungroupedEmpty.textContent = 'Select a room and zone to view configured lights.';
+          }
+        } else {
+          ungroupedList.innerHTML = ungrouped
+            .map((light) => `<li>${escapeHtml(resolveLightNameFromState(light.id, light))}</li>`)
+            .join('');
+          if (ungroupedEmpty) ungroupedEmpty.style.display = ungrouped.length ? 'none' : 'block';
+        }
       }
       if (ungroupedStatus) ungroupedStatus.textContent = '';
       updateGroupPlanInfoCard(null);
@@ -9967,11 +10068,30 @@ function wireGlobalEvents() {
           }
         });
       }
+      const { rawRoom: selectedRoomValue, roomId: selectedRoomId, roomName: selectedRoomName, zone: selectedZone } =
+        getSelectedGroupRoomZone();
+      const setupLights = collectSetupLightsForRoomZone(
+        selectedRoomValue || selectedRoomId || selectedRoomName,
+        selectedZone
+      );
+      setupLights.forEach((light) => {
+        if (light && light.id && !merged.has(light.id)) {
+          merged.set(light.id, light);
+        }
+      });
       const ungrouped = Array.from(merged.values()).filter((device) => device.id && !assignedSet.has(device.id));
-      ungroupedList.innerHTML = ungrouped
-        .map((light) => `<li>${escapeHtml(resolveLightNameFromState(light.id, light))}</li>`)
-        .join('');
-      if (ungroupedEmpty) ungroupedEmpty.style.display = ungrouped.length ? 'none' : 'block';
+      if (!selectedZone && setupLights.length === 0) {
+        ungroupedList.innerHTML = '';
+        if (ungroupedEmpty) {
+          ungroupedEmpty.style.display = 'block';
+          ungroupedEmpty.textContent = 'Select a room and zone to view configured lights.';
+        }
+      } else {
+        ungroupedList.innerHTML = ungrouped
+          .map((light) => `<li>${escapeHtml(resolveLightNameFromState(light.id, light))}</li>`)
+          .join('');
+        if (ungroupedEmpty) ungroupedEmpty.style.display = ungrouped.length ? 'none' : 'block';
+      }
     }
 
     // Render light cards for this group below the roster for quick control/visibility
@@ -9983,40 +10103,12 @@ function wireGlobalEvents() {
         .map((entry) => (typeof entry === 'string' ? entry : entry?.id || ''))
         .filter(Boolean);
       const fixtures = (window.STATE?.deviceKB?.fixtures || []);
-      // Get current room/zone context from dropdowns
-      const groupRoomSel = document.getElementById('groupRoomDropdown');
-      const groupZoneSel = document.getElementById('groupZoneDropdown');
-      let setupLights = [];
-      if (groupRoomSel && groupZoneSel && window.STATE?.lightSetups) {
-        const roomVal = groupRoomSel.value;
-        const zoneVal = groupZoneSel.value;
-        // Accept both room ID and room name for matching
-        const roomObj = (window.STATE?.rooms||[]).find(r => r.id === roomVal || r.name === roomVal);
-        const roomId = roomObj?.id || roomVal;
-        const roomName = roomObj?.name || roomVal;
-        window.STATE.lightSetups.forEach(setup => {
-          const setupRoomId = (window.STATE?.rooms||[]).find(r => r.id === setup.room || r.name === setup.room)?.id || setup.room;
-          const setupRoomName = (window.STATE?.rooms||[]).find(r => r.id === setup.room || r.name === setup.room)?.name || setup.room;
-          if ((setupRoomId === roomId || setupRoomName === roomName) && setup.zone === zoneVal) {
-            if (Array.isArray(setup.fixtures)) {
-              setup.fixtures.forEach(f => {
-                // Synthesize a device-like object for display
-                const synthId = f.id || `wired-${(f.vendor||f.name||'').replace(/\s+/g,'_')}-${(f.model||'').replace(/\s+/g,'_')}`;
-                setupLights.push({
-                  id: synthId,
-                  deviceName: f.vendor ? `${f.vendor} ${f.model}` : (f.name || f.model || 'Light'),
-                  type: 'light',
-                  watts: f.watts,
-                  count: f.count,
-                  source: 'setup',
-                  vendor: f.vendor,
-                  model: f.model
-                });
-              });
-            }
-          }
-        });
-      }
+      const { rawRoom: selectedRoomValue, roomId: selectedRoomId, roomName: selectedRoomName, zone: selectedZone } =
+        getSelectedGroupRoomZone();
+      const setupLights = collectSetupLightsForRoomZone(
+        selectedRoomValue || selectedRoomId || selectedRoomName,
+        selectedZone
+      );
       // Merge all sources for this group: STATE.devices, fixtures, and setupLights
       const allLightsMap = new Map();
       // Add from STATE.devices
@@ -10126,44 +10218,12 @@ function wireGlobalEvents() {
               d &&
               (d.type === 'light' || /light|fixture/i.test(String(d.deviceName || d.name || '')))
           );
-        // Also include lights from STATE.lightSetups for the selected room/zone
-        const groupRoomSel = document.getElementById('groupRoomDropdown');
-        const groupZoneSel = document.getElementById('groupZoneDropdown');
-        let setupLights = [];
-        if (groupRoomSel && groupZoneSel && window.STATE?.lightSetups) {
-          const roomVal = groupRoomSel.value;
-          const zoneVal = groupZoneSel.value;
-          const roomObj = (window.STATE?.rooms||[]).find(r => r.id === roomVal || r.name === roomVal);
-          const roomId = roomObj?.id || roomVal;
-          const roomName = roomObj?.name || roomVal;
-          window.STATE.lightSetups.forEach(setup => {
-            const setupRoomObj = (window.STATE?.rooms||[]).find(r => r.id === setup.room || r.name === setup.room);
-            const setupRoomId = setupRoomObj?.id || setup.room;
-            const setupRoomName = setupRoomObj?.name || setup.room;
-            const matchesRoom = (setupRoomId && setupRoomId === roomId) || (setupRoomName && setupRoomName === roomName);
-            const matchesZone = String(setup.zone || '') === String(zoneVal || '');
-            if (matchesRoom && matchesZone) {
-              if (Array.isArray(setup.fixtures)) {
-                setup.fixtures.forEach(f => {
-                  // Synthesize a device-like object for ungrouped display
-                  const synthId = f.id || `wired-${(f.vendor||f.name||'').replace(/\s+/g,'_')}-${(f.model||'').replace(/\s+/g,'_')}`;
-                  if (!assigned.has(synthId)) {
-                    setupLights.push({
-                      id: synthId,
-                      deviceName: f.vendor ? `${f.vendor} ${f.model}` : (f.name || f.model || 'Light'),
-                      type: 'light',
-                      watts: f.watts,
-                      count: f.count,
-                      source: 'setup',
-                      vendor: f.vendor,
-                      model: f.model
-                    });
-                  }
-                });
-              }
-            }
-          });
-        }
+        const { rawRoom: selectedRoomValue, roomId: selectedRoomId, roomName: selectedRoomName, zone: selectedZone } =
+          getSelectedGroupRoomZone();
+        const setupLights = collectSetupLightsForRoomZone(
+          selectedRoomValue || selectedRoomId || selectedRoomName,
+          selectedZone
+        );
         // Merge live and setup lights, dedup by id
         const allLightsMap = new Map();
         liveLights.forEach((l) => { if (l && l.id) allLightsMap.set(l.id, l); });
@@ -10172,16 +10232,25 @@ function wireGlobalEvents() {
         const mergedLights = Array.from(allLightsMap.values());
         const ungrouped = mergedLights.filter(d => !assigned.has(d.id));
         ungroupedList.innerHTML = '';
-        if (!ungrouped.length) {
+        if ((!selectedZone && setupLights.length === 0) || !ungrouped.length) {
           if (ungroupedEmpty) {
             ungroupedEmpty.style.display = 'block';
-            const hasAnyKnown = mergedLights.length > 0;
-            ungroupedEmpty.textContent = hasAnyKnown ? 'All lights are assigned to groups.' : 'No known lights yet. Pair devices or add them in Farm/Rooms.';
+            if (!selectedZone && setupLights.length === 0) {
+              ungroupedEmpty.textContent = 'Select a room and zone to view configured lights.';
+            } else {
+              const hasAnyKnown = mergedLights.length > 0;
+              ungroupedEmpty.textContent = hasAnyKnown ? 'All lights are assigned to groups.' : 'No known lights yet. Pair devices or add them in Farm/Rooms.';
+            }
           }
         } else {
           if (ungroupedEmpty) ungroupedEmpty.style.display = 'none';
           ungrouped.forEach(d => {
             const normalized = { ...d, deviceName: d.deviceName || resolveLightNameFromState(d.id, d) };
+            if (!normalized.room && normalized.roomName) normalized.room = normalized.roomName;
+            if (!normalized.room && normalized.roomId) normalized.room = normalized.roomId;
+            if (!normalized.zone && d.zone) normalized.zone = d.zone;
+            if (!normalized.vendor && d.vendor) normalized.vendor = d.vendor;
+            if (!normalized.model && d.model) normalized.model = d.model;
             const card = deviceCard(normalized, { compact: true });
             // Apply spectrum canvas coloring similar to group roster
             try {
@@ -10202,7 +10271,21 @@ function wireGlobalEvents() {
             add.style.marginTop = '6px';
             add.addEventListener('click', async () => {
               group.lights = group.lights || [];
-              if (!group.lights.some(x => x.id === d.id)) group.lights.push({ id: d.id, name: normalized.deviceName || d.id });
+              if (!group.lights.some(x => x.id === d.id)) {
+                group.lights.push({
+                  id: d.id,
+                  name: normalized.deviceName || d.id,
+                  deviceName: normalized.deviceName || d.id,
+                  vendor: normalized.vendor || '',
+                  model: normalized.model || '',
+                  room: normalized.room || normalized.roomName || '',
+                  roomId: normalized.roomId || '',
+                  zone: normalized.zone || '',
+                  source: normalized.source || d.source || '',
+                  setupId: normalized.setupId || d.setupId || null,
+                  fixtureId: normalized.fixtureId || d.fixtureId || null,
+                });
+              }
               await saveGroups();
               updateGroupUI(group);
             });
@@ -10211,7 +10294,13 @@ function wireGlobalEvents() {
             ungroupedList.appendChild(wrap);
           });
         }
-        if (ungroupedStatus) ungroupedStatus.textContent = `${ungrouped.length} ungrouped`;
+        if (ungroupedStatus) {
+          if (!selectedZone && setupLights.length === 0) {
+            ungroupedStatus.textContent = 'Select a room and zone';
+          } else {
+            ungroupedStatus.textContent = `${ungrouped.length} ungrouped`;
+          }
+        }
       }
     } catch {}
   }
