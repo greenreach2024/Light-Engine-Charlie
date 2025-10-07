@@ -6,4 +6,5 @@ __all__ = [
     "lighting",
     "automation",
     "server",
+    "spectrasync",
 ]
