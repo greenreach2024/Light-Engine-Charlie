@@ -6874,48 +6874,21 @@ function renderRooms() {
     return;
   }
     host.innerHTML = STATE.rooms.map(r => {
-      const fixtures = (r.fixtures||[]).reduce((sum,f)=> sum + (Number(f.count)||0), 0);
-      const sensorCats = (r.sensors?.categories||[]).map(s => escapeHtml(s)).join(', ') || '—';
-      const sensorPlacements = Object.entries(r.sensors?.placements || {})
-        .map(([cat, place]) => `${escapeHtml(cat)}@${escapeHtml(place || 'room')}`)
-        .join(', ') || '—';
-      const prog = r._categoryProgress || {};
-      const badge = (st) => {
-        if (st === 'complete') return '✅ Ready';
-        if (st === 'needs-info') return '• Needs details';
-        if (st === 'needs-hub' || st === 'needs-energy' || st === 'needs-setup') return '• Needs follow-up';
-        return '';
-      };
-      const orderedCats = ['hvac','mini-split','dehumidifier','fans','vents','controllers','sensors'];
-      const statusRow = orderedCats
-        .filter(c => prog[c])
-        .map(c => {
-          const labelText = typeof roomWizard?.categoryLabel === 'function' ? roomWizard.categoryLabel(c) : c;
-          const label = escapeHtml(labelText);
-          const statusText = escapeHtml(badge(prog[c]?.status));
-          return `<span class="chip tiny" title="${label}">${label}: ${statusText}</span>`;
-        })
-        .join(' ');
       const zones = (r.zones || []).map(z => escapeHtml(z)).join(', ') || '—';
-      const connectivity = r.connectivity || {};
-      const connSummary = connectivity.hasHub === null
-        ? 'Hub: ?'
-        : connectivity.hasHub
-          ? `Hub: ${connectivity.hubType ? escapeHtml(connectivity.hubType) : 'present'}${connectivity.hubIp ? ` @ ${escapeHtml(connectivity.hubIp)}` : ''}`
-          : 'Hub: none';
-      const layout = r.layout || {};
-      const layoutType = escapeHtml(layout.type || '—');
       const name = escapeHtml(r.name || '');
-      const control = escapeHtml(r.controlMethod || '—');
+      const controlCount = Array.isArray(r.controllers) ? r.controllers.length : (r.controlMethod ? 1 : 0);
+      const fixtures = (r.fixtures||[]);
+      const numLights = fixtures.reduce((sum,f)=> sum + (Number(f.count)||0), 0);
+      const lightsList = fixtures.length ? fixtures.map(f => `${escapeHtml(f.vendor||f.name||f.model||'Light')} ×${f.count||1}`).join(', ') : '—';
       const roomId = escapeHtml(r.id || '');
       return `<div class="card" style="margin-top:8px">
         <div class="row" style="justify-content:space-between;align-items:center">
           <div>
             <h3 style="margin:0">${name}</h3>
-            <div class="tiny" style="color:#475569">Layout: ${layoutType} • Zones: ${zones} • Control: ${control}</div>
-            <div class="tiny" style="color:#475569">Sensors: ${sensorCats} • Placement: ${sensorPlacements}</div>
-            <div class="tiny" style="color:#475569">${connSummary}</div>
-            ${statusRow ? `<div class="tiny" style="margin-top:4px">${statusRow}</div>` : ''}
+            <div class="tiny" style="color:#475569">Zones: ${zones}</div>
+            <div class="tiny" style="color:#475569">Controls: ${controlCount}</div>
+            <div class="tiny" style="color:#475569">Lights: ${numLights}</div>
+            <div class="tiny" style="color:#475569">${lightsList}</div>
           </div>
           <div class="row" style="gap:6px">
             <button type="button" class="ghost" data-action="edit-room" data-room-id="${roomId}">Edit</button>
