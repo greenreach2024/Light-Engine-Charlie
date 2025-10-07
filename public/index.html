@@ -608,7 +608,7 @@
             </div>
 
             <!-- Group roster -->
-            <div class="group-roster-card">
+            <div class="group-roster-card" id="groupRosterCard" style="display:block;">
               <div class="row row--between row--center mb-xs">
                 <h3 style="margin:0;font-size:15px;color:#0f172a">Group Roster</h3>
                 <span id="groupRosterStatus" class="tiny" aria-live="polite"></span>
@@ -653,17 +653,7 @@
                 <p id="groupLastHex" class="tiny" style="margin-top:6px;color:#475569"></p>
               </div>
 
-              <!-- Twin spectrum preview beside sliders: HUD mix and Plan mix -->
-              <div id="groupTwinSpectra" style="display:flex;flex-direction:column;gap:8px">
-                <div class="device-spectrum">
-                  <div class="device-spectrum__title tiny">Current mix</div>
-                  <canvas id="groupHudCanvas" class="device-spectrum__canvas"></canvas>
-                </div>
-                <div class="device-spectrum">
-                  <div class="device-spectrum__title tiny">Plan spectrum</div>
-                  <canvas id="groupPlanCanvas" class="device-spectrum__canvas"></canvas>
-                </div>
-              </div>
+              <!-- Removed twin spectrum preview beside sliders: HUD mix and Plan mix -->
             </div>
           </section>
       <section id="calibrationPanel" class="card" data-panel="calibration">

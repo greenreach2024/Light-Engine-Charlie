@@ -195,3 +195,297 @@
 [switchbot] Rate limiting: waiting 1841ms before next request
 [charlie] Fetching status for device: 3C8427B1ECDA
 [switchbot] Rate limiting: waiting 5780ms before next request
+[charlie] Fetching status for device: 3C8427B1316E
+[charlie] Fetching status for device: 3C8427B1E392
+[switchbot] Rate limiting: waiting 4001ms before next request
+[charlie] Fetching status for device: 3C8427B1ECDA
+[switchbot] Rate limiting: waiting 2001ms before next request
+[charlie] Fetching status for device: 3C8427B1316E
+[charlie] Fetching status for device: 3C8427B1E392
+[charlie] Fetching status for device: 3C8427B1ECDA
+[charlie] Fetching status for device: 3C8427B1316E
+[switchbot] Rate limiting: waiting 3847ms before next request
+[charlie] Fetching status for device: 3C8427B1E392
+[switchbot] Rate limiting: waiting 1844ms before next request
+[charlie] Fetching status for device: 3C8427B1ECDA
+[switchbot] Rate limiting: waiting 5838ms before next request
+[charlie] Fetching status for device: 3C8427B1316E
+[charlie] Fetching status for device: 3C8427B1E392
+[charlie] Fetching status for device: 3C8427B1ECDA
+[charlie] Fetching status for device: 3C8427B1316E
+[charlie] Fetching status for device: 3C8427B1E392
+[charlie] Fetching status for device: 3C8427B1ECDA
+[charlie] Fetching status for device: 3C8427B1316E
+[charlie] Fetching status for device: 3C8427B1E392
+[switchbot] Rate limiting: waiting 4002ms before next request
+[charlie] Fetching status for device: 3C8427B1ECDA
+[switchbot] Rate limiting: waiting 2001ms before next request
+[charlie] Fetching status for device: 3C8427B1316E
+[charlie] Fetching status for device: 3C8427B1E392
+[charlie] Fetching status for device: 3C8427B1ECDA
+[charlie] Fetching status for device: 3C8427B1316E
+[switchbot] Rate limiting: waiting 3717ms before next request
+[charlie] Fetching status for device: 3C8427B1E392
+[switchbot] Rate limiting: waiting 1722ms before next request
+[charlie] Fetching status for device: 3C8427B1ECDA
+[switchbot] Rate limiting: waiting 5729ms before next request
+[charlie] Fetching status for device: 3C8427B1316E
+[charlie] Fetching status for device: 3C8427B1E392
+[charlie] Fetching status for device: 3C8427B1ECDA
+[charlie] Fetching status for device: 3C8427B1316E
+[charlie] Fetching status for device: 3C8427B1E392
+[switchbot] Rate limiting: waiting 4002ms before next request
+[charlie] Fetching status for device: 3C8427B1ECDA
+[switchbot] Rate limiting: waiting 2004ms before next request
+[charlie] Fetching status for device: 3C8427B1316E
+[charlie] Fetching status for device: 3C8427B1E392
+[charlie] Fetching status for device: 3C8427B1ECDA
+⚠️  404 Not Found: GET /apple-touch-icon-precomposed.png
+⚠️  404 Not Found: GET /apple-touch-icon.png
+[charlie] Fetching status for device: 3C8427B1316E
+[charlie] Fetching status for device: 3C8427B1316E
+[charlie] Fetching status for device: 3C8427B1E392
+[charlie] Fetching status for device: 3C8427B1ECDA
+[charlie] Fetching status for device: 3C8427B1316E
+[charlie] Fetching status for device: 3C8427B1E392
+[charlie] Fetching status for device: 3C8427B1ECDA
+[charlie] Fetching status for device: 7C2C67C5467A
+[charlie] Fetching status for device: 84FCE6F34A66
+[switchbot] Rate limiting: waiting 3381ms before next request
+[charlie] Fetching status for device: 84FCE6F34A66
+[charlie] Fetching status for device: 84FCE6F5B1B6
+[switchbot] Rate limiting: waiting 1851ms before next request
+[charlie] Fetching status for device: 84FCE6F5B1B6
+[charlie] Fetching status for device: A0764E1FDB82
+[switchbot] Rate limiting: waiting 1017ms before next request
+[charlie] Fetching status for device: C3343035702D
+[charlie] Fetching status for device: CE2A81460E78
+[charlie] Fetching status for device: CE2A82461382
+[switchbot] Rate limiting: waiting 1803ms before next request
+[charlie] Fetching status for device: CE2A82C63B32
+[switchbot] Rate limiting: waiting 2587ms before next request
+[charlie] Fetching status for device: CE2A82C63B32
+fetchAndCacheWeather error: fetch failed
+fetchAndCacheWeather error: fetch failed
+fetchAndCacheWeather error: fetch failed
+[switchbot] Rate limited by API. Will use cached data if available.
+[switchbot] Rate limited by API. Will use cached data if available.
+[switchbot] Rate limited by API. Will use cached data if available.
+[charlie] Fetching status for device: 3C8427B1316E
+[switchbot] Rate limited by API. Will use cached data if available.
+[charlie] Fetching status for device: 3C8427B1E392
+[switchbot] Rate limiting: waiting 3122ms before next request
+[switchbot] Rate limited by API. Will use cached data if available.
+[switchbot] Rate limited by API. Will use cached data if available.
+[switchbot] Rate limited by API. Will use cached data if available.
+[switchbot] Rate limited by API. Will use cached data if available.
+[switchbot] Rate limited by API. Will use cached data if available.
+[switchbot] Rate limited by API. Will use cached data if available.
+[switchbot] Rate limited by API. Will use cached data if available.
+[switchbot] Rate limited by API. Will use cached data if available.
+[switchbot] Rate limited by API. Will use cached data if available.
+[switchbot] Rate limited by API. Will use cached data if available.
+[switchbot] Rate limited by API. Will use cached data if available.
+[switchbot] Rate limited by API. Will use cached data if available.
+[switchbot] Rate limited by API. Will use cached data if available.
+[switchbot] Rate limited by API. Will use cached data if available.
+[switchbot] Rate limited by API. Will use cached data if available.
+[switchbot] Rate limited by API. Will use cached data if available.
+[switchbot] Rate limited by API. Will use cached data if available.
+[switchbot] Rate limited by API. Will use cached data if available.
+[switchbot] Rate limited by API. Will use cached data if available.
+[switchbot] Rate limited by API. Will use cached data if available.
+[switchbot] Rate limited by API. Will use cached data if available.
+[switchbot] Rate limited by API. Will use cached data if available.
+[switchbot] Rate limited by API. Will use cached data if available.
+[switchbot] Rate limited by API. Will use cached data if available.
+[switchbot] Rate limited by API. Will use cached data if available.
+[switchbot] Rate limited by API. Will use cached data if available.
+[switchbot] Rate limited by API. Will use cached data if available.
+[switchbot] Rate limited by API. Will use cached data if available.
+[switchbot] Rate limited by API. Will use cached data if available.
+[switchbot] Rate limited by API. Will use cached data if available.
+[switchbot] Rate limited by API. Will use cached data if available.
+[switchbot] Rate limited by API. Will use cached data if available.
+[switchbot] Rate limited by API. Will use cached data if available.
+[switchbot] Rate limited by API. Will use cached data if available.
+[switchbot] Rate limited by API. Will use cached data if available.
+[switchbot] Rate limited by API. Will use cached data if available.
+[switchbot] Rate limited by API. Will use cached data if available.
+[switchbot] Rate limited by API. Will use cached data if available.
+[switchbot] Rate limited by API. Will use cached data if available.
+[switchbot] Rate limited by API. Will use cached data if available.
+[switchbot] Rate limited by API. Will use cached data if available.
+[switchbot] Rate limited by API. Will use cached data if available.
+[switchbot] Rate limited by API. Will use cached data if available.
+[switchbot] Rate limited by API. Will use cached data if available.
+[switchbot] Rate limited by API. Will use cached data if available.
+[switchbot] Rate limited by API. Will use cached data if available.
+[switchbot] Rate limited by API. Will use cached data if available.
+[switchbot] Rate limited by API. Will use cached data if available.
+[switchbot] Rate limited by API. Will use cached data if available.
+[switchbot] Rate limited by API. Will use cached data if available.
+[switchbot] Rate limited by API. Will use cached data if available.
+⚠️  404 Not Found: GET /apple-touch-icon-precomposed.png
+⚠️  404 Not Found: GET /apple-touch-icon.png
+[switchbot] Rate limited by API. Will use cached data if available.
+[charlie] Fetching status for device: 3C8427B1316E
+[switchbot] Rate limiting: waiting 3858ms before next request
+[charlie] Fetching status for device: 3C8427B1E392
+[switchbot] Rate limiting: waiting 1860ms before next request
+[switchbot] Rate limiting: waiting 409ms before next request
+[switchbot] Rate limited by API. Will use cached data if available.
+[switchbot] Rate limited by API. Will use cached data if available.
+[switchbot] Rate limited by API. Will use cached data if available.
+[charlie] Fetching status for device: 3C8427B1316E
+[switchbot] Rate limiting: waiting 3867ms before next request
+[charlie] Fetching status for device: 3C8427B1E392
+[switchbot] Rate limiting: waiting 1866ms before next request
+[switchbot] Rate limited by API. Will use cached data if available.
+[switchbot] Rate limited by API. Will use cached data if available.
+[charlie] Fetching status for device: 3C8427B1ECDA
+[switchbot] Rate limiting: waiting 5854ms before next request
+[switchbot] Rate limited by API. Will use cached data if available.
+[charlie] Fetching status for device: CE2A82461382
+[switchbot] Rate limited by API. Will use cached data if available.
+[charlie] Fetching status for device: CE2A82C63B32
+[switchbot] Rate limited by API. Will use cached data if available.
+[switchbot] Rate limited by API. Will use cached data if available.
+[charlie] Fetching status for device: 3C8427B1316E
+[switchbot] Rate limiting: waiting 3859ms before next request
+[charlie] Fetching status for device: 3C8427B1E392
+[switchbot] Rate limiting: waiting 1857ms before next request
+[switchbot] Rate limited by API. Will use cached data if available.
+[switchbot] Rate limited by API. Will use cached data if available.
+[charlie] Fetching status for device: 3C8427B1ECDA
+[switchbot] Rate limiting: waiting 5847ms before next request
+[switchbot] Rate limited by API. Will use cached data if available.
+[switchbot] Rate limited by API. Will use cached data if available.
+[switchbot] Rate limited by API. Will use cached data if available.
+[switchbot] Rate limited by API. Will use cached data if available.
+[switchbot] Rate limited by API. Will use cached data if available.
+[switchbot] Rate limited by API. Will use cached data if available.
+[switchbot] Rate limited by API. Will use cached data if available.
+[switchbot] Rate limited by API. Will use cached data if available.
+[switchbot] Rate limited by API. Will use cached data if available.
+[switchbot] Rate limited by API. Will use cached data if available.
+[switchbot] Rate limited by API. Will use cached data if available.
+[switchbot] Rate limited by API. Will use cached data if available.
+[switchbot] Rate limited by API. Will use cached data if available.
+[switchbot] Rate limited by API. Will use cached data if available.
+[switchbot] Rate limited by API. Will use cached data if available.
+[switchbot] Rate limited by API. Will use cached data if available.
+[switchbot] Rate limited by API. Will use cached data if available.
+[switchbot] Rate limited by API. Will use cached data if available.
+[charlie] Fetching status for device: 3C8427B1316E
+[switchbot] Rate limiting: waiting 3861ms before next request
+[charlie] Fetching status for device: 3C8427B1E392
+[switchbot] Rate limiting: waiting 1860ms before next request
+[switchbot] Rate limited by API. Will use cached data if available.
+[switchbot] Rate limited by API. Will use cached data if available.
+[charlie] Fetching status for device: 3C8427B1ECDA
+[switchbot] Rate limiting: waiting 5851ms before next request
+[switchbot] Rate limited by API. Will use cached data if available.
+[switchbot] Rate limited by API. Will use cached data if available.
+[charlie] Fetching status for device: 3C8427B1316E
+[switchbot] Rate limiting: waiting 3796ms before next request
+[charlie] Fetching status for device: 3C8427B1E392
+[switchbot] Rate limiting: waiting 1797ms before next request
+[switchbot] Rate limiting: waiting 1762ms before next request
+[switchbot] Rate limited by API. Will use cached data if available.
+[switchbot] Rate limited by API. Will use cached data if available.
+[switchbot] Rate limited by API. Will use cached data if available.
+[charlie] Fetching status for device: 3C8427B1316E
+[switchbot] Rate limiting: waiting 3882ms before next request
+[charlie] Fetching status for device: 3C8427B1E392
+[switchbot] Rate limiting: waiting 1884ms before next request
+[switchbot] Rate limited by API. Will use cached data if available.
+[switchbot] Rate limited by API. Will use cached data if available.
+[charlie] Fetching status for device: 3C8427B1ECDA
+[switchbot] Rate limiting: waiting 5871ms before next request
+[switchbot] Rate limited by API. Will use cached data if available.
+[charlie] Fetching status for device: 3C8427B1316E
+[switchbot] Rate limited by API. Will use cached data if available.
+[switchbot] Rate limited by API. Will use cached data if available.
+[charlie] Fetching status for device: 3C8427B1316E
+[switchbot] Rate limiting: waiting 3867ms before next request
+[charlie] Fetching status for device: 3C8427B1E392
+[switchbot] Rate limiting: waiting 1866ms before next request
+[switchbot] Rate limited by API. Will use cached data if available.
+[switchbot] Rate limited by API. Will use cached data if available.
+[charlie] Fetching status for device: 3C8427B1ECDA
+[switchbot] Rate limiting: waiting 5863ms before next request
+[switchbot] Rate limited by API. Will use cached data if available.
+[switchbot] Rate limited by API. Will use cached data if available.
+[charlie] Fetching status for device: 3C8427B1316E
+[switchbot] Rate limiting: waiting 3849ms before next request
+[charlie] Fetching status for device: 3C8427B1E392
+[switchbot] Rate limiting: waiting 1848ms before next request
+[switchbot] Rate limited by API. Will use cached data if available.
+[switchbot] Rate limited by API. Will use cached data if available.
+[charlie] Fetching status for device: 3C8427B1ECDA
+[switchbot] Rate limiting: waiting 5847ms before next request
+[switchbot] Rate limited by API. Will use cached data if available.
+⚠️  404 Not Found: GET /apple-touch-icon-precomposed.png
+⚠️  404 Not Found: GET /apple-touch-icon.png
+[switchbot] Rate limited by API. Will use cached data if available.
+[charlie] Fetching status for device: 3C8427B1316E
+[switchbot] Rate limiting: waiting 3862ms before next request
+[charlie] Fetching status for device: 3C8427B1E392
+[switchbot] Rate limiting: waiting 1867ms before next request
+[switchbot] Rate limited by API. Will use cached data if available.
+[switchbot] Rate limited by API. Will use cached data if available.
+[charlie] Fetching status for device: 3C8427B1ECDA
+[switchbot] Rate limiting: waiting 5855ms before next request
+[switchbot] Rate limiting: waiting 2330ms before next request
+[switchbot] Rate limited by API. Will use cached data if available.
+[switchbot] Rate limited by API. Will use cached data if available.
+[charlie] Fetching status for device: 3C8427B1316E
+[switchbot] Rate limiting: waiting 3880ms before next request
+[charlie] Fetching status for device: 3C8427B1E392
+[switchbot] Rate limiting: waiting 1879ms before next request
+[switchbot] Rate limited by API. Will use cached data if available.
+[switchbot] Rate limited by API. Will use cached data if available.
+[charlie] Fetching status for device: 3C8427B1ECDA
+[switchbot] Rate limiting: waiting 5879ms before next request
+[switchbot] Rate limited by API. Will use cached data if available.
+[switchbot] Rate limited by API. Will use cached data if available.
+[charlie] Fetching status for device: 3C8427B1316E
+[switchbot] Rate limiting: waiting 3849ms before next request
+[charlie] Fetching status for device: 3C8427B1E392
+[switchbot] Rate limiting: waiting 1848ms before next request
+[switchbot] Rate limited by API. Will use cached data if available.
+[switchbot] Rate limited by API. Will use cached data if available.
+[charlie] Fetching status for device: 3C8427B1ECDA
+[switchbot] Rate limiting: waiting 5855ms before next request
+[switchbot] Rate limited by API. Will use cached data if available.
+[switchbot] Rate limited by API. Will use cached data if available.
+[charlie] Fetching status for device: 3C8427B1316E
+[switchbot] Rate limiting: waiting 3860ms before next request
+[charlie] Fetching status for device: 3C8427B1E392
+[switchbot] Rate limiting: waiting 1856ms before next request
+[switchbot] Rate limited by API. Will use cached data if available.
+[switchbot] Rate limited by API. Will use cached data if available.
+[charlie] Fetching status for device: 3C8427B1ECDA
+[switchbot] Rate limiting: waiting 5856ms before next request
+[switchbot] Rate limited by API. Will use cached data if available.
+[switchbot] Rate limited by API. Will use cached data if available.
+[charlie] Fetching status for device: 3C8427B1316E
+[switchbot] Rate limiting: waiting 3809ms before next request
+[charlie] Fetching status for device: 3C8427B1E392
+[switchbot] Rate limiting: waiting 1805ms before next request
+[switchbot] Rate limited by API. Will use cached data if available.
+[switchbot] Rate limited by API. Will use cached data if available.
+[charlie] Fetching status for device: 3C8427B1ECDA
+[switchbot] Rate limiting: waiting 5816ms before next request
+[switchbot] Rate limited by API. Will use cached data if available.
+[switchbot] Rate limited by API. Will use cached data if available.
+[charlie] Fetching status for device: 3C8427B1316E
+[switchbot] Rate limiting: waiting 3865ms before next request
+[charlie] Fetching status for device: 3C8427B1E392
+[switchbot] Rate limiting: waiting 1866ms before next request
+[switchbot] Rate limited by API. Will use cached data if available.
+[switchbot] Rate limited by API. Will use cached data if available.
+[charlie] Fetching status for device: 3C8427B1ECDA
+[switchbot] Rate limiting: waiting 5848ms before next request
+[switchbot] Rate limited by API. Will use cached data if available.

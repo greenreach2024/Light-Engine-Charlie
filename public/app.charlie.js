@@ -8693,7 +8693,16 @@ function wireGlobalEvents() {
     if (title) title.textContent = `Current mix • ${resolvedLights.length} light${resolvedLights.length === 1 ? '' : 's'}`;
     if (subtitle) {
       const primary = resolvedLights[0];
-      subtitle.textContent = primary ? primary.name : 'Active fixture mix';
+      if (primary) {
+        // Show both manufacturer/vendor and model if available
+        let label = '';
+        if (primary.vendor) label += primary.vendor + ' ';
+        if (primary.model) label += primary.model + ' ';
+        if (!label.trim()) label = primary.name || primary.id;
+        subtitle.textContent = label.trim();
+      } else {
+        subtitle.textContent = 'Active fixture mix';
+      }
     }
     if (metrics) {
       const items = [
@@ -8870,9 +8879,14 @@ function wireGlobalEvents() {
       if (chipsHost) chipsHost.querySelectorAll('.chip[data-kind]').forEach(n=>n.remove());
       if (groupsStatus) groupsStatus.textContent = '';
       if (groupName) groupName.value = '';
-      if (ungroupedList) ungroupedList.innerHTML = '';
+      if (ungroupedList) {
+        // Repopulate ungrouped lights
+        const assignedIds = (STATE.groups||[]).flatMap(g => (g.lights||[]).map(l => l.id));
+        const ungrouped = STATE.devices.filter(d => !assignedIds.includes(d.id));
+        ungroupedList.innerHTML = ungrouped.map(l => `<li>${escapeHtml(l.deviceName || l.name || l.id)}</li>`).join('');
+        if (ungroupedEmpty) ungroupedEmpty.style.display = ungrouped.length ? 'none' : 'block';
+      }
       if (ungroupedStatus) ungroupedStatus.textContent = '';
-      if (ungroupedEmpty) ungroupedEmpty.style.display = 'none';
       updateGroupPlanInfoCard(null);
       updateGroupLightInfoCard(null);
       setHudLocked(true);
@@ -8923,15 +8937,27 @@ function wireGlobalEvents() {
     } catch {}
     // Roster
     if (groupRosterBody) {
-      groupRosterBody.innerHTML = (group.lights || []).map(l => {
-        const meta = getDeviceMeta(l.id);
+      // Defensive: allow for group.lights to be array of IDs or objects
+      const assignedIds = (group.lights || []).map(l => typeof l === 'string' ? l : l.id);
+      groupRosterBody.innerHTML = assignedIds.map(id => {
+        const meta = getDeviceMeta(id) || {};
         const locStr = [meta.room||'', meta.zone||''].filter(Boolean).join(' / ');
         const levelStr = meta.level || '';
         const sideStr = meta.side || '';
-        return `<tr><td>${l.name || 'Light'}</td><td>${l.id}</td><td>${locStr}</td><td>${meta.module||''}</td><td>${levelStr}</td><td>${sideStr}</td><td>—</td></tr>`;
+        const lightName = meta.deviceName || meta.name || id;
+        const lightVendor = meta.vendor || meta.manufacturer || '';
+        return `<tr><td>${escapeHtml(lightName)}</td><td>${escapeHtml(lightVendor)}</td><td>${escapeHtml(id)}</td><td>${locStr}</td><td>${meta.module||''}</td><td>${levelStr}</td><td>${sideStr}</td><td>—</td></tr>`;
       }).join('');
     }
     if (groupRosterEmpty) groupRosterEmpty.style.display = (group.lights||[]).length ? 'none' : 'block';
+
+    // Fix ungrouped lights: show all devices not assigned to any group
+    if (ungroupedList) {
+      const allAssignedIds = (STATE.groups||[]).flatMap(g => (g.lights||[]).map(l => typeof l === 'string' ? l : l.id));
+      const ungrouped = STATE.devices.filter(d => !allAssignedIds.includes(d.id));
+      ungroupedList.innerHTML = ungrouped.map(l => `<li>${escapeHtml(l.deviceName || l.name || l.id)}</li>`).join('');
+      if (ungroupedEmpty) ungroupedEmpty.style.display = ungrouped.length ? 'none' : 'block';
+    }
 
     // Render light cards for this group below the roster for quick control/visibility
     const lightList = document.getElementById('groupLightList');
