@@ -263,6 +263,8 @@ function findSetupFixtureById(id) {
 
 function getDeviceMeta(id) {
   if (!id) return null;
+  const fromRoster = getDeviceRosterRecord(id);
+  if (fromRoster) return fromRoster;
   const fromMeta = STATE.deviceMeta?.[id];
   if (fromMeta) return fromMeta;
   const fromDevices = Array.isArray(STATE.devices) ? STATE.devices.find((device) => device.id === id) : null;
@@ -294,6 +296,241 @@ function computeChannelPercentages(mix) {
     pct[key] = (value / safeTotal) * 100;
   });
   return { percentages: pct, total: totals };
+}
+
+function deriveDeviceId(device, fallbackIndex = 0) {
+  if (!device || typeof device !== 'object') {
+    return `device-${fallbackIndex + 1}`;
+  }
+  const candidates = [
+    device.id,
+    device.device_id,
+    device.deviceId,
+    device.mac,
+    device.address,
+    device.serial,
+    device.uuid,
+    device._id
+  ];
+  for (const candidate of candidates) {
+    if (candidate == null) continue;
+    const text = String(candidate).trim();
+    if (text) return text;
+  }
+  return `device-${fallbackIndex + 1}`;
+}
+
+function deriveDeviceName(device, fallbackId = '') {
+  if (!device || typeof device !== 'object') {
+    return fallbackId || 'Unknown device';
+  }
+  const candidates = [
+    device.deviceName,
+    device.name,
+    device.label,
+    device.alias,
+    device.description
+  ];
+  for (const candidate of candidates) {
+    if (candidate == null) continue;
+    const text = String(candidate).trim();
+    if (text) return text;
+  }
+  const vendor = typeof device.vendor === 'string' ? device.vendor.trim() : '';
+  const model = typeof device.model === 'string' ? device.model.trim() : '';
+  const combined = [vendor, model].filter(Boolean).join(' ').trim();
+  if (combined) return combined;
+  return fallbackId || 'Unknown device';
+}
+
+function pickText(...values) {
+  for (const value of values) {
+    if (value == null) continue;
+    const text = String(value).trim();
+    if (text) return text;
+  }
+  return '';
+}
+
+function pickValue(...values) {
+  for (const value of values) {
+    if (value !== undefined && value !== null) return value;
+  }
+  return undefined;
+}
+
+function buildFriendlyDeviceNameFromRecord(record, fallbackId) {
+  const candidate = deriveDeviceName(record || {}, fallbackId);
+  if (candidate && candidate !== 'Unknown device') return candidate;
+  const vendor = pickText(record?.vendor, record?.manufacturer);
+  const model = pickText(record?.model);
+  const nickname = pickText(record?.nickname, record?.alias, record?.label);
+  if (nickname) return nickname;
+  const composite = [vendor, model].filter(Boolean).join(' ').trim();
+  if (composite) return composite;
+  const serial = pickText(record?.serial, record?.mac, record?.uuid);
+  if (serial) return serial;
+  return fallbackId || 'Unknown device';
+}
+
+function normalizeMetaEntry(meta, id) {
+  if (!id) return null;
+  const vendor = pickText(meta?.vendor, meta?.manufacturer);
+  const model = pickText(meta?.model);
+  const friendly = buildFriendlyDeviceNameFromRecord({ ...meta, vendor, model }, id);
+  const type = pickText(meta?.type) || (/^light[-_]/i.test(String(id)) || /light|fixture/i.test(friendly.toLowerCase()) ? 'light' : pickText(meta?.category));
+  return {
+    ...(meta || {}),
+    id,
+    deviceName: friendly,
+    name: pickText(meta?.name, friendly),
+    vendor,
+    manufacturer: pickText(meta?.manufacturer, vendor),
+    model,
+    room: pickText(meta?.room),
+    zone: pickText(meta?.zone),
+    module: pickText(meta?.module),
+    level: pickText(meta?.level),
+    side: pickText(meta?.side),
+    type,
+    online: pickValue(meta?.online, false),
+    source: pickText(meta?.source) || 'meta'
+  };
+}
+
+function normalizeLiveDevice(device, id, fallback) {
+  if (!id) return null;
+  const base = fallback ? { ...fallback } : {};
+  const vendor = pickText(device?.vendor, device?.manufacturer, base.vendor, base.manufacturer);
+  const model = pickText(device?.model, base.model);
+  const friendly = buildFriendlyDeviceNameFromRecord({ ...base, ...device, vendor, model }, id);
+  const type = pickText(device?.type, base.type) || (/^light[-_]/i.test(String(id)) || /light|fixture/i.test(friendly.toLowerCase()) ? 'light' : '');
+  return {
+    ...base,
+    ...(device || {}),
+    id,
+    deviceName: friendly,
+    name: pickText(device?.name, base.name, friendly),
+    vendor,
+    manufacturer: pickText(device?.manufacturer, base.manufacturer, vendor),
+    model,
+    room: pickText(device?.room, base.room),
+    zone: pickText(device?.zone, base.zone),
+    module: pickText(device?.module, base.module),
+    level: pickText(device?.level, base.level),
+    side: pickText(device?.side, base.side),
+    type,
+    online: device?.online !== false,
+    source: pickText(device?.source) || 'live'
+  };
+}
+
+function normalizeGroupLight(light, id) {
+  if (!id) return null;
+  const record = (light && typeof light === 'object') ? { ...light } : { name: light };
+  const vendor = pickText(record.vendor, record.manufacturer);
+  const model = pickText(record.model);
+  const friendly = buildFriendlyDeviceNameFromRecord({ ...record, vendor, model }, id);
+  const inferredLight = /^light[-_]/i.test(String(id)) || /light|fixture|lamp|led/i.test(friendly.toLowerCase());
+  const type = pickText(record.type) || (inferredLight ? 'light' : '');
+  const category = pickText(record.category) || (inferredLight ? 'light' : pickText(record.deviceType, record.device_type));
+  return {
+    ...record,
+    id,
+    deviceName: friendly,
+    name: pickText(record.name, friendly),
+    vendor,
+    manufacturer: pickText(record.manufacturer, vendor),
+    model,
+    room: pickText(record.room),
+    zone: pickText(record.zone),
+    module: pickText(record.module),
+    level: pickText(record.level),
+    side: pickText(record.side),
+    type,
+    category,
+    online: record.online !== undefined ? !!record.online : false,
+    source: pickText(record.source) || 'group'
+  };
+}
+
+function refreshDeviceRosterIndex() {
+  if (typeof STATE !== 'object') return new Map();
+  const roster = new Map();
+  const metaEntries = STATE.deviceMeta || {};
+  Object.entries(metaEntries).forEach(([id, meta]) => {
+    if (!id) return;
+    const normalized = normalizeMetaEntry(meta, id);
+    if (normalized) roster.set(id, normalized);
+  });
+  (STATE.devices || []).forEach((device, index) => {
+    if (!device || typeof device !== 'object') return;
+    const id = deriveDeviceId(device, index);
+    if (!id) return;
+    const fallback = roster.get(id);
+    const normalized = normalizeLiveDevice(device, id, fallback);
+    if (normalized) roster.set(id, normalized);
+  });
+  (STATE.groups || []).forEach((group) => {
+    (group?.lights || []).forEach((light) => {
+      const id = typeof light === 'string' ? light : light?.id;
+      if (!id || roster.has(id)) return;
+      const normalized = normalizeGroupLight(light, id);
+      if (normalized) roster.set(id, normalized);
+    });
+  });
+  STATE.deviceRosterIndex = roster;
+  return roster;
+}
+
+function getDeviceRosterRecord(id) {
+  if (!id) return null;
+  const roster = STATE.deviceRosterIndex instanceof Map ? STATE.deviceRosterIndex : refreshDeviceRosterIndex();
+  return roster.get(id) || null;
+}
+
+function isLightLike(record) {
+  if (!record || typeof record !== 'object') return false;
+  const tagMatches = (tags) => {
+    if (!Array.isArray(tags)) return false;
+    return tags.some((tag) => typeof tag === 'string' && /light|fixture|lamp|led/i.test(tag));
+  };
+  const type = pickText(
+    record.type,
+    record.category,
+    record.deviceType,
+    record.device_type,
+    record.kind,
+    record.class,
+    record.productType,
+    record.product
+  );
+  if (type && /light|fixture|lamp|led/i.test(type)) return true;
+  const id = pickText(record.id);
+  if (id && /(light|fixture|led)/i.test(id)) return true;
+  const name = pickText(record.deviceName, record.name, record.label, record.description);
+  if (name && /light|fixture|lamp|led/i.test(name.toLowerCase())) return true;
+  if (tagMatches(record.tags) || tagMatches(record.labels)) return true;
+  if (record.factorySpectrum || record.spectrum || record.spectrumMode || record.spectrum_mode) return true;
+  if (['group', 'meta', 'setup', 'fixture'].includes(String(record.source || '').toLowerCase()) && (record.watts || record.ppfd)) {
+    return true;
+  }
+  return false;
+}
+
+function formatDelta(delta, unit = '', precision = 0) {
+  if (delta == null || !Number.isFinite(delta)) return null;
+  const factor = Math.pow(10, precision);
+  const rounded = Math.round(delta * factor) / factor;
+  const threshold = precision === 0 ? 0.5 : 0.5 / factor;
+  if (Math.abs(rounded) < threshold) return `±0${unit}`;
+  const sign = rounded > 0 ? '+' : '';
+  return `${sign}${rounded.toFixed(precision)}${unit}`;
+}
+
+function formatValueWithDelta(value, deltaText) {
+  if (!deltaText) return value;
+  return `${value} (${deltaText})`;
 }
 
 function resolveEnvironmentTargets(roomId, zoneValue) {
@@ -6656,10 +6893,29 @@ async function loadAllData() {
     }
     
     // Ensure all devices have proper online status for research mode
-    STATE.devices = STATE.devices.map(device => ({
-      ...device,
-      online: device.online !== false // Default to true unless explicitly false
-    }));
+    STATE.devices = STATE.devices.map((device, index) => {
+      if (!device || typeof device !== 'object') {
+        const fallbackId = deriveDeviceId(null, index);
+        return {
+          id: fallbackId,
+          deviceName: fallbackId,
+          name: fallbackId,
+          online: true
+        };
+      }
+      const copy = { ...device };
+      const id = deriveDeviceId(copy, index);
+      copy.id = id;
+      const friendlyName = deriveDeviceName(copy, id);
+      if (!copy.deviceName || !String(copy.deviceName).trim()) {
+        copy.deviceName = friendlyName;
+      }
+      if (!copy.name || !String(copy.name).trim()) {
+        copy.name = friendlyName;
+      }
+      copy.online = copy.online !== false;
+      return copy;
+    });
     
     // Load static data files
     const [groups, schedules, plans, environment, calibrations, spdLibrary, deviceMeta, deviceKB, equipmentKB, deviceManufacturers, farm, rooms, switchbotDevices] = await Promise.all([
@@ -6692,6 +6948,7 @@ async function loadAllData() {
     }
     hydrateDeviceDriverState();
   STATE.deviceMeta = deviceMeta?.devices || {};
+  refreshDeviceRosterIndex();
   STATE.switchbotDevices = switchbotDevices?.devices || [];
   const rawFarm = farm || (() => { try { return JSON.parse(localStorage.getItem('gr.farm') || 'null'); } catch { return null; } })() || {};
   STATE.farm = normalizeFarmDoc(rawFarm);
@@ -8689,6 +8946,23 @@ function wireGlobalEvents() {
     const staticCount = resolvedLights.length - dynamicCount;
     const mixInfo = computeMixAndHex(group);
     const { percentages } = computeChannelPercentages(mixInfo.mix);
+    const plan = group ? STATE.plans.find((p) => p.id === group.plan) : null;
+    const planSpectrum = plan?.spectrum || { cw: 45, ww: 45, bl: 0, rd: 0 };
+    const { percentages: planPercentages } = computeChannelPercentages(planSpectrum);
+    const hud = readHUD();
+    const masterValue = Number.isFinite(Number(hud.master)) ? Number(hud.master) : 100;
+    const masterPct = Math.max(0, Math.min(100, masterValue));
+    const intensityScale = plan ? (hud.lock ? masterPct / 100 : 1) : 1;
+    const planPhotoperiod = Number(plan?.photoperiod || 12);
+    const planPpfd = Number(plan?.ppfd || 0);
+    const planDliValue = plan
+      ? (plan.dli != null
+          ? Number(plan.dli)
+          : (planPpfd > 0 ? (planPpfd * 3600 * planPhotoperiod) / 1e6 : 0))
+      : null;
+    const activePhotoperiod = planPhotoperiod;
+    const actualPpfd = planPpfd ? planPpfd * intensityScale : 0;
+    const actualDli = actualPpfd > 0 && activePhotoperiod > 0 ? (actualPpfd * 3600 * activePhotoperiod) / 1e6 : 0;
     card.classList.remove('is-empty');
     if (title) title.textContent = `Current mix • ${resolvedLights.length} light${resolvedLights.length === 1 ? '' : 's'}`;
     if (subtitle) {
@@ -8705,16 +8979,48 @@ function wireGlobalEvents() {
       }
     }
     if (metrics) {
+      const hasPlan = !!plan;
       const items = [
-        { label: 'Cool white', value: `${percentages.cw.toFixed(0)}%` },
-        { label: 'Warm white', value: `${percentages.ww.toFixed(0)}%` },
-        { label: 'Blue', value: `${percentages.bl.toFixed(0)}%` },
-        { label: 'Red', value: `${percentages.rd.toFixed(0)}%` },
-        { label: 'Dynamic', value: dynamicCount ? `${dynamicCount}` : '0' },
-        { label: 'Static', value: staticCount ? `${staticCount}` : '0' },
+        {
+          label: 'Cool white',
+          value: `${percentages.cw.toFixed(0)}%`,
+          delta: hasPlan ? formatDelta(percentages.cw - planPercentages.cw, '%') : null
+        },
+        {
+          label: 'Warm white',
+          value: `${percentages.ww.toFixed(0)}%`,
+          delta: hasPlan ? formatDelta(percentages.ww - planPercentages.ww, '%') : null
+        },
+        {
+          label: 'Blue',
+          value: `${percentages.bl.toFixed(0)}%`,
+          delta: hasPlan ? formatDelta(percentages.bl - planPercentages.bl, '%') : null
+        },
+        {
+          label: 'Red',
+          value: `${percentages.rd.toFixed(0)}%`,
+          delta: hasPlan ? formatDelta(percentages.rd - planPercentages.rd, '%') : null
+        },
+        {
+          label: 'PPFD',
+          value: actualPpfd ? `${actualPpfd.toFixed(0)} µmol·m⁻²·s⁻¹` : '—',
+          delta: hasPlan ? formatDelta(actualPpfd - planPpfd, ' µmol·m⁻²·s⁻¹') : null
+        },
+        {
+          label: 'Photoperiod',
+          value: activePhotoperiod ? `${activePhotoperiod.toFixed(1)} h` : '—',
+          delta: hasPlan ? formatDelta(activePhotoperiod - planPhotoperiod, ' h', 1) : null
+        },
+        {
+          label: 'DLI',
+          value: actualDli ? `${actualDli.toFixed(2)} mol·m⁻²·d⁻¹` : '—',
+          delta: hasPlan ? formatDelta(actualDli - (planDliValue ?? 0), ' mol·m⁻²·d⁻¹', 2) : null
+        },
+        { label: 'Dynamic fixtures', value: dynamicCount ? `${dynamicCount}` : '0', delta: null },
+        { label: 'Static fixtures', value: staticCount ? `${staticCount}` : '0', delta: null }
       ];
       metrics.innerHTML = items
-        .map((item) => `<dt>${escapeHtml(item.label)}</dt><dd>${escapeHtml(item.value)}</dd>`)
+        .map((item) => `<dt>${escapeHtml(item.label)}</dt><dd>${escapeHtml(formatValueWithDelta(item.value, item.delta))}</dd>`)
         .join('');
     }
     const shouldLock = resolvedLights.length > 0 && dynamicCount === 0;
@@ -8871,6 +9177,70 @@ function wireGlobalEvents() {
     const ungroupedStatus = document.getElementById('ungroupedStatus');
     const ungroupedEmpty = document.getElementById('ungroupedEmpty');
 
+    const rosterIndex = refreshDeviceRosterIndex();
+    const assignedIdSet = new Set(
+      (STATE.groups || [])
+        .flatMap((g) => (g.lights || []).map((l) => (typeof l === 'string' ? l : l?.id)))
+        .filter(Boolean)
+    );
+
+    function collectSetupLightsForSelection() {
+      const results = [];
+      const groupRoomSel = document.getElementById('groupRoomDropdown');
+      const groupZoneSel = document.getElementById('groupZoneDropdown');
+      if (!groupRoomSel || !groupZoneSel || !window.STATE?.lightSetups) return results;
+      const roomVal = groupRoomSel.value;
+      const zoneVal = groupZoneSel.value;
+      const rooms = window.STATE?.rooms || [];
+      const roomObj = rooms.find((r) => r.id === roomVal || r.name === roomVal);
+      const roomId = roomObj?.id || roomVal;
+      const roomName = roomObj?.name || roomVal;
+      window.STATE.lightSetups.forEach((setup) => {
+        const setupRoomObj = rooms.find((r) => r.id === setup.room || r.name === setup.room);
+        const setupRoomId = setupRoomObj?.id || setup.room;
+        const setupRoomName = setupRoomObj?.name || setup.room;
+        const matchesRoom = (!roomId && !roomName) || setupRoomId === roomId || setupRoomName === roomName;
+        const matchesZone = String(setup.zone || '') === String(zoneVal || '');
+        if (!matchesRoom || !matchesZone) return;
+        (setup.fixtures || []).forEach((fixture) => {
+          const synthId = fixture.id || `wired-${(fixture.vendor || fixture.name || '').replace(/\s+/g, '_')}-${(fixture.model || '').replace(/\s+/g, '_')}`;
+          if (!synthId || assignedIdSet.has(synthId)) return;
+          const friendly = fixture.vendor ? `${fixture.vendor} ${fixture.model}` : (fixture.name || fixture.model || 'Light');
+          results.push({
+            id: synthId,
+            deviceName: friendly,
+            name: friendly,
+            vendor: fixture.vendor || '',
+            manufacturer: fixture.vendor || '',
+            model: fixture.model || '',
+            room: pickText(setupRoomName, setupRoomId),
+            zone: pickText(setup.zone),
+            type: 'light',
+            source: 'setup',
+            count: fixture.count,
+            watts: fixture.watts,
+            online: true
+          });
+        });
+      });
+      return results;
+    }
+
+    function computeUngroupedLights() {
+      const base = Array.from(rosterIndex.values())
+        .filter((light) => isLightLike(light) && !assignedIdSet.has(light.id));
+      const map = new Map();
+      base.forEach((light) => {
+        if (light?.id) map.set(light.id, light);
+      });
+      collectSetupLightsForSelection().forEach((light) => {
+        if (light?.id && !map.has(light.id) && !assignedIdSet.has(light.id)) {
+          map.set(light.id, light);
+        }
+      });
+      return Array.from(map.values());
+    }
+
     if (!group) {
       if (groupPlan) groupPlan.value = '';
       if (groupSchedule) groupSchedule.value = '';
@@ -8880,13 +9250,15 @@ function wireGlobalEvents() {
       if (groupsStatus) groupsStatus.textContent = '';
       if (groupName) groupName.value = '';
       if (ungroupedList) {
-        // Repopulate ungrouped lights
-        const assignedIds = (STATE.groups||[]).flatMap(g => (g.lights||[]).map(l => l.id));
-        const ungrouped = STATE.devices.filter(d => !assignedIds.includes(d.id));
-        ungroupedList.innerHTML = ungrouped.map(l => `<li>${escapeHtml(l.deviceName || l.name || l.id)}</li>`).join('');
+        const ungrouped = computeUngroupedLights();
+        ungroupedList.innerHTML = ungrouped.map(light => {
+          const location = [pickText(light.room), pickText(light.zone)].filter(Boolean).join(' / ');
+          const subtitle = location ? `<span class="tiny" style="display:block;color:#475569;margin-top:2px;">${escapeHtml(location)}</span>` : '';
+          return `<li><strong>${escapeHtml(light.deviceName || light.name || light.id)}</strong>${subtitle}</li>`;
+        }).join('');
         if (ungroupedEmpty) ungroupedEmpty.style.display = ungrouped.length ? 'none' : 'block';
+        if (ungroupedStatus) ungroupedStatus.textContent = ungrouped.length ? `${ungrouped.length} ungrouped` : '';
       }
-      if (ungroupedStatus) ungroupedStatus.textContent = '';
       updateGroupPlanInfoCard(null);
       updateGroupLightInfoCard(null);
       setHudLocked(true);
@@ -8928,8 +9300,8 @@ function wireGlobalEvents() {
     renderGroupSpectrumPreview(group);
     // Meta status: roster count and online
     try {
-      const ids = (group.lights||[]).map(l=>l.id);
-      const targets = STATE.devices.filter(d=>ids.includes(d.id));
+      const ids = (group.lights || []).map(l => (typeof l === 'string' ? l : l.id));
+      const targets = ids.map(id => rosterIndex.get(id)).filter(Boolean);
       const online = targets.filter(d=>d.online).length;
       const planName = STATE.plans.find(p=>p.id===group.plan)?.name || '—';
       const schedName = STATE.schedules.find(s=>s.id===group.schedule)?.name || '—';
@@ -8940,7 +9312,7 @@ function wireGlobalEvents() {
       // Defensive: allow for group.lights to be array of IDs or objects
       const assignedIds = (group.lights || []).map(l => typeof l === 'string' ? l : l.id);
       groupRosterBody.innerHTML = assignedIds.map(id => {
-        const meta = getDeviceMeta(id) || {};
+        const meta = rosterIndex.get(id) || getDeviceMeta(id) || {};
         const locStr = [meta.room||'', meta.zone||''].filter(Boolean).join(' / ');
         const levelStr = meta.level || '';
         const sideStr = meta.side || '';
@@ -8950,14 +9322,6 @@ function wireGlobalEvents() {
       }).join('');
     }
     if (groupRosterEmpty) groupRosterEmpty.style.display = (group.lights||[]).length ? 'none' : 'block';
-
-    // Fix ungrouped lights: show all devices not assigned to any group
-    if (ungroupedList) {
-      const allAssignedIds = (STATE.groups||[]).flatMap(g => (g.lights||[]).map(l => typeof l === 'string' ? l : l.id));
-      const ungrouped = STATE.devices.filter(d => !allAssignedIds.includes(d.id));
-      ungroupedList.innerHTML = ungrouped.map(l => `<li>${escapeHtml(l.deviceName || l.name || l.id)}</li>`).join('');
-      if (ungroupedEmpty) ungroupedEmpty.style.display = ungrouped.length ? 'none' : 'block';
-    }
 
     // Render light cards for this group below the roster for quick control/visibility
     const lightList = document.getElementById('groupLightList');
@@ -9082,69 +9446,26 @@ function wireGlobalEvents() {
     // Ungrouped lights list with Add buttons
     try {
       if (ungroupedList) {
-        const assigned = new Set((STATE.groups||[]).flatMap(g => (g.lights||[]).map(l=>l.id)));
-        let allLights = (STATE.devices||[]).filter(d => d.type === 'light' || /light|fixture/i.test(d.deviceName||''));
-        // Also include lights from STATE.lightSetups for the selected room/zone
-        const groupRoomSel = document.getElementById('groupRoomDropdown');
-        const groupZoneSel = document.getElementById('groupZoneDropdown');
-        let setupLights = [];
-        if (groupRoomSel && groupZoneSel && window.STATE?.lightSetups) {
-          const roomVal = groupRoomSel.value;
-          const zoneVal = groupZoneSel.value;
-          const roomObj = (window.STATE?.rooms||[]).find(r => r.id === roomVal || r.name === roomVal);
-          const roomId = roomObj?.id || roomVal;
-          const roomName = roomObj?.name || roomVal;
-          window.STATE.lightSetups.forEach(setup => {
-            const setupRoomObj = (window.STATE?.rooms||[]).find(r => r.id === setup.room || r.name === setup.room);
-            const setupRoomId = setupRoomObj?.id || setup.room;
-            const setupRoomName = setupRoomObj?.name || setup.room;
-            const matchesRoom = (setupRoomId && setupRoomId === roomId) || (setupRoomName && setupRoomName === roomName);
-            const matchesZone = String(setup.zone || '') === String(zoneVal || '');
-            if (matchesRoom && matchesZone) {
-              if (Array.isArray(setup.fixtures)) {
-                setup.fixtures.forEach(f => {
-                  // Synthesize a device-like object for ungrouped display
-                  const synthId = f.id || `wired-${(f.vendor||f.name||'').replace(/\s+/g,'_')}-${(f.model||'').replace(/\s+/g,'_')}`;
-                  if (!assigned.has(synthId)) {
-                    setupLights.push({
-                      id: synthId,
-                      deviceName: f.vendor ? `${f.vendor} ${f.model}` : (f.name || f.model || 'Light'),
-                      type: 'light',
-                      watts: f.watts,
-                      count: f.count,
-                      source: 'setup',
-                      vendor: f.vendor,
-                      model: f.model
-                    });
-                  }
-                });
-              }
-            }
-          });
-        }
-        // Merge live and setup lights, dedup by id
-        const allLightsMap = new Map();
-        allLights.forEach(l => allLightsMap.set(l.id, l));
-        setupLights.forEach(l => allLightsMap.set(l.id, l));
-        const mergedLights = Array.from(allLightsMap.values());
-        const ungrouped = mergedLights.filter(d => !assigned.has(d.id));
+        const ungrouped = computeUngroupedLights();
         ungroupedList.innerHTML = '';
         if (!ungrouped.length) {
           if (ungroupedEmpty) {
             ungroupedEmpty.style.display = 'block';
-            const hasAnyKnown = mergedLights.length > 0;
+            const hasAnyKnown = Array.from(rosterIndex.values()).some(isLightLike);
             ungroupedEmpty.textContent = hasAnyKnown ? 'All lights are assigned to groups.' : 'No known lights yet. Pair devices or add them in Farm/Rooms.';
           }
         } else {
           if (ungroupedEmpty) ungroupedEmpty.style.display = 'none';
           ungrouped.forEach(d => {
-            const card = deviceCard(d, { compact: true });
+            const rosterMeta = rosterIndex.get(d.id) || null;
+            const record = rosterMeta || d;
+            const card = deviceCard(record, { compact: true });
             // Apply spectrum canvas coloring similar to group roster
             try {
               const cv = card.querySelector('.device-spectrum__canvas');
               if (cv) {
-                const meta = getDeviceMeta(d.id) || {};
-                const isDynamic = ['cwPct','wwPct','blPct','rdPct'].some(k => d[k] !== undefined) || String(meta.spectrumMode||'dynamic')==='dynamic';
+                const meta = rosterMeta || getDeviceMeta(d.id) || {};
+                const isDynamic = ['cwPct','wwPct','blPct','rdPct'].some(k => record[k] !== undefined) || String(meta.spectrumMode||'dynamic')==='dynamic';
                 const mix = isDynamic
                   ? computeMixAndHex(group).mix
                   : (meta.factorySpectrum || (STATE.plans.find(p=>p.id===group.plan)?.spectrum) || { cw:45, ww:45, bl:0, rd:0 });
@@ -9153,12 +9474,21 @@ function wireGlobalEvents() {
                 card.title = isDynamic ? 'Dynamic: using driver spectrum' : 'Static: using device factory spectrum';
               }
             } catch {}
+            const location = [pickText(record.room, rosterMeta?.room), pickText(record.zone, rosterMeta?.zone)].filter(Boolean).join(' / ');
+            if (location) {
+              const loc = document.createElement('div');
+              loc.className = 'tiny';
+              loc.style.marginTop = '4px';
+              loc.style.color = '#475569';
+              loc.textContent = `Location: ${location}`;
+              card.appendChild(loc);
+            }
             const add = document.createElement('button');
             add.type = 'button'; add.className = 'ghost'; add.textContent = 'Add to group';
             add.style.marginTop = '6px';
             add.addEventListener('click', async () => {
               group.lights = group.lights || [];
-              if (!group.lights.some(x => x.id === d.id)) group.lights.push({ id: d.id, name: d.deviceName || d.id });
+              if (!group.lights.some(x => x.id === d.id)) group.lights.push({ id: d.id, name: record.deviceName || record.name || d.id });
               await saveGroups();
               updateGroupUI(group);
             });
