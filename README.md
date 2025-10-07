@@ -64,6 +64,27 @@ The script checks:
 - GET /index.html
 - POST /data/device-meta.json (dry-run to temp file)
 
+### Pre-AI Automation Layer
+
+The pre-AI automation layer orchestrates smart plugs using real-time sensor data. It exposes REST endpoints on the primary Node.js server and persists telemetry for future ML training.
+
+Key endpoints:
+
+- `GET /env` – Returns the latest environmental scopes, including which rooms are currently governed by plug rules.
+- `POST /env` – Submit sensor readings and target ranges for a scope (e.g., room) to keep the rules engine synchronized.
+- `GET /plugs` / `POST /plugs/discover` – Enumerate Shelly, Kasa, SwitchBot, and manual Tasmota plugs across vendors via a unified schema.
+- `POST /plugs/:plugId/state` – Toggle plug power state with guardrail enforcement.
+- `POST /plugs/:plugId/rules` – Attach or detach automation rules from a plug, preserving vendor-agnostic guardrails such as cooldowns.
+- `GET /rules` / `POST /rules` / `PATCH /rules/:id` / `DELETE /rules/:id` – Manage rule definitions that evaluate `when` thresholds and drive plug actions.
+
+Telemetry written to `data/automation/events.ndjson` captures every state-action-result tuple:
+
+```
+timestamp, scope, ruleId, plugId, action, temp_before, rh_before, temp_after, rh_after, powerW
+```
+
+The dashboard now surfaces smart plug discovery, live power readings, and rule assignment under **Control Devices → Smart Plugs**, while an always-on “Centralized Automation” indicator in the header shows whether plug automation is active, idle, or degraded.
+
 ## Python Backend Configuration
 
 ### Environment Variables

@@ -6,6 +6,7 @@ import { fileURLToPath } from 'url';
 import Datastore from 'nedb-promises';
 import crypto from 'crypto';
 import AutomationRulesEngine from './lib/automation-engine.js';
+import { createPreAutomationLayer } from './automation/index.js';
 import {
   buildSetupWizards,
   mergeDiscoveryPayload,
@@ -117,6 +118,251 @@ app.use(express.json({ limit: "1mb" }));
 // --- Automation Rules Engine ---
 const automationEngine = new AutomationRulesEngine();
 console.log('[automation] Rules engine initialized with default farm automation rules');
+
+const {
+  engine: preAutomationEngine,
+  envStore: preEnvStore,
+  rulesStore: preRulesStore,
+  registry: prePlugRegistry,
+  plugManager: prePlugManager
+} = createPreAutomationLayer({ dataDir: path.resolve('./data/automation') });
+console.log('[automation] Pre-AI automation layer initialized (sensors + smart plugs)');
+
+function setPreAutomationCors(res) {
+  res.setHeader('Access-Control-Allow-Origin', '*');
+  res.setHeader('Access-Control-Allow-Methods', 'GET,POST,PATCH,DELETE,OPTIONS');
+  res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
+}
+
+// --- Pre-AI Automation API ---
+
+app.options('/env', (req, res) => { setPreAutomationCors(res); res.status(204).end(); });
+app.options('/plugs', (req, res) => { setPreAutomationCors(res); res.status(204).end(); });
+app.options('/plugs/*', (req, res) => { setPreAutomationCors(res); res.status(204).end(); });
+app.options('/rules', (req, res) => { setPreAutomationCors(res); res.status(204).end(); });
+app.options('/rules/*', (req, res) => { setPreAutomationCors(res); res.status(204).end(); });
+
+app.get('/env', (req, res) => {
+  try {
+    setPreAutomationCors(res);
+    const snapshot = preEnvStore.getSnapshot();
+    const zones = Object.entries(snapshot.scopes || {}).map(([scopeId, scopeData]) => {
+      const sensors = Object.entries(scopeData.sensors || {}).reduce((acc, [sensorKey, sensorData]) => {
+        acc[sensorKey] = {
+          current: sensorData.value,
+          unit: sensorData.unit || null,
+          observedAt: sensorData.observedAt || null,
+          history: Array.isArray(sensorData.history) ? sensorData.history : [],
+          setpoint: snapshot.targets?.[scopeId]?.[sensorKey] || null
+        };
+        return acc;
+      }, {});
+
+      const activeRule = preAutomationEngine.getActiveRule(scopeId);
+
+      return {
+        id: scopeId,
+        name: scopeData.name || scopeData.label || scopeId,
+        sensors,
+        updatedAt: scopeData.updatedAt || null,
+        meta: {
+          ...scopeData.meta,
+          managedByPlugs: Boolean(activeRule),
+          activeRuleId: activeRule?.ruleId || null,
+          activeRuleAt: activeRule ? new Date(activeRule.executedAt).toISOString() : null
+        }
+      };
+    });
+
+    res.json({ ok: true, env: snapshot, zones });
+  } catch (error) {
+    res.status(500).json({ ok: false, error: error.message });
+  }
+});
+
+app.post('/env', (req, res) => {
+  try {
+    setPreAutomationCors(res);
+    const body = req.body || {};
+    const scope = body.scope || body.room || 'default';
+    const sensors = body.sensors || body.readings || {};
+    const sensorArray = Array.isArray(sensors) ? sensors : Object.entries(sensors).map(([type, value]) => ({ type, value }));
+    sensorArray.forEach((reading) => {
+      if (!reading) return;
+      const sensorType = reading.type || reading.sensor || reading.metric;
+      if (!sensorType) return;
+      const readingScope = reading.scope || reading.room || scope;
+      preAutomationEngine.ingestSensor(readingScope, sensorType, {
+        value: reading.value ?? reading.reading ?? null,
+        unit: reading.unit,
+        observedAt: reading.observedAt || reading.timestamp || new Date().toISOString(),
+        meta: reading.meta || reading.metadata || null
+      });
+    });
+
+    if (body.targets) {
+      preAutomationEngine.setTargets(scope, body.targets);
+    }
+
+    const env = preEnvStore.getScope(scope);
+    const targets = preEnvStore.getTargets(scope);
+    res.json({ ok: true, scope, env, targets });
+  } catch (error) {
+    res.status(500).json({ ok: false, error: error.message });
+  }
+});
+
+app.get('/plugs', asyncHandler(async (req, res) => {
+  setPreAutomationCors(res);
+  const plugs = await prePlugManager.discoverAll();
+  res.json({ ok: true, plugs });
+}));
+
+app.post('/plugs/discover', asyncHandler(async (req, res) => {
+  setPreAutomationCors(res);
+  const plugs = await prePlugManager.discoverAll();
+  res.json({ ok: true, plugs, refreshedAt: new Date().toISOString() });
+}));
+
+app.post('/plugs/register', (req, res) => {
+  try {
+    setPreAutomationCors(res);
+    const body = req.body || {};
+    const vendor = String(body.vendor || '').toLowerCase();
+    const deviceId = body.deviceId || body.shortId || body.serial || body.id;
+    if (!vendor || !deviceId) {
+      return res.status(400).json({ ok: false, error: 'vendor and deviceId are required' });
+    }
+    const saved = preAutomationEngine.registerPlug({
+      vendor,
+      deviceId,
+      name: body.name,
+      model: body.model,
+      manual: true,
+      connection: body.connection || {},
+      metadata: body.metadata || {}
+    });
+    res.json({ ok: true, plug: saved });
+  } catch (error) {
+    res.status(500).json({ ok: false, error: error.message });
+  }
+});
+
+app.delete('/plugs/:plugId', (req, res) => {
+  try {
+    setPreAutomationCors(res);
+    const plugId = decodeURIComponent(req.params.plugId);
+    const removed = preAutomationEngine.unregisterPlug(plugId);
+    res.json({ ok: true, removed });
+  } catch (error) {
+    res.status(500).json({ ok: false, error: error.message });
+  }
+});
+
+app.post('/plugs/:plugId/state', asyncHandler(async (req, res) => {
+  setPreAutomationCors(res);
+  const plugId = decodeURIComponent(req.params.plugId);
+  const body = req.body || {};
+  const desired = typeof body.on === 'boolean'
+    ? body.on
+    : typeof body.state === 'boolean'
+    ? body.state
+    : typeof body.set === 'string'
+    ? body.set.toLowerCase() === 'on'
+    : null;
+  if (desired === null) {
+    return res.status(400).json({ ok: false, error: 'Request body must include on/state boolean or set:"on|off"' });
+  }
+  const state = await preAutomationEngine.setPlugState(plugId, desired);
+  res.json({ ok: true, plugId, state });
+}));
+
+app.post('/plugs/:plugId/rules', (req, res) => {
+  try {
+    setPreAutomationCors(res);
+    const plugId = decodeURIComponent(req.params.plugId);
+    const body = req.body || {};
+    const ruleIds = Array.isArray(body.ruleIds) ? body.ruleIds : [];
+    const actionConfig = body.action || body.actionConfig || { set: 'on' };
+
+    const allRules = preRulesStore.list();
+    const existingRuleIds = allRules.filter((rule) => Array.isArray(rule.actions) && rule.actions.some((action) => action.plugId === plugId)).map((rule) => rule.id);
+
+    const toRemove = existingRuleIds.filter((id) => !ruleIds.includes(id));
+    const toAdd = ruleIds.filter((id) => !existingRuleIds.includes(id));
+
+    toRemove.forEach((ruleId) => preAutomationEngine.removePlugAssignment(ruleId, plugId));
+    toAdd.forEach((ruleId) => preAutomationEngine.assignPlug(ruleId, plugId, actionConfig));
+
+    const updatedRules = preRulesStore.list().filter((rule) => ruleIds.includes(rule.id));
+    res.json({ ok: true, plugId, rules: updatedRules });
+  } catch (error) {
+    res.status(500).json({ ok: false, error: error.message });
+  }
+});
+
+app.get('/rules', (req, res) => {
+  try {
+    setPreAutomationCors(res);
+    const rules = preAutomationEngine.listRules();
+    res.json({ ok: true, rules });
+  } catch (error) {
+    res.status(500).json({ ok: false, error: error.message });
+  }
+});
+
+app.get('/rules/:ruleId', (req, res) => {
+  try {
+    setPreAutomationCors(res);
+    const rule = preRulesStore.find(req.params.ruleId);
+    if (!rule) {
+      return res.status(404).json({ ok: false, error: 'Rule not found' });
+    }
+    res.json({ ok: true, rule });
+  } catch (error) {
+    res.status(500).json({ ok: false, error: error.message });
+  }
+});
+
+app.post('/rules', (req, res) => {
+  try {
+    setPreAutomationCors(res);
+    const body = req.body || {};
+    if (!body.when || !body.actions) {
+      return res.status(400).json({ ok: false, error: 'Rule must include when and actions' });
+    }
+    const saved = preAutomationEngine.upsertRule(body);
+    res.json({ ok: true, rule: saved });
+  } catch (error) {
+    res.status(500).json({ ok: false, error: error.message });
+  }
+});
+
+app.patch('/rules/:ruleId', (req, res) => {
+  try {
+    setPreAutomationCors(res);
+    const existing = preRulesStore.find(req.params.ruleId);
+    if (!existing) {
+      return res.status(404).json({ ok: false, error: 'Rule not found' });
+    }
+    const body = req.body || {};
+    const merged = { ...existing, ...body, id: existing.id };
+    const saved = preAutomationEngine.upsertRule(merged);
+    res.json({ ok: true, rule: saved });
+  } catch (error) {
+    res.status(500).json({ ok: false, error: error.message });
+  }
+});
+
+app.delete('/rules/:ruleId', (req, res) => {
+  try {
+    setPreAutomationCors(res);
+    const removed = preAutomationEngine.removeRule(req.params.ruleId);
+    res.json({ ok: true, removed });
+  } catch (error) {
+    res.status(500).json({ ok: false, error: error.message });
+  }
+});
 
 // --- IFTTT Integration (optional) ---
 // Status endpoint for quick checks
