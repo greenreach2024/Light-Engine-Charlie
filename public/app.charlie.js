@@ -341,6 +341,145 @@ function deriveDeviceName(device, fallbackId = '') {
   return fallbackId || 'Unknown device';
 }
 
+function firstNonEmptyString(...values) {
+  for (const value of values) {
+    if (value == null) continue;
+    const text = String(value).trim();
+    if (text) return text;
+  }
+  return '';
+}
+
+function formatVendorModel(vendor, model) {
+  const vendorText = typeof vendor === 'string' ? vendor.trim() : '';
+  const modelText = typeof model === 'string' ? model.trim() : '';
+  return [vendorText, modelText].filter(Boolean).join(' ').trim();
+}
+
+function resolveLightNameFromState(id, source) {
+  const sourceName =
+    source && typeof source === 'object'
+      ? firstNonEmptyString(
+          source.name,
+          source.deviceName,
+          source.label,
+          formatVendorModel(source.vendor, source.model),
+          formatVendorModel(source.manufacturer, source.model),
+          source.model,
+          source.manufacturer
+        )
+      : '';
+  if (sourceName) return sourceName;
+
+  const device = Array.isArray(STATE?.devices) ? STATE.devices.find((d) => d.id === id) : null;
+  if (device) {
+    const deviceName = firstNonEmptyString(
+      device.deviceName,
+      device.name,
+      formatVendorModel(device.vendor, device.model),
+      deriveDeviceName(device, id)
+    );
+    if (deviceName) return deviceName;
+  }
+
+  const meta = STATE?.deviceMeta?.[id];
+  if (meta) {
+    const metaName = firstNonEmptyString(
+      meta.deviceName,
+      meta.name,
+      meta.label,
+      formatVendorModel(meta.vendor || meta.manufacturer, meta.model),
+      meta.model,
+      meta.manufacturer
+    );
+    if (metaName) return metaName;
+  }
+
+  return id;
+}
+
+function normalizeGroupLightEntry(entry, index = 0) {
+  if (!entry) return null;
+  if (typeof entry === 'string') {
+    const id = firstNonEmptyString(entry);
+    if (!id) return null;
+    const name = resolveLightNameFromState(id, null);
+    return { id, name, deviceName: name };
+  }
+  if (typeof entry === 'object') {
+    const raw = entry;
+    const idCandidate = firstNonEmptyString(raw.id, raw.device_id, raw.deviceId, raw.deviceID);
+    const id = idCandidate || deriveDeviceId(raw, index);
+    if (!id) return null;
+    const name = resolveLightNameFromState(id, raw) || id;
+    const existingName = typeof raw.name === 'string' ? raw.name.trim() : '';
+    const needsUpdate = raw.id !== id || existingName !== name || !raw.deviceName;
+    if (!needsUpdate) {
+      return { ...raw, id, name: existingName || name, deviceName: raw.deviceName || existingName || name };
+    }
+    const normalized = { ...raw, id, name };
+    if (!normalized.deviceName) normalized.deviceName = name;
+    return normalized;
+  }
+  return null;
+}
+
+function normalizeGroupRecord(group) {
+  if (!group || typeof group !== 'object') {
+    return { id: '', name: '', lights: [] };
+  }
+  const normalized = { ...group };
+  if (typeof normalized.id === 'string') normalized.id = normalized.id.trim();
+  if (typeof normalized.name === 'string') normalized.name = normalized.name.trim();
+  if (!normalized.name && normalized.id) normalized.name = normalized.id;
+  const lights = Array.isArray(group.lights)
+    ? group.lights
+        .map((entry, idx) => normalizeGroupLightEntry(entry, idx))
+        .filter((entry) => entry && entry.id)
+    : [];
+  normalized.lights = lights;
+  return normalized;
+}
+
+function normalizeGroupsInState() {
+  if (!Array.isArray(STATE?.groups)) {
+    if (STATE) STATE.groups = [];
+    return;
+  }
+  const currentId = STATE.currentGroup?.id || null;
+  STATE.groups = STATE.groups.map((group) => normalizeGroupRecord(group));
+  if (currentId) {
+    STATE.currentGroup = STATE.groups.find((group) => group.id === currentId) || null;
+  }
+}
+
+function buildDeviceLikeFromMeta(id) {
+  if (!id) return null;
+  const meta = STATE?.deviceMeta?.[id];
+  if (!meta) return null;
+  const name = resolveLightNameFromState(id, meta);
+  return {
+    id,
+    deviceName: name,
+    name,
+    online: true,
+    type: meta.type || 'light',
+    protocol: meta.protocol || meta.transport || 'unknown',
+    spectrumMode: meta.spectrumMode || meta.control || 'static',
+    vendor: meta.vendor || meta.manufacturer,
+    manufacturer: meta.manufacturer || meta.vendor,
+    model: meta.model,
+    farm: meta.farm,
+    room: meta.room,
+    zone: meta.zone,
+    module: meta.module,
+    level: meta.level,
+    side: meta.side,
+    watts: meta.watts,
+    source: 'meta',
+  };
+}
+
 function formatDelta(delta, unit = '', precision = 0) {
   if (delta == null || !Number.isFinite(delta)) return null;
   const factor = Math.pow(10, precision);
@@ -7105,6 +7244,7 @@ async function loadAllData() {
     }
     hydrateDeviceDriverState();
   STATE.deviceMeta = deviceMeta?.devices || {};
+  normalizeGroupsInState();
   STATE.switchbotDevices = switchbotDevices?.devices || [];
   const rawFarm = farm || (() => { try { return JSON.parse(localStorage.getItem('gr.farm') || 'null'); } catch { return null; } })() || {};
   STATE.farm = normalizeFarmDoc(rawFarm);
@@ -7289,9 +7429,22 @@ function renderDevices() {
     const groups = STATE.groups.filter(g => selected.includes(g.id)).slice(0, cap);
     groups.forEach(g => {
       // Render one card summarizing the group; show first device as representative if present
-      const ids = (g.lights || []).map(l => l.id);
-      const devices = STATE.devices.filter(d => ids.includes(d.id));
-      const rep = devices[0] || { id: g.id, deviceName: g.name, onOffStatus: true, online: true };
+      const ids = (g.lights || [])
+        .map((entry) => (typeof entry === 'string' ? entry : entry?.id || ''))
+        .filter(Boolean);
+      const devices = ids
+        .map((id) => STATE.devices.find((d) => d.id === id) || buildDeviceLikeFromMeta(id))
+        .filter(Boolean);
+      const rep =
+        devices[0] ||
+        {
+          id: g.id,
+          deviceName: g.name,
+          name: g.name,
+          onOffStatus: true,
+          online: true,
+          type: 'group',
+        };
       const card = deviceCard(rep, { compact: true, context: { group: g, deviceCount: devices.length } });
       container.appendChild(card);
     });
@@ -7346,6 +7499,7 @@ function renderGroups() {
             const groupsReloaded = await loadJSON('./data/groups.json');
             if (groupsReloaded && Array.isArray(groupsReloaded.groups)) {
               STATE.groups = groupsReloaded.groups;
+              normalizeGroupsInState();
               // Re-select the current group by id
               STATE.currentGroup = STATE.groups.find(g => g.id === group.id) || null;
             }
@@ -9343,9 +9497,32 @@ function wireGlobalEvents() {
       if (groupName) groupName.value = '';
       if (ungroupedList) {
         // Repopulate ungrouped lights
-        const assignedIds = (STATE.groups||[]).flatMap(g => (g.lights||[]).map(l => l.id));
-        const ungrouped = STATE.devices.filter(d => !assignedIds.includes(d.id));
-        ungroupedList.innerHTML = ungrouped.map(l => `<li>${escapeHtml(l.deviceName || l.name || l.id)}</li>`).join('');
+        const assignedSet = new Set(
+          (STATE.groups || [])
+            .flatMap((g) =>
+              (g.lights || [])
+                .map((entry) => (typeof entry === 'string' ? entry : entry?.id || ''))
+                .filter(Boolean)
+            )
+        );
+        const merged = new Map();
+        (STATE.devices || []).forEach((device) => {
+          if (device && device.id && !merged.has(device.id)) {
+            merged.set(device.id, device);
+          }
+        });
+        if (STATE.deviceMeta && typeof STATE.deviceMeta === 'object') {
+          Object.keys(STATE.deviceMeta).forEach((id) => {
+            const metaDevice = buildDeviceLikeFromMeta(id);
+            if (metaDevice && metaDevice.id && !merged.has(metaDevice.id)) {
+              merged.set(metaDevice.id, metaDevice);
+            }
+          });
+        }
+        const ungrouped = Array.from(merged.values()).filter((device) => device.id && !assignedSet.has(device.id));
+        ungroupedList.innerHTML = ungrouped
+          .map((light) => `<li>${escapeHtml(resolveLightNameFromState(light.id, light))}</li>`)
+          .join('');
         if (ungroupedEmpty) ungroupedEmpty.style.display = ungrouped.length ? 'none' : 'block';
       }
       if (ungroupedStatus) ungroupedStatus.textContent = '';
@@ -9390,34 +9567,76 @@ function wireGlobalEvents() {
     renderGroupSpectrumPreview(group);
     // Meta status: roster count and online
     try {
-      const ids = (group.lights||[]).map(l=>l.id);
-      const targets = STATE.devices.filter(d=>ids.includes(d.id));
-      const online = targets.filter(d=>d.online).length;
+      const ids = (group.lights || [])
+        .map((entry) => (typeof entry === 'string' ? entry : entry?.id || ''))
+        .filter(Boolean);
+      const targets = ids
+        .map((id) => STATE.devices.find((d) => d.id === id) || buildDeviceLikeFromMeta(id))
+        .filter(Boolean);
+      const online = targets.filter((d) => d && d.online !== false).length;
       const planName = STATE.plans.find(p=>p.id===group.plan)?.name || '—';
       const schedName = STATE.schedules.find(s=>s.id===group.schedule)?.name || '—';
       if (groupsStatus) groupsStatus.textContent = `${ids.length} light(s) • ${online} online • Plan: ${planName} • Schedule: ${schedName}`;
     } catch {}
     // Roster
     if (groupRosterBody) {
-      // Defensive: allow for group.lights to be array of IDs or objects
-      const assignedIds = (group.lights || []).map(l => typeof l === 'string' ? l : l.id);
-      groupRosterBody.innerHTML = assignedIds.map(id => {
-        const meta = getDeviceMeta(id) || {};
-        const locStr = [meta.room||'', meta.zone||''].filter(Boolean).join(' / ');
-        const levelStr = meta.level || '';
-        const sideStr = meta.side || '';
-        const lightName = meta.deviceName || meta.name || id;
-        const lightVendor = meta.vendor || meta.manufacturer || '';
-        return `<tr><td>${escapeHtml(lightName)}</td><td>${escapeHtml(lightVendor)}</td><td>${escapeHtml(id)}</td><td>${locStr}</td><td>${meta.module||''}</td><td>${levelStr}</td><td>${sideStr}</td><td>—</td></tr>`;
-      }).join('');
+      const normalizedLights = (group.lights || [])
+        .map((entry, idx) => normalizeGroupLightEntry(entry, idx))
+        .filter((entry) => entry && entry.id);
+      group.lights = normalizedLights;
+      const rows = normalizedLights
+        .map((entry) => {
+          const id = entry.id;
+          if (!id) return '';
+          const meta = getDeviceMeta(id) || {};
+          const name = entry.name || resolveLightNameFromState(id, meta);
+          const vendor = firstNonEmptyString(entry.vendor, entry.manufacturer, meta.vendor, meta.manufacturer);
+          const locStr = [firstNonEmptyString(entry.room, meta.room), firstNonEmptyString(entry.zone, meta.zone)]
+            .filter(Boolean)
+            .join(' / ');
+          const moduleStr = firstNonEmptyString(entry.module, meta.module);
+          const levelStr = firstNonEmptyString(entry.level, meta.level);
+          const sideStr = firstNonEmptyString(entry.side, meta.side);
+          return `<tr><td>${escapeHtml(name)}</td><td>${escapeHtml(vendor)}</td><td>${escapeHtml(id)}</td><td>${escapeHtml(locStr)}</td><td>${escapeHtml(moduleStr)}</td><td>${escapeHtml(levelStr)}</td><td>${escapeHtml(sideStr)}</td><td>—</td></tr>`;
+        })
+        .filter(Boolean)
+        .join('');
+      groupRosterBody.innerHTML = rows;
     }
-    if (groupRosterEmpty) groupRosterEmpty.style.display = (group.lights||[]).length ? 'none' : 'block';
+    const rosterCount = (group.lights || []).filter((entry) => {
+      const id = typeof entry === 'string' ? entry : entry?.id;
+      return !!id;
+    }).length;
+    if (groupRosterEmpty) groupRosterEmpty.style.display = rosterCount ? 'none' : 'block';
 
     // Fix ungrouped lights: show all devices not assigned to any group
     if (ungroupedList) {
-      const allAssignedIds = (STATE.groups||[]).flatMap(g => (g.lights||[]).map(l => typeof l === 'string' ? l : l.id));
-      const ungrouped = STATE.devices.filter(d => !allAssignedIds.includes(d.id));
-      ungroupedList.innerHTML = ungrouped.map(l => `<li>${escapeHtml(l.deviceName || l.name || l.id)}</li>`).join('');
+      const assignedSet = new Set(
+        (STATE.groups || [])
+          .flatMap((g) =>
+            (g.lights || [])
+              .map((entry) => (typeof entry === 'string' ? entry : entry?.id || ''))
+              .filter(Boolean)
+          )
+      );
+      const merged = new Map();
+      (STATE.devices || []).forEach((device) => {
+        if (device && device.id && !merged.has(device.id)) {
+          merged.set(device.id, device);
+        }
+      });
+      if (STATE.deviceMeta && typeof STATE.deviceMeta === 'object') {
+        Object.keys(STATE.deviceMeta).forEach((id) => {
+          const metaDevice = buildDeviceLikeFromMeta(id);
+          if (metaDevice && metaDevice.id && !merged.has(metaDevice.id)) {
+            merged.set(metaDevice.id, metaDevice);
+          }
+        });
+      }
+      const ungrouped = Array.from(merged.values()).filter((device) => device.id && !assignedSet.has(device.id));
+      ungroupedList.innerHTML = ungrouped
+        .map((light) => `<li>${escapeHtml(resolveLightNameFromState(light.id, light))}</li>`)
+        .join('');
       if (ungroupedEmpty) ungroupedEmpty.style.display = ungrouped.length ? 'none' : 'block';
     }
 
@@ -9426,7 +9645,9 @@ function wireGlobalEvents() {
     if (lightList) {
       lightList.innerHTML = '';
       // Compose a merged list of all lights for this group: from STATE.devices, deviceKB.fixtures, and STATE.lightSetups for the current room/zone
-      const ids = (group.lights || []).map(l => l.id);
+      const ids = (group.lights || [])
+        .map((entry) => (typeof entry === 'string' ? entry : entry?.id || ''))
+        .filter(Boolean);
       const fixtures = (window.STATE?.deviceKB?.fixtures || []);
       // Get current room/zone context from dropdowns
       const groupRoomSel = document.getElementById('groupRoomDropdown');
@@ -9465,7 +9686,14 @@ function wireGlobalEvents() {
       // Merge all sources for this group: STATE.devices, fixtures, and setupLights
       const allLightsMap = new Map();
       // Add from STATE.devices
-      STATE.devices.forEach(l => allLightsMap.set(l.id, l));
+      (STATE.devices || []).forEach((l) => { if (l && l.id) allLightsMap.set(l.id, l); });
+      // Add from device meta fallback
+      Object.keys(STATE.deviceMeta || {}).forEach((id) => {
+        if (!allLightsMap.has(id)) {
+          const metaDevice = buildDeviceLikeFromMeta(id);
+          if (metaDevice) allLightsMap.set(id, metaDevice);
+        }
+      });
       // Add from fixtures (if not already present)
       fixtures.forEach(f => {
         const fid = f.id || `wired-${(f.vendor||'').replace(/\s+/g,'_')}-${(f.model||'').replace(/\s+/g,'_')}`;
@@ -9491,12 +9719,14 @@ function wireGlobalEvents() {
         if (!light) return;
         // Try to get fixture details for display
         const fixture = fixtures.find(f => (f.id || `wired-${(f.vendor||'').replace(/\s+/g,'_')}-${(f.model||'').replace(/\s+/g,'_')}`) === id);
-        const device = STATE.devices.find(d => d.id === id);
-        const name = light.deviceName || (fixture ? `${fixture.vendor || ''} ${fixture.model || ''}`.trim() : (device?.deviceName || 'Light'));
+        const device = STATE.devices.find(d => d.id === id) || buildDeviceLikeFromMeta(id);
+        const name = light.deviceName || resolveLightNameFromState(id, device || light);
         const watts = fixture?.watts || light.watts || device?.watts || '?';
-        const control = fixture?.control || light.control || (device?.spectrumMode === 'dynamic' ? 'Dynamic' : 'Static');
+        const control = fixture?.control || light.control || ((device?.spectrumMode || light.spectrumMode) === 'dynamic' ? 'Dynamic' : 'Static');
         const drivers = fixture?.drivers || 1;
-        const isDynamic = (fixture?.control && /dynamic|wifi|app|driver/i.test(fixture.control)) || (device && device.spectrumMode === 'dynamic');
+        const isDynamic =
+          (fixture?.control && /dynamic|wifi|app|driver/i.test(fixture.control)) ||
+          ((device?.spectrumMode || light.spectrumMode) === 'dynamic');
         const spectrum = fixture?.spectrum || {};
         // Card markup
         const card = document.createElement('div');
@@ -9544,8 +9774,24 @@ function wireGlobalEvents() {
     // Ungrouped lights list with Add buttons
     try {
       if (ungroupedList) {
-        const assigned = new Set((STATE.groups||[]).flatMap(g => (g.lights||[]).map(l=>l.id)));
-        let allLights = (STATE.devices||[]).filter(d => d.type === 'light' || /light|fixture/i.test(d.deviceName||''));
+        const assigned = new Set(
+          (STATE.groups || [])
+            .flatMap((g) =>
+              (g.lights || [])
+                .map((entry) => (typeof entry === 'string' ? entry : entry?.id || ''))
+                .filter(Boolean)
+            )
+        );
+        const liveLights = (STATE.devices || []).filter(
+          (d) => d && (d.type === 'light' || /light|fixture/i.test(String(d.deviceName || d.name || '')))
+        );
+        const metaLights = Object.keys(STATE.deviceMeta || {})
+          .map((id) => buildDeviceLikeFromMeta(id))
+          .filter(
+            (d) =>
+              d &&
+              (d.type === 'light' || /light|fixture/i.test(String(d.deviceName || d.name || '')))
+          );
         // Also include lights from STATE.lightSetups for the selected room/zone
         const groupRoomSel = document.getElementById('groupRoomDropdown');
         const groupZoneSel = document.getElementById('groupZoneDropdown');
@@ -9586,7 +9832,8 @@ function wireGlobalEvents() {
         }
         // Merge live and setup lights, dedup by id
         const allLightsMap = new Map();
-        allLights.forEach(l => allLightsMap.set(l.id, l));
+        liveLights.forEach((l) => { if (l && l.id) allLightsMap.set(l.id, l); });
+        metaLights.forEach((l) => { if (l && l.id && !allLightsMap.has(l.id)) allLightsMap.set(l.id, l); });
         setupLights.forEach(l => allLightsMap.set(l.id, l));
         const mergedLights = Array.from(allLightsMap.values());
         const ungrouped = mergedLights.filter(d => !assigned.has(d.id));
@@ -9600,7 +9847,8 @@ function wireGlobalEvents() {
         } else {
           if (ungroupedEmpty) ungroupedEmpty.style.display = 'none';
           ungrouped.forEach(d => {
-            const card = deviceCard(d, { compact: true });
+            const normalized = { ...d, deviceName: d.deviceName || resolveLightNameFromState(d.id, d) };
+            const card = deviceCard(normalized, { compact: true });
             // Apply spectrum canvas coloring similar to group roster
             try {
               const cv = card.querySelector('.device-spectrum__canvas');
@@ -9620,7 +9868,7 @@ function wireGlobalEvents() {
             add.style.marginTop = '6px';
             add.addEventListener('click', async () => {
               group.lights = group.lights || [];
-              if (!group.lights.some(x => x.id === d.id)) group.lights.push({ id: d.id, name: d.deviceName || d.id });
+              if (!group.lights.some(x => x.id === d.id)) group.lights.push({ id: d.id, name: normalized.deviceName || d.id });
               await saveGroups();
               updateGroupUI(group);
             });
@@ -9817,6 +10065,7 @@ function wireGlobalEvents() {
   btnReloadGroups?.addEventListener('click', async () => {
     const data = await loadJSON('./data/groups.json');
     STATE.groups = data?.groups || [];
+    normalizeGroupsInState();
     renderGroups();
     // Keep currentGroup selection if id still exists
     if (STATE.currentGroup) {
@@ -9833,6 +10082,7 @@ function wireGlobalEvents() {
     const g = STATE.currentGroup;
     if (!confirm(`Delete group "${g.name||g.id}"? This won’t affect devices.`)) return;
     STATE.groups = (STATE.groups||[]).filter(x => x.id !== g.id);
+    normalizeGroupsInState();
     STATE.currentGroup = null;
     await saveGroups();
     renderGroups();
