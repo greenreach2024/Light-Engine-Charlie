@@ -249,7 +249,7 @@
               </div>
       <div id="farmPanelBody" class="panel-body">
                 <div id="farmBadge" class="farm-summary is-hidden"></div>
-                <button id="btnStartDeviceSetup" type="button" class="ghost is-hidden">Continue device setup</button>
+                <!-- <button id="btnStartDeviceSetup" type="button" class="ghost is-hidden">Continue device setup</button> -->
               </div>
             </section>
       <section id="roomsPanel" class="card card--compact" data-panel="grow-rooms">
@@ -1121,14 +1121,12 @@
           <section class="farm-step" data-step="wifi-select">
             <p class="farm-question">Great—let’s pick the Wi‑Fi network.</p>
             <div class="farm-step__stack">
-              
-              <!-- Scanning indicator -->
-              <div id="wifiScanningIndicator" class="scanning-container" style="display: none;">
+              <!-- Wi-Fi Scanner (Step 2) -->
+              <div id="wifiStep2Scanner" class="scanning-container" style="display: none;">
                 <div class="scanning-radar"></div>
-                <div class="scanning-text">Scanning for Wi-Fi networks</div>
-                <div class="scanning-status">Please wait while we discover available networks...</div>
+                <div class="scanning-text">Scanning for Wi-Fi networks (Step 2)</div>
+                <div class="scanning-status">Please wait while we discover available networks for setup...</div>
               </div>
-              
               <div class="row row--gap-xs row--center row--wrap">
                 <button id="btnScanWifi" type="button" class="ghost">Scan again</button>
                 <span id="wifiScanStatus" class="tiny" aria-live="polite"></span>
@@ -1153,14 +1151,12 @@
           <section class="farm-step" data-step="wifi-test">
             <p class="farm-question">Testing that connection…</p>
             <div class="farm-step__stack">
-              
-              <!-- Testing indicator -->
+              <!-- Wi-Fi Test Scanner (Step 4) -->
               <div id="wifiTestingIndicator" class="scanning-container" style="display: none;">
                 <div class="scanning-radar"></div>
-                <div class="scanning-text">Testing Wi-Fi Connection</div>
+                <div class="scanning-text">Testing Wi-Fi Connection (Step 4)</div>
                 <div class="scanning-status">Verifying network connectivity and internet access...</div>
               </div>
-              
               <button id="btnTestWifi" type="button" class="primary">Test connection</button>
               <div id="wifiTestStatus" class="farm-review" aria-live="polite"></div>
             </div>

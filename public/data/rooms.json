@@ -56,28 +56,19 @@
               "model": "Quest Dual 155",
               "capacity": "155 pints/day",
               "control": "WiFi",
-              "count": 2
+              "count": 4
             }
           ],
           "wifi": false,
           "wired": true,
-          "count": 2,
+          "count": 4,
           "manufacturer": "Quest",
           "model": "Quest Dual 155"
         }
       },
       "_categoryProgress": {
         "2": {
-          "selectedEquipment": [
-            {
-              "category": "dehumidifier",
-              "vendor": "Quest",
-              "model": "Quest Dual 155",
-              "capacity": "155 pints/day",
-              "control": "WiFi",
-              "count": 2
-            }
-          ]
+          "selectedEquipment": []
         }
       }
     }

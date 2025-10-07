@@ -3,24 +3,20 @@
   "locations": [],
   "branding": {
     "palette": {
-      "primary": "#ffffff",
-      "accent": "#ee2128",
-      "background": "#eeeeee",
-      "surface": "#FFFFFF",
-      "border": "#DCE5E5",
+      "primary": "#0d7d7d",
+      "accent": "#64c7c7",
+      "border": "#64c7c7",
       "text": "#0b1220"
     },
-    "logo": "https://www.stlawrencecollege.ca/assets/icons/apple-touch-icon.png",
+    "logo": "",
     "tagline": "Growing with technology",
-    "fontFamily": "Montserrat",
-    "fontCss": [
-      "https://fonts.googleapis.com/css2?family=Montserrat&display=swap"
-    ]
+    "fontFamily": "",
+    "fontCss": []
   },
-  "name": "Your Farm",
+  "name": "My farm",
   "tagline": "Growing with technology",
-  "logo": "https://www.stlawrencecollege.ca/assets/icons/apple-touch-icon.png",
-  "farmName": "Your Farm",
+  "logo": "",
+  "farmName": "My farm",
   "address": "St Lawrence Avenue",
   "city": "Kingston",
   "state": "Ontario",
@@ -44,12 +40,9 @@
       "tested": true,
       "testResult": {
         "status": "connected",
-        "ip": "192.168.1.120",
+        "ip": "192.168.1.123",
         "gateway": "192.168.1.1",
-        "subnet": "192.168.1.0/24",
-        "latencyMs": 32,
-        "testedAt": "2025-10-01T20:05:32.918Z",
-        "ssid": "greenreach"
+        "latencyMs": 12
       }
     }
   },

@@ -759,12 +759,15 @@ if (typeof window.showToast !== 'function') {
 
 if (typeof window.applyTheme !== 'function') {
   window.applyTheme = function(themeObj) {
-    // Minimal CSS variable applier
+    // Enhanced CSS variable applier: sets both --primary and --gr-primary, etc.
     if (!themeObj || typeof themeObj !== 'object') return;
     const root = document.documentElement;
     for (const [k, v] of Object.entries(themeObj)) {
       if (typeof v === 'string') {
+        // Set --primary, --accent, etc.
         root.style.setProperty(`--${k.replace(/^--/, '')}`, v);
+        // Also set --gr-primary, --gr-accent, etc. for compatibility
+        root.style.setProperty(`--gr-${k.replace(/^--|^gr-/, '')}`, v);
       }
     }
   };
@@ -794,6 +797,17 @@ async function safeFarmSave(payload) {
 }
 
 // Utility: Save rooms to backend or localStorage fallback
+async function safeRoomsDelete(roomId) {
+  if (!roomId) return false;
+  if (!Array.isArray(STATE.rooms)) STATE.rooms = [];
+  const before = STATE.rooms.length;
+  STATE.rooms = STATE.rooms.filter(r => String(r.id) !== String(roomId));
+  const after = STATE.rooms.length;
+  if (after === before) return false; // nothing deleted
+  const ok = await safeRoomsSave();
+  return ok;
+}
+
 async function safeRoomsSave() {
   const rooms = Array.isArray(STATE.rooms) ? STATE.rooms : [];
   try {
@@ -1227,7 +1241,8 @@ class FarmWizard {
     this.currentStep = 0;
     // 1. Remove 'spaces' from FarmWizard baseSteps
         this.baseSteps = ['connection-choice', 'wifi-select', 'wifi-password', 'wifi-test', 'location', 'contact', 'review'];
-    this.wifiNetworks = [];
+  this.wifiNetworks = [];
+  this.hasScannedWifi = false;
     this.data = this.defaultData();
     this.discoveryStorageKeys = {
       reuse: 'gr.discovery.useSameNetwork',
@@ -1351,8 +1366,11 @@ class FarmWizard {
         if (!choice) return;
         this.data.connection.type = choice;
         document.querySelectorAll('#farmConnectionChoice .chip-option').forEach(b => b.classList.toggle('is-active', b === btn));
-        // Do NOT reassign this.steps here! Only update UI/data.
-        if (choice === 'wifi' && !this.wifiNetworks.length) this.scanWifiNetworks();
+        // Only reset scan state, do not auto-scan
+        if (choice === 'wifi') {
+          this.hasScannedWifi = false;
+          this.wifiNetworks = [];
+        }
         if (choice !== 'wifi') {
           this.data.connection.wifi.testResult = null;
           this.data.connection.wifi.tested = false;
@@ -1476,8 +1494,16 @@ class FarmWizard {
       nextBtn.style.display = 'inline-block';
       saveBtn.style.display = 'none';
     }
-    if (activeId === 'wifi-select' && this.wifiNetworks.length === 0) this.scanWifiNetworks();
+    // Do not auto-scan Wi-Fi networks when entering wifi-select step
+    if (activeId === 'wifi-select') {
+      this.renderWifiNetworks();
+    }
     if (activeId === 'wifi-password') this.updateWifiPasswordUI();
+    if (activeId === 'wifi-test') {
+      // Hide the test status until the user runs the test
+      const status = $('#wifiTestStatus');
+      if (status) status.style.display = 'none';
+    }
     // Update live branding when relevant steps are shown
     if (activeId === 'location' || activeId === 'contact') {
       this.updateLiveBranding();
@@ -1514,6 +1540,13 @@ class FarmWizard {
     const status = $('#wifiTestStatus');
     if (!status) return;
     const result = this.data.connection.wifi.testResult;
+    // Only show the status if the test has been run (tested=true)
+    if (!this.data.connection.wifi.tested) {
+      status.style.display = 'none';
+      status.innerHTML = '';
+      return;
+    }
+    status.style.display = 'block';
     if (!result) {
       status.innerHTML = '<div class="tiny" style="color:#475569">Run a quick connectivity test to confirm.</div>';
     } else if (result.status === 'connected') {
@@ -1526,34 +1559,32 @@ class FarmWizard {
   async scanWifiNetworks(force = false) {
     const status = $('#wifiScanStatus');
     const scanningIndicator = $('#wifiScanningIndicator');
+    const step2Scanner = $('#wifiStep2Scanner');
     const networkList = $('#wifiNetworkList');
     console.debug('[FarmWizard] scanWifiNetworks called', { force });
-    // Show scanning radar and hide network list
-    if (scanningIndicator) {
-      scanningIndicator.style.display = 'flex';
-    }
-    if (networkList) {
-      networkList.style.display = 'none';
-    }
+    // Show the new scanner in step 2, hide the old one if present
+    if (step2Scanner) step2Scanner.style.display = 'flex';
+    if (scanningIndicator) scanningIndicator.style.display = 'none';
+    if (networkList) networkList.style.display = 'none';
+    this.hasScannedWifi = true;
     if (status) status.textContent = 'Scanning…';
     // DEMO MODE: Always use demo Wi-Fi networks
-    this.wifiNetworks = [
-      { ssid: 'greenreach', signal: -42, security: 'WPA2' },
-      { ssid: 'Farm-IoT', signal: -48, security: 'WPA2' },
-      { ssid: 'Greenhouse-Guest', signal: -62, security: 'WPA2' },
-      { ssid: 'BackOffice', signal: -74, security: 'WPA3' },
-      { ssid: 'Equipment-WiFi', signal: -55, security: 'WPA2' }
-    ];
-    if (status) status.textContent = `${this.wifiNetworks.length} networks found (demo)`;
-    console.debug('[FarmWizard] DEMO Wi-Fi scan result', this.wifiNetworks);
-    // Hide scanning radar and show network list
-    if (scanningIndicator) {
-      scanningIndicator.style.display = 'none';
-    }
-    if (networkList) {
-      networkList.style.display = 'block';
-    }
-    this.renderWifiNetworks();
+    setTimeout(() => {
+      this.wifiNetworks = [
+        { ssid: 'greenreach', signal: -42, security: 'WPA2' },
+        { ssid: 'Farm-IoT', signal: -48, security: 'WPA2' },
+        { ssid: 'Greenhouse-Guest', signal: -62, security: 'WPA2' },
+        { ssid: 'BackOffice', signal: -74, security: 'WPA3' },
+        { ssid: 'Equipment-WiFi', signal: -55, security: 'WPA2' }
+      ];
+      if (status) status.textContent = `${this.wifiNetworks.length} networks found (demo)`;
+      console.debug('[FarmWizard] DEMO Wi-Fi scan result', this.wifiNetworks);
+      // Hide both scanners and show network list
+      if (step2Scanner) step2Scanner.style.display = 'none';
+      if (scanningIndicator) scanningIndicator.style.display = 'none';
+      if (networkList) networkList.style.display = 'block';
+      this.renderWifiNetworks();
+    }, 1200);
 
     // If not already on the wifi-select step, force the wizard to that step
     if (this.steps && this.steps[this.currentStep] !== 'wifi-select') {
@@ -1572,6 +1603,11 @@ class FarmWizard {
       host.innerHTML = '<p class="tiny">Ethernet selected—skip Wi‑Fi.</p>';
       return;
     }
+    if (!this.hasScannedWifi) {
+      host.style.display = 'none';
+      return;
+    }
+    host.style.display = 'block';
     console.debug('[FarmWizard] renderWifiNetworks', this.wifiNetworks);
     this.wifiNetworks.forEach(net => {
       const btn = document.createElement('button');
@@ -1589,11 +1625,9 @@ class FarmWizard {
   async testWifi() {
     if (this.data.connection.type !== 'wifi') return;
     if (!this.data.connection.wifi.ssid) { alert('Pick a Wi‑Fi network first.'); return; }
-    
     const status = $('#wifiTestStatus');
     const testingIndicator = $('#wifiTestingIndicator');
     const testButton = $('#btnTestWifi');
-    
     // Show testing indicator and disable button
     if (testingIndicator) {
       testingIndicator.style.display = 'flex';
@@ -1603,10 +1637,9 @@ class FarmWizard {
       testButton.textContent = 'Testing...';
     }
     if (status) {
-      status.innerHTML = '<div class="tiny">Testing connection...</div>';
       status.style.display = 'none'; // Hide status while testing indicator is shown
+      status.innerHTML = '<div class="tiny">Testing connection...</div>';
     }
-    
     // DEMO MODE: Simulate a 2s delay and always return a successful connection
     await new Promise(res => setTimeout(res, 2000));
     const demoResult = {
@@ -1625,7 +1658,6 @@ class FarmWizard {
       } catch {}
     }
     showToast({ title: 'Wi‑Fi connected', msg: `IP ${demoResult.ip} • gateway ${demoResult.gateway}`, kind: 'success', icon: '✅' });
-    
     // Hide testing indicator, restore button, and show status
     if (testingIndicator) {
       testingIndicator.style.display = 'none';
@@ -1634,10 +1666,6 @@ class FarmWizard {
       testButton.disabled = false;
       testButton.textContent = 'Test connection';
     }
-    if (status) {
-      status.style.display = 'block';
-    }
-    
     this.updateWifiPasswordUI();
   }
 
@@ -2012,29 +2040,19 @@ class FarmWizard {
       showToast({ title: 'Save failed', msg: err?.message || String(err), kind: 'warn', icon: '⚠️' });
     }
     this.close();
-
-    // 3. After farm registration completes, launch RoomWizard for room/zone setup
-    if (typeof RoomWizard === 'function') {
-      setTimeout(() => {
-        // Always close/reset before opening to prevent overlap
-        if (window.roomWizard && window.roomWizard.close) window.roomWizard.close();
-        if (window.roomWizard && window.roomWizard.open) window.roomWizard.open();
-      }, 500);
-    }
+    // Removed: Do not auto-launch Grow Room setup after farm registration
   }
 
   updateFarmDisplay() {
     const badge = $('#farmBadge');
     const editBtn = $('#btnEditFarm');
     const launchBtn = $('#btnLaunchFarm');
-    const setupBtn = $('#btnStartDeviceSetup');
     const summaryChip = $('#farmSummaryChip');
     const hide = el => { if (el) el.classList.add('is-hidden'); };
     const show = el => { if (el) el.classList.remove('is-hidden'); };
 
     if (!STATE.farm) {
       hide(badge);
-      hide(setupBtn);
       show(launchBtn);
       hide(editBtn);
       if (summaryChip) {
@@ -2043,18 +2061,19 @@ class FarmWizard {
       }
       return;
     }
-    const roomCount = Array.isArray(STATE.farm.rooms) ? STATE.farm.rooms.length : 0;
-    const zoneCount = (STATE.farm.rooms || []).reduce((acc, room) => acc + (room.zones?.length || 0), 0);
-    const summary = `${STATE.farm.farmName || 'Farm'} · ${roomCount} room${roomCount === 1 ? '' : 's'} · ${zoneCount} zone${zoneCount === 1 ? '' : 's'}`;
+    // Build summary with contact info only
+    const contact = STATE.farm?.contact || {};
+    const summary = `${STATE.farm.farmName || 'Farm'}\nContact: ${contact.name || '—'}\nPhone: ${contact.phone || '—'}\nEmail: ${contact.email || '—'}`;
     if (badge) {
       show(badge);
       badge.textContent = summary;
+      badge.style.whiteSpace = 'pre-line';
     }
     if (summaryChip) {
       summaryChip.dataset.hasSummary = 'true';
       summaryChip.textContent = summary;
+      summaryChip.style.whiteSpace = 'pre-line';
     }
-    show(setupBtn);
     if (launchBtn) hide(launchBtn);
     show(editBtn);
   }
@@ -2830,17 +2849,18 @@ class FarmWizard {
   }
 
   resetBrandingToDefaults() {
-    const farmName = this.data.location?.farmName || 'Your Farm';
-    
-    document.getElementById('farmNameInput').value = farmName;
-    document.getElementById('taglineInput').value = 'Growing with technology';
-    document.getElementById('primaryColor').value = '#0D7D7D';
-    document.getElementById('accentColor').value = '#64C7C7';
-    document.getElementById('backgroundColor').value = '#F7FAFA';
-    document.getElementById('textColor').value = '#0B1220';
-    document.getElementById('logoUrl').value = '';
-    document.getElementById('fontFamily').value = '';
-    this.updateBrandingPreview();
+  const farmName = this.data.location?.farmName || 'Your Farm';
+  document.getElementById('farmNameInput').value = farmName;
+  document.getElementById('taglineInput').value = 'Growing with technology';
+  document.getElementById('primaryColor').value = '#0D7D7D';
+  document.getElementById('accentColor').value = '#64C7C7';
+  document.getElementById('backgroundColor').value = '#F7FAFA';
+  document.getElementById('textColor').value = '#0B1220';
+  document.getElementById('logoUrl').value = '';
+  document.getElementById('fontFamily').value = '';
+  this.updateBrandingPreview();
+  // Immediately apply and save the default branding so the app resets everywhere
+  this.saveBrandingChanges();
   }
 
   async saveBrandingChanges() {
@@ -2849,12 +2869,10 @@ class FarmWizard {
     
     const branding = {
       palette: {
-        primary: document.getElementById('primaryColor').value,
-        accent: document.getElementById('accentColor').value,
-        background: document.getElementById('backgroundColor').value,
-        surface: '#FFFFFF',
-        border: '#DCE5E5',
-        text: document.getElementById('textColor').value
+  primary: document.getElementById('primaryColor').value,
+  accent: document.getElementById('accentColor').value,
+  border: document.getElementById('accentColor').value,
+  text: document.getElementById('textColor').value
       },
       logo: document.getElementById('logoUrl').value,
       tagline: tagline || 'Growing with technology',
@@ -2884,10 +2902,7 @@ class FarmWizard {
     
     // Also apply theme directly to make sure it works
     console.log('🎨 Calling applyTheme directly with palette:', branding.palette);
-    applyTheme(branding.palette, { 
-      fontFamily: branding.fontFamily || '',
-      logoHeight: branding.logoHeight || ''
-    });
+    applyTheme(branding.palette);
     
     // Update the header display immediately
     this.updateFarmHeaderDisplay();
@@ -5016,6 +5031,15 @@ class RoomWizard {
     
     // Add event listeners for manufacturer search to populate model dropdowns
     this.setupManufacturerSearch();
+    // Prevent Enter in number inputs from submitting the form in category-setup
+    body.querySelectorAll('input[type="number"]').forEach(input => {
+      input.addEventListener('keydown', (e) => {
+        if (e.key === 'Enter') {
+          e.preventDefault();
+          return false;
+        }
+      });
+    });
     
     // Wire chip groups to update data (for categories that still use chips)
     body.querySelectorAll('.chip-row').forEach(row => {
@@ -5240,7 +5264,6 @@ class RoomWizard {
 
   addEquipment(category, vendor, model, capacity, control) {
     console.log('[DEBUG] Adding equipment:', category, vendor, model);
-    
     // Initialize selected equipment array if it doesn't exist
     if (!this.categoryProgress[this.currentStep]) {
       this.categoryProgress[this.currentStep] = {};
@@ -5248,12 +5271,10 @@ class RoomWizard {
     if (!this.categoryProgress[this.currentStep].selectedEquipment) {
       this.categoryProgress[this.currentStep].selectedEquipment = [];
     }
-    
     // Check if already selected
     const existing = this.categoryProgress[this.currentStep].selectedEquipment.find(e => 
       e.category === category && e.vendor === vendor && e.model === model
     );
-    
     if (existing) {
       existing.count += 1;
     } else {
@@ -5266,8 +5287,9 @@ class RoomWizard {
         count: 1
       });
     }
-    
-    this.renderSelectedEquipment(category, `cat-${category}-selected`);
+    // Re-render the category form and manufacturer search to update the UI
+    this.renderCurrentCategoryForm();
+    this.setupManufacturerSearch();
   }
 
   renderSelectedEquipment(category, selectedElementId) {
@@ -5288,12 +5310,12 @@ class RoomWizard {
           <div style="font-size: 12px; color: #64748b;">Qty: ${item.count} • ${item.capacity} • ${item.control}</div>
         </div>
         <div style="display: flex; gap: 8px; align-items: center;">
-          <button onclick="roomWizard.changeEquipmentCount('${category}', '${item.vendor}', '${item.model}', -1)" 
+          <button type="button" onclick="roomWizard.changeEquipmentCount('${category}', '${item.vendor}', '${item.model}', -1)" 
                   style="width: 24px; height: 24px; border: 1px solid #d1d5db; background: white; border-radius: 4px; cursor: pointer;">-</button>
           <span style="min-width: 20px; text-align: center; font-size: 14px;">${item.count}</span>
-          <button onclick="roomWizard.changeEquipmentCount('${category}', '${item.vendor}', '${item.model}', 1)" 
+          <button type="button" onclick="roomWizard.changeEquipmentCount('${category}', '${item.vendor}', '${item.model}', 1)" 
                   style="width: 24px; height: 24px; border: 1px solid #d1d5db; background: white; border-radius: 4px; cursor: pointer;">+</button>
-          <button onclick="roomWizard.removeEquipment('${category}', '${item.vendor}', '${item.model}')" 
+          <button type="button" onclick="roomWizard.removeEquipment('${category}', '${item.vendor}', '${item.model}')" 
                   style="width: 24px; height: 24px; border: 1px solid #ef4444; background: #fef2f2; color: #ef4444; border-radius: 4px; cursor: pointer;">×</button>
         </div>
       </div>
@@ -5305,26 +5327,26 @@ class RoomWizard {
   changeEquipmentCount(category, vendor, model, delta) {
     const selectedEquipment = this.categoryProgress[this.currentStep]?.selectedEquipment || [];
     const item = selectedEquipment.find(e => e.category === category && e.vendor === vendor && e.model === model);
-    
     if (item) {
       item.count = Math.max(0, item.count + delta);
       if (item.count === 0) {
+        // Only remove from UI, do not save or close
         this.removeEquipment(category, vendor, model);
       } else {
         this.renderSelectedEquipment(category, `cat-${category}-selected`);
       }
     }
+    // No save or close here
   }
 
   removeEquipment(category, vendor, model) {
     if (!this.categoryProgress[this.currentStep]?.selectedEquipment) return;
-    
     this.categoryProgress[this.currentStep].selectedEquipment = 
       this.categoryProgress[this.currentStep].selectedEquipment.filter(e => 
         !(e.category === category && e.vendor === vendor && e.model === model)
       );
-    
     this.renderSelectedEquipment(category, `cat-${category}-selected`);
+    // No save or close here
   }
 
   populateModelDropdown(modelSelectId, manufacturerQuery, category) {
