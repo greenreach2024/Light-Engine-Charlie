@@ -5,6 +5,108 @@
       "name": "My farm - Room 1",
       "location": "",
       "hardwareCats": [
+        "dehumidifier",
+        "light"
+      ],
+      "hardwareOrder": [
+        "dehumidifier",
+        "light"
+      ],
+      "layout": {
+        "type": "",
+        "rows": 0,
+        "racks": 0,
+        "levels": 0
+      },
+      "zones": [
+        "Zone 1"
+      ],
+      "fixtures": [
+        {
+          "id": "fixture-1",
+          "vendor": "Gavita",
+          "model": "Pro 1700e",
+          "count": 4,
+          "zone": "Zone 1"
+        }
+      ],
+      "controlMethod": null,
+      "devices": [],
+      "sensors": {
+        "categories": [],
+        "placements": {}
+      },
+      "energy": "",
+      "energyHours": 0,
+      "targetPpfd": 0,
+      "photoperiod": 0,
+      "connectivity": {
+        "hasHub": null,
+        "hubType": "",
+        "hubIp": "",
+        "cloudTenant": "Azure"
+      },
+      "roles": {
+        "admin": [],
+        "operator": [],
+        "viewer": []
+      },
+      "grouping": {
+        "groups": [],
+        "planId": "",
+        "scheduleId": ""
+      },
+      "seriesCount": 0,
+      "category": {
+        "dehumidifier": {
+          "selectedEquipment": [
+            {
+              "category": "dehumidifier",
+              "vendor": "Quest",
+              "model": "Quest Dual 155",
+              "capacity": "155 pints/day",
+              "control": "WiFi",
+              "count": 2
+            }
+          ],
+          "wifi": false,
+          "wired": true,
+          "count": 2,
+          "manufacturer": "Quest",
+          "model": "Quest Dual 155"
+        },
+        "light": {
+          "selectedEquipment": [
+            {
+              "category": "light",
+              "vendor": "Gavita",
+              "model": "Pro 1700e",
+              "count": 4,
+              "zone": "Zone 1"
+            }
+          ]
+        }
+      },
+      "_categoryProgress": {
+        "2": {
+          "selectedEquipment": [
+            {
+              "category": "dehumidifier",
+              "vendor": "Quest",
+              "model": "Quest Dual 155",
+              "capacity": "155 pints/day",
+              "control": "WiFi",
+              "count": 2
+            }
+          ]
+        }
+      }
+    },
+    {
+      "id": "room-pek6ij",
+      "name": "My farm - Room 1",
+      "location": "",
+      "hardwareCats": [
         "dehumidifier"
       ],
       "hardwareOrder": [
@@ -60,7 +162,7 @@
             }
           ],
           "wifi": false,
-          "wired": true,
+          "wired": false,
           "count": 3,
           "manufacturer": "Quest",
           "model": "Quest Dual 155"

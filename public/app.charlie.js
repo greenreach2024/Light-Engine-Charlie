@@ -1,3 +1,31 @@
+// Fallbacks for device pick state if not defined elsewhere
+if (typeof getDevicePickState !== 'function') {
+  window.getDevicePickState = function() {
+    return { scope: 'devices', ids: [] };
+  };
+}
+if (typeof setDevicePickState !== 'function') {
+  window.setDevicePickState = function(scope, ids) {
+    // no-op fallback
+  };
+}
+// --- Device Control: sendDeviceCommand ---
+async function sendDeviceCommand(deviceId, command, params = {}) {
+  try {
+    const res = await fetch('/api/device/command', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ deviceId, command, params })
+    });
+    if (!res.ok) throw new Error('Device command failed');
+    const data = await res.json();
+    showToast({ title: 'Device Command', msg: `Command '${command}' sent to ${deviceId}`, kind: 'success', icon: '⚡' });
+    return data;
+  } catch (e) {
+    showToast({ title: 'Device Command Error', msg: e.message, kind: 'error', icon: '❌' });
+    return null;
+  }
+}
 // --- Grow3 Manager Modal Logic with Controller Info ---
 function getGrow3ControllerConfig() {
   let config = { name: 'Grow3 Controller', address: '127.0.0.1', port: '8091' };
@@ -230,18 +258,21 @@ function seedGroupRoomZoneDropdowns() {
 }
 
 function resolveRoomReference(roomValue) {
-  const text = typeof roomValue === 'string' ? roomValue.trim() : '';
-  if (!text) {
-    return { id: '', name: '' };
+  // Handle object form: { id, name } or similar
+  if (roomValue && typeof roomValue === 'object') {
+    const id   = String(roomValue.id   ?? roomValue.roomId ?? roomValue.value ?? '').trim();
+    const name = String(roomValue.name ?? roomValue.label  ?? id).trim();
+    if (id || name) return { id, name };
   }
+
+  // Handle primitive (string/number)
+  const text = String(roomValue ?? '').trim();
+  if (!text) return { id: '', name: '' };
+
   const rooms = collectRoomsFromState() || [];
-  const match = rooms.find((room) => room && (room.id === text || room.name === text));
-  if (match) {
-    return {
-      id: match.id || text,
-      name: match.name || match.id || text,
-    };
-  }
+  const match = rooms.find(r => r && (r.id === text || r.name === text));
+  if (match) return { id: match.id || text, name: match.name || match.id || text };
+
   return { id: text, name: text };
 }
 
@@ -282,15 +313,16 @@ function collectSetupLightsForRoomZone(roomValue, zoneValue) {
           device_id: instanceId,
           name: label,
           deviceName: label,
-          type: 'light',
+          type: 'Light',
           vendor: fixture.vendor || '',
           model: fixture.model || '',
           watts: fixture.watts,
           source: 'setup',
           count: 1,
-          roomId,
-          roomName,
-          zone,
+          room: String(roomId || roomName || '').trim(),
+          roomId: String(roomId || '').trim(),
+          roomName: String(roomName || '').trim(),
+          zone: String(zone || '').trim(),
           setupId,
           fixtureId: fixture.id || baseId,
           countIndex: instance + 1,
@@ -4573,11 +4605,70 @@ class RoomWizard {
     }
     $('#roomModalClose')?.addEventListener('click', () => this.close());
     $('#roomModalBackdrop')?.addEventListener('click', () => this.close());
-    $('#roomPrev')?.addEventListener('click', () => this.prevStep());
-    $('#roomNext')?.addEventListener('click', () => this.nextStep());
-    $('#roomTopPrev')?.addEventListener('click', () => this.prevStep());
-    $('#roomTopNext')?.addEventListener('click', () => this.nextStep());
-    $('#roomTopSaveClose')?.addEventListener('click', () => this.saveAndClose());
+    // --- One-time wiring and step guards for Room Setup wizard ---
+    if (!this._navWired) {
+      const prev = document.getElementById('roomPrev');
+      const next = document.getElementById('roomNext');
+      const topPrev = document.getElementById('roomTopPrev');
+      const topNext = document.getElementById('roomTopNext');
+      const topSaveClose = document.getElementById('roomTopSaveClose');
+      // Remove any inline handlers just in case
+      if (prev) prev.onclick = null;
+      if (next) next.onclick = null;
+      if (topPrev) topPrev.onclick = null;
+      if (topNext) topNext.onclick = null;
+      if (topSaveClose) topSaveClose.onclick = null;
+      // Step guards
+      this._isAdvancing = false;
+      const onPrevClick = () => {
+        if (this._isAdvancing) return;
+        this.prevStep();
+      };
+      const onNextClick = async (e) => {
+        if (this._isAdvancing) return;
+        this._isAdvancing = true;
+        try {
+          // validate returns boolean; do NOT mutate currentStep here
+          const ok = await this.validateCurrentStep();
+          if (!ok) return;
+          const nextIdx = Math.min(this.currentStep + 1, this.steps.length - 1);
+          if (nextIdx !== this.currentStep) {
+            this.currentStep = nextIdx;
+            this.showStep(this.currentStep);
+          } else {
+            this.saveAndClose();
+          }
+        } finally {
+          setTimeout(() => { this._isAdvancing = false; }, 0);
+        }
+      };
+      prev?.addEventListener('click', onPrevClick, { passive: true });
+      next?.addEventListener('click', onNextClick, { passive: true });
+      topPrev?.addEventListener('click', onPrevClick, { passive: true });
+      topNext?.addEventListener('click', onNextClick, { passive: true });
+      topSaveClose?.addEventListener('click', () => this.saveAndClose());
+      // Enter key should advance exactly once; prevent implicit submit
+      const modal = document.getElementById('roomModal');
+      if (modal) {
+        modal.addEventListener('keydown', (e) => {
+          if (e.key === 'Enter') {
+            e.preventDefault();
+            onNextClick(e);
+          }
+        });
+        // Optional: stop propagation from inputs that need native Enter behavior
+        const content = modal.querySelector('#roomWizardContent');
+        if (content) {
+          content.addEventListener('keydown', (e) => {
+            const tag = e.target.tagName;
+            if (e.key === 'Enter' && (tag === 'TEXTAREA')) {
+              e.stopPropagation();
+            }
+          });
+        }
+      }
+      this._navWired = true;
+    }
     this.form?.addEventListener('submit', (e)=> this.saveRoom(e));
 
     // Chip groups
@@ -6238,29 +6329,39 @@ class RoomWizard {
     selectedDiv.innerHTML = html;
   }
 
+
   changeEquipmentCount(category, vendor, model, delta) {
-    const selectedEquipment = this.categoryProgress[this.currentStep]?.selectedEquipment || [];
-    const item = selectedEquipment.find(e => e.category === category && e.vendor === vendor && e.model === model);
-    if (item) {
+    // Find the step that has this equipment (not just currentStep)
+    let foundStep = null;
+    let item = null;
+    for (const [stepIdx, catProg] of Object.entries(this.categoryProgress)) {
+      const eqArr = catProg?.selectedEquipment || [];
+      const match = eqArr.find(e => e.category === category && e.vendor === vendor && e.model === model);
+      if (match) {
+        foundStep = stepIdx;
+        item = match;
+        break;
+      }
+    }
+    if (item && foundStep !== null) {
       item.count = Math.max(0, item.count + delta);
       if (item.count === 0) {
-        // Only remove from UI, do not save or close
-        this.removeEquipment(category, vendor, model);
+        this.removeEquipment(category, vendor, model, foundStep);
       } else {
         this.renderSelectedEquipment(category, `cat-${category}-selected`);
       }
     }
-    // No save or close here
   }
 
-  removeEquipment(category, vendor, model) {
-    if (!this.categoryProgress[this.currentStep]?.selectedEquipment) return;
-    this.categoryProgress[this.currentStep].selectedEquipment = 
-      this.categoryProgress[this.currentStep].selectedEquipment.filter(e => 
+  removeEquipment(category, vendor, model, stepIdx = null) {
+    // Remove from the correct step if specified, else currentStep
+    const idx = stepIdx !== null ? stepIdx : this.currentStep;
+    if (!this.categoryProgress[idx]?.selectedEquipment) return;
+    this.categoryProgress[idx].selectedEquipment = 
+      this.categoryProgress[idx].selectedEquipment.filter(e => 
         !(e.category === category && e.vendor === vendor && e.model === model)
       );
     this.renderSelectedEquipment(category, `cat-${category}-selected`);
-    // No save or close here
   }
 
   populateModelDropdown(modelSelectId, manufacturerQuery, category) {
@@ -7491,41 +7592,7 @@ async function loadAllData() {
     renderRooms();
     renderLightSetups();
     
-    // Initialize sample light setups for demo (remove this in production)
-    if (!STATE.lightSetups || STATE.lightSetups.length === 0) {
-      STATE.lightSetups = [
-        {
-          id: 'demo-1',
-          room: 'Veg Room',
-          zone: 'Zone A',
-          fixtures: [
-            { id: 'gavita-1700e', name: 'Gavita Pro 1700e LED', watts: 645, ppfd: 1700, count: 4 }
-          ],
-          controlMethod: 'wifi',
-          controlDetails: 'Fixtures will be controlled via Wi-Fi connection using manufacturer apps.',
-          lightsPerController: 2,
-          controllersCount: 2,
-          totalFixtures: 4,
-          totalWattage: 2580,
-          createdAt: new Date().toISOString()
-        },
-        {
-          id: 'demo-2',
-          room: 'Flower Room',
-          zone: 'Zone 1',
-          fixtures: [
-            { id: 'fluence-spydr-2p', name: 'Fluence SPYDR 2p', watts: 645, ppfd: 1700, count: 6 }
-          ],
-          controlMethod: '0-10v',
-          controlDetails: 'Professional dimming control using 0-10V signals.',
-          lightsPerController: 3,
-          controllersCount: 2,
-          totalFixtures: 6,
-          totalWattage: 3870,
-          createdAt: new Date().toISOString()
-        }
-      ];
-    }
+    // Demo/mock light setups removed: only live light setups and devices will be used.
     
     renderLightSetupSummary();
     renderControllerAssignments();
@@ -8397,7 +8464,7 @@ function renderControllerAssignments() {
                 </select>
               </td>
               <td style="padding: 12px 8px; text-align: center;">
-                <button type="button" class="ghost tiny" onclick="editControllerAssignment(${index})">${item.status === 'Operational' ? 'Configure' : 'Edit'}</button>
+                <button type="button" class="ghost tiny" onclick="editControllerAssignment(${index})">Edit</button>
               </td>
             </tr>
           `).join('')}
@@ -8445,7 +8512,13 @@ function editControllerAssignment(index) {
   if (!item) return;
   
   const isOperational = item.status === 'Operational';
-  
+  // Room/zone dropdowns
+  const rooms = (window.STATE?.rooms || []);
+  const roomOptions = rooms.map(r => `<option value="${r.id}"${item.room === r.name || item.room === r.id ? ' selected' : ''}>${r.name}</option>`).join('');
+  const selectedRoom = rooms.find(r => r.name === item.room || r.id === item.room) || rooms[0] || {};
+  const zones = selectedRoom.zones || [];
+  const zoneOptions = zones.map(z => `<option value="${z}"${item.zone === z ? ' selected' : ''}>${z}</option>`).join('');
+
   const modalHTML = `
     <div class="modal-backdrop active" onclick="closeModal()">
       <div class="modal-content" onclick="event.stopPropagation()" style="max-width: 600px;">
@@ -8462,8 +8535,12 @@ function editControllerAssignment(index) {
                 <div><strong>Type:</strong> ${item.type}</div>
                 <div><strong>Make:</strong> ${item.make}</div>
                 <div><strong>Model:</strong> ${item.model}</div>
-                <div><strong>Room:</strong> ${item.room}</div>
-                <div><strong>Zone:</strong> ${item.zone}</div>
+                <div><strong>Room:</strong> 
+                  <select id="editRoomDropdown" style="width: 90%; padding: 4px 8px; border-radius: 4px;">${roomOptions}</select>
+                </div>
+                <div><strong>Zone:</strong> 
+                  <select id="editZoneDropdown" style="width: 90%; padding: 4px 8px; border-radius: 4px;">${zoneOptions}</select>
+                </div>
                 <div><strong>Control:</strong> ${item.controlMethod}</div>
                 ${item.serial ? `<div><strong>Serial:</strong> ${item.serial}</div>` : ''}
                 ${item.watts ? `<div><strong>Power:</strong> ${item.watts}W</div>` : ''}
@@ -8502,34 +8579,82 @@ function editControllerAssignment(index) {
         
         <div class="modal-footer">
           <button type="button" class="btn secondary" onclick="closeModal()">Cancel</button>
-          <button type="button" class="btn primary" onclick="saveControllerAssignment(${index})">
+          <button type="button" class="btn primary" onclick="saveControllerAssignment(${index}, true)">
             ${isOperational ? 'Update Assignment' : 'Save Assignment'}
           </button>
         </div>
       </div>
     </div>
   `;
-  
   document.body.insertAdjacentHTML('beforeend', modalHTML);
+  // Wire up room/zone dropdown linkage
+  const roomSel = document.getElementById('editRoomDropdown');
+  const zoneSel = document.getElementById('editZoneDropdown');
+  if (roomSel && zoneSel) {
+    roomSel.addEventListener('change', () => {
+      const selected = rooms.find(r => r.id === roomSel.value);
+      zoneSel.innerHTML = (selected?.zones || []).map(z => `<option value="${z}">${z}</option>`).join('');
+    });
+  }
 }
 
-function saveControllerAssignment(index) {
+function saveControllerAssignment(index, updateRoomZone) {
   const equipment = getControllerRequiredEquipment();
   const item = equipment[index];
-  
   if (!item) return;
-  
   const controllerId = document.getElementById('assignedController').value;
   const notes = document.getElementById('assignmentNotes').value;
-  
+  // Room/zone update
+  if (updateRoomZone) {
+    const roomSel = document.getElementById('editRoomDropdown');
+    const zoneSel = document.getElementById('editZoneDropdown');
+    if (roomSel && zoneSel) {
+      item.room = roomSel.options[roomSel.selectedIndex].text;
+      item.zone = zoneSel.value;
+      // Try to update STATE.devices and STATE.deviceMeta if possible
+      if (window.STATE?.devices) {
+        const dev = window.STATE.devices.find(d => d.id === item.uniqueId);
+        if (dev) {
+          dev.room = item.room;
+          dev.zone = item.zone;
+        }
+      }
+      if (window.STATE?.deviceMeta) {
+        const meta = window.STATE.deviceMeta[item.uniqueId];
+        if (meta) {
+          meta.room = item.room;
+          meta.zone = item.zone;
+        }
+      }
+      // Add to group.lights if matching group exists
+      if (window.STATE && Array.isArray(window.STATE.groups)) {
+        let group = window.STATE.groups.find(g => (g.room === item.room || g.roomId === item.room) && g.zone === item.zone);
+        if (group) {
+          group.lights = group.lights || [];
+          if (!group.lights.some(l => l.id === item.uniqueId)) {
+            group.lights.push({
+              id: item.uniqueId,
+              name: item.make || item.model || item.uniqueId,
+              vendor: item.make || '',
+              model: item.model || '',
+              room: item.room,
+              roomId: item.room,
+              zone: item.zone,
+              source: 'controller',
+              fixtureId: null
+            });
+            if (typeof saveGroups === 'function') saveGroups();
+            if (typeof updateGroupUI === 'function') updateGroupUI(group);
+          }
+        }
+      }
+    }
+  }
   // Update the equipment item
   item.controller = controllerId || 'Unassigned';
   if (notes) item.notes = notes;
-  
-  // Close modal and refresh display
   closeModal();
   renderControllerAssignments();
-  
   showToast({
     title: 'Assignment Updated',
     msg: `${item.uniqueId} ${controllerId ? 'assigned to ' + controllerId : 'unassigned'}`,
@@ -9889,6 +10014,7 @@ function wireGlobalEvents() {
   });
   // Render the selected group's UI and helpers
   function updateGroupUI(group) {
+  debugger; // DEBUG: Entry to updateGroupUI
     // Local element lookups to avoid stale references
     const groupPlan = document.getElementById('groupPlan');
     const groupSchedule = document.getElementById('groupSchedule');
@@ -9912,7 +10038,7 @@ function wireGlobalEvents() {
       if (groupsStatus) groupsStatus.textContent = '';
       if (groupName) groupName.value = '';
       if (ungroupedList) {
-        // Repopulate ungrouped lights
+        // Repopulate ungrouped lights: show all real, unassigned lights for selected room/zone, even if room/zone is not set
         const assignedSet = new Set(
           (STATE.groups || [])
             .flatMap((g) =>
@@ -9923,42 +10049,47 @@ function wireGlobalEvents() {
         );
         const merged = new Map();
         (STATE.devices || []).forEach((device) => {
-          if (device && device.id && !merged.has(device.id)) {
+          if (
+            device && device.id && !merged.has(device.id)
+            && device.type === 'Light'
+            && !/mock|demo/i.test(device.id)
+          ) {
             merged.set(device.id, device);
           }
         });
         if (STATE.deviceMeta && typeof STATE.deviceMeta === 'object') {
           Object.keys(STATE.deviceMeta).forEach((id) => {
             const metaDevice = buildDeviceLikeFromMeta(id);
-            if (metaDevice && metaDevice.id && !merged.has(metaDevice.id)) {
+            if (
+              metaDevice && metaDevice.id && !merged.has(metaDevice.id)
+              && metaDevice.type === 'Light'
+              && !/mock|demo/i.test(metaDevice.id)
+            ) {
               merged.set(metaDevice.id, metaDevice);
             }
           });
         }
+        // Show all unassigned lights for the selected room/zone, or all if no selection
         const { rawRoom: selectedRoomValue, roomId: selectedRoomId, roomName: selectedRoomName, zone: selectedZone } =
           getSelectedGroupRoomZone();
-        const setupLights = collectSetupLightsForRoomZone(
-          selectedRoomValue || selectedRoomId || selectedRoomName,
-          selectedZone
-        );
-        setupLights.forEach((light) => {
-          if (light && light.id && !merged.has(light.id)) {
-            merged.set(light.id, light);
-          }
-        });
-        const ungrouped = Array.from(merged.values()).filter((device) => device.id && !assignedSet.has(device.id));
-        if (!selectedZone && setupLights.length === 0) {
-          ungroupedList.innerHTML = '';
-          if (ungroupedEmpty) {
-            ungroupedEmpty.style.display = 'block';
-            ungroupedEmpty.textContent = 'Select a room and zone to view configured lights.';
-          }
-        } else {
-          ungroupedList.innerHTML = ungrouped
-            .map((light) => `<li>${escapeHtml(resolveLightNameFromState(light.id, light))}</li>`)
-            .join('');
-          if (ungroupedEmpty) ungroupedEmpty.style.display = ungrouped.length ? 'none' : 'block';
+  let ungrouped = Array.from(merged.values()).filter((device) => device.id && !assignedSet.has(device.id));
+  debugger; // DEBUG: ungrouped lights calculation
+  debugger; // DEBUG: Entry to collectSetupLightsForRoomZone
+  debugger; // DEBUG: Entry to renderLightSetups
+  debugger; // DEBUG: Entry to renderLightSetupSummary
+        if (selectedRoomValue || selectedRoomId || selectedRoomName || selectedZone) {
+          const selRoom = (selectedRoomValue || selectedRoomId || selectedRoomName || '').toString().trim().toLowerCase();
+          const selZone = (selectedZone || '').toString().trim().toLowerCase();
+          ungrouped = ungrouped.filter(device => {
+            const room = (device.room || device.roomId || '').toString().trim().toLowerCase();
+            const zone = (device.zone || '').toString().trim().toLowerCase();
+            return (!selRoom || room === selRoom) && (!selZone || zone === selZone);
+          });
         }
+        ungroupedList.innerHTML = ungrouped
+          .map((light) => `<li>${escapeHtml(resolveLightNameFromState(light.id, light))}</li>`)
+          .join('');
+        if (ungroupedEmpty) ungroupedEmpty.style.display = ungrouped.length ? 'none' : 'block';
       }
       if (ungroupedStatus) ungroupedStatus.textContent = '';
       updateGroupPlanInfoCard(null);
@@ -10015,10 +10146,22 @@ function wireGlobalEvents() {
     } catch {}
     // Roster
     if (groupRosterBody) {
+      // Only show lights that are explicitly in group.lights, are real lights, and not mock/demo
+      const { roomId: selectedRoomId, roomName: selectedRoomName, zone: selectedZone } = getSelectedGroupRoomZone();
       const normalizedLights = (group.lights || [])
         .map((entry, idx) => normalizeGroupLightEntry(entry, idx))
-        .filter((entry) => entry && entry.id);
-      group.lights = normalizedLights;
+        .filter((entry) => {
+          if (!entry || !entry.id) return false;
+          if (entry.type && entry.type !== 'Light') return false;
+          if (/mock|demo/i.test(entry.id)) return false;
+          // Normalize room/zone for comparison
+          const room = (entry.room || entry.roomId || '').toString().trim().toLowerCase();
+          const zone = (entry.zone || '').toString().trim().toLowerCase();
+          const selRoomId = (selectedRoomId || '').toString().trim().toLowerCase();
+          const selRoomName = (selectedRoomName || '').toString().trim().toLowerCase();
+          const selZone = (selectedZone || '').toString().trim().toLowerCase();
+          return (room === selRoomId || room === selRoomName) && zone === selZone;
+        });
       const rows = normalizedLights
         .map((entry) => {
           const id = entry.id;
@@ -10079,7 +10222,16 @@ function wireGlobalEvents() {
           merged.set(light.id, light);
         }
       });
-      const ungrouped = Array.from(merged.values()).filter((device) => device.id && !assignedSet.has(device.id));
+      // Only show ungrouped lights for the selected room/zone
+      const ungrouped = Array.from(merged.values()).filter((device) => {
+        if (!device.id || assignedSet.has(device.id)) return false;
+        const room = (device.room || device.roomId || '').toString().trim().toLowerCase();
+        const zone = (device.zone || '').toString().trim().toLowerCase();
+        const selRoomId = (selectedRoomId || '').toString().trim().toLowerCase();
+        const selRoomName = (selectedRoomName || '').toString().trim().toLowerCase();
+        const selZone = (selectedZone || '').toString().trim().toLowerCase();
+        return (room === selRoomId || room === selRoomName) && zone === selZone;
+      });
       if (!selectedZone && setupLights.length === 0) {
         ungroupedList.innerHTML = '';
         if (ungroupedEmpty) {
@@ -10094,100 +10246,7 @@ function wireGlobalEvents() {
       }
     }
 
-    // Render light cards for this group below the roster for quick control/visibility
-    const lightList = document.getElementById('groupLightList');
-    if (lightList) {
-      lightList.innerHTML = '';
-      // Compose a merged list of all lights for this group: from STATE.devices, deviceKB.fixtures, and STATE.lightSetups for the current room/zone
-      const ids = (group.lights || [])
-        .map((entry) => (typeof entry === 'string' ? entry : entry?.id || ''))
-        .filter(Boolean);
-      const fixtures = (window.STATE?.deviceKB?.fixtures || []);
-      const { rawRoom: selectedRoomValue, roomId: selectedRoomId, roomName: selectedRoomName, zone: selectedZone } =
-        getSelectedGroupRoomZone();
-      const setupLights = collectSetupLightsForRoomZone(
-        selectedRoomValue || selectedRoomId || selectedRoomName,
-        selectedZone
-      );
-      // Merge all sources for this group: STATE.devices, fixtures, and setupLights
-      const allLightsMap = new Map();
-      // Add from STATE.devices
-      (STATE.devices || []).forEach((l) => { if (l && l.id) allLightsMap.set(l.id, l); });
-      // Add from device meta fallback
-      Object.keys(STATE.deviceMeta || {}).forEach((id) => {
-        if (!allLightsMap.has(id)) {
-          const metaDevice = buildDeviceLikeFromMeta(id);
-          if (metaDevice) allLightsMap.set(id, metaDevice);
-        }
-      });
-      // Add from fixtures (if not already present)
-      fixtures.forEach(f => {
-        const fid = f.id || `wired-${(f.vendor||'').replace(/\s+/g,'_')}-${(f.model||'').replace(/\s+/g,'_')}`;
-        if (!allLightsMap.has(fid)) {
-          allLightsMap.set(fid, {
-            id: fid,
-            deviceName: f.vendor ? `${f.vendor} ${f.model}` : (f.name || f.model || 'Light'),
-            type: 'light',
-            watts: f.watts,
-            source: 'fixture',
-            vendor: f.vendor,
-            model: f.model
-          });
-        }
-      });
-      // Add from setupLights (if not already present)
-      setupLights.forEach(l => {
-        if (!allLightsMap.has(l.id)) allLightsMap.set(l.id, l);
-      });
-      // Only show lights that are in the group.lights list
-      ids.forEach(id => {
-        const light = allLightsMap.get(id);
-        if (!light) return;
-        // Try to get fixture details for display
-        const fixture = fixtures.find(f => (f.id || `wired-${(f.vendor||'').replace(/\s+/g,'_')}-${(f.model||'').replace(/\s+/g,'_')}`) === id);
-        const device = STATE.devices.find(d => d.id === id) || buildDeviceLikeFromMeta(id);
-        const name = light.deviceName || resolveLightNameFromState(id, device || light);
-        const watts = fixture?.watts || light.watts || device?.watts || '?';
-        const control = fixture?.control || light.control || ((device?.spectrumMode || light.spectrumMode) === 'dynamic' ? 'Dynamic' : 'Static');
-        const drivers = fixture?.drivers || 1;
-        const isDynamic =
-          (fixture?.control && /dynamic|wifi|app|driver/i.test(fixture.control)) ||
-          ((device?.spectrumMode || light.spectrumMode) === 'dynamic');
-        const spectrum = fixture?.spectrum || {};
-        // Card markup
-        const card = document.createElement('div');
-        card.className = 'detailed-light-card';
-        card.style = 'border:1px solid #e5e7eb;border-radius:6px;padding:10px;margin-bottom:8px;background:#f8fafc;min-width:260px;max-width:340px;';
-        card.innerHTML = `
-          <div style="font-weight:600;font-size:15px;">${name}</div>
-          <div class="tiny" style="color:#64748b;">Model: <b>${fixture?.model || light.model || device?.model || ''}</b></div>
-          <div class="tiny" style="color:#64748b;">Wattage: <b>${watts}W</b></div>
-          <div class="tiny" style="color:#64748b;">Control: <b>${isDynamic ? 'Dynamic' : 'Static'}</b></div>
-          <div class="tiny" style="color:#64748b;">Drivers: <b>${drivers}</b></div>
-          ${!isDynamic ? `<div class="tiny" style="color:#64748b;">Assigned Spectrum:</div>
-            <div style="display:flex;gap:8px;align-items:center;">
-              <label style='font-size:12px;'>CW <input type='range' min='0' max='100' value='${spectrum.cw||0}' disabled style='width:60px;'></label>
-              <label style='font-size:12px;'>WW <input type='range' min='0' max='100' value='${spectrum.ww||0}' disabled style='width:60px;'></label>
-              <label style='font-size:12px;'>Blue <input type='range' min='0' max='100' value='${spectrum.bl||0}' disabled style='width:60px;'></label>
-              <label style='font-size:12px;'>Red <input type='range' min='0' max='100' value='${spectrum.rd||0}' disabled style='width:60px;'></label>
-            </div>` : ''}
-        `;
-        // Remove button
-        const rm = document.createElement('button');
-        rm.type = 'button'; rm.className = 'ghost'; rm.textContent = 'Remove from group';
-        rm.style.marginTop = '6px';
-        rm.onclick = async () => {
-          const idx = (group.lights||[]).findIndex(x => x.id === id);
-          if (idx >= 0) {
-            group.lights.splice(idx, 1);
-            await saveJSON('./data/groups.json', { groups: STATE.groups });
-            updateGroupUI(group);
-          }
-        };
-        card.appendChild(rm);
-        lightList.appendChild(card);
-      });
-    }
+    // Removed rendering of light cards in group card as requested.
     // Initialize HUD from plan when switching groups
   const plan = STATE.plans.find(p => p.id === group?.plan);
   const spec = plan?.spectrum || { cw: 45, ww: 45, bl: 0, rd: 0 };
@@ -10266,31 +10325,79 @@ function wireGlobalEvents() {
                 card.title = isDynamic ? 'Dynamic: using driver spectrum' : 'Static: using device factory spectrum';
               }
             } catch {}
+            // Edit button for room/zone assignment
+            const edit = document.createElement('button');
+            edit.type = 'button'; edit.className = 'ghost'; edit.textContent = 'Edit';
+            edit.style.marginTop = '6px';
+            edit.addEventListener('click', () => {
+              // Create dropdowns for room and zone
+              const rooms = (STATE.rooms || []).map(r => ({ id: r.id, name: r.name, zones: r.zones || [] }));
+              const editDiv = document.createElement('div');
+              editDiv.style.marginTop = '8px';
+              const roomSel = document.createElement('select');
+              roomSel.innerHTML = rooms.map(r => `<option value="${r.id}"${(normalized.roomId === r.id || normalized.room === r.id) ? ' selected' : ''}>${r.name}</option>`).join('');
+              const zoneSel = document.createElement('select');
+              let currentZones = rooms.find(r => r.id === (normalized.roomId || normalized.room))?.zones || [];
+              zoneSel.innerHTML = currentZones.map(z => `<option value="${z}"${normalized.zone === z ? ' selected' : ''}>${z}</option>`).join('');
+              roomSel.addEventListener('change', () => {
+                const selectedRoom = rooms.find(r => r.id === roomSel.value);
+                zoneSel.innerHTML = (selectedRoom?.zones || []).map(z => `<option value="${z}">${z}</option>`).join('');
+              });
+              const saveBtn = document.createElement('button');
+              saveBtn.type = 'button'; saveBtn.className = 'primary'; saveBtn.textContent = 'Save';
+              saveBtn.onclick = async () => {
+                // Update STATE.devices
+                const dev = (STATE.devices || []).find(dev => dev.id === d.id);
+                if (dev) {
+                  dev.room = roomSel.value;
+                  dev.roomId = roomSel.value;
+                  dev.zone = zoneSel.value;
+                  await saveJSON('./data/devices.nedb', { devices: STATE.devices });
+                  showToast({ title: 'Light updated', msg: 'Room and zone updated.', kind: 'success', icon: '💡' });
+                  updateGroupUI(group);
+                }
+              };
+              editDiv.appendChild(roomSel);
+              editDiv.appendChild(zoneSel);
+              editDiv.appendChild(saveBtn);
+              card.appendChild(editDiv);
+            });
+            // Add to group button
             const add = document.createElement('button');
             add.type = 'button'; add.className = 'ghost'; add.textContent = 'Add to group';
             add.style.marginTop = '6px';
             add.addEventListener('click', async () => {
               group.lights = group.lights || [];
-              if (!group.lights.some(x => x.id === d.id)) {
-                group.lights.push({
-                  id: d.id,
-                  name: normalized.deviceName || d.id,
-                  deviceName: normalized.deviceName || d.id,
-                  vendor: normalized.vendor || '',
-                  model: normalized.model || '',
-                  room: normalized.room || normalized.roomName || '',
-                  roomId: normalized.roomId || '',
-                  zone: normalized.zone || '',
-                  source: normalized.source || d.source || '',
-                  setupId: normalized.setupId || d.setupId || null,
-                  fixtureId: normalized.fixtureId || d.fixtureId || null,
-                });
+              // Only allow assignment if light matches selected room/zone
+              const room = (normalized.room || normalized.roomId || '').toString().trim().toLowerCase();
+              const zone = (normalized.zone || '').toString().trim().toLowerCase();
+              const selRoomId = (selectedRoomId || '').toString().trim().toLowerCase();
+              const selRoomName = (selectedRoomName || '').toString().trim().toLowerCase();
+              const selZone = (selectedZone || '').toString().trim().toLowerCase();
+              if ((room === selRoomId || room === selRoomName) && zone === selZone) {
+                if (!group.lights.some(x => x.id === d.id)) {
+                  group.lights.push({
+                    id: d.id,
+                    name: normalized.deviceName || d.id,
+                    deviceName: normalized.deviceName || d.id,
+                    vendor: normalized.vendor || '',
+                    model: normalized.model || '',
+                    room: normalized.room || normalized.roomName || '',
+                    roomId: normalized.roomId || '',
+                    zone: normalized.zone || '',
+                    source: normalized.source || d.source || '',
+                    setupId: normalized.setupId || d.setupId || null,
+                    fixtureId: normalized.fixtureId || d.fixtureId || null,
+                  });
+                }
+                await saveGroups();
+                updateGroupUI(group);
+              } else {
+                showToast({ title: 'Assignment Error', msg: 'Light does not match selected room/zone.', kind: 'warn', icon: '🚫' });
               }
-              await saveGroups();
-              updateGroupUI(group);
             });
             const wrap = document.createElement('div');
-            wrap.appendChild(card); wrap.appendChild(add);
+            wrap.appendChild(card); wrap.appendChild(edit); wrap.appendChild(add);
             ungroupedList.appendChild(wrap);
           });
         }
@@ -11420,6 +11527,35 @@ class FreshLightWizard {
     window.dispatchEvent(new CustomEvent('lightSetupsChanged'));
     renderLightSetupSummary();
     renderControllerAssignments();
+    // Add to group if matching group exists
+    if (window.STATE && Array.isArray(window.STATE.groups)) {
+      // Try to find group for this room/zone
+      let group = window.STATE.groups.find(g => (g.room === this.data.room || g.roomId === this.data.room) && g.zone === this.data.zone);
+      if (group) {
+        // Add fixtures as lights to group.lights if not already present
+        group.lights = group.lights || [];
+        this.data.fixtures.forEach(fixture => {
+          for (let i = 0; i < (fixture.count || 1); i++) {
+            const lightId = `${fixture.vendor||fixture.name||fixture.model||'Light'}-${Date.now()}-${Math.floor(Math.random()*10000)}`;
+            if (!group.lights.some(l => l.id === lightId)) {
+              group.lights.push({
+                id: lightId,
+                name: fixture.name || fixture.model || 'Light',
+                vendor: fixture.vendor || '',
+                model: fixture.model || '',
+                room: this.data.room,
+                roomId: this.data.room,
+                zone: this.data.zone,
+                source: 'setup',
+                setupId: lightSetup.id,
+                fixtureId: fixture.id || null
+              });
+            }
+          }
+        });
+        if (typeof saveGroups === 'function') saveGroups();
+      }
+    }
     // Look up user-friendly room name
     let roomName = this.data.room;
     if (STATE.rooms && Array.isArray(STATE.rooms)) {
@@ -11428,9 +11564,15 @@ class FreshLightWizard {
     }
     const summary = `Light Setup Saved!\n\nLocation: ${roomName} - ${this.data.zone}\nFixtures: ${totalFixtures} lights (${totalWattage.toLocaleString()}W total)\nControl: ${this.getControlMethodName(this.data.controlMethod)}`;
     alert(summary);
-  this.close();
-  // After closing wizard, reload rooms and re-render
-  setTimeout(async () => { await loadRoomsFromBackend(); renderRooms(); }, 300);
+    this.close();
+    // After closing wizard, reload rooms and re-render (guarded)
+    setTimeout(() => {
+      if (typeof loadRoomsFromBackend === 'function') {
+        loadRoomsFromBackend().then(renderRooms).catch(()=>{});
+      } else {
+        renderRooms();
+      }
+    }, 300);
   }
 }
   

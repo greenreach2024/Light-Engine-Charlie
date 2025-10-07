@@ -581,3 +581,364 @@ fetchAndCacheWeather error: fetch failed
 [charlie] Fetching status for device: 3C8427B1ECDA
 [switchbot] Rate limiting: waiting 5797ms before next request
 [switchbot] Rate limited by API. Will use cached data if available.
+⚠️  404 Not Found: GET /apple-touch-icon-precomposed.png
+⚠️  404 Not Found: GET /apple-touch-icon.png
+[switchbot] Rate limited by API. Will use cached data if available.
+[charlie] Fetching status for device: 3C8427B1316E
+[switchbot] Rate limiting: waiting 3775ms before next request
+[charlie] Fetching status for device: 3C8427B1E392
+[switchbot] Rate limiting: waiting 1773ms before next request
+[switchbot] Rate limited by API. Will use cached data if available.
+[switchbot] Rate limited by API. Will use cached data if available.
+[charlie] Fetching status for device: 3C8427B1ECDA
+[switchbot] Rate limiting: waiting 5779ms before next request
+[switchbot] Rate limited by API. Will use cached data if available.
+[switchbot] Rate limited by API. Will use cached data if available.
+[charlie] Fetching status for device: 3C8427B1316E
+[switchbot] Rate limiting: waiting 3736ms before next request
+[charlie] Fetching status for device: 3C8427B1E392
+[switchbot] Rate limiting: waiting 1733ms before next request
+[switchbot] Rate limited by API. Will use cached data if available.
+[switchbot] Rate limited by API. Will use cached data if available.
+[charlie] Fetching status for device: 3C8427B1ECDA
+[switchbot] Rate limiting: waiting 5737ms before next request
+[switchbot] Rate limited by API. Will use cached data if available.
+⚠️  404 Not Found: GET /rules
+⚠️  404 Not Found: GET /plugs
+[switchbot] Rate limited by API. Will use cached data if available.
+[charlie] Fetching status for device: 3C8427B1316E
+[switchbot] Rate limiting: waiting 3766ms before next request
+[charlie] Fetching status for device: 3C8427B1E392
+[switchbot] Rate limiting: waiting 1767ms before next request
+[switchbot] Rate limited by API. Will use cached data if available.
+[switchbot] Rate limited by API. Will use cached data if available.
+[charlie] Fetching status for device: 3C8427B1ECDA
+[switchbot] Rate limiting: waiting 5773ms before next request
+[switchbot] Rate limited by API. Will use cached data if available.
+⚠️  404 Not Found: GET /rules
+⚠️  404 Not Found: GET /plugs
+[switchbot] Rate limited by API. Will use cached data if available.
+[charlie] Fetching status for device: 3C8427B1316E
+[switchbot] Rate limiting: waiting 3780ms before next request
+[charlie] Fetching status for device: 3C8427B1E392
+[switchbot] Rate limiting: waiting 1776ms before next request
+[switchbot] Rate limited by API. Will use cached data if available.
+[switchbot] Rate limited by API. Will use cached data if available.
+[charlie] Fetching status for device: 3C8427B1ECDA
+[switchbot] Rate limiting: waiting 5777ms before next request
+[switchbot] Rate limited by API. Will use cached data if available.
+[switchbot] Rate limiting: waiting 950ms before next request
+[switchbot] Rate limited by API. Will use cached data if available.
+[charlie] Fetching status for device: 3C8427B1316E
+[switchbot] Rate limiting: waiting 3826ms before next request
+[charlie] Fetching status for device: 3C8427B1E392
+[switchbot] Rate limiting: waiting 1827ms before next request
+[switchbot] Rate limited by API. Will use cached data if available.
+[switchbot] Rate limited by API. Will use cached data if available.
+[charlie] Fetching status for device: 3C8427B1ECDA
+[switchbot] Rate limiting: waiting 5833ms before next request
+[switchbot] Rate limited by API. Will use cached data if available.
+⚠️  404 Not Found: POST /plugs/discover
+⚠️  404 Not Found: GET /plugs
+[switchbot] Rate limited by API. Will use cached data if available.
+[charlie] Fetching status for device: 3C8427B1316E
+[switchbot] Rate limiting: waiting 3828ms before next request
+[charlie] Fetching status for device: 3C8427B1E392
+[switchbot] Rate limiting: waiting 1830ms before next request
+[switchbot] Rate limited by API. Will use cached data if available.
+[switchbot] Rate limited by API. Will use cached data if available.
+[charlie] Fetching status for device: 3C8427B1ECDA
+[switchbot] Rate limiting: waiting 5825ms before next request
+[switchbot] Rate limited by API. Will use cached data if available.
+[switchbot] Rate limited by API. Will use cached data if available.
+[charlie] Fetching status for device: 3C8427B1316E
+[switchbot] Rate limiting: waiting 3794ms before next request
+🔍 Starting live device discovery on greenreach network...
+🔍 Scanning network range 192.168.2.0/24 for IoT devices...
+[charlie] Fetching status for device: 3C8427B1E392
+[switchbot] Rate limiting: waiting 1793ms before next request
+[charlie] Fetching status for device: 3C8427B1ECDA
+[switchbot] Rate limiting: waiting 5795ms before next request
+[switchbot] Rate limited by API. Will use cached data if available.
+[switchbot] Rate limited by API. Will use cached data if available.
+[switchbot] Rate limited by API. Will use cached data if available.
+✅ Discovery complete: Found 4 live devices
+⚠️  404 Not Found: GET /rules
+⚠️  404 Not Found: GET /plugs
+⚠️  404 Not Found: GET /apple-touch-icon-precomposed.png
+⚠️  404 Not Found: GET /apple-touch-icon.png
+[switchbot] Rate limited by API. Will use cached data if available.
+[charlie] Fetching status for device: 3C8427B1316E
+[switchbot] Rate limiting: waiting 3733ms before next request
+[charlie] Fetching status for device: 3C8427B1E392
+[switchbot] Rate limiting: waiting 1735ms before next request
+[switchbot] Rate limited by API. Will use cached data if available.
+[switchbot] Rate limited by API. Will use cached data if available.
+[charlie] Fetching status for device: 3C8427B1ECDA
+[switchbot] Rate limiting: waiting 5741ms before next request
+[switchbot] Rate limited by API. Will use cached data if available.
+[switchbot] Rate limiting: waiting 599ms before next request
+[switchbot] Rate limited by API. Will use cached data if available.
+[charlie] Fetching status for device: 3C8427B1316E
+[switchbot] Rate limiting: waiting 3826ms before next request
+[charlie] Fetching status for device: 3C8427B1E392
+[switchbot] Rate limiting: waiting 1826ms before next request
+[switchbot] Rate limited by API. Will use cached data if available.
+[switchbot] Rate limited by API. Will use cached data if available.
+[charlie] Fetching status for device: 3C8427B1ECDA
+[switchbot] Rate limiting: waiting 5824ms before next request
+[switchbot] Rate limited by API. Will use cached data if available.
+⚠️  404 Not Found: GET /rules
+⚠️  404 Not Found: GET /plugs
+[switchbot] Rate limited by API. Will use cached data if available.
+[charlie] Fetching status for device: 3C8427B1316E
+[switchbot] Rate limiting: waiting 3561ms before next request
+[charlie] Fetching status for device: 3C8427B1E392
+[switchbot] Rate limiting: waiting 1560ms before next request
+[switchbot] Rate limited by API. Will use cached data if available.
+[switchbot] Rate limited by API. Will use cached data if available.
+[charlie] Fetching status for device: 3C8427B1ECDA
+[switchbot] Rate limiting: waiting 5561ms before next request
+[switchbot] Rate limited by API. Will use cached data if available.
+⚠️  404 Not Found: GET /rules
+⚠️  404 Not Found: GET /plugs
+[switchbot] Rate limited by API. Will use cached data if available.
+[charlie] Fetching status for device: 3C8427B1316E
+[switchbot] Rate limiting: waiting 3808ms before next request
+[charlie] Fetching status for device: 3C8427B1E392
+[switchbot] Rate limiting: waiting 1804ms before next request
+[switchbot] Rate limited by API. Will use cached data if available.
+[switchbot] Rate limited by API. Will use cached data if available.
+[charlie] Fetching status for device: 3C8427B1ECDA
+[switchbot] Rate limiting: waiting 5808ms before next request
+[switchbot] Rate limited by API. Will use cached data if available.
+⚠️  404 Not Found: GET /rules
+⚠️  404 Not Found: GET /plugs
+[switchbot] Rate limited by API. Will use cached data if available.
+[charlie] Fetching status for device: 3C8427B1316E
+[switchbot] Rate limiting: waiting 3815ms before next request
+[charlie] Fetching status for device: 3C8427B1E392
+[switchbot] Rate limiting: waiting 1815ms before next request
+[switchbot] Rate limited by API. Will use cached data if available.
+[switchbot] Rate limited by API. Will use cached data if available.
+[charlie] Fetching status for device: 3C8427B1ECDA
+[switchbot] Rate limiting: waiting 5791ms before next request
+[switchbot] Rate limited by API. Will use cached data if available.
+⚠️  404 Not Found: GET /rules
+⚠️  404 Not Found: GET /plugs
+[switchbot] Rate limited by API. Will use cached data if available.
+[charlie] Fetching status for device: 3C8427B1316E
+[switchbot] Rate limiting: waiting 3768ms before next request
+[charlie] Fetching status for device: 3C8427B1E392
+[switchbot] Rate limiting: waiting 1771ms before next request
+[switchbot] Rate limited by API. Will use cached data if available.
+[switchbot] Rate limited by API. Will use cached data if available.
+[charlie] Fetching status for device: 3C8427B1ECDA
+[switchbot] Rate limiting: waiting 5777ms before next request
+[switchbot] Rate limited by API. Will use cached data if available.
+⚠️  404 Not Found: GET /rules
+⚠️  404 Not Found: GET /plugs
+[switchbot] Rate limited by API. Will use cached data if available.
+[charlie] Fetching status for device: 3C8427B1316E
+[switchbot] Rate limiting: waiting 3766ms before next request
+[charlie] Fetching status for device: 3C8427B1E392
+[switchbot] Rate limiting: waiting 1767ms before next request
+[switchbot] Rate limited by API. Will use cached data if available.
+[switchbot] Rate limited by API. Will use cached data if available.
+[charlie] Fetching status for device: 3C8427B1ECDA
+[switchbot] Rate limiting: waiting 5775ms before next request
+[switchbot] Rate limited by API. Will use cached data if available.
+⚠️  404 Not Found: GET /rules
+⚠️  404 Not Found: GET /plugs
+[switchbot] Rate limiting: waiting 3795ms before next request
+[switchbot] Rate limited by API. Will use cached data if available.
+[charlie] Fetching status for device: 3C8427B1316E
+[switchbot] Rate limiting: waiting 3821ms before next request
+[charlie] Fetching status for device: 3C8427B1E392
+[switchbot] Rate limiting: waiting 1821ms before next request
+[charlie] Fetching status for device: 3C8427B1ECDA
+[switchbot] Rate limiting: waiting 5822ms before next request
+[switchbot] Rate limited by API. Will use cached data if available.
+[switchbot] Rate limited by API. Will use cached data if available.
+[switchbot] Rate limited by API. Will use cached data if available.
+⚠️  404 Not Found: GET /rules
+⚠️  404 Not Found: GET /plugs
+[switchbot] Rate limited by API. Will use cached data if available.
+[charlie] Fetching status for device: 3C8427B1316E
+[switchbot] Rate limiting: waiting 3790ms before next request
+[charlie] Fetching status for device: 3C8427B1E392
+[switchbot] Rate limiting: waiting 1786ms before next request
+[switchbot] Rate limited by API. Will use cached data if available.
+[switchbot] Rate limited by API. Will use cached data if available.
+[charlie] Fetching status for device: 3C8427B1ECDA
+[switchbot] Rate limiting: waiting 5794ms before next request
+[switchbot] Rate limited by API. Will use cached data if available.
+⚠️  404 Not Found: GET /rules
+⚠️  404 Not Found: GET /plugs
+[switchbot] Rate limited by API. Will use cached data if available.
+[charlie] Fetching status for device: 3C8427B1316E
+[switchbot] Rate limiting: waiting 3713ms before next request
+[charlie] Fetching status for device: 3C8427B1E392
+[switchbot] Rate limiting: waiting 1711ms before next request
+[switchbot] Rate limited by API. Will use cached data if available.
+[switchbot] Rate limited by API. Will use cached data if available.
+[charlie] Fetching status for device: 3C8427B1ECDA
+[switchbot] Rate limiting: waiting 5723ms before next request
+[switchbot] Rate limited by API. Will use cached data if available.
+[switchbot] Rate limited by API. Will use cached data if available.
+[charlie] Fetching status for device: 3C8427B1316E
+[switchbot] Rate limiting: waiting 3809ms before next request
+[charlie] Fetching status for device: 3C8427B1E392
+[switchbot] Rate limiting: waiting 1810ms before next request
+[switchbot] Rate limited by API. Will use cached data if available.
+[switchbot] Rate limited by API. Will use cached data if available.
+[charlie] Fetching status for device: 3C8427B1ECDA
+[switchbot] Rate limiting: waiting 5809ms before next request
+[switchbot] Rate limiting: waiting 5415ms before next request
+[switchbot] Rate limited by API. Will use cached data if available.
+[switchbot] Rate limited by API. Will use cached data if available.
+[charlie] Fetching status for device: 3C8427B1316E
+[switchbot] Rate limiting: waiting 3831ms before next request
+[charlie] Fetching status for device: 3C8427B1E392
+[switchbot] Rate limiting: waiting 1830ms before next request
+[switchbot] Rate limited by API. Will use cached data if available.
+[switchbot] Rate limited by API. Will use cached data if available.
+[charlie] Fetching status for device: 3C8427B1ECDA
+[switchbot] Rate limiting: waiting 5820ms before next request
+[switchbot] Rate limited by API. Will use cached data if available.
+[switchbot] Rate limiting: waiting 4482ms before next request
+[switchbot] Rate limited by API. Will use cached data if available.
+[charlie] Fetching status for device: 3C8427B1316E
+[switchbot] Rate limiting: waiting 3802ms before next request
+[switchbot] Rate limited by API. Will use cached data if available.
+⚠️  404 Not Found: GET /rules
+⚠️  404 Not Found: GET /plugs
+[switchbot] Rate limited by API. Will use cached data if available.
+[charlie] Fetching status for device: 3C8427B1316E
+[switchbot] Rate limiting: waiting 3737ms before next request
+[switchbot] Rate limiting: waiting 2883ms before next request
+[switchbot] Rate limited by API. Will use cached data if available.
+[switchbot] Rate limited by API. Will use cached data if available.
+[charlie] Fetching status for device: 3C8427B1316E
+[switchbot] Rate limiting: waiting 3825ms before next request
+[charlie] Fetching status for device: 3C8427B1E392
+[switchbot] Rate limiting: waiting 1825ms before next request
+[switchbot] Rate limited by API. Will use cached data if available.
+[switchbot] Rate limited by API. Will use cached data if available.
+[charlie] Fetching status for device: 3C8427B1ECDA
+[switchbot] Rate limiting: waiting 5822ms before next request
+[switchbot] Rate limited by API. Will use cached data if available.
+⚠️  404 Not Found: GET /rules
+⚠️  404 Not Found: GET /plugs
+[switchbot] Rate limited by API. Will use cached data if available.
+[charlie] Fetching status for device: 3C8427B1316E
+[switchbot] Rate limiting: waiting 3813ms before next request
+[charlie] Fetching status for device: 3C8427B1E392
+[switchbot] Rate limiting: waiting 1808ms before next request
+[switchbot] Rate limited by API. Will use cached data if available.
+[switchbot] Rate limited by API. Will use cached data if available.
+[charlie] Fetching status for device: 3C8427B1ECDA
+[switchbot] Rate limiting: waiting 5809ms before next request
+[switchbot] Rate limited by API. Will use cached data if available.
+⚠️  404 Not Found: GET /rules
+⚠️  404 Not Found: GET /plugs
+[switchbot] Rate limited by API. Will use cached data if available.
+[charlie] Fetching status for device: 3C8427B1316E
+[switchbot] Rate limiting: waiting 3809ms before next request
+[charlie] Fetching status for device: 3C8427B1E392
+[switchbot] Rate limiting: waiting 1806ms before next request
+[switchbot] Rate limited by API. Will use cached data if available.
+[switchbot] Rate limited by API. Will use cached data if available.
+[charlie] Fetching status for device: 3C8427B1ECDA
+[switchbot] Rate limiting: waiting 5790ms before next request
+[switchbot] Rate limited by API. Will use cached data if available.
+⚠️  404 Not Found: GET /rules
+⚠️  404 Not Found: GET /plugs
+⚠️  404 Not Found: GET /apple-touch-icon-precomposed.png
+⚠️  404 Not Found: GET /apple-touch-icon.png
+[switchbot] Rate limited by API. Will use cached data if available.
+[charlie] Fetching status for device: 3C8427B1316E
+[switchbot] Rate limiting: waiting 3693ms before next request
+[charlie] Fetching status for device: 3C8427B1E392
+[switchbot] Rate limiting: waiting 1688ms before next request
+[switchbot] Rate limited by API. Will use cached data if available.
+[switchbot] Rate limited by API. Will use cached data if available.
+[charlie] Fetching status for device: 3C8427B1ECDA
+[switchbot] Rate limiting: waiting 5698ms before next request
+[switchbot] Rate limited by API. Will use cached data if available.
+⚠️  404 Not Found: GET /rules
+⚠️  404 Not Found: GET /plugs
+[switchbot] Rate limited by API. Will use cached data if available.
+[charlie] Fetching status for device: 3C8427B1316E
+[switchbot] Rate limiting: waiting 3764ms before next request
+[charlie] Fetching status for device: 3C8427B1E392
+[switchbot] Rate limiting: waiting 1766ms before next request
+[switchbot] Rate limited by API. Will use cached data if available.
+[switchbot] Rate limited by API. Will use cached data if available.
+[charlie] Fetching status for device: 3C8427B1ECDA
+[switchbot] Rate limiting: waiting 5783ms before next request
+[switchbot] Rate limited by API. Will use cached data if available.
+⚠️  404 Not Found: GET /rules
+⚠️  404 Not Found: GET /plugs
+[charlie] Fetching status for device: 3C8427B1316E
+[switchbot] Rate limiting: waiting 3753ms before next request
+[charlie] Fetching status for device: 3C8427B1E392
+[switchbot] Rate limiting: waiting 1756ms before next request
+[charlie] Fetching status for device: 3C8427B1ECDA
+[switchbot] Rate limiting: waiting 5725ms before next request
+⚠️  404 Not Found: GET /rules
+⚠️  404 Not Found: GET /plugs
+[charlie] Fetching status for device: 3C8427B1316E
+[charlie] Fetching status for device: 3C8427B1E392
+[switchbot] Rate limiting: waiting 3981ms before next request
+[charlie] Fetching status for device: 3C8427B1ECDA
+[switchbot] Rate limiting: waiting 2003ms before next request
+⚠️  404 Not Found: GET /rules
+⚠️  404 Not Found: GET /plugs
+[charlie] Fetching status for device: 3C8427B1316E
+[charlie] Fetching status for device: 3C8427B1E392
+[charlie] Fetching status for device: 3C8427B1ECDA
+fetchAndCacheWeather error: fetch failed
+fetchAndCacheWeather error: fetch failed
+⚠️  404 Not Found: GET /rules
+⚠️  404 Not Found: GET /plugs
+⚠️  404 Not Found: GET /apple-touch-icon-precomposed.png
+⚠️  404 Not Found: GET /apple-touch-icon.png
+[charlie] Fetching status for device: 3C8427B1316E
+[switchbot] Rate limiting: waiting 3832ms before next request
+[charlie] Fetching status for device: 3C8427B1E392
+[switchbot] Rate limiting: waiting 1835ms before next request
+[charlie] Fetching status for device: 3C8427B1ECDA
+[switchbot] Rate limiting: waiting 5821ms before next request
+⚠️  404 Not Found: GET /rules
+⚠️  404 Not Found: GET /plugs
+[charlie] Fetching status for device: 3C8427B1316E
+[charlie] Fetching status for device: 3C8427B1E392
+[switchbot] Rate limiting: waiting 4013ms before next request
+[charlie] Fetching status for device: 3C8427B1ECDA
+[switchbot] Rate limiting: waiting 2012ms before next request
+⚠️  404 Not Found: GET /rules
+⚠️  404 Not Found: GET /plugs
+[charlie] Fetching status for device: 3C8427B1316E
+[switchbot] Rate limiting: waiting 3789ms before next request
+[charlie] Fetching status for device: 3C8427B1E392
+[switchbot] Rate limiting: waiting 1787ms before next request
+[charlie] Fetching status for device: 3C8427B1ECDA
+[switchbot] Rate limiting: waiting 5794ms before next request
+⚠️  404 Not Found: GET /rules
+⚠️  404 Not Found: GET /plugs
+[charlie] Fetching status for device: 3C8427B1316E
+[charlie] Fetching status for device: 3C8427B1E392
+[charlie] Fetching status for device: 3C8427B1ECDA
+⚠️  404 Not Found: GET /rules
+⚠️  404 Not Found: GET /plugs
+[charlie] Fetching status for device: 3C8427B1316E
+[charlie] Fetching status for device: 3C8427B1E392
+[switchbot] Rate limiting: waiting 4000ms before next request
+[charlie] Fetching status for device: 3C8427B1ECDA
+[switchbot] Rate limiting: waiting 2000ms before next request
+⚠️  404 Not Found: GET /rules
+⚠️  404 Not Found: GET /plugs
+[charlie] Fetching status for device: 3C8427B1316E
+[charlie] Fetching status for device: 3C8427B1E392
+[charlie] Fetching status for device: 3C8427B1ECDA
