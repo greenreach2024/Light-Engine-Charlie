@@ -188,6 +188,48 @@
         color: #28a745;
         font-weight: 600;
       }
+
+      .device-summary {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 8px;
+        margin: 12px 0;
+      }
+
+      .device-summary-item {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        padding: 8px 12px;
+        border-radius: 8px;
+        border: 1px solid #e2e8f0;
+        background: linear-gradient(135deg, #f8fafc, #eef2ff);
+        box-shadow: 0 1px 2px rgba(15, 23, 42, 0.08);
+        min-width: 120px;
+      }
+
+      .device-summary-icon {
+        font-size: 18px;
+      }
+
+      .device-summary-text {
+        display: flex;
+        flex-direction: column;
+        gap: 2px;
+      }
+
+      .device-summary-value {
+        font-weight: 600;
+        color: #1e293b;
+        font-size: 13px;
+      }
+
+      .device-summary-label {
+        font-size: 10px;
+        text-transform: uppercase;
+        letter-spacing: 0.4px;
+        color: #64748b;
+      }
   </style>
 </head>
 <body>
@@ -238,6 +280,505 @@
     let devices = [];
     let syncInterval = null;
     let environmentData = [];
+    const deviceMetadataMap = new Map();
+    let deviceMetadataLoaded = false;
+    let deviceMetadataPromise = null;
+    let baseZoneOptions = [];
+    let baseRoomOptions = [];
+    let availableZones = [];
+    let availableRooms = [];
+    const fallbackCounters = { zone: 0, room: 0 };
+
+    function escapeHtml(value) {
+      return String(value ?? '')
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;')
+        .replace(/'/g, '&#39;');
+    }
+
+    function escapeAttribute(value) {
+      return escapeHtml(value);
+    }
+
+    function slugify(value) {
+      return String(value ?? '')
+        .trim()
+        .toLowerCase()
+        .replace(/[^a-z0-9]+/g, '-')
+        .replace(/^-+|-+$/g, '');
+    }
+
+    function nextFallbackValue(prefix) {
+      fallbackCounters[prefix] = (fallbackCounters[prefix] || 0) + 1;
+      return `${prefix}-${fallbackCounters[prefix]}`;
+    }
+
+    function createOption(id, name, prefix) {
+      const trimmedName = typeof name === 'string' ? name.trim() : '';
+      const trimmedId = typeof id === 'string' ? id.trim() : '';
+      const displayName = trimmedName || trimmedId;
+      if (!displayName) return null;
+      let value = trimmedId;
+      if (!value) {
+        const slug = slugify(displayName);
+        value = slug ? `${prefix}-${slug}` : nextFallbackValue(prefix);
+      }
+      return {
+        id: trimmedId || null,
+        name: displayName,
+        value
+      };
+    }
+
+    function normalizeZoneOption(zone, index = 0) {
+      if (!zone) return null;
+      if (typeof zone === 'string') {
+        return createOption(null, zone, 'zone');
+      }
+      if (typeof zone === 'object') {
+        const source = zone;
+        const id = source.id || source.zoneId || source.zone_id || source.zone || source.identifier || null;
+        const name = source.name || source.displayName || source.label || source.zone || source.location || id || `Zone ${index + 1}`;
+        return createOption(id, name, 'zone');
+      }
+      return null;
+    }
+
+    function normalizeRoomOption(room, index = 0) {
+      if (!room) return null;
+      if (typeof room === 'string') {
+        return createOption(null, room, 'room');
+      }
+      if (typeof room === 'object') {
+        const source = room;
+        const id = source.id || source.roomId || source.room_id || source.identifier || null;
+        const name = source.name || source.label || source.title || source.roomName || source.location || id || `Room ${index + 1}`;
+        return createOption(id, name, 'room');
+      }
+      return null;
+    }
+
+    function dedupeAndSortOptions(options) {
+      const map = new Map();
+      (options || []).forEach(option => {
+        if (!option || !option.value) return;
+        if (!map.has(option.value)) {
+          map.set(option.value, option);
+        } else {
+          const existing = map.get(option.value);
+          if (!existing.name && option.name) {
+            map.set(option.value, option);
+          }
+        }
+      });
+      return Array.from(map.values()).sort((a, b) =>
+        a.name.localeCompare(b.name, undefined, { sensitivity: 'base' })
+      );
+    }
+
+    function findOption(list, value) {
+      if (!value) return null;
+      const normalized = String(value).trim();
+      if (!normalized) return null;
+      return (list || []).find(
+        option =>
+          option.value === normalized ||
+          option.id === normalized ||
+          option.name === normalized
+      ) || null;
+    }
+
+    function setBaseZoneOptions(options) {
+      baseZoneOptions = dedupeAndSortOptions(options || []);
+      rebuildZoneOptions();
+    }
+
+    function setBaseRoomOptions(options) {
+      baseRoomOptions = dedupeAndSortOptions(options || []);
+      rebuildRoomOptions();
+    }
+
+    function extractZoneOptionsFromMetadata(meta) {
+      if (!meta || typeof meta !== 'object') return [];
+      const details = meta.details || {};
+      const candidates = [
+        createOption(details.zoneId || details.zoneSlug || null, details.zoneName || details.zone, 'zone'),
+        createOption(meta.zoneId || meta.zoneSlug || null, meta.zoneName || meta.zone, 'zone'),
+        createOption(null, meta.zone, 'zone')
+      ];
+      return candidates.filter(Boolean);
+    }
+
+    function extractRoomOptionsFromMetadata(meta) {
+      if (!meta || typeof meta !== 'object') return [];
+      const details = meta.details || {};
+      const assigned = meta.assignedEquipment || {};
+      const candidates = [
+        createOption(details.roomId || details.roomSlug || null, details.roomName || details.room || details.location, 'room'),
+        createOption(meta.roomId || meta.roomSlug || null, meta.roomName || meta.room || meta.location, 'room'),
+        createOption(assigned.roomId || null, assigned.roomName || assigned.room || null, 'room')
+      ];
+      const enriched = candidates
+        .filter(Boolean)
+        .map(option => {
+          if (option && option.id && !option.name) {
+            const match = findOption(baseRoomOptions, option.id);
+            if (match) {
+              return createOption(match.id, match.name, 'room');
+            }
+          }
+          return option;
+        });
+      return enriched.filter(Boolean);
+    }
+
+    function rebuildZoneOptions() {
+      const combined = [...baseZoneOptions];
+      deviceMetadataMap.forEach(meta => {
+        combined.push(...extractZoneOptionsFromMetadata(meta));
+      });
+      availableZones = dedupeAndSortOptions(combined);
+    }
+
+    function rebuildRoomOptions() {
+      const combined = [...baseRoomOptions];
+      deviceMetadataMap.forEach(meta => {
+        combined.push(...extractRoomOptionsFromMetadata(meta));
+      });
+      availableRooms = dedupeAndSortOptions(combined);
+    }
+
+    function findZoneOption(value) {
+      return findOption(availableZones, value) || findOption(baseZoneOptions, value);
+    }
+
+    function findRoomOption(value) {
+      return findOption(availableRooms, value) || findOption(baseRoomOptions, value);
+    }
+
+    function getCanonicalDeviceId(source) {
+      if (!source || typeof source !== 'object') return '';
+      const candidate =
+        source.device_id ??
+        source.deviceId ??
+        source.id ??
+        source.uuid ??
+        source.deviceID ??
+        source.macAddress ??
+        '';
+      return typeof candidate === 'string'
+        ? candidate.trim()
+        : String(candidate || '').trim();
+    }
+
+    function normalizeMetadata(raw) {
+      if (!raw || typeof raw !== 'object') return null;
+      return { ...raw };
+    }
+
+    function storeDeviceMetadata(raw) {
+      const normalized = normalizeMetadata(raw);
+      if (!normalized) return null;
+      const id = getCanonicalDeviceId(normalized);
+      if (!id) return null;
+      normalized.device_id = id;
+      deviceMetadataMap.set(id.toLowerCase(), normalized);
+      return normalized;
+    }
+
+    function getDeviceMetadata(deviceId) {
+      const key =
+        typeof deviceId === 'string'
+          ? deviceId.trim()
+          : String(deviceId || '').trim();
+      if (!key) return null;
+      return deviceMetadataMap.get(key.toLowerCase()) || null;
+    }
+
+    function getZoneSelection(metadata, device) {
+      const candidates = [];
+      if (metadata && typeof metadata === 'object') {
+        const details = metadata.details || {};
+        candidates.push({ value: details.zoneSlug, label: details.zoneName || details.zone });
+        candidates.push({ value: details.zoneId, label: details.zoneName || details.zone });
+        candidates.push({ value: metadata.zoneSlug, label: metadata.zoneName });
+        candidates.push({ value: metadata.zoneId, label: metadata.zoneName });
+        candidates.push({ value: metadata.zone, label: metadata.zone });
+      }
+      if (device && typeof device === 'object') {
+        candidates.push({ value: device.zoneId, label: device.zoneName });
+        candidates.push({ value: device.zone, label: device.zoneName || device.zone });
+      }
+      for (const candidate of candidates) {
+        if (!candidate) continue;
+        const { value, label } = candidate;
+        if (value) {
+          const option = findZoneOption(value) || findZoneOption(label);
+          if (option) {
+            return { value: option.value, label: option.name };
+          }
+          return {
+            value: String(value).trim(),
+            label: label ? String(label).trim() : String(value).trim()
+          };
+        }
+        if (label) {
+          const option = findZoneOption(label);
+          if (option) {
+            return { value: option.value, label: option.name };
+          }
+        }
+      }
+      return { value: '', label: '' };
+    }
+
+    function getRoomSelection(metadata, device) {
+      const candidates = [];
+      if (metadata && typeof metadata === 'object') {
+        const details = metadata.details || {};
+        const assigned = metadata.assignedEquipment || {};
+        candidates.push({ value: details.roomSlug, label: details.roomName || details.room || details.location });
+        candidates.push({ value: details.roomId, label: details.roomName || details.room || details.location });
+        candidates.push({ value: metadata.roomSlug, label: metadata.roomName || metadata.room || metadata.location });
+        candidates.push({ value: metadata.roomId, label: metadata.roomName || metadata.room || metadata.location });
+        candidates.push({ value: assigned.roomId, label: assigned.roomName || assigned.room });
+        candidates.push({ value: metadata.location, label: metadata.location });
+      }
+      if (device && typeof device === 'object') {
+        candidates.push({ value: device.farmLocationId, label: device.farmLocation });
+        candidates.push({ value: device.farmLocation, label: device.farmLocation });
+      }
+      for (const candidate of candidates) {
+        if (!candidate) continue;
+        const { value, label } = candidate;
+        if (value) {
+          const option = findRoomOption(value) || findRoomOption(label);
+          if (option) {
+            return { value: option.value, label: option.name };
+          }
+          return {
+            value: String(value).trim(),
+            label: label ? String(label).trim() : String(value).trim()
+          };
+        }
+        if (label) {
+          const option = findRoomOption(label);
+          if (option) {
+            return { value: option.value, label: option.name };
+          }
+        }
+      }
+      return { value: '', label: '' };
+    }
+
+    function computeVPD(tempC, humidityPercent) {
+      const temp = Number(tempC);
+      const rh = Number(humidityPercent);
+      if (!Number.isFinite(temp) || !Number.isFinite(rh)) return null;
+      const clampedRh = Math.min(Math.max(rh, 0), 100);
+      const saturationVaporPressure = 0.6108 * Math.exp((17.27 * temp) / (temp + 237.3));
+      const deficit = saturationVaporPressure * (1 - clampedRh / 100);
+      const rounded = Math.round(deficit * 100) / 100;
+      return Number.isFinite(rounded) ? rounded : null;
+    }
+
+    function formatNumber(value, decimals = 1) {
+      const num = Number(value);
+      if (!Number.isFinite(num)) return String(value);
+      const fixed = num.toFixed(decimals);
+      return fixed.replace(/\.0+$/, '').replace(/(\.\d*[1-9])0+$/, '$1');
+    }
+
+    function getPowerState(reading = {}) {
+      if (!reading || typeof reading !== 'object') return null;
+      const candidates = [
+        reading.power,
+        reading.powerState,
+        reading.powerStatus,
+        reading.switch,
+        reading.switchStatus,
+        reading.status,
+        reading.state
+      ];
+      for (const candidate of candidates) {
+        if (candidate === undefined || candidate === null) continue;
+        if (typeof candidate === 'string') {
+          const normalized = candidate.trim().toLowerCase();
+          if (normalized === 'on' || normalized === 'open' || normalized === 'true') return 'on';
+          if (normalized === 'off' || normalized === 'closed' || normalized === 'false') return 'off';
+        } else if (typeof candidate === 'boolean') {
+          return candidate ? 'on' : 'off';
+        } else if (typeof candidate === 'number') {
+          if (candidate === 1) return 'on';
+          if (candidate === 0) return 'off';
+          return candidate > 0 ? 'on' : 'off';
+        }
+      }
+      return null;
+    }
+
+    function getBatteryIcon(level) {
+      const numeric = Number(level);
+      if (!Number.isFinite(numeric)) return '🔋';
+      if (numeric >= 70) return '🔋';
+      if (numeric >= 30) return '🪫';
+      return '🔴';
+    }
+
+    function isPlugDevice(deviceType) {
+      const type = String(deviceType || '').toLowerCase();
+      return type.includes('plug') || type.includes('outlet') || type.includes('switch');
+    }
+
+    function isSensorDevice(deviceType) {
+      const type = String(deviceType || '').toLowerCase();
+      return (
+        type.includes('sensor') ||
+        type.includes('meter') ||
+        type.includes('monitor') ||
+        type.includes('woiosensor')
+      );
+    }
+
+    function enrichReading(reading) {
+      if (!reading || typeof reading !== 'object') return reading;
+      const enriched = { ...reading };
+      if (
+        enriched.vpd === undefined &&
+        typeof enriched.temperature === 'number' &&
+        typeof enriched.humidity === 'number'
+      ) {
+        const computed = computeVPD(enriched.temperature, enriched.humidity);
+        if (computed !== null) {
+          enriched.vpd = computed;
+        }
+      }
+      if (enriched.weight !== undefined && enriched.wattage === undefined) {
+        enriched.wattage = enriched.weight;
+      }
+      return enriched;
+    }
+
+    function enrichDeviceReading(device) {
+      if (device && device.lastReading) {
+        device.lastReading = enrichReading(device.lastReading);
+      }
+    }
+
+    function applyMetadataToDevice(device, metadataOverride) {
+      if (!device) return;
+      const metadata = metadataOverride || getDeviceMetadata(getCanonicalDeviceId(device));
+      enrichDeviceReading(device);
+      if (metadata) {
+        const nameFromMeta =
+          metadata.name ||
+          metadata.deviceName ||
+          (metadata.details && (metadata.details.displayName || metadata.details.name));
+        if (nameFromMeta) {
+          device.displayName = nameFromMeta;
+        }
+        const zoneSelection = getZoneSelection(metadata, device);
+        device.zoneId = zoneSelection.value || '';
+        device.zoneName = zoneSelection.label || '';
+        const roomSelection = getRoomSelection(metadata, device);
+        device.farmLocationId = roomSelection.value || '';
+        device.farmLocation = roomSelection.label || '';
+        const metadataDetails = metadata.details || {};
+        const managed =
+          metadataDetails.managedEquipment ??
+          metadata.managedEquipment ??
+          device.managedEquipment ??
+          '';
+        device.managedEquipment = managed || '';
+      } else {
+        if (!device.displayName) {
+          device.displayName = device.deviceName || device.device_id || device.deviceId;
+        }
+        enrichDeviceReading(device);
+      }
+    }
+
+    function applyMetadataToAllDevices() {
+      devices.forEach(device => {
+        applyMetadataToDevice(device);
+      });
+    }
+
+    function renderSelectOptions(options, selectedValue, selectedLabel, placeholder) {
+      const normalizedSelected = selectedValue ? String(selectedValue).trim() : '';
+      const html = [
+        `<option value=""${normalizedSelected ? '' : ' selected'}>${escapeHtml(placeholder)}</option>`
+      ];
+      let hasSelected = false;
+      (options || []).forEach(option => {
+        if (!option || !option.value) return;
+        const isSelected = normalizedSelected && option.value === normalizedSelected;
+        if (isSelected) hasSelected = true;
+        html.push(
+          `<option value="${escapeAttribute(option.value)}"${isSelected ? ' selected' : ''}>${escapeHtml(option.name)}</option>`
+        );
+      });
+      if (normalizedSelected && !hasSelected) {
+        html.push(
+          `<option value="${escapeAttribute(normalizedSelected)}" selected>${escapeHtml(selectedLabel || normalizedSelected)}</option>`
+        );
+      }
+      return html.join('');
+    }
+
+    function createDeviceSummary(device, reading) {
+      if (!device || !reading || typeof reading !== 'object') return '';
+      const type = String(device.deviceType || '').toLowerCase();
+      const items = [];
+      if (isPlugDevice(type)) {
+        const state = getPowerState(reading);
+        if (state) {
+          items.push({
+            icon: state === 'on' ? '🟢' : '🔴',
+            label: 'Status',
+            value: state.toUpperCase()
+          });
+        }
+        if (reading.wattage !== undefined) {
+          items.push({ icon: '⚡', label: 'Wattage', value: `${formatNumber(reading.wattage, 1)} W` });
+        }
+        if (reading.voltage !== undefined) {
+          items.push({ icon: '🔌', label: 'Voltage', value: `${formatNumber(reading.voltage, 1)} V` });
+        }
+        if (reading.electricCurrent !== undefined) {
+          items.push({ icon: '🔋', label: 'Current', value: `${formatNumber(reading.electricCurrent, 2)} A` });
+        }
+      } else if (isSensorDevice(type)) {
+        if (reading.temperature !== undefined) {
+          items.push({ icon: '🌡️', label: 'Temperature', value: `${formatNumber(reading.temperature, 1)} °C` });
+        }
+        if (reading.humidity !== undefined) {
+          items.push({ icon: '💧', label: 'Humidity', value: `${formatNumber(reading.humidity, 1)} %` });
+        }
+        const vpdValue = reading.vpd ?? computeVPD(reading.temperature, reading.humidity);
+        if (vpdValue !== null && vpdValue !== undefined) {
+          items.push({ icon: '🌿', label: 'VPD', value: `${formatNumber(vpdValue, 2)} kPa` });
+        }
+        if (reading.battery !== undefined) {
+          items.push({ icon: getBatteryIcon(reading.battery), label: 'Battery', value: `${formatNumber(reading.battery, 0)}%` });
+        }
+      }
+      if (!items.length) return '';
+      const chips = items
+        .map(item => `
+          <div class="device-summary-item">
+            <span class="device-summary-icon">${item.icon}</span>
+            <div class="device-summary-text">
+              <div class="device-summary-value">${escapeHtml(item.value)}</div>
+              <div class="device-summary-label">${escapeHtml(item.label)}</div>
+            </div>
+          </div>
+        `)
+        .join('');
+      return `<div class="device-summary">${chips}</div>`;
+    }
 
     async function fetchEnvironmentData() {
       try {
@@ -266,6 +807,219 @@
         console.error('Environment API Error:', error);
         throw error;
       }
+    }
+
+    async function ensureEnvironmentData(force = false) {
+      const hadData = Array.isArray(environmentData) && environmentData.length > 0;
+      if (!force && hadData) {
+        return environmentData;
+      }
+
+      try {
+        const data = await fetchEnvironmentData();
+        const normalized = Array.isArray(data) ? data : [];
+        environmentData = normalized;
+        const zoneOptions = normalized
+          .map((zone, index) => normalizeZoneOption(zone, index))
+          .filter(Boolean);
+        setBaseZoneOptions(zoneOptions);
+        return environmentData;
+      } catch (error) {
+        if (!hadData) {
+          environmentData = [];
+          setBaseZoneOptions([]);
+        }
+        throw error;
+      }
+    }
+
+    async function fetchFarmRooms() {
+      const collected = [];
+
+      try {
+        const response = await fetch('/farm');
+        if (response.ok) {
+          const data = await response.json();
+          const rawRooms = Array.isArray(data?.rooms)
+            ? data.rooms
+            : Array.isArray(data?.farm?.rooms)
+            ? data.farm.rooms
+            : [];
+          rawRooms.forEach((room, index) => {
+            const option = normalizeRoomOption(room, index);
+            if (option) collected.push(option);
+          });
+        }
+      } catch (error) {
+        console.warn('Failed to load rooms from /farm:', error);
+      }
+
+      if (collected.length === 0) {
+        try {
+          const response = await fetch('/data/rooms.json');
+          if (response.ok) {
+            const data = await response.json();
+            const rawRooms = Array.isArray(data?.rooms) ? data.rooms : [];
+            rawRooms.forEach((room, index) => {
+              const option = normalizeRoomOption(room, index);
+              if (option) collected.push(option);
+            });
+          }
+        } catch (error) {
+          console.warn('Failed to load fallback room list:', error);
+        }
+      }
+
+      setBaseRoomOptions(collected);
+      return collected;
+    }
+
+    async function fetchDeviceMetadata() {
+      try {
+        const response = await fetch('/devices');
+        if (!response.ok) {
+          throw new Error(`Failed to load device metadata (${response.status})`);
+        }
+        const payload = await response.json();
+        const list = Array.isArray(payload?.devices)
+          ? payload.devices
+          : Array.isArray(payload)
+          ? payload
+          : [];
+
+        deviceMetadataMap.clear();
+        list.forEach(item => {
+          storeDeviceMetadata(item);
+        });
+        rebuildZoneOptions();
+        rebuildRoomOptions();
+        deviceMetadataLoaded = true;
+        return list;
+      } catch (error) {
+        console.warn('Failed to load device metadata:', error);
+        deviceMetadataLoaded = false;
+        return [];
+      }
+    }
+
+    async function loadDeviceMetadataIfNeeded(force = false) {
+      if (!force && deviceMetadataLoaded && deviceMetadataMap.size > 0) {
+        return;
+      }
+      if (deviceMetadataPromise) {
+        await deviceMetadataPromise;
+        return;
+      }
+      deviceMetadataPromise = fetchDeviceMetadata().finally(() => {
+        deviceMetadataPromise = null;
+      });
+      await deviceMetadataPromise;
+    }
+
+    async function loadReferenceData() {
+      await Promise.all([
+        ensureEnvironmentData().catch(error => {
+          console.warn('Environment data unavailable:', error);
+          return [];
+        }),
+        fetchFarmRooms().catch(error => {
+          console.warn('Room catalogue unavailable:', error);
+          return [];
+        }),
+        (async () => {
+          try {
+            await loadDeviceMetadataIfNeeded();
+          } catch (error) {
+            console.warn('Device metadata unavailable:', error);
+          }
+        })()
+      ]);
+
+      applyMetadataToAllDevices();
+    }
+
+    function sanitizeMetadataPayload(updates = {}) {
+      const result = {};
+      Object.entries(updates).forEach(([key, value]) => {
+        if (value === undefined) {
+          return;
+        }
+        if (value === '') {
+          result[key] = null;
+          return;
+        }
+        if (typeof value === 'object' && value !== null && !Array.isArray(value)) {
+          result[key] = { ...value };
+        } else {
+          result[key] = value;
+        }
+      });
+      return result;
+    }
+
+    async function fetchJson(url, options = {}) {
+      const response = await fetch(url, options);
+      const text = await response.text();
+      let data = null;
+      if (text) {
+        try {
+          data = JSON.parse(text);
+        } catch (error) {
+          data = null;
+        }
+      }
+      return { response, data };
+    }
+
+    async function persistDeviceMetadata(device, updates = {}) {
+      const deviceId = getCanonicalDeviceId(device);
+      if (!deviceId) {
+        throw new Error('Unable to determine device id for metadata update');
+      }
+
+      const payload = sanitizeMetadataPayload(updates);
+      let result = await fetchJson(`/devices/${encodeURIComponent(deviceId)}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload)
+      });
+
+      if (result.response.status === 404) {
+        const createPayload = sanitizeMetadataPayload({
+          id: deviceId,
+          protocol: 'switchbot',
+          category: device?.deviceType || 'SwitchBot Device',
+          name: device?.displayName || device?.deviceName || deviceId,
+          deviceName: device?.displayName || device?.deviceName || deviceId,
+          manufacturer: 'SwitchBot',
+          model: device?.deviceType || device?.deviceName || 'SwitchBot',
+          ...updates
+        });
+        result = await fetchJson('/devices', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(createPayload)
+        });
+      }
+
+      const { response, data } = result;
+      if (!response.ok) {
+        const message = (data && (data.error || data.message)) || `Request failed with status ${response.status}`;
+        const error = new Error(message);
+        error.status = response.status;
+        error.data = data;
+        throw error;
+      }
+
+      const saved = data && (data.device || data);
+      if (saved) {
+        const normalized = storeDeviceMetadata(saved);
+        rebuildZoneOptions();
+        rebuildRoomOptions();
+        return normalized || saved;
+      }
+
+      return saved;
     }
 
     async function fetchSwitchBotDevices() {
@@ -591,23 +1345,24 @@
     }
 
     function createDeviceControls(device) {
-      const deviceType = device.deviceType.toLowerCase();
-      
+      const deviceType = String(device.deviceType || '').toLowerCase();
+      const safeDeviceIdAttr = escapeAttribute(device.deviceId);
+
       if (deviceType.includes('plug') || deviceType.includes('switch')) {
         return `
           <div class="row" style="gap: 4px;">
-            <button class="ghost tiny" onclick="sendDeviceCommand('${device.deviceId}', 'turnOn')">ON</button>
-            <button class="ghost tiny" onclick="sendDeviceCommand('${device.deviceId}', 'turnOff')">OFF</button>
+            <button class="ghost tiny" onclick="sendDeviceCommand('${safeDeviceIdAttr}', 'turnOn')">ON</button>
+            <button class="ghost tiny" onclick="sendDeviceCommand('${safeDeviceIdAttr}', 'turnOff')">OFF</button>
           </div>
         `;
       }
-      
+
       if (deviceType.includes('bot')) {
         return `
-          <button class="ghost tiny" onclick="sendDeviceCommand('${device.deviceId}', 'press')">Press</button>
+          <button class="ghost tiny" onclick="sendDeviceCommand('${safeDeviceIdAttr}', 'press')">Press</button>
         `;
       }
-      
+
       return '<span class="tiny" style="color: #64748b;">Read-only</span>';
     }
 
@@ -616,7 +1371,11 @@
         clearError();
         document.getElementById('loadingContainer').style.display = 'block';
         updateSyncStatus('Checking SwitchBot connection...');
-        
+
+        await loadDeviceMetadataIfNeeded().catch(error => {
+          console.warn('Device metadata preload failed:', error);
+        });
+
         // First try to get real SwitchBot devices from your farm
         try {
           const realDevices = await fetchSwitchBotDevices();
@@ -634,9 +1393,10 @@
                 message: "Click refresh (🔄) to get current readings"
               }
             }));
+            applyMetadataToAllDevices();
             renderDevicesFromAPI();
             document.getElementById('deviceCount').textContent = `${devices.length} real devices`;
-            
+
             // Auto-fetch initial status data for a few devices only to avoid API limits
             setTimeout(() => {
               // Only fetch status for first 3 devices to avoid overloading API
@@ -653,30 +1413,37 @@
         } catch (realApiError) {
           console.warn('Real SwitchBot API failed, falling back to environment data:', realApiError);
         }
-        
+
         // Fallback to environment data
         updateSyncStatus('Loading environment data...');
         await fetchServerStatus();
-        
-        environmentData = await fetchEnvironmentData();
-        const switchbotEnvData = environmentData.filter(zone => 
-          zone.source === 'switchbot' || 
+
+        try {
+          await ensureEnvironmentData(true);
+        } catch (envError) {
+          console.warn('Environment data fetch failed:', envError);
+        }
+
+        const sourceData = Array.isArray(environmentData) ? environmentData : [];
+        const switchbotEnvData = sourceData.filter(zone =>
+          zone.source === 'switchbot' ||
           (zone.sensors && (zone.sensors.tempC || zone.sensors.rh || zone.sensors.co2))
         );
-        
+
         if (switchbotEnvData.length > 0) {
           updateSyncStatus(`✅ Found ${switchbotEnvData.length} environmental devices`);
-          
+
           devices = switchbotEnvData.map(zone => ({
             deviceId: zone.id || zone.name || zone.zoneId,
             deviceName: zone.name || zone.id || zone.zoneId,
             deviceType: zone.source === 'switchbot' ? 'SwitchBot Environmental Sensor' : 'Environmental Sensor',
             lastReading: zone.source === 'switchbot' ? zone : convertZoneToReading(zone)
           }));
-          
+
+          applyMetadataToAllDevices();
           renderDevicesFromEnvironment();
           document.getElementById('deviceCount').textContent = `${devices.length} devices`;
-          
+
         } else {
           updateSyncStatus('⚠️ No environmental data found');
           devices = [];
@@ -702,7 +1469,7 @@
         battery: zone.meta?.battery,
         rssi: zone.meta?.rssi
       };
-      
+
       if (zone.sensors?.tempC?.current !== undefined) {
         reading.temperature = zone.sensors.tempC.current;
       }
@@ -712,13 +1479,18 @@
       if (zone.sensors?.co2?.current !== undefined) {
         reading.co2 = zone.sensors.co2.current;
       }
-      
-      return reading;
+      if (zone.sensors?.vpd?.current !== undefined) {
+        reading.vpd = zone.sensors.vpd.current;
+      }
+
+      return enrichReading(reading);
     }
 
     function renderDevicesFromEnvironment() {
       const container = document.getElementById('devicesContainer');
-      
+
+      applyMetadataToAllDevices();
+
       if (devices.length === 0) {
         container.innerHTML = '<p style="text-align: center; color: #64748b; grid-column: 1 / -1;">No SwitchBot devices found in environment data</p>';
         return;
@@ -819,149 +1591,139 @@
 
     function renderDevicesFromAPI() {
       const container = document.getElementById('devicesContainer');
-      
+
       if (devices.length === 0) {
         container.innerHTML = '<p style="text-align: center; color: #64748b; grid-column: 1 / -1;">No SwitchBot devices found</p>';
         return;
       }
-      
+
+      applyMetadataToAllDevices();
+
       container.innerHTML = devices.map(device => {
         const reading = device.lastReading;
-        const isOnline = reading && reading.lastUpdate && 
+        const isOnline = reading && reading.lastUpdate &&
           (Date.now() - new Date(reading.lastUpdate).getTime()) < 5 * 60 * 1000; // 5 minutes
-        
+
         return createAPIDeviceCard(device, reading, isOnline);
       }).join('');
     }
 
     function createAPIDeviceCard(device, reading, isOnline) {
-      // Load any saved settings
-      const settings = loadDeviceSettings(device.deviceId);
-      device.displayName = settings.displayName || device.displayName || device.deviceName;
-      device.farmLocation = settings.farmLocation || device.farmLocation;
-      device.zone = settings.zone || device.zone;
-      device.managedEquipment = settings.managedEquipment || device.managedEquipment || '';
-      
+      const metadata = getDeviceMetadata(getCanonicalDeviceId(device));
+      enrichDeviceReading(device);
+      const currentReading = device.lastReading || reading || {};
       const statusColor = isOnline ? '#10b981' : '#ef4444';
       const statusText = isOnline ? 'ONLINE' : 'OFFLINE';
-      const lastUpdate = reading?.lastUpdate ? new Date(reading.lastUpdate).toLocaleString() : 'Never';
-      
-      // Get device icon and category
+      const lastUpdate = currentReading?.lastUpdate ? new Date(currentReading.lastUpdate).toLocaleString() : 'Never';
       const deviceIcon = getDeviceIcon(device.deviceType);
       const deviceCategory = getDeviceCategory(device.deviceType);
-      
-      // Check if this is a controllable plug
-      const isPlug = device.deviceType.toLowerCase().includes('plug');
-      const deviceState = reading?.power !== undefined ? (reading.power > 0 ? 'on' : 'off') : 'unknown';
-      
+      const displayName = escapeHtml(device.displayName || device.deviceName || device.deviceId);
+      const safeDeviceType = escapeHtml(device.deviceType || 'SwitchBot Device');
+      const safeDeviceIdAttr = escapeAttribute(device.deviceId);
+      const safeDeviceIdLabel = escapeHtml(device.deviceId);
+      const zoneSelection = getZoneSelection(metadata, device);
+      const roomSelection = getRoomSelection(metadata, device);
+      const zoneOptionsHtml = renderSelectOptions(availableZones, zoneSelection.value, zoneSelection.label, 'Select Zone');
+      const roomOptionsHtml = renderSelectOptions(availableRooms, roomSelection.value, roomSelection.label, 'Select Location');
+      const isPlug = isPlugDevice(device.deviceType);
+      const powerState = getPowerState(currentReading);
+      const summaryHtml = createDeviceSummary(device, currentReading);
+      const batteryLevel = currentReading?.battery;
+      const batteryDisplay = batteryLevel !== undefined && batteryLevel !== null ? `${formatNumber(batteryLevel, 0)}%` : null;
+      const batteryMarkup = batteryDisplay !== null
+        ? `<div title="Battery: ${escapeHtml(batteryDisplay)}">${getBatteryIcon(batteryLevel)} ${escapeHtml(batteryDisplay)}</div>`
+        : '<div title="Powered">🔌 AC</div>';
+      const connectivityLabel = currentReading?.hubDeviceId ? '🌐 Hub Connected' : '📶 Direct';
+      const safeConnectivity = escapeHtml(connectivityLabel);
+      const managedEquipmentValue = device.managedEquipment || '';
+      const safeManagedEquipmentValue = escapeAttribute(managedEquipmentValue);
+
       return `
         <div class="device-card" style="border-left: 4px solid ${statusColor}; opacity: ${isOnline ? 1 : 0.7};">
           <div class="device-header">
             <div style="display: flex; align-items: flex-start; gap: 12px; flex: 1; min-width: 0;">
               <div style="font-size: 28px; flex-shrink: 0;">${deviceIcon}</div>
               <div style="flex: 1; min-width: 0; overflow: hidden;">
-                <h4 style="margin: 0 0 8px 0; color: #1e293b; font-size: 16px; font-weight: 600; cursor: pointer; line-height: 1.2; word-break: break-word;" 
-                    onclick="editDeviceName('${device.deviceId}')" 
+                <h4 style="margin: 0 0 8px 0; color: #1e293b; font-size: 16px; font-weight: 600; cursor: pointer; line-height: 1.2; word-break: break-word;"
+                    onclick="editDeviceName('${safeDeviceIdAttr}')"
                     title="Click to edit device name">
-                  ${device.displayName}
+                  ${displayName}
                 </h4>
                 <div style="display: flex; flex-direction: column; gap: 4px;">
                   <div style="display: flex; align-items: center; gap: 8px; flex-wrap: wrap;">
                     <span style="color: ${statusColor}; font-weight: 600; font-size: 12px; white-space: nowrap;">
                       ${statusText}
                     </span>
-                    ${isPlug ? `<span style="color: ${deviceState === 'on' ? '#10b981' : '#64748b'}; font-weight: 600; font-size: 11px; white-space: nowrap;">
-                      ${deviceState.toUpperCase()}
-                    </span>` : ''}
+                    ${isPlug && powerState ? `<span style="color: ${powerState === 'on' ? '#10b981' : '#64748b'}; font-weight: 600; font-size: 11px; white-space: nowrap;">${powerState.toUpperCase()}</span>` : ''}
                   </div>
                   <div style="color: #64748b; font-size: 11px; line-height: 1.3; word-break: break-word;">
-                    ${deviceCategory}
+                    ${escapeHtml(deviceCategory)}
                   </div>
                 </div>
               </div>
             </div>
-            <div style="display: flex; gap: 8px; flex-shrink: 0; margin-left: 8px;">
-              <button onclick="refreshDeviceData('${device.deviceId}')" 
-                      class="btn-small" 
+            <div style="display: flex; flex-direction: column; align-items: flex-end; gap: 4px; min-width: 100px;">
+              ${batteryMarkup}
+              <div class="tiny" style="color: #64748b;">${safeConnectivity}</div>
+              <button onclick="refreshDeviceData('${safeDeviceIdAttr}')"
+                      class="btn-small"
                       style="background: #0ea5e9; color: white; border: none; padding: 6px 10px; border-radius: 4px; cursor: pointer; font-size: 12px; white-space: nowrap;">
                 🔄
               </button>
             </div>
           </div>
-          
-          ${isPlug ? `
+
+          ${summaryHtml ? summaryHtml : ''}
+
           <div class="device-controls" style="margin: 12px 0;">
-            <button onclick="controlDevice('${device.deviceId}', 'turnOn')" 
-                    class="control-button on" 
-                    ${deviceState === 'on' ? 'disabled' : ''}>
-              🔌 Turn ON
-            </button>
-            <button onclick="controlDevice('${device.deviceId}', 'turnOff')" 
-                    class="control-button off"
-                    ${deviceState === 'off' ? 'disabled' : ''}>
-              ⏻ Turn OFF
-            </button>
+            ${createDeviceControls(device)}
           </div>
-          ` : ''}
-          
+
           <div class="device-info">
             <div style="margin-bottom: 12px;">
               <div style="display: flex; gap: 12px; margin-bottom: 8px;">
                 <div style="flex: 1; min-width: 0;">
                   <label class="tiny" style="color: #64748b; display: block; margin-bottom: 4px;">Zone Assignment:</label>
-                  <select onchange="updateDeviceZone('${device.deviceId}', this.value)" 
+                  <select onchange="updateDeviceZone('${safeDeviceIdAttr}', this.value)"
                           style="width: 100%; padding: 4px 8px; border: 1px solid #d1d5db; border-radius: 4px; font-size: 12px;">
-                    <option value="" ${!device.zone ? 'selected' : ''}>Select Zone</option>
-                    <option value="Zone 1" ${device.zone === 'Zone 1' ? 'selected' : ''}>Zone 1</option>
-                    <option value="Zone 2" ${device.zone === 'Zone 2' ? 'selected' : ''}>Zone 2</option>
-                    <option value="Zone 3" ${device.zone === 'Zone 3' ? 'selected' : ''}>Zone 3</option>
-                    <option value="Zone 4" ${device.zone === 'Zone 4' ? 'selected' : ''}>Zone 4</option>
-                    <option value="Zone 5" ${device.zone === 'Zone 5' ? 'selected' : ''}>Zone 5</option>
+                    ${zoneOptionsHtml}
                   </select>
                 </div>
                 <div style="flex: 1; min-width: 0;">
                   <label class="tiny" style="color: #64748b; display: block; margin-bottom: 4px;">Farm Location:</label>
-                  <select onchange="updateDeviceLocation('${device.deviceId}', this.value)" 
+                  <select onchange="updateDeviceLocation('${safeDeviceIdAttr}', this.value)"
                           style="width: 100%; padding: 4px 8px; border: 1px solid #d1d5db; border-radius: 4px; font-size: 12px;">
-                    <option value="" ${!device.farmLocation ? 'selected' : ''}>Select Location</option>
-                    <option value="Greenhouse A" ${device.farmLocation === 'Greenhouse A' ? 'selected' : ''}>Greenhouse A</option>
-                    <option value="Greenhouse B" ${device.farmLocation === 'Greenhouse B' ? 'selected' : ''}>Greenhouse B</option>
-                    <option value="Greenhouse C" ${device.farmLocation === 'Greenhouse C' ? 'selected' : ''}>Greenhouse C</option>
-                    <option value="Propagation House" ${device.farmLocation === 'Propagation House' ? 'selected' : ''}>Propagation House</option>
-                    <option value="Storage Room" ${device.farmLocation === 'Storage Room' ? 'selected' : ''}>Storage Room</option>
-                    <option value="Processing Area" ${device.farmLocation === 'Processing Area' ? 'selected' : ''}>Processing Area</option>
-                    <option value="Office" ${device.farmLocation === 'Office' ? 'selected' : ''}>Office</option>
-                    <option value="Outdoor Area" ${device.farmLocation === 'Outdoor Area' ? 'selected' : ''}>Outdoor Area</option>
+                    ${roomOptionsHtml}
                   </select>
                 </div>
               </div>
               ${!isPlug ? '' : `
               <div style="margin-bottom: 8px;">
                 <label class="tiny" style="color: #64748b; display: block; margin-bottom: 4px;">Managed Equipment:</label>
-                <input type="text" 
-                       value="${device.managedEquipment}" 
-                       onchange="updateManagedEquipment('${device.deviceId}', this.value)"
+                <input type="text"
+                       value="${safeManagedEquipmentValue}"
+                       onchange="updateManagedEquipment('${safeDeviceIdAttr}', this.value)"
                        placeholder="e.g., Heater, Fan, Lights"
                        style="width: 100%; padding: 4px 8px; border: 1px solid #d1d5db; border-radius: 4px; font-size: 12px;">
               </div>
               `}
             </div>
-            
+
             <div class="device-meta" style="background: #f8fafc; border-radius: 6px; padding: 10px; margin-bottom: 12px;">
               <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 8px; font-size: 11px;">
-                <div><strong>Device ID:</strong><br><span style="word-break: break-all; font-size: 10px;">${device.deviceId}</span></div>
-                <div><strong>Type:</strong><br><span style="font-size: 10px;">${device.deviceType}</span></div>
-                <div><strong>MAC:</strong><br><span style="font-size: 10px;">${device.macAddress || 'N/A'}</span></div>
-                <div><strong>Cloud:</strong><br><span style="font-size: 10px;">${device.cloudService || 'SwitchBot'}</span></div>
+                <div><strong>Device ID:</strong><br><span style="word-break: break-all; font-size: 10px;">${safeDeviceIdLabel}</span></div>
+                <div><strong>Type:</strong><br><span style="font-size: 10px;">${safeDeviceType}</span></div>
+                <div><strong>MAC:</strong><br><span style="font-size: 10px;">${escapeHtml(device.macAddress || 'N/A')}</span></div>
+                <div><strong>Cloud:</strong><br><span style="font-size: 10px;">${escapeHtml(device.cloudService || 'SwitchBot')}</span></div>
               </div>
             </div>
-            
-            ${createAPIReadingsGrid(reading)}
+
+            ${createAPIReadingsGrid(currentReading)}
           </div>
-          
+
           <div style="display: flex; justify-content: space-between; align-items: center; margin-top: 12px; flex-wrap: wrap; gap: 8px; border-top: 1px solid #e2e8f0; padding-top: 8px;">
             <span class="tiny" style="color: #64748b; font-size: 10px;">
-              Last updated: ${lastUpdate}
+              Last updated: ${escapeHtml(lastUpdate)}
             </span>
             <span class="tiny" style="color: ${device.isRealDevice ? '#28a745' : '#0ea5e9'}; font-size: 10px;">
               ${device.isRealDevice ? '🌱 Real Farm Device' : '🎮 Live Demo API'}
@@ -1015,6 +1777,12 @@
             unit = '%';
             label = 'Humidity';
             break;
+          case 'vpd':
+            icon = '🌿';
+            unit = ' kPa';
+            label = 'VPD';
+            displayValue = formatNumber(value, 2);
+            break;
           case 'co2':
             icon = '🌬️';
             unit = ' ppm';
@@ -1024,7 +1792,12 @@
             icon = '⚡';
             unit = value === 'on' ? '' : value === 'off' ? '' : 'W';
             label = 'Power';
-            displayValue = value === 'on' ? 'ON' : value === 'off' ? 'OFF' : value;
+            if (typeof value === 'string') {
+              const normalized = getPowerState({ power: value });
+              displayValue = normalized ? normalized.toUpperCase() : value.toUpperCase();
+            } else {
+              displayValue = value;
+            }
             break;
           case 'voltage':
             icon = '⚡';
@@ -1045,10 +1818,10 @@
           case 'weight':
             icon = '⚡';
             unit = 'W';
-            label = 'Power';
+            label = 'Wattage';
             break;
           case 'battery':
-            icon = value > 70 ? '🔋' : value > 30 ? '🪫' : '🔴';
+            icon = getBatteryIcon(value);
             unit = '%';
             label = 'Battery';
             break;
@@ -1131,16 +1904,23 @@
     async function refreshEnvironmentData() {
       try {
         updateSyncStatus('Refreshing environment data...');
-        environmentData = await fetchEnvironmentData();
-        const switchbotData = environmentData.filter(zone => zone.source === 'switchbot');
-        
+        try {
+          await ensureEnvironmentData(true);
+        } catch (error) {
+          console.warn('Environment refresh failed:', error);
+        }
+
+        const sourceData = Array.isArray(environmentData) ? environmentData : [];
+        const switchbotData = sourceData.filter(zone => zone.source === 'switchbot');
+
         if (switchbotData.length > 0) {
           devices = switchbotData.map(zone => ({
-            deviceId: zone.name || zone.zoneId,
-            deviceName: zone.name || zone.zoneId,
-            deviceType: 'SwitchBot Environmental Sensor',
+            deviceId: zone.id || zone.name || zone.zoneId,
+            deviceName: zone.name || zone.id || zone.zoneId,
+            deviceType: zone.source === 'switchbot' ? 'SwitchBot Environmental Sensor' : 'Environmental Sensor',
             lastReading: zone
           }));
+          applyMetadataToAllDevices();
           renderDevicesFromEnvironment();
           updateSyncStatus(`✅ Refreshed ${devices.length} devices`);
           document.getElementById('deviceCount').textContent = `${devices.length} devices from environment data`;
@@ -1255,14 +2035,20 @@
     window.startSwitchBotPolling = startSwitchBotPolling;
 
     // Event listeners
-    document.addEventListener('DOMContentLoaded', () => {
+    document.addEventListener('DOMContentLoaded', async () => {
       document.getElementById('btnRefresh').addEventListener('click', refreshEnvironmentData);
       document.getElementById('btnStartPolling').addEventListener('click', startSwitchBotPolling);
       document.getElementById('btnOpenMain').addEventListener('click', () => {
         window.open('/', '_blank');
       });
-      
-      loadDevices();
+
+      try {
+        await loadReferenceData();
+      } catch (error) {
+        console.warn('Initial reference data load failed:', error);
+      }
+
+      await loadDevices();
       // Disabled auto-refresh to prevent conflicts - use manual refresh instead
       // startAutoRefresh();
     });
@@ -1277,7 +2063,7 @@
 
     // Helper functions for device management
     function getDeviceIcon(deviceType) {
-      const type = deviceType.toLowerCase();
+      const type = String(deviceType || '').toLowerCase();
       if (type.includes('meter') || type.includes('sensor') || type.includes('monitor')) {
         return '🌡️'; // Sensor/meter devices
       } else if (type.includes('plug') || type.includes('switch')) {
@@ -1296,7 +2082,7 @@
     }
 
     function getDeviceCategory(deviceType) {
-      const type = deviceType.toLowerCase();
+      const type = String(deviceType || '').toLowerCase();
       if (type.includes('meter') || type.includes('sensor') || type.includes('monitor')) {
         return 'Environmental Monitoring';
       } else if (type.includes('plug') || type.includes('switch')) {
@@ -1311,56 +2097,130 @@
     }
 
     // Device editing functions
-    function editDeviceName(deviceId) {
+    async function editDeviceName(deviceId) {
       const device = devices.find(d => d.deviceId === deviceId);
       if (!device) return;
-      
-      const newName = prompt('Enter new device name:', device.displayName || device.deviceName);
-      if (newName && newName !== device.deviceName) {
-        device.displayName = newName;
-        saveDeviceSettings(deviceId, { displayName: newName });
-        renderDevicesFromAPI(); // Re-render to show changes
+
+      const currentName = device.displayName || device.deviceName || deviceId;
+      const newName = prompt('Enter new device name:', currentName);
+      if (!newName || newName === currentName) {
+        return;
+      }
+
+      try {
+        const metadata = await persistDeviceMetadata(device, { name: newName, deviceName: newName });
+        if (metadata) {
+          applyMetadataToDevice(device, metadata);
+        } else {
+          device.displayName = newName;
+        }
+        renderDevicesFromAPI();
+        showInfo(`Updated device name to ${escapeHtml(newName)}.`);
+      } catch (error) {
+        console.error('Failed to update device name:', error);
+        showError(`Failed to update device name: ${escapeHtml(error.message || 'Unknown error')}`);
       }
     }
 
-    function updateDeviceLocation(deviceId, location) {
+    async function updateDeviceLocation(deviceId, locationValue) {
       const device = devices.find(d => d.deviceId === deviceId);
-      if (device) {
-        device.farmLocation = location;
-        saveDeviceSettings(deviceId, { farmLocation: location });
-        showInfo(`Updated location for ${device.deviceName} to: ${location}`);
+      if (!device) return;
+
+      const option = findRoomOption(locationValue);
+      const locationName = option ? option.name : '';
+
+      try {
+        const metadata = await persistDeviceMetadata(device, {
+          room: locationName || null,
+          roomName: locationName || null,
+          roomId: option ? option.id || option.value : null,
+          roomSlug: option ? option.value : null,
+          location: locationName || null
+        });
+        if (metadata) {
+          applyMetadataToDevice(device, metadata);
+        } else {
+          device.farmLocation = locationName;
+        }
+        renderDevicesFromAPI();
+        const safeDeviceName = escapeHtml(device.displayName || device.deviceName || deviceId);
+        if (locationName) {
+          showInfo(`Updated location for ${safeDeviceName} to ${escapeHtml(locationName)}.`);
+        } else {
+          showInfo(`Cleared farm location for ${safeDeviceName}.`);
+        }
+      } catch (error) {
+        console.error('Failed to update device location:', error);
+        showError(`Failed to update device location: ${escapeHtml(error.message || 'Unknown error')}`);
+        applyMetadataToDevice(device);
+        renderDevicesFromAPI();
       }
     }
 
-    function updateDeviceZone(deviceId, zone) {
+    async function updateDeviceZone(deviceId, zoneValue) {
       const device = devices.find(d => d.deviceId === deviceId);
-      if (device) {
-        device.zone = zone;
-        saveDeviceSettings(deviceId, { zone: zone });
-        showInfo(`Assigned ${device.deviceName} to: ${zone}`);
+      if (!device) return;
+
+      const option = findZoneOption(zoneValue);
+      const zoneName = option ? option.name : '';
+
+      try {
+        const metadata = await persistDeviceMetadata(device, {
+          zone: zoneName || null,
+          zoneName: zoneName || null,
+          zoneId: option ? option.id || option.value : null,
+          zoneSlug: option ? option.value : null
+        });
+        if (metadata) {
+          applyMetadataToDevice(device, metadata);
+        } else {
+          device.zoneName = zoneName;
+          device.zoneId = option ? option.value : '';
+        }
+        renderDevicesFromAPI();
+        const safeDeviceName = escapeHtml(device.displayName || device.deviceName || deviceId);
+        if (zoneName) {
+          showInfo(`Assigned ${safeDeviceName} to ${escapeHtml(zoneName)}.`);
+        } else {
+          showInfo(`Cleared zone assignment for ${safeDeviceName}.`);
+        }
+      } catch (error) {
+        console.error('Failed to update device zone:', error);
+        showError(`Failed to update zone: ${escapeHtml(error.message || 'Unknown error')}`);
+        applyMetadataToDevice(device);
+        renderDevicesFromAPI();
       }
     }
 
-    function updateManagedEquipment(deviceId, equipment) {
+    async function updateManagedEquipment(deviceId, equipment) {
       const device = devices.find(d => d.deviceId === deviceId);
-      if (device) {
-        device.managedEquipment = equipment;
-        saveDeviceSettings(deviceId, { managedEquipment: equipment });
-        showInfo(`Updated managed equipment for ${device.deviceName}: ${equipment}`);
+      if (!device) return;
+
+      const trimmed = equipment && equipment.trim().length > 0 ? equipment.trim() : '';
+
+      try {
+        const metadata = await persistDeviceMetadata(device, {
+          managedEquipment: trimmed || null,
+          equipment: trimmed || null
+        });
+        if (metadata) {
+          applyMetadataToDevice(device, metadata);
+        } else {
+          device.managedEquipment = trimmed;
+        }
+        renderDevicesFromAPI();
+        const safeDeviceName = escapeHtml(device.displayName || device.deviceName || deviceId);
+        if (trimmed) {
+          showInfo(`Updated managed equipment for ${safeDeviceName}: ${escapeHtml(trimmed)}.`);
+        } else {
+          showInfo(`Cleared managed equipment for ${safeDeviceName}.`);
+        }
+      } catch (error) {
+        console.error('Failed to update managed equipment:', error);
+        showError(`Failed to update managed equipment: ${escapeHtml(error.message || 'Unknown error')}`);
+        applyMetadataToDevice(device);
+        renderDevicesFromAPI();
       }
-    }
-
-    function saveDeviceSettings(deviceId, settings) {
-      // Save to localStorage for now (could be extended to server)
-      const storageKey = `switchbot_device_${deviceId}`;
-      const existingSettings = JSON.parse(localStorage.getItem(storageKey) || '{}');
-      const newSettings = { ...existingSettings, ...settings };
-      localStorage.setItem(storageKey, JSON.stringify(newSettings));
-    }
-
-    function loadDeviceSettings(deviceId) {
-      const storageKey = `switchbot_device_${deviceId}`;
-      return JSON.parse(localStorage.getItem(storageKey) || '{}');
     }
 
     // Rate limiting for API calls
@@ -1375,32 +2235,50 @@
           showInfo(`⏳ Please wait ${Math.ceil((API_RATE_LIMIT - (now - lastApiCall[deviceId])) / 1000)} seconds before refreshing this device again`);
           return;
         }
-        
+
         lastApiCall[deviceId] = now;
-        showInfo(`🔄 Refreshing data for device ${deviceId}...`);
-        
+        const targetDevice = devices.find(d => d.deviceId === deviceId);
+        const safeDeviceLabel = escapeHtml(targetDevice?.displayName || targetDevice?.deviceName || deviceId);
+        showInfo(`🔄 Refreshing data for ${safeDeviceLabel}...`);
+
         // Call SwitchBot status API for individual device
         const response = await fetch(`/api/switchbot/devices/${deviceId}/status`);
         const data = await response.json();
-        
+
         if (data.statusCode === 100) {
           // Update device with fresh data
-          const device = devices.find(d => d.deviceId === deviceId);
+          const device = targetDevice || devices.find(d => d.deviceId === deviceId);
           if (device) {
-            device.lastReading = {
+            const merged = {
               ...device.lastReading,
               ...data.body,
               lastUpdate: new Date().toISOString()
             };
+            if (
+              merged.vpd === undefined &&
+              typeof merged.temperature === 'number' &&
+              typeof merged.humidity === 'number'
+            ) {
+              const computedVpd = computeVPD(merged.temperature, merged.humidity);
+              if (computedVpd !== null) {
+                merged.vpd = computedVpd;
+              }
+            }
+            if (merged.weight !== undefined && merged.wattage === undefined) {
+              merged.wattage = merged.weight;
+            }
+            device.lastReading = enrichReading(merged);
+            applyMetadataToDevice(device);
             renderDevicesFromAPI();
-            showInfo(`✅ Refreshed data for ${device.deviceName || device.displayName}`);
+            const refreshedLabel = escapeHtml(device.displayName || device.deviceName || deviceId);
+            showInfo(`✅ Refreshed data for ${refreshedLabel}.`);
           }
         } else {
           throw new Error(data.message || 'Failed to get device status');
         }
       } catch (error) {
         console.error('Device refresh error:', error);
-        showError(`Failed to refresh device data: ${error.message}`);
+        showError(`Failed to refresh device data: ${escapeHtml(error.message || 'Unknown error')}`);
       }
     }
 
@@ -1408,9 +2286,11 @@
       try {
         const device = devices.find(d => d.deviceId === deviceId);
         const deviceName = device ? device.displayName || device.deviceName : deviceId;
-        
-        showInfo(`🎮 Sending ${command} command to ${deviceName}...`);
-        
+        const safeCommand = escapeHtml(command);
+        const safeDeviceName = escapeHtml(deviceName);
+
+        showInfo(`🎮 Sending ${safeCommand} command to ${safeDeviceName}...`);
+
         const response = await fetch(`/api/switchbot/devices/${deviceId}/commands`, {
           method: 'POST',
           headers: {
@@ -1423,16 +2303,17 @@
         });
         
         const data = await response.json();
-        
+
         if (data.statusCode === 100) {
-          showInfo(`✅ Successfully sent ${command} command to ${deviceName}`);
+          showInfo(`✅ Successfully sent ${safeCommand} command to ${safeDeviceName}.`);
           // Refresh device data after command
           setTimeout(() => refreshDeviceData(deviceId), 2000);
         } else {
           throw new Error(data.message || 'Command failed');
         }
       } catch (error) {
-        showError(`Failed to control device: ${error.message}`);
+        console.error('Failed to control device:', error);
+        showError(`Failed to control device: ${escapeHtml(error.message || 'Unknown error')}`);
       }
     }
   </script>
