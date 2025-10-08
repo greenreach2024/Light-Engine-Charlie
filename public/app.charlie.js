@@ -1,11 +1,96 @@
 // Phase-3: Enforce strict group member selection logic
-function computeGroupMembers(group, devices) {
-  const norm = x => (x||'').toString().trim().toLowerCase();
-  const m = group.match || {};
-  // Gate: If either room or zone is not set, return no members (prevents misleading preview)
-  if (!norm(m.room) || !norm(m.zone)) return [];
-  // Both set: filter strictly by both room and zone
-  return (devices||[]).filter(d => norm(d.room) === norm(m.room) && norm(d.zone) === norm(m.zone));
+function computeGroupMembers(group, allDevices) {
+  const normalize = (value) => (typeof value === 'string' ? value.trim().toLowerCase() : '');
+  const toNeedles = (values) => (Array.isArray(values) ? values : [values]).map(normalize).filter(Boolean);
+  const asId = (entry) => {
+    if (!entry) return '';
+    if (typeof entry === 'string') return entry;
+    if (typeof entry === 'object') {
+      return entry.id || entry.deviceId || entry.device_id || '';
+    }
+    return '';
+  };
+
+  const match = (group && group.match) || {};
+  const roomNeedles = toNeedles([match.room, match.roomId, match.roomName]);
+  const zoneNeedles = toNeedles([match.zone, match.zoneId, match.zoneName]);
+  const hasRoom = roomNeedles.length > 0;
+  const hasZone = zoneNeedles.length > 0;
+  if (!hasRoom || !hasZone) return [];
+
+  const candidates = (allDevices || []).filter((device) => {
+    if (!device) return false;
+    const roomValues = toNeedles([
+      device.room,
+      device.roomId,
+      device.roomName,
+      device.location?.room,
+    ]);
+    const zoneValues = toNeedles([
+      device.zone,
+      device.zoneId,
+      device.zoneName,
+      device.location?.zone,
+    ]);
+    const roomMatch = roomValues.some((value) => roomNeedles.includes(value));
+    const zoneMatch = zoneValues.some((value) => zoneNeedles.includes(value));
+    return roomMatch && zoneMatch;
+  });
+
+  if (Array.isArray(group?.members) && group.members.length) {
+    const ids = new Set(
+      group.members
+        .map(asId)
+        .map((id) => (typeof id === 'string' ? id.trim() : ''))
+        .filter(Boolean)
+    );
+    if (ids.size) {
+      return candidates.filter((device) => ids.has(String(device?.id || '').trim()));
+    }
+  }
+
+  return candidates;
+}
+
+function getActiveGroupMembers(group, selectionOverride = null) {
+  const activeGroup = group || (typeof STATE === 'object' ? STATE?.currentGroup : null) || null;
+  if (!activeGroup) return [];
+
+  const selection = selectionOverride ||
+    (typeof getSelectedGroupRoomZone === 'function'
+      ? getSelectedGroupRoomZone()
+      : { roomId: '', roomName: '', rawRoom: '', zone: '' });
+
+  const match = {
+    ...activeGroup.match,
+    room: firstNonEmptyString(selection.room, selection.roomId, selection.roomName, selection.rawRoom),
+    roomId: firstNonEmptyString(selection.roomId, selection.room, selection.roomName, selection.rawRoom),
+    roomName: firstNonEmptyString(selection.roomName, selection.room, selection.roomId, selection.rawRoom),
+    zone: firstNonEmptyString(selection.zone, selection.zoneId, selection.zoneName),
+    zoneId: firstNonEmptyString(selection.zoneId, selection.zone, selection.zoneName),
+    zoneName: firstNonEmptyString(selection.zoneName, selection.zone, selection.zoneId),
+  };
+
+  const normalizedLights = Array.isArray(activeGroup.lights)
+    ? activeGroup.lights
+        .map((entry, index) => normalizeGroupLightEntry(entry, index))
+        .filter(Boolean)
+        .map((light) => {
+          const roomValue = firstNonEmptyString(light.room, light.roomId, light.roomName, light.location?.room);
+          const zoneValue = firstNonEmptyString(light.zone, light.zoneId, light.zoneName, light.location?.zone);
+          return {
+            ...light,
+            room: roomValue,
+            roomId: firstNonEmptyString(light.roomId, light.room, light.roomName, light.location?.room),
+            roomName: firstNonEmptyString(light.roomName, light.room, light.roomId, light.location?.room),
+            zone: zoneValue,
+            zoneId: firstNonEmptyString(light.zoneId, light.zone, light.zoneName, light.location?.zone),
+            zoneName: firstNonEmptyString(light.zoneName, light.zone, light.zoneId, light.location?.zone),
+          };
+        })
+    : [];
+
+  return computeGroupMembers({ ...activeGroup, match }, normalizedLights);
 }
 // Utility: Always include x-pin header for farm writes (mirrors Recipe Bridge _hdrs)
 function _hdrs(extra = {}) {
@@ -232,9 +317,42 @@ function collectRoomsFromState() {
   return farmRooms;
 }
 
-function updateGroupActionStates({ hasGroup = false, hasRoom = false, hasZone = false } = {}) {
-  const applyDisabled = !(hasGroup && hasRoom);
-  const saveDisabled = !hasRoom;
+function updateGroupActionStates({ hasGroup = false, selection = null } = {}) {
+  const fallback = { room: '', roomId: '', roomName: '', rawRoom: '', zone: '', zoneId: '', zoneName: '' };
+  const currentSelection = selection ||
+    (typeof getSelectedGroupRoomZone === 'function' ? getSelectedGroupRoomZone() : fallback);
+
+  const roomValue = firstNonEmptyString(
+    currentSelection.room,
+    currentSelection.roomId,
+    currentSelection.roomName,
+    currentSelection.rawRoom
+  );
+  const zoneValue = firstNonEmptyString(
+    currentSelection.zone,
+    currentSelection.zoneId,
+    currentSelection.zoneName
+  );
+
+  const hasRoom = !!roomValue;
+  const hasZone = !!zoneValue;
+
+  let memberCount = 0;
+  if (hasGroup && hasRoom && hasZone) {
+    const match = {
+      room: roomValue,
+      roomId: firstNonEmptyString(currentSelection.roomId, roomValue, currentSelection.roomName),
+      roomName: firstNonEmptyString(currentSelection.roomName, roomValue, currentSelection.roomId),
+      zone: zoneValue,
+      zoneId: firstNonEmptyString(currentSelection.zoneId, zoneValue),
+      zoneName: firstNonEmptyString(currentSelection.zoneName, zoneValue),
+    };
+    memberCount = getActiveGroupMembers(STATE?.currentGroup || null, match).length;
+  }
+
+  const applyDisabled = !hasGroup || !hasRoom || !hasZone || memberCount === 0;
+  const saveDisabled = !hasRoom || !hasZone;
+
   ['grpApply', 'grpOn', 'grpOff'].forEach((id) => {
     const btn = document.getElementById(id);
     if (btn) btn.disabled = applyDisabled;
@@ -250,10 +368,24 @@ function seedGroupRoomZoneDropdowns() {
   const zoneSel = document.getElementById('groupZoneDropdown');
   const fixtureSummary = document.getElementById('groupFixtureSummary');
   if (!roomSel || !zoneSel) return;
+  const buildSelection = () => {
+    const roomId = roomSel.value;
+    const roomMeta = (collectRoomsFromState() || []).find((room) => room?.id === roomId) || null;
+    const zoneValue = zoneSel.value;
+    return {
+      room: roomSel.value,
+      roomId,
+      roomName: roomMeta?.name || '',
+      rawRoom: roomSel.value,
+      zone: zoneValue,
+      zoneId: zoneValue,
+      zoneName: zoneValue,
+    };
+  };
   function updateFixtureSummary() {
     if (!fixtureSummary) return;
     const roomId = roomSel.value;
-    updateGroupActionStates({ hasGroup: Boolean(STATE?.currentGroup), hasRoom: !!roomId });
+    updateGroupActionStates({ hasGroup: Boolean(STATE?.currentGroup), selection: buildSelection() });
     if (!roomId) {
       fixtureSummary.innerHTML = '<span style="color:#64748b;font-size:13px;">Select a room to view lights.</span>';
       return;
@@ -280,10 +412,15 @@ function seedGroupRoomZoneDropdowns() {
   const previousRoom = roomSel.value;
   const rooms = normaliseRooms();
 
-  roomSel.innerHTML = '<option value="">Room</option>' + rooms.map(r => `<option value="${escapeHtml(r.id)}">${escapeHtml(r.name)}</option>`).join('');
+  roomSel.innerHTML = '<option value="" disabled>Select room…</option>' + rooms.map(r => `<option value="${escapeHtml(r.id)}">${escapeHtml(r.name)}</option>`).join('');
 
   const preservedRoomId = rooms.some(r => r.id === previousRoom) ? previousRoom : '';
   roomSel.value = preservedRoomId;
+  const roomPlaceholder = roomSel.querySelector('option[value=""]');
+  if (roomPlaceholder) {
+    roomPlaceholder.disabled = true;
+    roomPlaceholder.selected = !preservedRoomId;
+  }
 
   function updateZoneDropdown() {
     const roomId = roomSel.value;
@@ -296,24 +433,30 @@ function seedGroupRoomZoneDropdowns() {
         zones = selectedRoom.zones;
       }
     }
-    zoneSel.innerHTML = '<option value="">Zone</option>' + zones.map(z => `<option value="${escapeHtml(z)}">${escapeHtml(z)}</option>`).join('');
+    zoneSel.innerHTML = '<option value="" disabled>Select zone…</option>' + zones.map(z => `<option value="${escapeHtml(z)}">${escapeHtml(z)}</option>`).join('');
     // Optionally preserve previous selection
+    const zonePlaceholder = zoneSel.querySelector('option[value=""]');
     if (zones.length && zoneSel.dataset.prevZone && zones.includes(zoneSel.dataset.prevZone)) {
       zoneSel.value = zoneSel.dataset.prevZone;
+      if (zonePlaceholder) zonePlaceholder.selected = false;
     } else {
       zoneSel.value = '';
+      if (zonePlaceholder) zonePlaceholder.selected = true;
+      zoneSel.dataset.prevZone = '';
     }
   }
 
   roomSel.onchange = () => {
     updateZoneDropdown();
     updateFixtureSummary();
+    updateGroupActionStates({ hasGroup: Boolean(STATE?.currentGroup), selection: buildSelection() });
     if (STATE.currentGroup) {
       try { updateGroupUI(STATE.currentGroup); } catch (e) { console.warn('Failed to refresh group UI after room change', e); }
     }
   };
   zoneSel.onchange = () => {
     zoneSel.dataset.prevZone = zoneSel.value;
+    updateGroupActionStates({ hasGroup: Boolean(STATE?.currentGroup), selection: buildSelection() });
     if (STATE.currentGroup) {
       try { updateGroupUI(STATE.currentGroup); } catch (e) { console.warn('Failed to refresh group UI after zone change', e); }
     }
@@ -10005,14 +10148,15 @@ function wireGlobalEvents() {
     const clamp01 = v => Math.max(0, Math.min(100, Math.round(Number(v)||0)));
     const finalMix = { cw: clamp01(scaled.cw), ww: clamp01(scaled.ww), bl: clamp01(scaled.bl), rd: clamp01(scaled.rd) };
     const payloadMix = { ...finalMix, fr: 0, uv: 0 };
-    const deviceIds = Array.isArray(group?.lights) ? group.lights.map((l) => l.id).filter(Boolean) : [];
+    const members = getActiveGroupMembers(group);
+    const deviceIds = members.map((member) => member.id).filter(Boolean);
     const perDevice = {};
     deviceIds.forEach((id) => {
       const details = buildDeviceHexForMix(payloadMix, id);
       perDevice[id] = details;
     });
     const hex12 = buildHex12(payloadMix);
-    return { mix: finalMix, hex12, perDevice, deviceIds };
+    return { mix: finalMix, hex12, perDevice, deviceIds, members };
   }
 
   function setHudLocked(locked) {
@@ -10079,7 +10223,8 @@ function wireGlobalEvents() {
     }
     if (canvas && typeof renderSpectrumCanvas === 'function') {
       const mix = { cw: Number(spectrum.cw || 0), ww: Number(spectrum.ww || 0), bl: Number(spectrum.bl || 0), rd: Number(spectrum.rd || 0) };
-      const deviceIds = Array.isArray(group?.lights) ? group.lights.map((l) => l.id).filter(Boolean) : [];
+      const members = getActiveGroupMembers(group);
+      const deviceIds = members.map((entry) => entry.id).filter(Boolean);
       const spd = computeWeightedSPD(mix, { deviceIds });
       renderSpectrumCanvas(canvas, spd, { width: canvas.width, height: canvas.height });
     }
@@ -10093,17 +10238,34 @@ function wireGlobalEvents() {
     const canvas = document.getElementById('groupLightInfoCanvas');
     const metrics = document.getElementById('groupLightInfoMetrics');
     const modeLabel = document.getElementById('groupLightInfoMode');
-    if (!group || !Array.isArray(group.lights) || group.lights.length === 0) {
+    if (!group) {
       card.classList.add('is-empty');
       if (title) title.textContent = 'Current mix';
-      if (subtitle) subtitle.textContent = 'Add lights to preview live control options.';
+      if (subtitle) subtitle.textContent = 'Select a group to preview live control options.';
       if (metrics) metrics.innerHTML = '';
       if (modeLabel) modeLabel.textContent = 'Control mode: Locked until lights are assigned.';
       clearCanvas(canvas);
       setHudLocked(true);
       return;
     }
-    const resolvedLights = group.lights.map((entry) => {
+    const activeLights = getActiveGroupMembers(group);
+    if (!activeLights.length) {
+      card.classList.add('is-empty');
+      if (title) title.textContent = 'Current mix';
+      if (subtitle) {
+        const { rawRoom, zone } = typeof getSelectedGroupRoomZone === 'function' ? getSelectedGroupRoomZone() : { rawRoom: '', zone: '' };
+        const missingSelection = !String(rawRoom || '').trim() || !String(zone || '').trim();
+        subtitle.textContent = missingSelection
+          ? 'Select a room and zone to preview live control options.'
+          : 'No lights assigned for this room and zone.';
+      }
+      if (metrics) metrics.innerHTML = '';
+      if (modeLabel) modeLabel.textContent = 'Control mode: Locked until lights are assigned.';
+      clearCanvas(canvas);
+      setHudLocked(true);
+      return;
+    }
+    const resolvedLights = activeLights.map((entry) => {
       const meta = getDeviceMeta(entry.id) || {};
       const setup = findSetupFixtureById(entry.id);
       const fromSetup = setup?.fixture || null;
@@ -10275,12 +10437,22 @@ function wireGlobalEvents() {
     const host = document.getElementById('groupSpectrumPreview');
     if (!host) return;
     host.innerHTML = '';
-    const { mix, deviceIds } = computeMixAndHex(group);
-    const spd = computeWeightedSPD(mix, { deviceIds });
+    const mixInfo = computeMixAndHex(group);
+    const activeMembers = mixInfo.members || [];
+    if (!activeMembers.length) {
+      const selection = typeof getSelectedGroupRoomZone === 'function' ? getSelectedGroupRoomZone() : { rawRoom: '', zone: '' };
+      const missingSelection = !String(selection.rawRoom || '').trim() || !String(selection.zone || '').trim();
+      const message = missingSelection
+        ? 'Select a room and zone to preview spectrum.'
+        : 'No lights assigned for this room and zone.';
+      host.innerHTML = `<div class="group-spectrum__empty" style="padding:12px;color:#64748b;font-size:13px;">${escapeHtml(message)}</div>`;
+      return;
+    }
+    const spd = computeWeightedSPD(mixInfo.mix, { deviceIds: mixInfo.deviceIds });
     const cv = document.createElement('canvas');
     cv.className = 'group-spectrum__canvas';
     host.appendChild(cv);
-    
+
     // Use consistent fixed dimensions to prevent resizing issues
     const w = 420;
     const h = 40;
@@ -10301,7 +10473,7 @@ function wireGlobalEvents() {
         const planSpec = plan?.spectrum || { cw: 45, ww: 45, bl: 0, rd: 0 };
         const planSpd = computeWeightedSPD({
           cw: Number(planSpec.cw||0), ww: Number(planSpec.ww||0), bl: Number(planSpec.bl||0), rd: Number(planSpec.rd||0)
-        }, { deviceIds });
+        }, { deviceIds: mixInfo.deviceIds });
         const pW = 260;
         const pH = 90;
         renderSpectrumCanvas(planCv, planSpd, { width: pW, height: pH });
@@ -10364,26 +10536,21 @@ function wireGlobalEvents() {
     const hasZoneSelection = !!(selectedZoneValue && selectedZoneValue.trim());
     const hasFilters = hasRoomSelection && hasZoneSelection;
 
-    const filteredLights = hasFilters
-      ? (group.lights || [])
-          .map((entry, idx) => normalizeGroupLightEntry(entry, idx))
-          .filter((entry) => {
-            if (!entry || !entry.id) return false;
-            if (entry.type && entry.type !== 'Light') return false;
-            if (/mock|demo/i.test(entry.id)) return false;
-            const room = (entry.room || entry.roomId || '').toString().trim().toLowerCase();
-            const zone = (entry.zone || '').toString().trim().toLowerCase();
-            const selRoomId = (selectedRoomId || '').toString().trim().toLowerCase();
-            const selRoomName = (selectedRoomName || '').toString().trim().toLowerCase();
-            const selZone = (selectedZone || '').toString().trim().toLowerCase();
-            return (room === selRoomId || room === selRoomName) && zone === selZone;
-          })
-      : [];
+    const selectionPayload = {
+      room: firstNonEmptyString(selectedRoomValue, selectedRoomId, selectedRoomName),
+      roomId: selectedRoomId,
+      roomName: selectedRoomName,
+      rawRoom: selectedRoomValue,
+      zone: firstNonEmptyString(selectedZoneValue, selectedZone),
+      zoneId: firstNonEmptyString(selectedZoneValue, selectedZone),
+      zoneName: firstNonEmptyString(selectedZoneValue, selectedZone),
+    };
+
+    const filteredLights = hasFilters ? getActiveGroupMembers(group, selectionPayload) : [];
 
     updateGroupActionStates({
       hasGroup: Boolean(group),
-      hasRoom: hasRoomSelection,
-      hasZone: hasZoneSelection,
+      selection: selectionPayload,
     });
 
     if (!group) {
