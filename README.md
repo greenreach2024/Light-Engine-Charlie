@@ -41,7 +41,7 @@ Light Engine Charlie is a comprehensive platform for indoor farming automation, 
 - Devices: Use device cards to view PPFD/DLI/energy. Research Mode reveals more controls.
 - Groups: Select a group to view roster, schedule preview, and apply spectrum safely.
 - Guardrails: Offline devices are skipped with a toast. Payloads cap to 100% per channel.
-- Persistence: UI saves to public/data via POST /data/:name.
+- Persistence: UI saves to `/ui/<resource>` (backed by `public/data`) instead of the raw `/data/:name` helper to avoid collisions with controller endpoints.
 
 ### Live Farm Configuration
 - **WiFi Network**: `greenreach` (password: `Farms2024`)
@@ -73,6 +73,8 @@ Before exercising Groups controls, run the combined preflight and scale probe he
 ```
 
 The script executes the "preflight five" checks, validates CORS handling, and determines whether the controller expects `00-64` or `00-FF` channel scales. See [`docs/operator-quick-test.md`](docs/operator-quick-test.md) for details and manual follow-up steps.
+
+When the scale probe succeeds the chosen byte range is persisted to [`config/channel-scale.json`](config/channel-scale.json). The Node.js proxy, SpectraSync helpers, and Recipe Bridge all consume this file to keep payload math aligned.
 
 ### Pre-AI Automation Layer
 

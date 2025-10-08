@@ -20,7 +20,7 @@ The script performs four checks:
 1. `GET /healthz` — confirms the server is responding.
 2. `GET /api/devicedatas` — verifies that at least one device is visible from the controller. The raw payload is parsed server-side to catch schema drift.
 3. `OPTIONS /api/devicedatas` — sends a realistic CORS preflight (Origin + Access-Control-Request headers) and fails if the proxy does not echo `Access-Control-Allow-Origin` **and** `Access-Control-Allow-Headers`.
-4. Scale probe — tests both `00-FF` and `00-64` channel scales by issuing the documented payload to `/api/devicedatas/device/{id}`. The first `2xx` response wins, the result is printed, and the device is reset to OFF (`{"status":"off","value":null}`) for safety.
+4. Scale probe — tests both `00-FF` and `00-64` channel scales by issuing the documented payload to `/api/devicedatas/device/{id}`. The first `2xx` response wins, the result is printed, and the device is reset to OFF (`{"status":"off","value":null}`) for safety. The successful scale is written to `config/channel-scale.json`, keeping the dashboard, SpectraSync helpers, and the Recipe Bridge on the same byte range.
 
 If any step fails, the script exits non-zero. Resolve the issue before editing Groups or schedules.
 
@@ -34,4 +34,4 @@ After the script succeeds:
 
 ## Record the outcome
 
-Document the chosen scale and the device used for the probe in your site log. This avoids future drift between the UI, Recipe Bridge, and any downstream automation. The script output can be attached directly to the onboarding ticket for traceability.
+Document the chosen scale and the device used for the probe in your site log. This avoids future drift between the UI, Recipe Bridge, and any downstream automation. The script output can be attached directly to the onboarding ticket for traceability, and `config/channel-scale.json` provides the machine-readable record consumed by the backend.

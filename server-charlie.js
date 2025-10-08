@@ -32,6 +32,13 @@ const ENV_PATH = path.resolve("./public/data/env.json");
 const DATA_DIR = path.resolve("./public/data");
 const FARM_PATH = path.join(DATA_DIR, 'farm.json');
 const CONTROLLER_PATH = path.join(DATA_DIR, 'controller.json');
+const UI_DATA_RESOURCES = new Map([
+  ['farm', 'farm.json'],
+  ['groups', 'groups.json'],
+  ['sched', 'schedules.json'],
+  ['plans', 'plans.json'],
+  ['env', 'env.json']
+]);
 // Device DB (outside public): ./data/devices.nedb
 const DB_DIR = path.resolve('./data');
 const DB_PATH = path.join(DB_DIR, 'devices.nedb');
@@ -128,23 +135,55 @@ const {
 } = createPreAutomationLayer({ dataDir: path.resolve('./data/automation') });
 console.log('[automation] Pre-AI automation layer initialized (sensors + smart plugs)');
 
-function setPreAutomationCors(res) {
-  res.setHeader('Access-Control-Allow-Origin', '*');
-  res.setHeader('Access-Control-Allow-Methods', 'GET,POST,PATCH,DELETE,OPTIONS');
-  res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
+function applyCorsHeaders(req, res, methods = 'GET,POST,PATCH,DELETE,OPTIONS') {
+  const origin = req.headers?.origin;
+  if (origin) {
+    res.setHeader('Access-Control-Allow-Origin', origin);
+    const existingVary = res.getHeader('Vary');
+    if (existingVary) {
+      if (!String(existingVary).split(/,\s*/).includes('Origin')) {
+        res.setHeader('Vary', `${existingVary}, Origin`);
+      }
+    } else {
+      res.setHeader('Vary', 'Origin');
+    }
+  } else {
+    res.setHeader('Access-Control-Allow-Origin', '*');
+  }
+
+  res.setHeader('Access-Control-Allow-Methods', methods);
+
+  const requestedHeaders = req.headers?.['access-control-request-headers'];
+  const allowHeaders = requestedHeaders && typeof requestedHeaders === 'string'
+    ? requestedHeaders
+    : 'Content-Type, Authorization, X-Requested-With';
+  res.setHeader('Access-Control-Allow-Headers', allowHeaders);
+}
+
+function setPreAutomationCors(req, res) {
+  applyCorsHeaders(req, res, 'GET,POST,PATCH,DELETE,OPTIONS');
+}
+
+function proxyCorsMiddleware(req, res, next) {
+  applyCorsHeaders(req, res, 'GET,POST,PATCH,DELETE,OPTIONS');
+  if (req.method === 'OPTIONS') {
+    res.status(204).end();
+    return;
+  }
+  next();
 }
 
 // --- Pre-AI Automation API ---
 
-app.options('/env', (req, res) => { setPreAutomationCors(res); res.status(204).end(); });
-app.options('/plugs', (req, res) => { setPreAutomationCors(res); res.status(204).end(); });
-app.options('/plugs/*', (req, res) => { setPreAutomationCors(res); res.status(204).end(); });
-app.options('/rules', (req, res) => { setPreAutomationCors(res); res.status(204).end(); });
-app.options('/rules/*', (req, res) => { setPreAutomationCors(res); res.status(204).end(); });
+app.options('/env', (req, res) => { setPreAutomationCors(req, res); res.status(204).end(); });
+app.options('/plugs', (req, res) => { setPreAutomationCors(req, res); res.status(204).end(); });
+app.options('/plugs/*', (req, res) => { setPreAutomationCors(req, res); res.status(204).end(); });
+app.options('/rules', (req, res) => { setPreAutomationCors(req, res); res.status(204).end(); });
+app.options('/rules/*', (req, res) => { setPreAutomationCors(req, res); res.status(204).end(); });
 
 app.get('/env', (req, res) => {
   try {
-    setPreAutomationCors(res);
+    setPreAutomationCors(req, res);
     const snapshot = preEnvStore.getSnapshot();
     const zones = Object.entries(snapshot.scopes || {}).map(([scopeId, scopeData]) => {
       const sensors = Object.entries(scopeData.sensors || {}).reduce((acc, [sensorKey, sensorData]) => {
@@ -182,7 +221,7 @@ app.get('/env', (req, res) => {
 
 app.post('/env', (req, res) => {
   try {
-    setPreAutomationCors(res);
+    setPreAutomationCors(req, res);
     const body = req.body || {};
     const scope = body.scope || body.room || 'default';
     const sensors = body.sensors || body.readings || {};
@@ -213,20 +252,20 @@ app.post('/env', (req, res) => {
 });
 
 app.get('/plugs', asyncHandler(async (req, res) => {
-  setPreAutomationCors(res);
+  setPreAutomationCors(req, res);
   const plugs = await prePlugManager.discoverAll();
   res.json({ ok: true, plugs });
 }));
 
 app.post('/plugs/discover', asyncHandler(async (req, res) => {
-  setPreAutomationCors(res);
+  setPreAutomationCors(req, res);
   const plugs = await prePlugManager.discoverAll();
   res.json({ ok: true, plugs, refreshedAt: new Date().toISOString() });
 }));
 
 app.post('/plugs/register', (req, res) => {
   try {
-    setPreAutomationCors(res);
+    setPreAutomationCors(req, res);
     const body = req.body || {};
     const vendor = String(body.vendor || '').toLowerCase();
     const deviceId = body.deviceId || body.shortId || body.serial || body.id;
@@ -250,7 +289,7 @@ app.post('/plugs/register', (req, res) => {
 
 app.delete('/plugs/:plugId', (req, res) => {
   try {
-    setPreAutomationCors(res);
+    setPreAutomationCors(req, res);
     const plugId = decodeURIComponent(req.params.plugId);
     const removed = preAutomationEngine.unregisterPlug(plugId);
     res.json({ ok: true, removed });
@@ -260,7 +299,7 @@ app.delete('/plugs/:plugId', (req, res) => {
 });
 
 app.post('/plugs/:plugId/state', asyncHandler(async (req, res) => {
-  setPreAutomationCors(res);
+  setPreAutomationCors(req, res);
   const plugId = decodeURIComponent(req.params.plugId);
   const body = req.body || {};
   const desired = typeof body.on === 'boolean'
@@ -279,7 +318,7 @@ app.post('/plugs/:plugId/state', asyncHandler(async (req, res) => {
 
 app.post('/plugs/:plugId/rules', (req, res) => {
   try {
-    setPreAutomationCors(res);
+    setPreAutomationCors(req, res);
     const plugId = decodeURIComponent(req.params.plugId);
     const body = req.body || {};
     const ruleIds = Array.isArray(body.ruleIds) ? body.ruleIds : [];
@@ -303,7 +342,7 @@ app.post('/plugs/:plugId/rules', (req, res) => {
 
 app.get('/rules', (req, res) => {
   try {
-    setPreAutomationCors(res);
+    setPreAutomationCors(req, res);
     const rules = preAutomationEngine.listRules();
     res.json({ ok: true, rules });
   } catch (error) {
@@ -313,7 +352,7 @@ app.get('/rules', (req, res) => {
 
 app.get('/rules/:ruleId', (req, res) => {
   try {
-    setPreAutomationCors(res);
+    setPreAutomationCors(req, res);
     const rule = preRulesStore.find(req.params.ruleId);
     if (!rule) {
       return res.status(404).json({ ok: false, error: 'Rule not found' });
@@ -326,7 +365,7 @@ app.get('/rules/:ruleId', (req, res) => {
 
 app.post('/rules', (req, res) => {
   try {
-    setPreAutomationCors(res);
+    setPreAutomationCors(req, res);
     const body = req.body || {};
     if (!body.when || !body.actions) {
       return res.status(400).json({ ok: false, error: 'Rule must include when and actions' });
@@ -340,7 +379,7 @@ app.post('/rules', (req, res) => {
 
 app.patch('/rules/:ruleId', (req, res) => {
   try {
-    setPreAutomationCors(res);
+    setPreAutomationCors(req, res);
     const existing = preRulesStore.find(req.params.ruleId);
     if (!existing) {
       return res.status(404).json({ ok: false, error: 'Rule not found' });
@@ -356,7 +395,7 @@ app.patch('/rules/:ruleId', (req, res) => {
 
 app.delete('/rules/:ruleId', (req, res) => {
   try {
-    setPreAutomationCors(res);
+    setPreAutomationCors(req, res);
     const removed = preAutomationEngine.removeRule(req.params.ruleId);
     res.json({ ok: true, removed });
   } catch (error) {
@@ -1686,7 +1725,7 @@ function getWeatherDescription(code) {
 
 app.get('/api/geocode', async (req, res) => {
   try {
-    setCors(res);
+    setCors(req, res);
     const { address } = req.query;
     if (!address) return res.status(400).json({ ok: false, error: 'Address parameter required' });
     const encodedAddress = encodeURIComponent(address);
@@ -1704,7 +1743,7 @@ app.get('/api/geocode', async (req, res) => {
 
 app.get('/api/weather', async (req, res) => {
   try {
-    setCors(res);
+    setCors(req, res);
     const { lat, lng } = req.query;
     if (!lat || !lng) return res.status(400).json({ ok: false, error: 'Latitude and longitude parameters required' });
     const weatherUrl = `https://api.open-meteo.com/v1/forecast?latitude=${lat}&longitude=${lng}&current_weather=true&hourly=temperature_2m,relative_humidity_2m,precipitation,weather_code&timezone=auto`;
@@ -1736,7 +1775,7 @@ app.get('/api/weather', async (req, res) => {
 // Reverse geocoding: lat/lng → address parts
 app.get('/api/reverse-geocode', async (req, res) => {
   try {
-    setCors(res);
+    setCors(req, res);
     const { lat, lng } = req.query;
     if (!lat || !lng) return res.status(400).json({ ok: false, error: 'Latitude and longitude required' });
     const url = `https://nominatim.openstreetmap.org/reverse?format=json&lat=${encodeURIComponent(lat)}&lon=${encodeURIComponent(lng)}&addressdetails=1`;
@@ -1823,7 +1862,7 @@ function setupWeatherPolling() {
 // Expose cached weather (falls back to fetching if stale and coords exist)
 app.get('/api/weather/current', async (req, res) => {
   try {
-    setCors(res);
+    setCors(req, res);
     // If stale (>15 min) try refresh
     const farm = readJSONSafe(FARM_PATH, null);
     const coords = farm?.coordinates || farm?.location?.coordinates;
@@ -1838,7 +1877,7 @@ app.get('/api/weather/current', async (req, res) => {
 
 // STRICT pass-through: client calls /api/* → controller receives /api/*
 // Express strips the mount "/api", so add it back via pathRewrite.
-app.use("/api", createProxyMiddleware({
+app.use('/api', proxyCorsMiddleware, createProxyMiddleware({
   // Initial target is required; router() will be consulted per-request
   target: getController(),
   router: () => getController(),
@@ -1853,6 +1892,67 @@ app.use("/api", createProxyMiddleware({
     // For visibility in logs
     const outgoingPath = req.url.startsWith('/api/') ? req.url : `/api${req.url}`;
     console.log(`[→] ${req.method} ${req.originalUrl} -> ${getController()}${outgoingPath}`);
+  },
+  onProxyRes(proxyRes, req, res) {
+    const origin = req.headers?.origin;
+    if (origin) {
+      proxyRes.headers['access-control-allow-origin'] = origin;
+      const existingVary = proxyRes.headers['vary'];
+      if (existingVary) {
+        const varyParts = String(existingVary).split(/,\s*/);
+        if (!varyParts.includes('Origin')) {
+          proxyRes.headers['vary'] = `${existingVary}, Origin`;
+        }
+      } else {
+        proxyRes.headers['vary'] = 'Origin';
+      }
+    } else {
+      proxyRes.headers['access-control-allow-origin'] = '*';
+    }
+    const requestedHeaders = req.headers?.['access-control-request-headers'];
+    if (requestedHeaders && typeof requestedHeaders === 'string') {
+      proxyRes.headers['access-control-allow-headers'] = requestedHeaders;
+    } else if (!proxyRes.headers['access-control-allow-headers']) {
+      proxyRes.headers['access-control-allow-headers'] = 'Content-Type, Authorization, X-Requested-With';
+    }
+    proxyRes.headers['access-control-allow-methods'] = 'GET,POST,PATCH,DELETE,OPTIONS';
+  }
+}));
+
+// Namespaced pass-through for controller-bound helpers (e.g., /controller/sched)
+app.use('/controller', proxyCorsMiddleware, createProxyMiddleware({
+  target: getController(),
+  router: () => getController(),
+  changeOrigin: true,
+  xfwd: true,
+  logLevel: 'debug',
+  pathRewrite: (path) => path.replace(/^\/controller/, ''),
+  onProxyReq(proxyReq, req) {
+    console.log(`[→] ${req.method} ${req.originalUrl} -> ${getController()}${req.url}`);
+  },
+  onProxyRes(proxyRes, req) {
+    const origin = req.headers?.origin;
+    if (origin) {
+      proxyRes.headers['access-control-allow-origin'] = origin;
+      const existingVary = proxyRes.headers['vary'];
+      if (existingVary) {
+        const varyParts = String(existingVary).split(/,\s*/);
+        if (!varyParts.includes('Origin')) {
+          proxyRes.headers['vary'] = `${existingVary}, Origin`;
+        }
+      } else {
+        proxyRes.headers['vary'] = 'Origin';
+      }
+    } else {
+      proxyRes.headers['access-control-allow-origin'] = '*';
+    }
+    const requestedHeaders = req.headers?.['access-control-request-headers'];
+    if (requestedHeaders && typeof requestedHeaders === 'string') {
+      proxyRes.headers['access-control-allow-headers'] = requestedHeaders;
+    } else if (!proxyRes.headers['access-control-allow-headers']) {
+      proxyRes.headers['access-control-allow-headers'] = 'Content-Type, Authorization, X-Requested-With';
+    }
+    proxyRes.headers['access-control-allow-methods'] = 'GET,POST,PATCH,DELETE,OPTIONS';
   }
 }));
 
@@ -1947,7 +2047,7 @@ app.post('/webhooks/ifttt/:deviceId', async (req, res) => {
 // Geocoding API to get coordinates from address
 app.get('/api/geocode', async (req, res) => {
   try {
-    setCors(res);
+    setCors(req, res);
     const { address } = req.query;
     
     if (!address) {
@@ -1987,7 +2087,7 @@ app.get('/api/geocode', async (req, res) => {
 // Weather API to get current conditions
 app.get('/api/weather', async (req, res) => {
   try {
-    setCors(res);
+    setCors(req, res);
     const { lat, lng } = req.query;
     
     if (!lat || !lng) {
@@ -2078,14 +2178,14 @@ app.get('/config', (req, res) => {
 });
 
 // Allow runtime GET/POST of controller target. CORS-enabled for convenience.
-app.options('/controller', (req, res) => { setCors(res); res.status(204).end(); });
+app.options('/controller', (req, res) => { setCors(req, res); res.status(204).end(); });
 app.get('/controller', (req, res) => {
-  setCors(res);
+  setCors(req, res);
   res.json({ url: getController() });
 });
 app.post('/controller', (req, res) => {
   try {
-    setCors(res);
+    setCors(req, res);
     const { url } = req.body || {};
     if (!url || typeof url !== 'string' || !isHttpUrl(url)) {
       return res.status(400).json({ ok: false, error: 'Valid http(s) url required' });
@@ -2164,14 +2264,12 @@ app.post('/forwarder/provision/bluetooth', async (req, res) => {
 });
 
 // --- Branding and Farm Profile Endpoints ---
-function setCors(res) {
-  res.setHeader('Access-Control-Allow-Origin', '*');
-  res.setHeader('Access-Control-Allow-Methods', 'GET,POST,OPTIONS');
-  res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
+function setCors(req, res) {
+  applyCorsHeaders(req, res, 'GET,POST,OPTIONS');
 }
 
-app.options('/brand/extract', (req, res) => { setCors(res); res.status(204).end(); });
-app.options('/farm', (req, res) => { setCors(res); res.status(204).end(); });
+app.options('/brand/extract', (req, res) => { setCors(req, res); res.status(204).end(); });
+app.options('/farm', (req, res) => { setCors(req, res); res.status(204).end(); });
 
 // Helper: safe JSON read
 function readJSONSafe(fullPath, fallback = null) {
@@ -2182,6 +2280,24 @@ function readJSONSafe(fullPath, fallback = null) {
     }
   } catch {}
   return fallback;
+}
+
+function resolveUiDataPath(resource) {
+  const normalized = String(resource || '').toLowerCase();
+  if (!UI_DATA_RESOURCES.has(normalized)) {
+    return null;
+  }
+  return path.join(DATA_DIR, UI_DATA_RESOURCES.get(normalized));
+}
+
+function loadUiData(resource) {
+  const normalized = String(resource || '').toLowerCase();
+  const fullPath = resolveUiDataPath(normalized);
+  if (!fullPath) {
+    return null;
+  }
+  const fallback = normalized === 'plans' ? { plans: [] } : {};
+  return readJSONSafe(fullPath, fallback);
 }
 
 // Tiny color utils
@@ -2261,7 +2377,7 @@ function normalizePalette(seed){
 
 app.get('/brand/extract', async (req, res) => {
   try {
-    setCors(res);
+    setCors(req, res);
     const target = String(req.query.url || '').trim();
     if (!target) return res.status(400).json({ ok:false, error: 'url required' });
     const ac = new AbortController();
@@ -2333,7 +2449,7 @@ app.get('/brand/extract', async (req, res) => {
     } catch {}
     return res.json({ ok:true, name: siteName, logo, palette, fontFamily, fontCss: fontCssLinks });
   } catch (e) {
-    setCors(res);
+    setCors(req, res);
     // neutral fallback
     const fallback = { background:'#F7FAFA', surface:'#FFFFFF', border:'#DCE5E5', text:'#0B1220', primary:'#0D7D7D', accent:'#64C7C7' };
     return res.status(200).json({ ok:false, error: e.message, name: '', logo: '', palette: fallback, fontFamily: '', fontCss: [] });
@@ -2343,7 +2459,7 @@ app.get('/brand/extract', async (req, res) => {
 // GET current farm (including branding)
 app.get('/farm', (req, res) => {
   try {
-    setCors(res);
+    setCors(req, res);
     const data = readJSONSafe(FARM_PATH, null) || { farmName:'', locations:[], contact:{}, crops:[], branding:null };
     res.json(data);
   } catch (e) {
@@ -2354,7 +2470,7 @@ app.get('/farm', (req, res) => {
 // Save farm
 app.post('/farm', (req, res) => {
   try {
-    setCors(res);
+    setCors(req, res);
     const body = req.body || {};
     // basic shape: store as-is
     fs.mkdirSync(DATA_DIR, { recursive: true });
@@ -2585,6 +2701,37 @@ app.post("/ingest/env", async (req, res) => {
     }
 
     return res.json({ ok: true });
+  } catch (e) {
+    return res.status(500).json({ ok: false, error: e.message });
+  }
+});
+
+// Namespaced UI config endpoints to avoid collisions with controller routes
+app.options('/ui/:resource', (req, res) => { setCors(req, res); res.status(204).end(); });
+
+app.get('/ui/:resource', (req, res) => {
+  const resource = String(req.params.resource || '').toLowerCase();
+  setCors(req, res);
+  const data = loadUiData(resource);
+  if (data === null) {
+    return res.status(404).json({ ok: false, error: `Unknown UI resource '${resource}'` });
+  }
+  return res.json({ ok: true, resource, data });
+});
+
+app.post('/ui/:resource', (req, res) => {
+  const resource = String(req.params.resource || '').toLowerCase();
+  setCors(req, res);
+  const fullPath = resolveUiDataPath(resource);
+  if (!fullPath) {
+    return res.status(404).json({ ok: false, error: `Unknown UI resource '${resource}'` });
+  }
+  try {
+    ensureDataDir();
+    const body = req.body ?? {};
+    const payload = JSON.stringify(body, null, 2);
+    fs.writeFileSync(fullPath, payload);
+    return res.json({ ok: true, resource, bytesWritten: Buffer.byteLength(payload) });
   } catch (e) {
     return res.status(500).json({ ok: false, error: e.message });
   }
