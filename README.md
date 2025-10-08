@@ -64,6 +64,16 @@ The script checks:
 - GET /index.html
 - POST /data/device-meta.json (dry-run to temp file)
 
+### Operator quick test
+
+Before exercising Groups controls, run the combined preflight and scale probe helper:
+
+```bash
+./scripts/preflight-scale-probe.sh
+```
+
+The helper auto-detects whether the controller is exposed via `/controller/devicedatas` (Managed Edge/medge) or the legacy `/api/devicedatas` route, accepts custom headers and TLS overrides for medge tunnels, runs the "preflight five" checks, validates CORS handling, and — unless `--skip-probe` is passed — safely probes both `00-64` and `00-FF` channel scales before restoring the original light state. See [`docs/operator-quick-test.md`](docs/operator-quick-test.md) for usage examples, override flags, and manual follow-up steps.
+
 ### Pre-AI Automation Layer
 
 The pre-AI automation layer orchestrates smart plugs using real-time sensor data. It exposes REST endpoints on the primary Node.js server and persists telemetry for future ML training.
