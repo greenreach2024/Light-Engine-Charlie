@@ -1,3 +1,40 @@
+
+
+// --- CORS guardrail: always answer OPTIONS and echo request headers ---
+app.use((req, res, next) => {
+  const origin = req.headers.origin || '*';
+  res.setHeader('Access-Control-Allow-Origin', origin);
+  res.setHeader('Vary', 'Origin'); // allow per-origin caching
+  res.setHeader('Access-Control-Allow-Methods', 'GET,POST,PUT,PATCH,DELETE,OPTIONS');
+  const reqHdrs = req.headers['access-control-request-headers'];
+  if (reqHdrs) res.setHeader('Access-Control-Allow-Headers', reqHdrs);
+  if (req.method === 'OPTIONS') return res.sendStatus(204);
+  next();
+});
+
+// --- Health probe: refuse to start if CORS config is missing ---
+function checkCorsConfigOrExit() {
+  // Check if CORS middleware is present by inspecting app._router.stack
+  const hasCors = app._router && app._router.stack && app._router.stack.some(
+    (layer) => layer && layer.handle && layer.handle.toString().includes('Access-Control-Allow-Origin')
+  );
+  if (!hasCors) {
+    console.error('[health] CORS middleware missing. Refusing to start.');
+    process.exit(1);
+  }
+}
+
+app.get('/healthz', (req, res) => {
+  // Health probe: returns 200 if CORS is present, 500 otherwise
+  const hasCors = app._router && app._router.stack && app._router.stack.some(
+    (layer) => layer && layer.handle && layer.handle.toString().includes('Access-Control-Allow-Origin')
+  );
+  if (!hasCors) return res.status(500).json({ ok: false, error: 'CORS middleware missing' });
+  res.json({ ok: true, status: 'healthy' });
+});
+
+// Call CORS check after CORS middleware is registered
+checkCorsConfigOrExit();
 import express from "express";
 import { createProxyMiddleware } from "http-proxy-middleware";
 import fs from "fs";
@@ -14,9 +51,19 @@ import {
   cloneWizardStep
 } from './server/wizards/index.js';
 
-const __filename = fileURLToPath(import.meta.url);
-const app = express();
-const PORT = process.env.PORT || 8091;
+
+
+// --- CORS guardrail: always answer OPTIONS and echo request headers ---
+app.use((req, res, next) => {
+  const origin = req.headers.origin || '*';
+  res.setHeader('Access-Control-Allow-Origin', origin);
+  res.setHeader('Vary', 'Origin'); // allow per-origin caching
+  res.setHeader('Access-Control-Allow-Methods', 'GET,POST,PUT,PATCH,DELETE,OPTIONS');
+  const reqHdrs = req.headers['access-control-request-headers'];
+  if (reqHdrs) res.setHeader('Access-Control-Allow-Headers', reqHdrs);
+  if (req.method === 'OPTIONS') return res.sendStatus(204);
+  next();
+});
 // Default controller target. Can be overridden with the CTRL env var.
 // Use the Pi forwarder when available for remote device reachability during development.
 let CURRENT_CONTROLLER = process.env.CTRL || "http://100.65.187.59:8089";
@@ -1995,6 +2042,16 @@ app.get('/api/weather/current', async (req, res) => {
   }
 });
 
+// Explicit OPTIONS handler for all /api/* endpoints to support CORS preflight
+app.options('/api/*', (req, res) => {
+  // Allow all origins for development; adjust as needed for production
+  res.setHeader('Access-Control-Allow-Origin', req.headers.origin || '*');
+  res.setHeader('Vary', 'Origin');
+  res.setHeader('Access-Control-Allow-Methods', 'GET,POST,PATCH,DELETE,OPTIONS');
+  res.setHeader('Access-Control-Allow-Headers', req.headers['access-control-request-headers'] || 'Content-Type, Authorization, X-Requested-With');
+  res.status(204).end();
+});
+
 // STRICT pass-through: client calls /api/* → controller receives /api/*
 // Express strips the mount "/api", so add it back via pathRewrite.
 app.use('/api', proxyCorsMiddleware, createProxyMiddleware({
@@ -2077,7 +2134,23 @@ app.use('/controller', proxyCorsMiddleware, createProxyMiddleware({
 }));
 
 // Static files
+// Serve static files
 app.use(express.static("./public"));
+
+// Allow direct access to JSON data files in /public/data with CORS headers
+app.use('/data', (req, res, next) => {
+  // Only allow .json files
+  if (!req.path.endsWith('.json')) return res.status(403).send('Forbidden');
+  res.setHeader('Access-Control-Allow-Origin', '*');
+  res.setHeader('Access-Control-Allow-Methods', 'GET,OPTIONS');
+  res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization, X-Requested-With');
+  if (req.method === 'OPTIONS') return res.status(204).end();
+  // Serve the file from public/data
+  const filePath = path.join(__dirname, 'public', 'data', req.path);
+  if (!fs.existsSync(filePath)) return res.status(404).send('Not found');
+  res.type('application/json');
+  fs.createReadStream(filePath).pipe(res);
+});
 
 // Favicon handler: map /favicon.ico to our SVG to avoid 404 noise
 app.get('/favicon.ico', (req, res) => {
@@ -2891,7 +2964,19 @@ app.post('/groups', (req, res) => {
     return res.status(400).json({ ok: false, error: 'Expected { groups: [...] } payload.' });
   }
   try {
-    const parsed = incoming.map(parseIncomingGroup);
+    // Systemic hardening: reject partial match{} and prevent stale members[]
+    const parsed = incoming.map((g) => {
+      // If match is present, require both room and zone
+      if (g.match && (typeof g.match === 'object')) {
+        const room = String(g.match.room ?? '').trim();
+        const zone = String(g.match.zone ?? '').trim();
+        if (!room || !zone) throw new Error('Group match{} must include both room and zone.');
+        // If match is set, members[] must not be present or must be empty
+        if (Array.isArray(g.members) && g.members.length > 0) throw new Error('Group with match{} cannot include members[].');
+        if (Array.isArray(g.lights) && g.lights.length > 0) throw new Error('Group with match{} cannot include lights[].');
+      }
+      return parseIncomingGroup(g);
+    });
     const stored = parsed.map((item) => item.stored);
     if (!saveGroupsFile(stored)) {
       return res.status(500).json({ ok: false, error: 'Failed to persist groups.' });
@@ -2911,6 +2996,14 @@ app.put('/groups/:id', (req, res) => {
   if (idx === -1) return res.status(404).json({ ok: false, error: `Group '${id}' not found.` });
   try {
     const merged = { ...req.body, id };
+    // Systemic hardening: reject partial match{} and prevent stale members[]
+    if (merged.match && (typeof merged.match === 'object')) {
+      const room = String(merged.match.room ?? '').trim();
+      const zone = String(merged.match.zone ?? '').trim();
+      if (!room || !zone) throw new Error('Group match{} must include both room and zone.');
+      if (Array.isArray(merged.members) && merged.members.length > 0) throw new Error('Group with match{} cannot include members[].');
+      if (Array.isArray(merged.lights) && merged.lights.length > 0) throw new Error('Group with match{} cannot include lights[].');
+    }
     const { stored, response } = parseIncomingGroup(merged);
     existing[idx] = stored;
     if (!saveGroupsFile(existing)) {
