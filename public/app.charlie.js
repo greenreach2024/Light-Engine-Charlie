@@ -334,6 +334,242 @@ function collectSetupLightsForRoomZone(roomValue, zoneValue) {
   return results;
 }
 
+// --- Utilities: stable id + room/zone normalization -------------------------
+
+function stableLightId(entry) {
+  const id = entry?.id;
+  if (id && String(id).trim()) return String(id).trim();
+  const vendorRaw = (entry?.vendor || entry?.name || 'fixture').toString().trim().replace(/\s+/g, '_');
+  const modelRaw = (entry?.model || 'light').toString().trim().replace(/\s+/g, '_');
+  const vendor = vendorRaw || 'fixture';
+  const model = modelRaw || 'light';
+  return `wired-${vendor}-${model}`;
+}
+
+function resolveRoomRef(roomValue, rooms = collectRoomsFromState() || []) {
+  if (roomValue && typeof roomValue === 'object') {
+    const id = String(roomValue.id ?? roomValue.roomId ?? roomValue.value ?? '').trim();
+    const name = String(roomValue.name ?? roomValue.label ?? id).trim();
+    if (id || name) return { id, name };
+  }
+  const text = String(roomValue ?? '').trim();
+  if (!text) return { id: '', name: '' };
+  const hit = rooms.find((room) => room && (room.id === text || room.name === text));
+  if (hit) return { id: hit.id || text, name: hit.name || text };
+  return { id: text, name: text };
+}
+
+function normZone(z) {
+  return String(z ?? '').trim();
+}
+
+function isForSelection(lightMeta, selectedRoom, selectedZone) {
+  const rooms = collectRoomsFromState() || [];
+  const sel = resolveRoomRef(selectedRoom, rooms);
+  const lit = resolveRoomRef(lightMeta?.roomId ?? lightMeta?.room ?? lightMeta?.roomName, rooms);
+  const selZone = normZone(selectedZone);
+  const litZone = normZone(lightMeta?.zone);
+  if (selZone !== litZone) return false;
+  const idMatch =
+    (sel.id && lit.id && lit.id === sel.id) ||
+    (sel.id && lit.name && lit.name === sel.id);
+  const nameMatch =
+    (sel.name && lit.name && lit.name === sel.name) ||
+    (sel.name && lit.id && lit.id === sel.name);
+  return Boolean(idMatch || nameMatch);
+}
+
+// --- Build the candidate set strictly from Room+Zone ------------------------
+
+function collectCandidatesForSelection(selectedRoom, selectedZone) {
+  const rooms = collectRoomsFromState() || [];
+  const sel = resolveRoomRef(selectedRoom, rooms);
+  const zone = normZone(selectedZone);
+  if (!zone || (!sel.id && !sel.name)) return [];
+
+  const outMap = new Map();
+
+  function ensureCandidate(id, payload) {
+    if (!id) return;
+    if (!outMap.has(id)) {
+      outMap.set(id, payload);
+    }
+  }
+
+  (STATE?.lightSetups || []).forEach((setup) => {
+    const sRoom = resolveRoomRef(setup?.room, rooms);
+    if (!isForSelection({ roomId: sRoom.id, room: sRoom.name, zone: setup?.zone }, sel, zone)) return;
+    (setup?.fixtures || []).forEach((fixture) => {
+      if (!fixture) return;
+      const id = stableLightId(fixture);
+      ensureCandidate(id, {
+        id,
+        vendor: fixture.vendor,
+        model: fixture.model,
+        deviceName: fixture.vendor ? `${fixture.vendor} ${fixture.model}` : (fixture.name || fixture.model || 'Light'),
+        roomId: sRoom.id,
+        roomName: sRoom.name,
+        zone,
+        source: 'setup',
+        setupId: setup?.id || null,
+        fixtureId: fixture.id || null,
+      });
+    });
+  });
+
+  (STATE?.deviceKB?.fixtures || []).forEach((fixture) => {
+    if (!fixture) return;
+    const fRoom = resolveRoomRef(fixture?.roomId ?? fixture?.room, rooms);
+    if (!isForSelection({ roomId: fRoom.id, room: fRoom.name, zone: fixture?.zone }, sel, zone)) return;
+    const id = stableLightId(fixture);
+    ensureCandidate(id, {
+      ...fixture,
+      id,
+      vendor: fixture.vendor,
+      model: fixture.model,
+      deviceName: fixture.vendor ? `${fixture.vendor} ${fixture.model}` : (fixture.name || fixture.model || 'Light'),
+      roomId: fRoom.id,
+      roomName: fRoom.name,
+      zone,
+      source: 'fixture',
+    });
+  });
+
+  (STATE?.devices || []).forEach((device) => {
+    if (!device) return;
+    const dRoom = resolveRoomRef(device?.roomId ?? device?.room, rooms);
+    if (!isForSelection({ roomId: dRoom.id, room: dRoom.name, zone: device?.zone }, sel, zone)) return;
+    const id = stableLightId(device);
+    ensureCandidate(id, {
+      ...device,
+      id,
+      deviceName: device.deviceName || device.name || `${device.vendor || ''} ${device.model || ''}`.trim(),
+      roomId: dRoom.id,
+      roomName: dRoom.name,
+      zone,
+      source: device.source || 'device',
+    });
+  });
+
+  Object.entries(STATE?.deviceMeta || {}).forEach(([metaId, meta]) => {
+    if (!metaId) return;
+    const mRoom = resolveRoomRef(meta?.roomId ?? meta?.room ?? meta?.roomName, rooms);
+    if (!isForSelection({ roomId: mRoom.id, room: mRoom.name, zone: meta?.zone }, sel, zone)) return;
+    ensureCandidate(String(metaId), {
+      ...meta,
+      id: String(metaId),
+      deviceName: meta.deviceName || meta.name || resolveLightNameFromState(metaId, meta) || String(metaId),
+      roomId: mRoom.id,
+      roomName: mRoom.name,
+      zone,
+      source: meta.source || 'meta',
+    });
+  });
+
+  return Array.from(outMap.values());
+}
+
+// --- Split Assigned vs Ungrouped WITHOUT using group name ------------------
+
+function computeRostersForSelection(selectedRoom, selectedZone) {
+  const candidates = collectCandidatesForSelection(selectedRoom, selectedZone);
+  if (!candidates.length) return { assigned: [], ungrouped: [] };
+
+  const assignedIds = new Set();
+  (STATE?.groups || []).forEach((group) => {
+    (group?.lights || []).forEach((light) => {
+      const id = typeof light === 'string' ? String(light).trim() : stableLightId(light);
+      if (!id) return;
+      const meta = typeof light === 'string' ? {} : light;
+      if (isForSelection(meta, selectedRoom, selectedZone)) {
+        assignedIds.add(id);
+      }
+    });
+  });
+
+  const assigned = [];
+  const ungrouped = [];
+  candidates.forEach((candidate) => {
+    if (!candidate?.id) return;
+    (assignedIds.has(candidate.id) ? assigned : ungrouped).push(candidate);
+  });
+
+  return { assigned, ungrouped };
+}
+
+// --- When adding a light to a group, stamp roomId/zone explicitly ----------
+
+function addLightToGroup(group, light, selectedRoom, selectedZone) {
+  if (!group || !light) return;
+  const rooms = collectRoomsFromState() || [];
+  const sel = resolveRoomRef(selectedRoom, rooms);
+  const zone = normZone(selectedZone);
+  const entry = {
+    id: stableLightId(light),
+    vendor: light.vendor,
+    model: light.model,
+    deviceName: light.deviceName || light.name || `${light.vendor || ''} ${light.model || ''}`.trim(),
+    roomId: sel.id,
+    roomName: sel.name,
+    room: light.room || light.roomName || sel.name || sel.id,
+    zone,
+    spectra: light.spectra,
+    watts: light.watts,
+    labels: light.labels,
+    source: light.source,
+    setupId: light.setupId,
+    fixtureId: light.fixtureId,
+  };
+  if (!entry.id) return;
+  group.lights = Array.isArray(group.lights) ? group.lights : [];
+  if (!group.lights.some((existing) => stableLightId(existing) === entry.id)) {
+    group.lights.push(entry);
+  }
+}
+
+function dedupeById(arr) {
+  const map = new Map();
+  (arr || []).forEach((item) => {
+    if (!item || !item.id) return;
+    if (!map.has(item.id)) {
+      map.set(item.id, { ...item });
+    }
+  });
+  return Array.from(map.values());
+}
+
+function normalizeExistingGroups() {
+  const rooms = collectRoomsFromState() || [];
+  (STATE?.groups || []).forEach((group) => {
+    if (!group || !Array.isArray(group.lights)) return;
+    const cleaned = [];
+    group.lights.forEach((light) => {
+      const id = typeof light === 'string' ? String(light).trim() : stableLightId(light);
+      if (!id) return;
+      const roomRef = resolveRoomRef(light?.roomId ?? light?.room ?? light?.roomName, rooms);
+      const zone = normZone(light?.zone);
+      const deviceName = firstNonEmptyString(
+        light?.deviceName,
+        light?.name,
+        resolveLightNameFromState(id, light || null),
+        id
+      );
+      const entry = {
+        ...((typeof light === 'object' && light) || {}),
+        id,
+        deviceName,
+        name: deviceName,
+        roomId: roomRef.id,
+        roomName: roomRef.name,
+        room: light?.room || roomRef.name || roomRef.id,
+        zone,
+      };
+      cleaned.push(entry);
+    });
+    group.lights = dedupeById(cleaned);
+  });
+}
+
 function getSelectedGroupRoomZone() {
   const roomSel = document.getElementById('groupRoomDropdown');
   const zoneSel = document.getElementById('groupZoneDropdown');
@@ -560,6 +796,7 @@ function normalizeGroupsInState() {
     if (STATE) STATE.groups = [];
     return;
   }
+  normalizeExistingGroups();
   const currentId = STATE.currentGroup?.id || null;
   STATE.groups = STATE.groups.map((group) => normalizeGroupRecord(group));
   if (currentId) {
@@ -7827,21 +8064,26 @@ function renderGroups() {
       const roomId = groupRoomSel.value;
       const zone = groupZoneSel.value;
       window.STATE.lightSetups.forEach(setup => {
-        if ((setup.room === roomId || setup.room === (window.STATE?.rooms?.find(r=>r.id===roomId)?.name)) && setup.zone === zone) {
-          if (Array.isArray(setup.fixtures)) {
-            setup.fixtures.forEach(f => {
-              setupLights.push({
-                id: f.id,
-                name: f.vendor ? `${f.vendor} ${f.model}` : (f.name || f.model || 'Light'),
-                watts: f.watts,
-                count: f.count,
-                source: 'setup',
+          if ((setup.room === roomId || setup.room === (window.STATE?.rooms?.find(r=>r.id===roomId)?.name)) && setup.zone === zone) {
+            if (Array.isArray(setup.fixtures)) {
+              setup.fixtures.forEach(f => {
+                const fixtureId = f.id || buildFixtureSyntheticId(f);
+                setupLights.push({
+                  id: fixtureId,
+                  name: f.vendor ? `${f.vendor} ${f.model}` : (f.name || f.model || 'Light'),
+                  vendor: f.vendor,
+                  model: f.model,
+                  watts: f.watts,
+                  count: f.count,
+                  source: 'setup',
+                  setupId: setup.id || null,
+                  fixtureId,
+                });
               });
-            });
+            }
           }
-        }
-      });
-    }
+        });
+      }
     if (setupLights.length === 0) {
       lightSelectionBar.innerHTML = '<span style="color:#64748b;font-size:13px;">No lights configured for this room/zone.</span>';
     } else {
@@ -7851,14 +8093,13 @@ function renderGroups() {
         btn.className = 'ghost';
         btn.style.marginRight = '8px';
         btn.textContent = `${light.name} (${light.count || 1} × ${light.watts || '?'}W)`;
-        btn.onclick = () => {
+        btn.onclick = async () => {
           // Add this light to the current group if not already present
           const group = STATE.currentGroup;
-          if (!group || !Array.isArray(group.lights)) return;
-          if (!group.lights.some(l => l.id === light.id)) {
-            group.lights.push({ id: light.id, name: light.name });
-            renderGroups();
-          }
+          if (!group) return;
+          addLightToGroup(group, light, roomId ? { id: roomId } : groupRoomSel.value, zone);
+          await saveGroups();
+          renderGroups();
         };
         lightSelectionBar.appendChild(btn);
       });
@@ -10038,6 +10279,7 @@ function wireGlobalEvents() {
       if (groupsStatus) groupsStatus.textContent = '';
       if (groupName) groupName.value = '';
       if (ungroupedList) {
+<<<<<<< HEAD
         // Repopulate ungrouped lights: show all real, unassigned lights for selected room/zone, even if room/zone is not set
         const assignedSet = new Set(
           (STATE.groups || [])
@@ -10085,6 +10327,35 @@ function wireGlobalEvents() {
             const zone = (device.zone || '').toString().trim().toLowerCase();
             return (!selRoom || room === selRoom) && (!selZone || zone === selZone);
           });
+=======
+        const { rawRoom, roomId, roomName, zone } = getSelectedGroupRoomZone();
+        const selectedRoom = roomId || roomName ? { id: roomId, name: roomName } : rawRoom;
+        const zoneValue = normZone(zone);
+        const hasRoom =
+          typeof selectedRoom === 'string'
+            ? !!selectedRoom.trim()
+            : !!(selectedRoom && (selectedRoom.id || selectedRoom.name));
+        const hasZone = !!zoneValue;
+        const roster = hasRoom && hasZone ? computeRostersForSelection(selectedRoom, zoneValue) : { ungrouped: [] };
+        const ungrouped = roster.ungrouped || [];
+        if (!hasRoom || !hasZone) {
+          ungroupedList.innerHTML = '';
+          if (ungroupedEmpty) {
+            ungroupedEmpty.style.display = 'block';
+            ungroupedEmpty.textContent = 'Select a room and zone to view configured lights.';
+          }
+        } else if (!ungrouped.length) {
+          ungroupedList.innerHTML = '';
+          if (ungroupedEmpty) {
+            ungroupedEmpty.style.display = 'block';
+            ungroupedEmpty.textContent = 'All lights are assigned to groups.';
+          }
+        } else {
+          ungroupedList.innerHTML = ungrouped
+            .map((light) => `<li>${escapeHtml(resolveLightNameFromState(light.id, light))}</li>`)
+            .join('');
+          if (ungroupedEmpty) ungroupedEmpty.style.display = 'none';
+>>>>>>> d598849603e868e9992f57adbed9233a6939ca35
         }
         ungroupedList.innerHTML = ungrouped
           .map((light) => `<li>${escapeHtml(resolveLightNameFromState(light.id, light))}</li>`)
@@ -10169,7 +10440,10 @@ function wireGlobalEvents() {
           const meta = getDeviceMeta(id) || {};
           const name = entry.name || resolveLightNameFromState(id, meta);
           const vendor = firstNonEmptyString(entry.vendor, entry.manufacturer, meta.vendor, meta.manufacturer);
-          const locStr = [firstNonEmptyString(entry.room, meta.room), firstNonEmptyString(entry.zone, meta.zone)]
+          const locStr = [
+            firstNonEmptyString(entry.roomName, entry.room, meta.roomName, meta.room),
+            firstNonEmptyString(entry.zone, meta.zone)
+          ]
             .filter(Boolean)
             .join(' / ');
           const moduleStr = firstNonEmptyString(entry.module, meta.module);
@@ -10189,6 +10463,7 @@ function wireGlobalEvents() {
 
     // Fix ungrouped lights: show all devices not assigned to any group
     if (ungroupedList) {
+<<<<<<< HEAD
       const assignedSet = new Set(
         (STATE.groups || [])
           .flatMap((g) =>
@@ -10234,15 +10509,84 @@ function wireGlobalEvents() {
       });
       if (!selectedZone && setupLights.length === 0) {
         ungroupedList.innerHTML = '';
+=======
+      const { rawRoom, roomId, roomName, zone } = getSelectedGroupRoomZone();
+      const selectedRoom = roomId || roomName ? { id: roomId, name: roomName } : rawRoom;
+      const zoneValue = normZone(zone);
+      const hasRoom =
+        typeof selectedRoom === 'string'
+          ? !!selectedRoom.trim()
+          : !!(selectedRoom && (selectedRoom.id || selectedRoom.name));
+      const hasZone = !!zoneValue;
+      const roster = hasRoom && hasZone ? computeRostersForSelection(selectedRoom, zoneValue) : { assigned: [], ungrouped: [] };
+      const assignedIds = new Set((roster.assigned || []).map((entry) => entry.id).filter(Boolean));
+      const ungrouped = roster.ungrouped || [];
+      ungroupedList.innerHTML = '';
+      if (!hasRoom || !hasZone) {
+>>>>>>> d598849603e868e9992f57adbed9233a6939ca35
         if (ungroupedEmpty) {
           ungroupedEmpty.style.display = 'block';
           ungroupedEmpty.textContent = 'Select a room and zone to view configured lights.';
         }
+      } else if (!ungrouped.length) {
+        if (ungroupedEmpty) {
+          ungroupedEmpty.style.display = 'block';
+          const hasAnyCandidates = (roster.assigned || []).length > 0;
+          ungroupedEmpty.textContent = hasAnyCandidates
+            ? 'All lights are assigned to groups.'
+            : 'No lights found for this room and zone.';
+        }
       } else {
-        ungroupedList.innerHTML = ungrouped
-          .map((light) => `<li>${escapeHtml(resolveLightNameFromState(light.id, light))}</li>`)
-          .join('');
-        if (ungroupedEmpty) ungroupedEmpty.style.display = ungrouped.length ? 'none' : 'block';
+        if (ungroupedEmpty) ungroupedEmpty.style.display = 'none';
+        ungrouped.forEach((candidate) => {
+          if (!candidate?.id || assignedIds.has(candidate.id)) return;
+          const normalized = {
+            ...candidate,
+            deviceName: candidate.deviceName || resolveLightNameFromState(candidate.id, candidate),
+          };
+          if (!normalized.room && normalized.roomName) normalized.room = normalized.roomName;
+          if (!normalized.room && normalized.roomId) normalized.room = normalized.roomId;
+          if (!normalized.zone && candidate.zone) normalized.zone = candidate.zone;
+          if (!normalized.vendor && candidate.vendor) normalized.vendor = candidate.vendor;
+          if (!normalized.model && candidate.model) normalized.model = candidate.model;
+          const card = deviceCard(normalized, { compact: true });
+          try {
+            const cv = card.querySelector('.device-spectrum__canvas');
+            if (cv) {
+              const meta = getDeviceMeta(candidate.id) || {};
+              const isDynamic =
+                ['cwPct', 'wwPct', 'blPct', 'rdPct'].some((key) => candidate[key] !== undefined) ||
+                String(meta.spectrumMode || 'dynamic') === 'dynamic';
+              const mix = isDynamic
+                ? computeMixAndHex(group).mix
+                : (meta.factorySpectrum || (STATE.plans.find((p) => p.id === group.plan)?.spectrum) || {
+                    cw: 45,
+                    ww: 45,
+                    bl: 0,
+                    rd: 0,
+                  });
+              const spd = computeWeightedSPD({ cw: mix.cw || 0, ww: mix.ww || 0, bl: mix.bl || 0, rd: mix.rd || 0 }, {
+                deviceIds: [candidate.id],
+              });
+              renderSpectrumCanvas(cv, spd, { width: 300, height: 36 });
+              card.title = isDynamic ? 'Dynamic: using driver spectrum' : 'Static: using device factory spectrum';
+            }
+          } catch {}
+          const add = document.createElement('button');
+          add.type = 'button';
+          add.className = 'ghost';
+          add.textContent = 'Add to group';
+          add.style.marginTop = '6px';
+          add.addEventListener('click', async () => {
+            addLightToGroup(group, candidate, selectedRoom, zoneValue);
+            await saveGroups();
+            updateGroupUI(group);
+          });
+          const wrap = document.createElement('div');
+          wrap.appendChild(card);
+          wrap.appendChild(add);
+          ungroupedList.appendChild(wrap);
+        });
       }
     }
 
@@ -10256,6 +10600,7 @@ function wireGlobalEvents() {
   updateGroupPlanInfoCard(group);
   updateGroupLightInfoCard(group);
 
+<<<<<<< HEAD
     // Ungrouped lights list with Add buttons
     try {
       if (ungroupedList) {
@@ -10410,9 +10755,13 @@ function wireGlobalEvents() {
         }
       }
     } catch {}
+=======
+>>>>>>> d598849603e868e9992f57adbed9233a6939ca35
   }
   // Expose for callers outside this scope
   window.updateGroupUI = updateGroupUI;
+  window.computeRostersForSelection = computeRostersForSelection;
+  window.collectCandidatesForSelection = collectCandidatesForSelection;
 
   window.addEventListener('lightSetupsChanged', () => {
     try { seedGroupRoomZoneDropdowns(); } catch (e) { console.warn('Failed to reseed room/zone dropdowns after light setup change', e); }
