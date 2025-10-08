@@ -1,16 +1,14 @@
 {
   "rooms": [
     {
-      "id": "room-qbs9tv",
-      "name": "My farm - Room 1",
+      "id": "greenreach-room-1",
+      "name": "GreenReach Room 1",
       "location": "",
       "hardwareCats": [
-        "dehumidifier",
-        "light"
+        "dehumidifier"
       ],
       "hardwareOrder": [
-        "dehumidifier",
-        "light"
+        "dehumidifier"
       ],
       "layout": {
         "type": "",
@@ -23,11 +21,59 @@
       ],
       "fixtures": [
         {
-          "id": "fixture-1",
-          "vendor": "Gavita",
-          "model": "Pro 1700e",
-          "count": 4,
-          "zone": "Zone 1"
+          "id": "F00001",
+          "deviceName": "F00001",
+          "name": "GROW3 TopLight MH Model-300W-22G12",
+          "model": "Model-300W-22G12",
+          "vendor": "GROW3",
+          "watts": 300,
+          "type": "light",
+          "onOffStatus": 1,
+          "online": true
+        },
+        {
+          "id": "F00002",
+          "deviceName": "F00002",
+          "name": "GROW3 TopLight MH Model-300W-22G12",
+          "model": "Model-300W-22G12",
+          "vendor": "GROW3",
+          "watts": 300,
+          "type": "light",
+          "onOffStatus": 1,
+          "online": true
+        },
+        {
+          "id": "F00003",
+          "deviceName": "F00003",
+          "name": "GROW3 TopLight MH Model-300W-22G12",
+          "model": "Model-300W-22G12",
+          "vendor": "GROW3",
+          "watts": 300,
+          "type": "light",
+          "onOffStatus": 1,
+          "online": true
+        },
+        {
+          "id": "F00005",
+          "deviceName": "F00005",
+          "name": "GROW3 TopLight MH Model-300W-22G12",
+          "model": "Model-300W-22G12",
+          "vendor": "GROW3",
+          "watts": 300,
+          "type": "light",
+          "onOffStatus": 1,
+          "online": true
+        },
+        {
+          "id": "F00004",
+          "deviceName": "F00004",
+          "name": "GROW3 TopLight MH Model-300W-22G12",
+          "model": "Model-300W-22G12",
+          "vendor": "GROW3",
+          "watts": 300,
+          "type": "light",
+          "onOffStatus": 1,
+          "online": false
         }
       ],
       "controlMethod": null,
@@ -58,130 +104,25 @@
       },
       "seriesCount": 0,
       "category": {
-        "dehumidifier": {
-          "selectedEquipment": [
-            {
-              "category": "dehumidifier",
-              "vendor": "Quest",
-              "model": "Quest Dual 155",
-              "capacity": "155 pints/day",
-              "control": "WiFi",
-              "count": 2
-            }
-          ],
-          "wifi": false,
-          "wired": true,
-          "count": 2,
-          "manufacturer": "Quest",
-          "model": "Quest Dual 155"
-        },
         "light": {
           "selectedEquipment": [
             {
               "category": "light",
-              "vendor": "Gavita",
-              "model": "Pro 1700e",
-              "count": 4,
+              "vendor": "",
+              "model": "",
+              "count": 5,
               "zone": "Zone 1"
             }
           ]
-        }
-      },
-      "_categoryProgress": {
-        "2": {
-          "selectedEquipment": [
-            {
-              "category": "dehumidifier",
-              "vendor": "Quest",
-              "model": "Quest Dual 155",
-              "capacity": "155 pints/day",
-              "control": "WiFi",
-              "count": 2
-            }
-          ]
-        }
-      }
-    },
-    {
-      "id": "room-pek6ij",
-      "name": "My farm - Room 1",
-      "location": "",
-      "hardwareCats": [
-        "dehumidifier"
-      ],
-      "hardwareOrder": [
-        "dehumidifier"
-      ],
-      "layout": {
-        "type": "",
-        "rows": 0,
-        "racks": 0,
-        "levels": 0
-      },
-      "zones": [
-        "Zone 1"
-      ],
-      "fixtures": [],
-      "controlMethod": null,
-      "devices": [],
-      "sensors": {
-        "categories": [],
-        "placements": {}
-      },
-      "energy": "",
-      "energyHours": 0,
-      "targetPpfd": 0,
-      "photoperiod": 0,
-      "connectivity": {
-        "hasHub": null,
-        "hubType": "",
-        "hubIp": "",
-        "cloudTenant": "Azure"
-      },
-      "roles": {
-        "admin": [],
-        "operator": [],
-        "viewer": []
-      },
-      "grouping": {
-        "groups": [],
-        "planId": "",
-        "scheduleId": ""
-      },
-      "seriesCount": 0,
-      "category": {
+        },
         "dehumidifier": {
-          "selectedEquipment": [
-            {
-              "category": "dehumidifier",
-              "vendor": "Quest",
-              "model": "Quest Dual 155",
-              "capacity": "155 pints/day",
-              "control": "WiFi",
-              "count": 3
-            }
-          ],
+          "selectedEquipment": [],
           "wifi": false,
           "wired": false,
-          "count": 3,
-          "manufacturer": "Quest",
-          "model": "Quest Dual 155"
+          "count": 0
         }
       },
-      "_categoryProgress": {
-        "2": {
-          "selectedEquipment": [
-            {
-              "category": "dehumidifier",
-              "vendor": "Quest",
-              "model": "Quest Dual 155",
-              "capacity": "155 pints/day",
-              "control": "WiFi",
-              "count": 3
-            }
-          ]
-        }
-      }
+      "_categoryProgress": {}
     }
   ]
 }

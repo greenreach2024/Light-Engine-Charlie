@@ -1,72 +1,64 @@
 {
-  "rooms": [],
-  "locations": [],
-  "branding": {
-    "palette": {
-      "primary": "#0D7D7D",
-      "primaryHover": "#0B6E6E",
-      "primaryActive": "#0A6464",
-      "primarySoft": "#DBECEC",
-      "accent": "#64C7C7",
-      "accentHover": "#58AFAF",
-      "accentSoft": "#E8F7F7",
-      "background": "#F7FAFA",
-      "surface": "#F8FAFA",
-      "border": "#A5CECE",
-      "borderStrong": "#0F4C4C",
-      "borderSubtle": "#232424",
-      "text": "#111111",
-      "muted": "#909191",
-      "highlight": "#8BD5D5",
-      "onPrimary": "#FFFFFF",
-      "onAccent": "#111111",
-      "shadow": "0 1px 3px 0 rgba(13, 125, 125, 0.16), 0 1px 2px -1px rgba(13, 125, 125, 0.12)",
-      "shadowLg": "0 10px 15px -3px rgba(13, 125, 125, 0.22), 0 4px 6px -4px rgba(13, 125, 125, 0.14)",
-      "focusRing": "0 0 0 3px rgba(100, 199, 199, 0.35)"
-    },
-    "logo": "",
-    "tagline": "Growing with technology",
-    "fontFamily": "",
-    "fontCss": []
-  },
-  "name": "My farm",
-  "tagline": "Growing with technology",
-  "logo": "",
-  "farmName": "My farm",
-  "address": "King Street East",
-  "city": "Gananoque",
-  "state": "Ontario",
-  "postalCode": "K7G 2Y5",
-  "timezone": "America/Toronto",
-  "coordinates": {
-    "lat": 44.327912152483194,
-    "lng": -76.16342763728883
-  },
-  "contact": {
-    "name": "Pege",
-    "email": "info@greenreachfarms.com",
-    "phone": "6138881031",
-    "website": "https://www.stlawrencecollege.ca"
-  },
-  "connection": {
-    "type": "wifi",
-    "wifi": {
-      "ssid": "greenreach",
-      "reuseDiscovery": true,
-      "tested": true,
-      "testResult": {
-        "status": "connected",
-        "ip": "192.168.1.123",
-        "gateway": "192.168.1.1",
-        "latencyMs": 12
-      }
+  "farmName": "",
+  "location": {},
+  "rooms": [
+    {
+      "id": "room-g0slb6",
+      "name": "My farm - Room 1",
+      "location": "",
+      "hardwareCats": [
+        "dehumidifier"
+      ],
+      "hardwareOrder": [
+        "dehumidifier"
+      ],
+      "layout": {
+        "type": "",
+        "rows": 0,
+        "racks": 0,
+        "levels": 0
+      },
+      "zones": [
+        "Zone 1"
+      ],
+      "fixtures": [],
+      "controlMethod": null,
+      "devices": [],
+      "sensors": {
+        "categories": [],
+        "placements": {}
+      },
+      "energy": "",
+      "energyHours": 0,
+      "targetPpfd": 0,
+      "photoperiod": 0,
+      "connectivity": {
+        "hasHub": null,
+        "hubType": "",
+        "hubIp": "",
+        "cloudTenant": "Azure"
+      },
+      "roles": {
+        "admin": [],
+        "operator": [],
+        "viewer": []
+      },
+      "grouping": {
+        "groups": [],
+        "planId": "",
+        "scheduleId": ""
+      },
+      "seriesCount": 0,
+      "category": {
+        "dehumidifier": {
+          "selectedEquipment": [],
+          "wifi": false,
+          "wired": false,
+          "count": 0
+        }
+      },
+      "_categoryProgress": {}
     }
-  },
-  "discovery": {
-    "subnet": "192.168.1.0/24",
-    "gateway": "192.168.1.1",
-    "reuseNetwork": true,
-    "ssid": "greenreach"
-  },
-  "registered": "2025-10-01T19:42:13.578Z"
+  ],
+  "zones": []
 }
