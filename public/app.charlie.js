@@ -179,6 +179,19 @@ function collectRoomsFromState() {
   return farmRooms;
 }
 
+function updateGroupActionStates({ hasGroup = false, hasRoom = false, hasZone = false } = {}) {
+  const applyDisabled = !(hasGroup && hasRoom && hasZone);
+  const saveDisabled = !(hasRoom && hasZone);
+  ['grpApply', 'grpOn', 'grpOff'].forEach((id) => {
+    const btn = document.getElementById(id);
+    if (btn) btn.disabled = applyDisabled;
+  });
+  ['btnSaveGroup', 'btnGroupSave'].forEach((id) => {
+    const btn = document.getElementById(id);
+    if (btn) btn.disabled = saveDisabled;
+  });
+}
+
 function seedGroupRoomZoneDropdowns() {
   const roomSel = document.getElementById('groupRoomDropdown');
   const zoneSel = document.getElementById('groupZoneDropdown');
@@ -189,6 +202,7 @@ function seedGroupRoomZoneDropdowns() {
     if (!fixtureSummary) return;
     const roomId = roomSel.value;
     const zone = zoneSel.value;
+    updateGroupActionStates({ hasGroup: Boolean(STATE?.currentGroup), hasRoom: !!roomId, hasZone: !!zone });
     if (!roomId || !zone) {
       fixtureSummary.innerHTML = '<span style="color:#64748b;font-size:13px;">Select a room and zone to view lights.</span>';
       return;
@@ -219,10 +233,8 @@ function seedGroupRoomZoneDropdowns() {
 
   roomSel.innerHTML = '<option value="">Room</option>' + rooms.map(r => `<option value="${escapeHtml(r.id)}">${escapeHtml(r.name)}</option>`).join('');
 
-  const defaultRoomId = rooms.some(r => r.id === previousRoom) ? previousRoom : (rooms[0]?.id || '');
-  if (defaultRoomId) {
-    roomSel.value = defaultRoomId;
-  }
+  const preservedRoomId = rooms.some(r => r.id === previousRoom) ? previousRoom : '';
+  roomSel.value = preservedRoomId;
 
   const updateZones = (roomId, zoneToPreserve) => {
     const currentRooms = normaliseRooms();
@@ -10255,7 +10267,6 @@ function wireGlobalEvents() {
   });
   // Render the selected group's UI and helpers
   function updateGroupUI(group) {
-  debugger; // DEBUG: Entry to updateGroupUI
     // Local element lookups to avoid stale references
     const groupPlan = document.getElementById('groupPlan');
     const groupSchedule = document.getElementById('groupSchedule');
@@ -10269,98 +10280,55 @@ function wireGlobalEvents() {
     const ungroupedList = document.getElementById('ungroupedList');
     const ungroupedStatus = document.getElementById('ungroupedStatus');
     const ungroupedEmpty = document.getElementById('ungroupedEmpty');
+    const roomSel = document.getElementById('groupRoomDropdown');
+    const zoneSel = document.getElementById('groupZoneDropdown');
+    const selectedRoomValue = roomSel?.value || '';
+    const selectedZoneValue = zoneSel?.value || '';
+
+    const { roomId: selectedRoomId, roomName: selectedRoomName, zone: selectedZone } = getSelectedGroupRoomZone();
+    const hasRoomSelection = !!(selectedRoomValue && selectedRoomValue.trim());
+    const hasZoneSelection = !!(selectedZoneValue && selectedZoneValue.trim());
+    const hasFilters = hasRoomSelection && hasZoneSelection;
+
+    const filteredLights = hasFilters
+      ? (group.lights || [])
+          .map((entry, idx) => normalizeGroupLightEntry(entry, idx))
+          .filter((entry) => {
+            if (!entry || !entry.id) return false;
+            if (entry.type && entry.type !== 'Light') return false;
+            if (/mock|demo/i.test(entry.id)) return false;
+            const room = (entry.room || entry.roomId || '').toString().trim().toLowerCase();
+            const zone = (entry.zone || '').toString().trim().toLowerCase();
+            const selRoomId = (selectedRoomId || '').toString().trim().toLowerCase();
+            const selRoomName = (selectedRoomName || '').toString().trim().toLowerCase();
+            const selZone = (selectedZone || '').toString().trim().toLowerCase();
+            return (room === selRoomId || room === selRoomName) && zone === selZone;
+          })
+      : [];
+
+    updateGroupActionStates({
+      hasGroup: Boolean(group),
+      hasRoom: hasRoomSelection,
+      hasZone: hasZoneSelection,
+    });
 
     if (!group) {
       if (groupPlan) groupPlan.value = '';
       if (groupSchedule) groupSchedule.value = '';
-      if (schedulePreview) schedulePreview.innerHTML='';
-      if (spectrumPreview) spectrumPreview.innerHTML='';
-      if (chipsHost) chipsHost.querySelectorAll('.chip[data-kind]').forEach(n=>n.remove());
+      if (schedulePreview) schedulePreview.innerHTML = '';
+      if (spectrumPreview) spectrumPreview.innerHTML = '';
+      if (chipsHost) chipsHost.querySelectorAll('.chip[data-kind]').forEach((n) => n.remove());
       if (groupsStatus) groupsStatus.textContent = '';
       if (groupName) groupName.value = '';
-      if (ungroupedList) {
-<<<<<<< HEAD
-        // Repopulate ungrouped lights: show all real, unassigned lights for selected room/zone, even if room/zone is not set
-        const assignedSet = new Set(
-          (STATE.groups || [])
-            .flatMap((g) =>
-              (g.lights || [])
-                .map((entry) => (typeof entry === 'string' ? entry : entry?.id || ''))
-                .filter(Boolean)
-            )
-        );
-        const merged = new Map();
-        (STATE.devices || []).forEach((device) => {
-          if (
-            device && device.id && !merged.has(device.id)
-            && device.type === 'Light'
-            && !/mock|demo/i.test(device.id)
-          ) {
-            merged.set(device.id, device);
-          }
-        });
-        if (STATE.deviceMeta && typeof STATE.deviceMeta === 'object') {
-          Object.keys(STATE.deviceMeta).forEach((id) => {
-            const metaDevice = buildDeviceLikeFromMeta(id);
-            if (
-              metaDevice && metaDevice.id && !merged.has(metaDevice.id)
-              && metaDevice.type === 'Light'
-              && !/mock|demo/i.test(metaDevice.id)
-            ) {
-              merged.set(metaDevice.id, metaDevice);
-            }
-          });
-        }
-        // Show all unassigned lights for the selected room/zone, or all if no selection
-        const { rawRoom: selectedRoomValue, roomId: selectedRoomId, roomName: selectedRoomName, zone: selectedZone } =
-          getSelectedGroupRoomZone();
-  let ungrouped = Array.from(merged.values()).filter((device) => device.id && !assignedSet.has(device.id));
-  debugger; // DEBUG: ungrouped lights calculation
-  debugger; // DEBUG: Entry to collectSetupLightsForRoomZone
-  debugger; // DEBUG: Entry to renderLightSetups
-  debugger; // DEBUG: Entry to renderLightSetupSummary
-        if (selectedRoomValue || selectedRoomId || selectedRoomName || selectedZone) {
-          const selRoom = (selectedRoomValue || selectedRoomId || selectedRoomName || '').toString().trim().toLowerCase();
-          const selZone = (selectedZone || '').toString().trim().toLowerCase();
-          ungrouped = ungrouped.filter(device => {
-            const room = (device.room || device.roomId || '').toString().trim().toLowerCase();
-            const zone = (device.zone || '').toString().trim().toLowerCase();
-            return (!selRoom || room === selRoom) && (!selZone || zone === selZone);
-          });
-=======
-        const { rawRoom, roomId, roomName, zone } = getSelectedGroupRoomZone();
-        const selectedRoom = roomId || roomName ? { id: roomId, name: roomName } : rawRoom;
-        const zoneValue = normZone(zone);
-        const hasRoom =
-          typeof selectedRoom === 'string'
-            ? !!selectedRoom.trim()
-            : !!(selectedRoom && (selectedRoom.id || selectedRoom.name));
-        const hasZone = !!zoneValue;
-        const roster = hasRoom && hasZone ? computeRostersForSelection(selectedRoom, zoneValue) : { ungrouped: [] };
-        const ungrouped = roster.ungrouped || [];
-        if (!hasRoom || !hasZone) {
-          ungroupedList.innerHTML = '';
-          if (ungroupedEmpty) {
-            ungroupedEmpty.style.display = 'block';
-            ungroupedEmpty.textContent = 'Select a room and zone to view configured lights.';
-          }
-        } else if (!ungrouped.length) {
-          ungroupedList.innerHTML = '';
-          if (ungroupedEmpty) {
-            ungroupedEmpty.style.display = 'block';
-            ungroupedEmpty.textContent = 'All lights are assigned to groups.';
-          }
-        } else {
-          ungroupedList.innerHTML = ungrouped
-            .map((light) => `<li>${escapeHtml(resolveLightNameFromState(light.id, light))}</li>`)
-            .join('');
-          if (ungroupedEmpty) ungroupedEmpty.style.display = 'none';
->>>>>>> d598849603e868e9992f57adbed9233a6939ca35
-        }
-        ungroupedList.innerHTML = ungrouped
-          .map((light) => `<li>${escapeHtml(resolveLightNameFromState(light.id, light))}</li>`)
-          .join('');
-        if (ungroupedEmpty) ungroupedEmpty.style.display = ungrouped.length ? 'none' : 'block';
+      if (groupRosterBody) groupRosterBody.innerHTML = '';
+      if (groupRosterEmpty) {
+        groupRosterEmpty.style.display = 'block';
+        groupRosterEmpty.textContent = 'Select a group to view members.';
+      }
+      if (ungroupedList) ungroupedList.innerHTML = '';
+      if (ungroupedEmpty) {
+        ungroupedEmpty.style.display = 'block';
+        ungroupedEmpty.textContent = 'Select a room and zone to view configured lights.';
       }
       if (ungroupedStatus) ungroupedStatus.textContent = '';
       updateGroupPlanInfoCard(null);
@@ -10403,37 +10371,27 @@ function wireGlobalEvents() {
     // Spectrum preview driven by HUD (with green split + master scaling if locked)
     renderGroupSpectrumPreview(group);
     // Meta status: roster count and online
-    try {
-      const ids = (group.lights || [])
-        .map((entry) => (typeof entry === 'string' ? entry : entry?.id || ''))
-        .filter(Boolean);
-      const targets = ids
-        .map((id) => STATE.devices.find((d) => d.id === id) || buildDeviceLikeFromMeta(id))
-        .filter(Boolean);
-      const online = targets.filter((d) => d && d.online !== false).length;
-      const planName = STATE.plans.find(p=>p.id===group.plan)?.name || '—';
-      const schedName = STATE.schedules.find(s=>s.id===group.schedule)?.name || '—';
-      if (groupsStatus) groupsStatus.textContent = `${ids.length} light(s) • ${online} online • Plan: ${planName} • Schedule: ${schedName}`;
-    } catch {}
+    if (groupsStatus) {
+      if (!hasFilters) {
+        groupsStatus.textContent = 'Select a room and zone to preview this group.';
+      } else {
+        try {
+          const filteredIds = filteredLights.map((entry) => entry.id).filter(Boolean);
+          const targets = filteredIds
+            .map((id) => STATE.devices.find((d) => d.id === id) || buildDeviceLikeFromMeta(id))
+            .filter(Boolean);
+          const online = targets.filter((d) => d && d.online !== false).length;
+          const planName = STATE.plans.find((p) => p.id === group.plan)?.name || '—';
+          const schedName = STATE.schedules.find((s) => s.id === group.schedule)?.name || '—';
+          groupsStatus.textContent = `${filteredLights.length} light(s) • ${online} online • Plan: ${planName} • Schedule: ${schedName}`;
+        } catch {
+          groupsStatus.textContent = 'Select a room and zone to preview this group.';
+        }
+      }
+    }
     // Roster
     if (groupRosterBody) {
-      // Only show lights that are explicitly in group.lights, are real lights, and not mock/demo
-      const { roomId: selectedRoomId, roomName: selectedRoomName, zone: selectedZone } = getSelectedGroupRoomZone();
-      const normalizedLights = (group.lights || [])
-        .map((entry, idx) => normalizeGroupLightEntry(entry, idx))
-        .filter((entry) => {
-          if (!entry || !entry.id) return false;
-          if (entry.type && entry.type !== 'Light') return false;
-          if (/mock|demo/i.test(entry.id)) return false;
-          // Normalize room/zone for comparison
-          const room = (entry.room || entry.roomId || '').toString().trim().toLowerCase();
-          const zone = (entry.zone || '').toString().trim().toLowerCase();
-          const selRoomId = (selectedRoomId || '').toString().trim().toLowerCase();
-          const selRoomName = (selectedRoomName || '').toString().trim().toLowerCase();
-          const selZone = (selectedZone || '').toString().trim().toLowerCase();
-          return (room === selRoomId || room === selRoomName) && zone === selZone;
-        });
-      const rows = normalizedLights
+      const rows = filteredLights
         .map((entry) => {
           const id = entry.id;
           if (!id) return '';
@@ -10455,61 +10413,20 @@ function wireGlobalEvents() {
         .join('');
       groupRosterBody.innerHTML = rows;
     }
-    const rosterCount = (group.lights || []).filter((entry) => {
-      const id = typeof entry === 'string' ? entry : entry?.id;
-      return !!id;
-    }).length;
-    if (groupRosterEmpty) groupRosterEmpty.style.display = rosterCount ? 'none' : 'block';
+    if (groupRosterEmpty) {
+      if (!hasFilters) {
+        groupRosterEmpty.style.display = 'block';
+        groupRosterEmpty.textContent = 'Select a room and zone to view this group.';
+      } else if (filteredLights.length) {
+        groupRosterEmpty.style.display = 'none';
+      } else {
+        groupRosterEmpty.style.display = 'block';
+        groupRosterEmpty.textContent = 'No lights in this group for the selected room and zone.';
+      }
+    }
 
     // Fix ungrouped lights: show all devices not assigned to any group
     if (ungroupedList) {
-<<<<<<< HEAD
-      const assignedSet = new Set(
-        (STATE.groups || [])
-          .flatMap((g) =>
-            (g.lights || [])
-              .map((entry) => (typeof entry === 'string' ? entry : entry?.id || ''))
-              .filter(Boolean)
-          )
-      );
-      const merged = new Map();
-      (STATE.devices || []).forEach((device) => {
-        if (device && device.id && !merged.has(device.id)) {
-          merged.set(device.id, device);
-        }
-      });
-      if (STATE.deviceMeta && typeof STATE.deviceMeta === 'object') {
-        Object.keys(STATE.deviceMeta).forEach((id) => {
-          const metaDevice = buildDeviceLikeFromMeta(id);
-          if (metaDevice && metaDevice.id && !merged.has(metaDevice.id)) {
-            merged.set(metaDevice.id, metaDevice);
-          }
-        });
-      }
-      const { rawRoom: selectedRoomValue, roomId: selectedRoomId, roomName: selectedRoomName, zone: selectedZone } =
-        getSelectedGroupRoomZone();
-      const setupLights = collectSetupLightsForRoomZone(
-        selectedRoomValue || selectedRoomId || selectedRoomName,
-        selectedZone
-      );
-      setupLights.forEach((light) => {
-        if (light && light.id && !merged.has(light.id)) {
-          merged.set(light.id, light);
-        }
-      });
-      // Only show ungrouped lights for the selected room/zone
-      const ungrouped = Array.from(merged.values()).filter((device) => {
-        if (!device.id || assignedSet.has(device.id)) return false;
-        const room = (device.room || device.roomId || '').toString().trim().toLowerCase();
-        const zone = (device.zone || '').toString().trim().toLowerCase();
-        const selRoomId = (selectedRoomId || '').toString().trim().toLowerCase();
-        const selRoomName = (selectedRoomName || '').toString().trim().toLowerCase();
-        const selZone = (selectedZone || '').toString().trim().toLowerCase();
-        return (room === selRoomId || room === selRoomName) && zone === selZone;
-      });
-      if (!selectedZone && setupLights.length === 0) {
-        ungroupedList.innerHTML = '';
-=======
       const { rawRoom, roomId, roomName, zone } = getSelectedGroupRoomZone();
       const selectedRoom = roomId || roomName ? { id: roomId, name: roomName } : rawRoom;
       const zoneValue = normZone(zone);
@@ -10523,7 +10440,6 @@ function wireGlobalEvents() {
       const ungrouped = roster.ungrouped || [];
       ungroupedList.innerHTML = '';
       if (!hasRoom || !hasZone) {
->>>>>>> d598849603e868e9992f57adbed9233a6939ca35
         if (ungroupedEmpty) {
           ungroupedEmpty.style.display = 'block';
           ungroupedEmpty.textContent = 'Select a room and zone to view configured lights.';
@@ -10588,175 +10504,24 @@ function wireGlobalEvents() {
           ungroupedList.appendChild(wrap);
         });
       }
-    }
-
-    // Removed rendering of light cards in group card as requested.
-    // Initialize HUD from plan when switching groups
-  const plan = STATE.plans.find(p => p.id === group?.plan);
-  const spec = plan?.spectrum || { cw: 45, ww: 45, bl: 0, rd: 0 };
-  setHUD({ master: 60, ...spec });
-  // After seeding HUD, render preview
-  renderGroupSpectrumPreview(group);
-  updateGroupPlanInfoCard(group);
-  updateGroupLightInfoCard(group);
-
-<<<<<<< HEAD
-    // Ungrouped lights list with Add buttons
-    try {
-      if (ungroupedList) {
-        const assigned = new Set(
-          (STATE.groups || [])
-            .flatMap((g) =>
-              (g.lights || [])
-                .map((entry) => (typeof entry === 'string' ? entry : entry?.id || ''))
-                .filter(Boolean)
-            )
-        );
-        const liveLights = (STATE.devices || []).filter(
-          (d) => d && (d.type === 'light' || /light|fixture/i.test(String(d.deviceName || d.name || '')))
-        );
-        const metaLights = Object.keys(STATE.deviceMeta || {})
-          .map((id) => buildDeviceLikeFromMeta(id))
-          .filter(
-            (d) =>
-              d &&
-              (d.type === 'light' || /light|fixture/i.test(String(d.deviceName || d.name || '')))
-          );
-        const { rawRoom: selectedRoomValue, roomId: selectedRoomId, roomName: selectedRoomName, zone: selectedZone } =
-          getSelectedGroupRoomZone();
-        const setupLights = collectSetupLightsForRoomZone(
-          selectedRoomValue || selectedRoomId || selectedRoomName,
-          selectedZone
-        );
-        // Merge live and setup lights, dedup by id
-        const allLightsMap = new Map();
-        liveLights.forEach((l) => { if (l && l.id) allLightsMap.set(l.id, l); });
-        metaLights.forEach((l) => { if (l && l.id && !allLightsMap.has(l.id)) allLightsMap.set(l.id, l); });
-        setupLights.forEach(l => allLightsMap.set(l.id, l));
-        const mergedLights = Array.from(allLightsMap.values());
-        const ungrouped = mergedLights.filter(d => !assigned.has(d.id));
-        ungroupedList.innerHTML = '';
-        if ((!selectedZone && setupLights.length === 0) || !ungrouped.length) {
-          if (ungroupedEmpty) {
-            ungroupedEmpty.style.display = 'block';
-            if (!selectedZone && setupLights.length === 0) {
-              ungroupedEmpty.textContent = 'Select a room and zone to view configured lights.';
-            } else {
-              const hasAnyKnown = mergedLights.length > 0;
-              ungroupedEmpty.textContent = hasAnyKnown ? 'All lights are assigned to groups.' : 'No known lights yet. Pair devices or add them in Farm/Rooms.';
-            }
-          }
+      if (ungroupedStatus) {
+        if (!hasRoom || !hasZone) {
+          ungroupedStatus.textContent = 'Select a room and zone';
         } else {
-          if (ungroupedEmpty) ungroupedEmpty.style.display = 'none';
-          ungrouped.forEach(d => {
-            const normalized = { ...d, deviceName: d.deviceName || resolveLightNameFromState(d.id, d) };
-            if (!normalized.room && normalized.roomName) normalized.room = normalized.roomName;
-            if (!normalized.room && normalized.roomId) normalized.room = normalized.roomId;
-            if (!normalized.zone && d.zone) normalized.zone = d.zone;
-            if (!normalized.vendor && d.vendor) normalized.vendor = d.vendor;
-            if (!normalized.model && d.model) normalized.model = d.model;
-            const card = deviceCard(normalized, { compact: true });
-            // Apply spectrum canvas coloring similar to group roster
-            try {
-              const cv = card.querySelector('.device-spectrum__canvas');
-              if (cv) {
-                const meta = getDeviceMeta(d.id) || {};
-                const isDynamic = ['cwPct','wwPct','blPct','rdPct'].some(k => d[k] !== undefined) || String(meta.spectrumMode||'dynamic')==='dynamic';
-                const mix = isDynamic
-                  ? computeMixAndHex(group).mix
-                  : (meta.factorySpectrum || (STATE.plans.find(p=>p.id===group.plan)?.spectrum) || { cw:45, ww:45, bl:0, rd:0 });
-                const spd = computeWeightedSPD({ cw: mix.cw||0, ww: mix.ww||0, bl: mix.bl||0, rd: mix.rd||0 }, { deviceIds: [d.id] });
-                renderSpectrumCanvas(cv, spd, { width: 300, height: 36 });
-                card.title = isDynamic ? 'Dynamic: using driver spectrum' : 'Static: using device factory spectrum';
-              }
-            } catch {}
-            // Edit button for room/zone assignment
-            const edit = document.createElement('button');
-            edit.type = 'button'; edit.className = 'ghost'; edit.textContent = 'Edit';
-            edit.style.marginTop = '6px';
-            edit.addEventListener('click', () => {
-              // Create dropdowns for room and zone
-              const rooms = (STATE.rooms || []).map(r => ({ id: r.id, name: r.name, zones: r.zones || [] }));
-              const editDiv = document.createElement('div');
-              editDiv.style.marginTop = '8px';
-              const roomSel = document.createElement('select');
-              roomSel.innerHTML = rooms.map(r => `<option value="${r.id}"${(normalized.roomId === r.id || normalized.room === r.id) ? ' selected' : ''}>${r.name}</option>`).join('');
-              const zoneSel = document.createElement('select');
-              let currentZones = rooms.find(r => r.id === (normalized.roomId || normalized.room))?.zones || [];
-              zoneSel.innerHTML = currentZones.map(z => `<option value="${z}"${normalized.zone === z ? ' selected' : ''}>${z}</option>`).join('');
-              roomSel.addEventListener('change', () => {
-                const selectedRoom = rooms.find(r => r.id === roomSel.value);
-                zoneSel.innerHTML = (selectedRoom?.zones || []).map(z => `<option value="${z}">${z}</option>`).join('');
-              });
-              const saveBtn = document.createElement('button');
-              saveBtn.type = 'button'; saveBtn.className = 'primary'; saveBtn.textContent = 'Save';
-              saveBtn.onclick = async () => {
-                // Update STATE.devices
-                const dev = (STATE.devices || []).find(dev => dev.id === d.id);
-                if (dev) {
-                  dev.room = roomSel.value;
-                  dev.roomId = roomSel.value;
-                  dev.zone = zoneSel.value;
-                  await saveJSON('./data/devices.nedb', { devices: STATE.devices });
-                  showToast({ title: 'Light updated', msg: 'Room and zone updated.', kind: 'success', icon: '💡' });
-                  updateGroupUI(group);
-                }
-              };
-              editDiv.appendChild(roomSel);
-              editDiv.appendChild(zoneSel);
-              editDiv.appendChild(saveBtn);
-              card.appendChild(editDiv);
-            });
-            // Add to group button
-            const add = document.createElement('button');
-            add.type = 'button'; add.className = 'ghost'; add.textContent = 'Add to group';
-            add.style.marginTop = '6px';
-            add.addEventListener('click', async () => {
-              group.lights = group.lights || [];
-              // Only allow assignment if light matches selected room/zone
-              const room = (normalized.room || normalized.roomId || '').toString().trim().toLowerCase();
-              const zone = (normalized.zone || '').toString().trim().toLowerCase();
-              const selRoomId = (selectedRoomId || '').toString().trim().toLowerCase();
-              const selRoomName = (selectedRoomName || '').toString().trim().toLowerCase();
-              const selZone = (selectedZone || '').toString().trim().toLowerCase();
-              if ((room === selRoomId || room === selRoomName) && zone === selZone) {
-                if (!group.lights.some(x => x.id === d.id)) {
-                  group.lights.push({
-                    id: d.id,
-                    name: normalized.deviceName || d.id,
-                    deviceName: normalized.deviceName || d.id,
-                    vendor: normalized.vendor || '',
-                    model: normalized.model || '',
-                    room: normalized.room || normalized.roomName || '',
-                    roomId: normalized.roomId || '',
-                    zone: normalized.zone || '',
-                    source: normalized.source || d.source || '',
-                    setupId: normalized.setupId || d.setupId || null,
-                    fixtureId: normalized.fixtureId || d.fixtureId || null,
-                  });
-                }
-                await saveGroups();
-                updateGroupUI(group);
-              } else {
-                showToast({ title: 'Assignment Error', msg: 'Light does not match selected room/zone.', kind: 'warn', icon: '🚫' });
-              }
-            });
-            const wrap = document.createElement('div');
-            wrap.appendChild(card); wrap.appendChild(edit); wrap.appendChild(add);
-            ungroupedList.appendChild(wrap);
-          });
-        }
-        if (ungroupedStatus) {
-          if (!selectedZone && setupLights.length === 0) {
-            ungroupedStatus.textContent = 'Select a room and zone';
-          } else {
-            ungroupedStatus.textContent = `${ungrouped.length} ungrouped`;
-          }
+          ungroupedStatus.textContent = `${ungrouped.length} ungrouped`;
         }
       }
-    } catch {}
-=======
->>>>>>> d598849603e868e9992f57adbed9233a6939ca35
+    }
+    // Removed rendering of light cards in group card as requested.
+    // Initialize HUD from plan when switching groups
+    const plan = STATE.plans.find(p => p.id === group?.plan);
+    const spec = plan?.spectrum || { cw: 45, ww: 45, bl: 0, rd: 0 };
+    setHUD({ master: 60, ...spec });
+    // After seeding HUD, render preview
+    renderGroupSpectrumPreview(group);
+    updateGroupPlanInfoCard(group);
+    updateGroupLightInfoCard(group);
+
   }
   // Expose for callers outside this scope
   window.updateGroupUI = updateGroupUI;
