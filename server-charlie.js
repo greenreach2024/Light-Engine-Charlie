@@ -32,6 +32,7 @@ const ENV_PATH = path.resolve("./public/data/env.json");
 const DATA_DIR = path.resolve("./public/data");
 const FARM_PATH = path.join(DATA_DIR, 'farm.json');
 const CONTROLLER_PATH = path.join(DATA_DIR, 'controller.json');
+const GROUPS_PATH = path.join(DATA_DIR, 'groups.json');
 const UI_DATA_RESOURCES = new Map([
   ['farm', 'farm.json'],
   ['groups', 'groups.json'],
@@ -49,6 +50,125 @@ function ensureDataDir() {
 }
 function ensureDbDir(){ try { fs.mkdirSync(DB_DIR, { recursive: true }); } catch {} }
 function isHttpUrl(u){ try { const x=new URL(u); return x.protocol==='http:'||x.protocol==='https:'; } catch { return false; } }
+
+function loadGroupsFile() {
+  ensureDataDir();
+  try {
+    if (!fs.existsSync(GROUPS_PATH)) return [];
+    const raw = JSON.parse(fs.readFileSync(GROUPS_PATH, 'utf8'));
+    if (Array.isArray(raw)) return raw;
+    if (raw && Array.isArray(raw.groups)) return raw.groups;
+    return [];
+  } catch (err) {
+    console.warn('[groups] Failed to read groups.json:', err.message);
+    return [];
+  }
+}
+
+function saveGroupsFile(groups) {
+  ensureDataDir();
+  try {
+    const payload = JSON.stringify({ groups }, null, 2);
+    fs.writeFileSync(GROUPS_PATH, payload);
+    return true;
+  } catch (err) {
+    console.error('[groups] Failed to write groups.json:', err.message);
+    return false;
+  }
+}
+
+function normalizeMemberEntry(entry) {
+  if (entry == null) return null;
+  if (typeof entry === 'string') {
+    const id = entry.trim();
+    return id ? { id } : null;
+  }
+  if (typeof entry === 'object') {
+    const copy = { ...entry };
+    const idCandidate = [copy.id, copy.device_id, copy.deviceId, copy.deviceID]
+      .map((value) => (typeof value === 'string' ? value.trim() : ''))
+      .find((value) => !!value);
+    if (!idCandidate) return null;
+    copy.id = idCandidate;
+    delete copy.device_id;
+    delete copy.deviceId;
+    delete copy.deviceID;
+    return copy;
+  }
+  return null;
+}
+
+function normalizeGroupForResponse(group) {
+  if (!group || typeof group !== 'object') return null;
+  const id = typeof group.id === 'string' ? group.id.trim() : '';
+  const name = typeof group.name === 'string' ? group.name.trim() : '';
+  const matchRaw = group.match && typeof group.match === 'object' ? group.match : null;
+  const room = matchRaw ? String(matchRaw.room ?? '').trim() : '';
+  const zone = matchRaw ? String(matchRaw.zone ?? '').trim() : '';
+  const hasMatch = !!(room && zone);
+  const membersSource = Array.isArray(group.members) ? group.members : Array.isArray(group.lights) ? group.lights : [];
+  const members = membersSource.map(normalizeMemberEntry).filter(Boolean);
+
+  const response = { id, name };
+  if (typeof group.plan === 'string' && group.plan.trim()) response.plan = group.plan.trim();
+  if (typeof group.schedule === 'string' && group.schedule.trim()) response.schedule = group.schedule.trim();
+  if (group.pendingSpectrum && typeof group.pendingSpectrum === 'object') response.pendingSpectrum = group.pendingSpectrum;
+
+  if (hasMatch) {
+    response.match = { room, zone };
+  } else {
+    response.members = members;
+  }
+  return response;
+}
+
+function parseIncomingGroup(raw) {
+  if (!raw || typeof raw !== 'object') throw new Error('Group payload must be an object.');
+  const id = String(raw.id ?? raw.groupId ?? '').trim();
+  if (!id) throw new Error('Group id is required.');
+  const name = typeof raw.name === 'string' ? raw.name.trim() : '';
+
+  const matchRaw = raw.match && typeof raw.match === 'object' ? raw.match : null;
+  const matchRoom = matchRaw ? String(matchRaw.room ?? '').trim() : '';
+  const matchZone = matchRaw ? String(matchRaw.zone ?? '').trim() : '';
+  const hasMatch = !!(matchRoom && matchZone);
+
+  const membersSource = Array.isArray(raw.members) ? raw.members : Array.isArray(raw.lights) ? raw.lights : [];
+  const members = membersSource.map(normalizeMemberEntry).filter(Boolean);
+  const hasMembers = members.length > 0;
+
+  if (hasMatch && hasMembers) throw new Error('Group cannot include both match and members.');
+  if (!hasMatch && !hasMembers) throw new Error('Group requires match.room + match.zone or a non-empty members[] list.');
+
+  const stored = { ...raw, id, name };
+  if (typeof stored.plan === 'string') stored.plan = stored.plan.trim();
+  if (typeof stored.schedule === 'string') stored.schedule = stored.schedule.trim();
+  if (!stored.plan) delete stored.plan;
+  if (!stored.schedule) delete stored.schedule;
+
+  if (hasMatch) {
+    stored.match = { room: matchRoom, zone: matchZone };
+    stored.lights = [];
+  } else {
+    delete stored.match;
+    stored.lights = members;
+  }
+  delete stored.members;
+
+  const response = { id, name };
+  if (stored.plan) response.plan = stored.plan;
+  if (stored.schedule) response.schedule = stored.schedule;
+  if (stored.pendingSpectrum && typeof stored.pendingSpectrum === 'object') {
+    response.pendingSpectrum = stored.pendingSpectrum;
+  }
+  if (hasMatch) {
+    response.match = { room: matchRoom, zone: matchZone };
+  } else {
+    response.members = members;
+  }
+
+  return { stored, response };
+}
 function loadControllerFromDisk(){
   try {
     if (fs.existsSync(CONTROLLER_PATH)) {
@@ -2747,6 +2867,58 @@ app.post("/data/:name", (req, res) => {
     return res.json({ ok: true });
   } catch (e) {
     return res.status(500).json({ ok: false, error: e.message });
+  }
+});
+
+app.options('/groups', (req, res) => { setCors(req, res); res.status(204).end(); });
+app.options('/groups/:id', (req, res) => { setCors(req, res); res.status(204).end(); });
+
+app.get('/groups', (req, res) => {
+  setCors(req, res);
+  try {
+    const groups = loadGroupsFile().map(normalizeGroupForResponse).filter(Boolean);
+    return res.json({ ok: true, groups });
+  } catch (err) {
+    return res.status(500).json({ ok: false, error: err.message });
+  }
+});
+
+app.post('/groups', (req, res) => {
+  setCors(req, res);
+  const body = req.body ?? {};
+  const incoming = Array.isArray(body.groups) ? body.groups : (Array.isArray(body) ? body : null);
+  if (!Array.isArray(incoming)) {
+    return res.status(400).json({ ok: false, error: 'Expected { groups: [...] } payload.' });
+  }
+  try {
+    const parsed = incoming.map(parseIncomingGroup);
+    const stored = parsed.map((item) => item.stored);
+    if (!saveGroupsFile(stored)) {
+      return res.status(500).json({ ok: false, error: 'Failed to persist groups.' });
+    }
+    return res.json({ ok: true, groups: parsed.map((item) => item.response) });
+  } catch (err) {
+    return res.status(400).json({ ok: false, error: err.message });
+  }
+});
+
+app.put('/groups/:id', (req, res) => {
+  setCors(req, res);
+  const id = String(req.params.id || '').trim();
+  if (!id) return res.status(400).json({ ok: false, error: 'Group id is required.' });
+  const existing = loadGroupsFile();
+  const idx = existing.findIndex((group) => String(group?.id || '').trim() === id);
+  if (idx === -1) return res.status(404).json({ ok: false, error: `Group '${id}' not found.` });
+  try {
+    const merged = { ...req.body, id };
+    const { stored, response } = parseIncomingGroup(merged);
+    existing[idx] = stored;
+    if (!saveGroupsFile(existing)) {
+      return res.status(500).json({ ok: false, error: 'Failed to persist groups.' });
+    }
+    return res.json({ ok: true, group: response });
+  } catch (err) {
+    return res.status(400).json({ ok: false, error: err.message });
   }
 });
 
