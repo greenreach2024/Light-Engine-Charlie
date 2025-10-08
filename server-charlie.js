@@ -7,6 +7,7 @@ import path from "path";
 import { fileURLToPath } from 'url';
 import Datastore from 'nedb-promises';
 import crypto from 'crypto';
+import net from 'node:net';
 import AutomationRulesEngine from './lib/automation-engine.js';
 import { createPreAutomationLayer } from './automation/index.js';
 import {
@@ -17,7 +18,9 @@ import {
 } from './server/wizards/index.js';
 
 const app = express();
-const PORT = Number.parseInt(process.env.PORT ?? '', 10) || 8091;
+const parsedPort = Number.parseInt(process.env.PORT ?? '', 10);
+const hasExplicitPort = Number.isFinite(parsedPort);
+let PORT = hasExplicitPort ? parsedPort : 8091;
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
@@ -5409,11 +5412,111 @@ app.use((req, res) => {
   });
 });
 
-// Start the server after all routes are defined when executed directly
-if (process.argv[1] === __filename) {
-  app.listen(PORT, () => {
+function tryListenOnPort(port, host) {
+  return new Promise((resolve, reject) => {
+    const tester = net.createServer();
+
+    const onError = (error) => {
+      tester.removeListener('listening', onListening);
+      try {
+        tester.close();
+      } catch {}
+      reject(error);
+    };
+
+    const onListening = () => {
+      tester.removeListener('error', onError);
+      tester.close(() => resolve(true));
+    };
+
+    tester.once('error', onError);
+    tester.once('listening', onListening);
+
+    tester.listen({ port, host, exclusive: true });
+  });
+}
+
+async function isPortAvailable(port) {
+  if (port === 0) return true; // allow OS to choose a port
+  try {
+    await tryListenOnPort(port, '::');
+    return true;
+  } catch (error) {
+    if (error && (error.code === 'EADDRNOTAVAIL' || error.code === 'EAFNOSUPPORT')) {
+      try {
+        await tryListenOnPort(port, '0.0.0.0');
+        return true;
+      } catch (ipv4Error) {
+        if (ipv4Error && (ipv4Error.code === 'EADDRINUSE' || ipv4Error.code === 'EACCES')) {
+          return false;
+        }
+        throw ipv4Error;
+      }
+    }
+    if (error && (error.code === 'EADDRINUSE' || error.code === 'EACCES')) {
+      return false;
+    }
+    throw error;
+  }
+}
+
+async function resolveAvailablePort(initialPort) {
+  if (hasExplicitPort || initialPort === 0) {
+    return initialPort;
+  }
+
+  let candidate = initialPort;
+  const maxAttempts = 10;
+  for (let attempt = 0; attempt < maxAttempts; attempt += 1) {
+    if (await isPortAvailable(candidate)) {
+      if (candidate !== initialPort) {
+        console.warn(`[charlie] Port ${initialPort} in use, falling back to ${candidate}.`);
+      }
+      return candidate;
+    }
+    candidate += 1;
+  }
+
+  const error = new Error(`Unable to find an open port starting at ${initialPort}`);
+  error.code = 'EADDRINUSE';
+  throw error;
+}
+
+async function startServer() {
+  try {
+    const resolvedPort = await resolveAvailablePort(PORT);
+    PORT = resolvedPort;
+  } catch (error) {
+    if (error && error.code === 'EADDRINUSE') {
+      console.error(`[charlie] Port ${PORT} is already in use. Stop the other process or set PORT to a free value.`);
+    } else {
+      console.error('[charlie] Failed to determine available port:', error?.message || error);
+    }
+    process.exit(1);
+  }
+
+  const server = app.listen(PORT);
+
+  server.on('listening', () => {
     console.log(`[charlie] running http://127.0.0.1:${PORT} → ${getController()}`);
     try { setupWeatherPolling(); } catch {}
+  });
+
+  server.on('error', (error) => {
+    if (error && error.code === 'EADDRINUSE') {
+      console.error(`[charlie] Port ${PORT} is already in use. Stop the other process or set PORT to a free value.`);
+    } else {
+      console.error('[charlie] Server failed to start:', error?.message || error);
+    }
+    process.exit(1);
+  });
+}
+
+// Start the server after all routes are defined when executed directly
+if (process.argv[1] === __filename) {
+  startServer().catch((error) => {
+    console.error('[charlie] Unexpected startup failure:', error?.message || error);
+    process.exit(1);
   });
 }
 
