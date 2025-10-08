@@ -20,7 +20,9 @@ automation contexts.
 
 from __future__ import annotations
 
+import json
 from dataclasses import dataclass, field
+from pathlib import Path
 from typing import Dict, Iterable, Mapping, Optional, Tuple
 
 
@@ -98,6 +100,47 @@ class SpectraSyncConfig:
 
 DEFAULT_CONFIG = SpectraSyncConfig()
 CHANNEL_ORDER: Tuple[str, ...] = ("cw", "ww", "bl", "rd")
+
+HEX_SCALE_CONFIG_PATH = Path(__file__).resolve().parents[1] / "config" / "channel-scale.json"
+
+
+def _load_hex_scale_config() -> Dict[str, object]:
+    default = {"scale": "00-FF", "max_byte": 255}
+    try:
+        raw = HEX_SCALE_CONFIG_PATH.read_text(encoding="utf-8")
+    except FileNotFoundError:
+        return default
+    except OSError:
+        return default
+
+    try:
+        payload = json.loads(raw)
+    except json.JSONDecodeError:
+        return default
+
+    scale_label = str(payload.get("scale", "00-FF")).upper()
+    max_byte_value = payload.get("maxByte")
+
+    parsed_max: Optional[int] = None
+    if isinstance(max_byte_value, (int, float)):
+        try:
+            parsed_max = int(round(max_byte_value))
+        except (TypeError, ValueError):
+            parsed_max = None
+
+    if parsed_max is None or parsed_max <= 0 or parsed_max > 255:
+        if scale_label == "00-64":
+            parsed_max = 100
+        elif scale_label == "00-FF":
+            parsed_max = 255
+        else:
+            parsed_max = 255
+
+    return {"scale": scale_label, "max_byte": parsed_max}
+
+
+HEX_SCALE_CONFIG = _load_hex_scale_config()
+HEX_MAX_BYTE = max(1, min(255, int(HEX_SCALE_CONFIG.get("max_byte", 255))))
 
 
 def compute_exceedances(
@@ -248,7 +291,8 @@ def percentages_to_hex(channels: Mapping[str, float]) -> str:
     for channel in CHANNEL_ORDER:
         percent = float(channels.get(channel, 0.0))
         clipped = _clip(percent, 0.0, 100.0)
-        byte_value = int(round(clipped * 0.64))
+        scaled = int(round((clipped / 100.0) * HEX_MAX_BYTE))
+        byte_value = max(0, min(HEX_MAX_BYTE, scaled))
         ordered.append(f"{byte_value:02X}")
     ordered.extend(["00", "00"])
     return "".join(ordered)

@@ -8,6 +8,10 @@
 
 set -euo pipefail
 
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+REPO_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
+CONFIG_PATH="${REPO_ROOT}/config/channel-scale.json"
+
 BASE_URL="${1:-${API_BASE:-http://127.0.0.1:8091}}"
 DEVICE_ID="${DEVICE_ID:-2}"
 
@@ -117,11 +121,36 @@ probe_scale() {
   fi
 
   echo "  Selected scale: ${SCALE_CHOICE}"
+  update_scale_config "$SCALE_CHOICE"
   echo "  Restoring device to OFF"
   curl -s -o /dev/null -w "%{http_code}" -X PATCH "$endpoint" \
     -H 'Content-Type: application/json' \
     -d '{"status":"off","value":null}' >/dev/null
   return 0
+}
+
+update_scale_config() {
+  local scale="$1"
+  local max_byte
+  case "$scale" in
+    '00-FF') max_byte=255 ;;
+    '00-64') max_byte=100 ;;
+    *) max_byte=255 ;;
+  esac
+  local timestamp
+  timestamp="$(date -Iseconds)"
+  mkdir -p "$(dirname "$CONFIG_PATH")"
+  cat >"$CONFIG_PATH" <<JSON
+{
+  "scale": "${scale}",
+  "maxByte": ${max_byte},
+  "updatedAt": "${timestamp}",
+  "source": "scripts/preflight-scale-probe.sh",
+  "deviceId": "${DEVICE_ID}",
+  "apiBase": "${BASE_URL}"
+}
+JSON
+  echo "  Wrote scale selection to ${CONFIG_PATH}"
 }
 
 print_header "Light Engine Charlie – Preflight & Scale Probe"

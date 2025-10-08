@@ -36,7 +36,7 @@ The Code3 manager now captures the end-to-end communication contract between the
      - `GET /healthz` – confirms the proxy link and controller URL.
      - `GET /api/devicedatas` – returns light metadata (id, name, status, online).
      - `PATCH /api/devicedatas/device/:id` – toggles power and sets the HEX payload.
-     - `POST /plans` and `POST /sched` – publishes lighting recipes and schedules.
+     - `POST /controller/plans` and `POST /controller/sched` – publishes lighting recipes and schedules without colliding with the dashboard’s file-backed `/ui/*` routes.
 2. **Device IDs** – the controller is the source of truth for the mapping:
 
    | Controller ID | Fixture ID |
@@ -47,22 +47,28 @@ The Code3 manager now captures the end-to-end communication contract between the
    | 5             | F00005     |
    | 6             | F00004     |
 
-3. **HEX payload format** – `[CW][WW][BL][RD][00][00]` where each channel uses `00–64` hex (0–100%). Examples:
-   - Safe ON (~45% across channels): `{"status":"on","value":"737373730000"}`
+3. **HEX payload format** – `[CW][WW][BL][RD][00][00]` where the byte range is recorded in [`config/channel-scale.json`](../config/channel-scale.json). Run [`scripts/preflight-scale-probe.sh`](../scripts/preflight-scale-probe.sh) once per site; the script tests both `00-FF` and `00-64`, updates the config file, and keeps the UI and Recipe Bridge in sync. Examples:
+   - Safe ON (~45% across channels):
+     - `00-FF` scale → `{"status":"on","value":"737373730000"}`
+     - `00-64` scale → `{"status":"on","value":"2D2D2D2D0000"}`
    - All OFF: `{"status":"off","value":null}`
-   - Red 100%: `{"status":"on","value":"000000640000"}`
-   - Blue 50%: `{"status":"on","value":"000032000000"}`
+   - Red 100%:
+     - `00-FF` scale → `{"status":"on","value":"000000FF0000"}`
+     - `00-64` scale → `{"status":"on","value":"000000640000"}`
+   - Blue 50%:
+     - `00-FF` scale → `{"status":"on","value":"000080000000"}`
+     - `00-64` scale → `{"status":"on","value":"000032000000"}`
 4. **Dynamic lighting script (Excel bridge)**
    - Workbook: `/home/greenreach/LightRecipes.xlsx`.
    - Sheets: **Lights**, **Recipes**, **Schedules**.
-   - Logic: converts CW/WW/BL/RD percentages into HEX12 via `round(pct * 0.64)` and publishes to `/plans` and `/sched`.
-   - Default “safe on” payload: `737373730000`.
+   - Logic: converts CW/WW/BL/RD percentages into HEX12 using the `maxByte` value from `config/channel-scale.json` (set via the probe script) and publishes to `/controller/plans` and `/controller/sched`.
+   - Default “safe on” payload: determined by the active scale in `config/channel-scale.json`.
 5. **Verification checklist**
    1. `curl -s http://127.0.0.1:8091/healthz` → expect `200 OK`.
    2. `curl -s http://127.0.0.1:8091/api/devicedatas` → Code3 fixture IDs visible.
    3. `curl -X PATCH -H 'Content-Type: application/json' -d '{"status":"on","value":"737373730000"}' http://127.0.0.1:8091/api/devicedatas/device/2`
       → light responds.
    4. Dashboard UI shows the live spectrum matching the controller state.
-   5. `POST /plans` and `POST /sched` both return `200`.
+   5. `POST /controller/plans` and `POST /controller/sched` both return `200`.
 
 With this layout the answer to the original question remains **yes**: the Code3 hex protocol belongs to the Code3 controller manager. The IoT Devices card should surface the manager UI, but the manager is the source of truth for the protocol, including proxy endpoints, payload formats, and validation steps.
