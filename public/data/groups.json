@@ -1,24 +1,25 @@
 {
   "groups": [
     {
-      "id": "group-test",
-      "name": "Test",
-      "lights": [
-        {
-          "id": "light-002",
-          "name": "LIGHT 002"
-        },
-        {
-          "id": "light-003",
-          "name": "LIGHT 003"
-        },
-        {
-          "id": "light-004",
-          "name": "LIGHT 004"
-        }
+      "id": "propagation-north",
+      "name": "Propagation North",
+      "match": {
+        "room": "Propagation Bay",
+        "zone": "Propagation North"
+      },
+      "plan": "propagation-daylight",
+      "schedule": "schedule-prop-18h"
+    },
+    {
+      "id": "flower-east",
+      "name": "Flower East Array",
+      "members": [
+        { "id": "light-003", "name": "LIGHT 003" },
+        { "id": "light-004", "name": "LIGHT 004" },
+        { "id": "light-005", "name": "LIGHT 005" }
       ],
-      "plan": "herbs-general",
-      "schedule": "schedule-gn01jt"
+      "plan": "flower-full-cycle",
+      "schedule": "schedule-flower-12h"
     }
   ]
 }

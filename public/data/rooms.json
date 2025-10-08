@@ -1,6 +1,7 @@
 {
   "rooms": [
     {
+<<<<<<< HEAD
       "id": "greenreach-room-1",
       "name": "GreenReach Room 1",
       "location": "",
@@ -10,17 +11,23 @@
       "hardwareOrder": [
         "dehumidifier"
       ],
+=======
+      "id": "room-prop",
+      "name": "Propagation Bay",
+      "location": "Main Campus",
+      "hardwareCats": ["light", "dehumidifier"],
+      "hardwareOrder": ["light", "dehumidifier"],
+>>>>>>> d35f85d3775380eea787a9a2bfaf982cb487be71
       "layout": {
-        "type": "",
-        "rows": 0,
-        "racks": 0,
-        "levels": 0
+        "type": "benches",
+        "rows": 2,
+        "racks": 1,
+        "levels": 1
       },
-      "zones": [
-        "Zone 1"
-      ],
+      "zones": ["Propagation North"],
       "fixtures": [
         {
+<<<<<<< HEAD
           "id": "F00001",
           "deviceName": "F00001",
           "name": "GROW3 TopLight MH Model-300W-22G12",
@@ -74,48 +81,109 @@
           "type": "light",
           "onOffStatus": 1,
           "online": false
+=======
+          "id": "fixture-prop-toplight",
+          "vendor": "GROW3",
+          "model": "TopLight MH Model-300W-22G12",
+          "count": 2,
+          "zone": "Propagation North"
+>>>>>>> d35f85d3775380eea787a9a2bfaf982cb487be71
         }
       ],
-      "controlMethod": null,
-      "devices": [],
+      "controlMethod": "local",
+      "devices": [
+        { "id": "light-001", "type": "light" },
+        { "id": "light-002", "type": "light" }
+      ],
       "sensors": {
-        "categories": [],
-        "placements": {}
+        "categories": ["environment"],
+        "placements": {
+          "environment": [
+            { "type": "Temp/Humidity", "location": "center canopy" },
+            { "type": "CO2", "location": "north aisle" }
+          ]
+        }
       },
-      "energy": "",
-      "energyHours": 0,
-      "targetPpfd": 0,
-      "photoperiod": 0,
+      "energy": "120V dedicated",
+      "energyHours": 18,
+      "targetPpfd": 320,
+      "photoperiod": 18,
       "connectivity": {
-        "hasHub": null,
-        "hubType": "",
-        "hubIp": "",
-        "cloudTenant": "Azure"
+        "hasHub": true,
+        "hubType": "SwitchBot Hub 2",
+        "hubIp": "192.168.1.52",
+        "cloudTenant": "SwitchBot"
       },
       "roles": {
-        "admin": [],
-        "operator": [],
+        "admin": ["alex.nguyen"],
+        "operator": ["samantha.hughes"],
         "viewer": []
       },
       "grouping": {
-        "groups": [],
-        "planId": "",
-        "scheduleId": ""
+        "groups": ["propagation-north"],
+        "planId": "propagation-daylight",
+        "scheduleId": "schedule-prop-18h"
       },
-      "seriesCount": 0,
+      "seriesCount": 1,
       "category": {
+<<<<<<< HEAD
+=======
         "light": {
           "selectedEquipment": [
             {
               "category": "light",
+              "vendor": "GROW3",
+              "model": "TopLight MH Model-300W-22G12",
+              "count": 2,
+              "zone": "Propagation North"
+            }
+          ],
+          "wifi": true,
+          "wired": false,
+          "count": 2,
+          "manufacturer": "GROW3",
+          "model": "TopLight MH Model-300W-22G12"
+        },
+        "dehumidifier": {
+          "selectedEquipment": [
+            {
+              "category": "dehumidifier",
+              "vendor": "Quest",
+              "model": "Quest Dual 155",
+              "capacity": "155 pints/day",
+              "control": "WiFi",
+              "count": 1
+            }
+          ],
+          "wifi": true,
+          "wired": false,
+          "count": 1,
+          "manufacturer": "Quest",
+          "model": "Quest Dual 155"
+        }
+      },
+      "_categoryProgress": {
+>>>>>>> d35f85d3775380eea787a9a2bfaf982cb487be71
+        "light": {
+          "selectedEquipment": [
+            {
+              "category": "light",
+<<<<<<< HEAD
               "vendor": "",
               "model": "",
               "count": 5,
               "zone": "Zone 1"
+=======
+              "vendor": "GROW3",
+              "model": "TopLight MH Model-300W-22G12",
+              "count": 2,
+              "zone": "Propagation North"
+>>>>>>> d35f85d3775380eea787a9a2bfaf982cb487be71
             }
           ]
         },
         "dehumidifier": {
+<<<<<<< HEAD
           "selectedEquipment": [],
           "wifi": false,
           "wired": false,
@@ -123,6 +191,137 @@
         }
       },
       "_categoryProgress": {}
+=======
+          "selectedEquipment": [
+            {
+              "category": "dehumidifier",
+              "vendor": "Quest",
+              "model": "Quest Dual 155",
+              "capacity": "155 pints/day",
+              "control": "WiFi",
+              "count": 1
+            }
+          ]
+        }
+      }
+    },
+    {
+      "id": "room-flower",
+      "name": "Flower Bay",
+      "location": "Main Campus",
+      "hardwareCats": ["light", "hvac"],
+      "hardwareOrder": ["light", "hvac"],
+      "layout": {
+        "type": "racks",
+        "rows": 3,
+        "racks": 2,
+        "levels": 2
+      },
+      "zones": ["Flower East"],
+      "fixtures": [
+        {
+          "id": "fixture-flower-toplight",
+          "vendor": "GROW3",
+          "model": "TopLight MH Model-300W-22G12",
+          "count": 3,
+          "zone": "Flower East"
+        }
+      ],
+      "controlMethod": "controller",
+      "devices": [
+        { "id": "light-003", "type": "light" },
+        { "id": "light-004", "type": "light" },
+        { "id": "light-005", "type": "light" }
+      ],
+      "sensors": {
+        "categories": ["environment"],
+        "placements": {
+          "environment": [
+            { "type": "Temp/Humidity", "location": "center canopy" },
+            { "type": "PPFD", "location": "south rack" }
+          ]
+        }
+      },
+      "energy": "208V three-phase",
+      "energyHours": 12,
+      "targetPpfd": 850,
+      "photoperiod": 12,
+      "connectivity": {
+        "hasHub": true,
+        "hubType": "GrowLink",
+        "hubIp": "192.168.1.60",
+        "cloudTenant": "GrowLink"
+      },
+      "roles": {
+        "admin": ["alex.nguyen"],
+        "operator": ["maria.lopez"],
+        "viewer": ["samantha.hughes"]
+      },
+      "grouping": {
+        "groups": ["flower-east"],
+        "planId": "flower-full-cycle",
+        "scheduleId": "schedule-flower-12h"
+      },
+      "seriesCount": 2,
+      "category": {
+        "light": {
+          "selectedEquipment": [
+            {
+              "category": "light",
+              "vendor": "GROW3",
+              "model": "TopLight MH Model-300W-22G12",
+              "count": 3,
+              "zone": "Flower East"
+            }
+          ],
+          "wifi": true,
+          "wired": false,
+          "count": 3,
+          "manufacturer": "GROW3",
+          "model": "TopLight MH Model-300W-22G12"
+        },
+        "hvac": {
+          "selectedEquipment": [
+            {
+              "category": "hvac",
+              "vendor": "TrolMaster",
+              "model": "Hydro-X Pro",
+              "control": "Modbus",
+              "count": 1
+            }
+          ],
+          "wifi": false,
+          "wired": true,
+          "count": 1,
+          "manufacturer": "TrolMaster",
+          "model": "Hydro-X Pro"
+        }
+      },
+      "_categoryProgress": {
+        "light": {
+          "selectedEquipment": [
+            {
+              "category": "light",
+              "vendor": "GROW3",
+              "model": "TopLight MH Model-300W-22G12",
+              "count": 3,
+              "zone": "Flower East"
+            }
+          ]
+        },
+        "hvac": {
+          "selectedEquipment": [
+            {
+              "category": "hvac",
+              "vendor": "TrolMaster",
+              "model": "Hydro-X Pro",
+              "control": "Modbus",
+              "count": 1
+            }
+          ]
+        }
+      }
+>>>>>>> d35f85d3775380eea787a9a2bfaf982cb487be71
     }
   ]
 }

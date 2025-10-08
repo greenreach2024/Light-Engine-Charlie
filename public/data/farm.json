@@ -1,4 +1,5 @@
 {
+<<<<<<< HEAD
   "farmName": "",
   "location": {},
   "rooms": [
@@ -62,3 +63,112 @@
   ],
   "zones": []
 }
+=======
+  "farmName": "GreenReach Farms",
+  "name": "GreenReach Farms",
+  "tagline": "Precision light orchestration",
+  "logo": "",
+  "branding": {
+    "palette": {
+      "primary": "#0D7D7D",
+      "primaryHover": "#0B6E6E",
+      "primaryActive": "#0A6464",
+      "primarySoft": "#DBECEC",
+      "accent": "#64C7C7",
+      "accentHover": "#58AFAF",
+      "accentSoft": "#E8F7F7",
+      "background": "#F7FAFA",
+      "surface": "#F8FAFA",
+      "border": "#A5CECE",
+      "borderStrong": "#0F4C4C",
+      "borderSubtle": "#232424",
+      "text": "#111111",
+      "muted": "#909191",
+      "highlight": "#8BD5D5",
+      "onPrimary": "#FFFFFF",
+      "onAccent": "#111111",
+      "shadow": "0 1px 3px 0 rgba(13, 125, 125, 0.16), 0 1px 2px -1px rgba(13, 125, 125, 0.12)",
+      "shadowLg": "0 10px 15px -3px rgba(13, 125, 125, 0.22), 0 4px 6px -4px rgba(13, 125, 125, 0.14)",
+      "focusRing": "0 0 0 3px rgba(100, 199, 199, 0.35)"
+    },
+    "logo": "",
+    "tagline": "Precision light orchestration",
+    "fontFamily": "",
+    "fontCss": []
+  },
+  "address": "100 St. Lawrence College Way",
+  "city": "Gananoque",
+  "state": "Ontario",
+  "postalCode": "K7G 2Y5",
+  "timezone": "America/Toronto",
+  "coordinates": {
+    "lat": 44.327912152483194,
+    "lng": -76.16342763728883
+  },
+  "contact": {
+    "name": "Peggy Cameron",
+    "email": "info@greenreachfarms.com",
+    "phone": "+1-613-888-1031",
+    "website": "https://www.stlawrencecollege.ca"
+  },
+  "connection": {
+    "type": "wifi",
+    "wifi": {
+      "ssid": "greenreach",
+      "reuseDiscovery": true,
+      "tested": true,
+      "testResult": {
+        "status": "connected",
+        "ip": "192.168.1.123",
+        "gateway": "192.168.1.1",
+        "latencyMs": 12
+      }
+    }
+  },
+  "discovery": {
+    "subnet": "192.168.1.0/24",
+    "gateway": "192.168.1.1",
+    "reuseNetwork": true,
+    "ssid": "greenreach"
+  },
+  "locations": [
+    {
+      "id": "main-campus",
+      "name": "Main Campus",
+      "address": "100 St. Lawrence College Way",
+      "city": "Gananoque",
+      "state": "Ontario",
+      "postalCode": "K7G 2Y5",
+      "timezone": "America/Toronto",
+      "rooms": ["room-prop", "room-flower"]
+    }
+  ],
+  "rooms": [
+    {
+      "id": "room-prop",
+      "name": "Propagation Bay",
+      "locationId": "main-campus",
+      "zones": ["Propagation North"],
+      "primaryUse": "Propagation",
+      "targetPpfd": 320,
+      "photoperiod": 18,
+      "sensors": ["Temp/Humidity", "CO2"],
+      "lights": ["light-001", "light-002"],
+      "groups": ["propagation-north"]
+    },
+    {
+      "id": "room-flower",
+      "name": "Flower Bay",
+      "locationId": "main-campus",
+      "zones": ["Flower East"],
+      "primaryUse": "Flower",
+      "targetPpfd": 850,
+      "photoperiod": 12,
+      "sensors": ["Temp/Humidity", "PPFD"],
+      "lights": ["light-003", "light-004", "light-005"],
+      "groups": ["flower-east"]
+    }
+  ],
+  "registered": "2025-10-01T19:42:13.578Z"
+}
+>>>>>>> d35f85d3775380eea787a9a2bfaf982cb487be71
