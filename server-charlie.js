@@ -1,5 +1,26 @@
 
 
+import express from "express";
+import { createProxyMiddleware } from "http-proxy-middleware";
+import fs from "fs";
+import path from "path";
+import { fileURLToPath } from 'url';
+import Datastore from 'nedb-promises';
+import crypto from 'crypto';
+import AutomationRulesEngine from './lib/automation-engine.js';
+import { createPreAutomationLayer } from './automation/index.js';
+import {
+  buildSetupWizards,
+  mergeDiscoveryPayload,
+  getWizardDefaultInputs,
+  cloneWizardStep
+} from './server/wizards/index.js';
+
+const app = express();
+const PORT = Number.parseInt(process.env.PORT ?? '', 10) || 8091;
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
+
 // --- CORS guardrail: always answer OPTIONS and echo request headers ---
 app.use((req, res, next) => {
   const origin = req.headers.origin || '*';
@@ -35,35 +56,6 @@ app.get('/healthz', (req, res) => {
 
 // Call CORS check after CORS middleware is registered
 checkCorsConfigOrExit();
-import express from "express";
-import { createProxyMiddleware } from "http-proxy-middleware";
-import fs from "fs";
-import path from "path";
-import { fileURLToPath } from 'url';
-import Datastore from 'nedb-promises';
-import crypto from 'crypto';
-import AutomationRulesEngine from './lib/automation-engine.js';
-import { createPreAutomationLayer } from './automation/index.js';
-import {
-  buildSetupWizards,
-  mergeDiscoveryPayload,
-  getWizardDefaultInputs,
-  cloneWizardStep
-} from './server/wizards/index.js';
-
-
-
-// --- CORS guardrail: always answer OPTIONS and echo request headers ---
-app.use((req, res, next) => {
-  const origin = req.headers.origin || '*';
-  res.setHeader('Access-Control-Allow-Origin', origin);
-  res.setHeader('Vary', 'Origin'); // allow per-origin caching
-  res.setHeader('Access-Control-Allow-Methods', 'GET,POST,PUT,PATCH,DELETE,OPTIONS');
-  const reqHdrs = req.headers['access-control-request-headers'];
-  if (reqHdrs) res.setHeader('Access-Control-Allow-Headers', reqHdrs);
-  if (req.method === 'OPTIONS') return res.sendStatus(204);
-  next();
-});
 // Default controller target. Can be overridden with the CTRL env var.
 // Use the Pi forwarder when available for remote device reachability during development.
 let CURRENT_CONTROLLER = process.env.CTRL || "http://100.65.187.59:8089";

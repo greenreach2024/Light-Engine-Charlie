@@ -1,6 +1,8 @@
 {
-  "rooms": [],
-  "locations": [],
+  "farmName": "GreenReach Farms",
+  "name": "GreenReach Farms",
+  "tagline": "Precision light orchestration",
+  "logo": "",
   "branding": {
     "palette": {
       "primary": "#0D7D7D",
@@ -25,15 +27,11 @@
       "focusRing": "0 0 0 3px rgba(100, 199, 199, 0.35)"
     },
     "logo": "",
-    "tagline": "Growing with technology",
+    "tagline": "Precision light orchestration",
     "fontFamily": "",
     "fontCss": []
   },
-  "name": "My farm",
-  "tagline": "Growing with technology",
-  "logo": "",
-  "farmName": "My farm",
-  "address": "King Street East",
+  "address": "100 St. Lawrence College Way",
   "city": "Gananoque",
   "state": "Ontario",
   "postalCode": "K7G 2Y5",
@@ -43,9 +41,9 @@
     "lng": -76.16342763728883
   },
   "contact": {
-    "name": "Pege",
+    "name": "Peggy Cameron",
     "email": "info@greenreachfarms.com",
-    "phone": "6138881031",
+    "phone": "+1-613-888-1031",
     "website": "https://www.stlawrencecollege.ca"
   },
   "connection": {
@@ -68,5 +66,43 @@
     "reuseNetwork": true,
     "ssid": "greenreach"
   },
+  "locations": [
+    {
+      "id": "main-campus",
+      "name": "Main Campus",
+      "address": "100 St. Lawrence College Way",
+      "city": "Gananoque",
+      "state": "Ontario",
+      "postalCode": "K7G 2Y5",
+      "timezone": "America/Toronto",
+      "rooms": ["room-prop", "room-flower"]
+    }
+  ],
+  "rooms": [
+    {
+      "id": "room-prop",
+      "name": "Propagation Bay",
+      "locationId": "main-campus",
+      "zones": ["Propagation North"],
+      "primaryUse": "Propagation",
+      "targetPpfd": 320,
+      "photoperiod": 18,
+      "sensors": ["Temp/Humidity", "CO2"],
+      "lights": ["light-001", "light-002"],
+      "groups": ["propagation-north"]
+    },
+    {
+      "id": "room-flower",
+      "name": "Flower Bay",
+      "locationId": "main-campus",
+      "zones": ["Flower East"],
+      "primaryUse": "Flower",
+      "targetPpfd": 850,
+      "photoperiod": 12,
+      "sensors": ["Temp/Humidity", "PPFD"],
+      "lights": ["light-003", "light-004", "light-005"],
+      "groups": ["flower-east"]
+    }
+  ],
   "registered": "2025-10-01T19:42:13.578Z"
 }
