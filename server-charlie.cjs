@@ -4,7 +4,6 @@ const express = require("express");
 const { createProxyMiddleware } = require("http-proxy-middleware");
 const fs = require("fs");
 const path = require("path");
-const { fileURLToPath } = require('url');
 const Datastore = require('nedb-promises');
 
 const crypto = require('crypto');
@@ -5359,8 +5358,7 @@ function setController(url){ CURRENT_CONTROLLER = url; persistControllerToDisk(u
 loadControllerFromDisk();
 
 // Start the server after all routes are defined when executed directly
-if (process.argv[1] === __filename) {
-  console.log('About to call app.listen...');
+if (require.main === module) {
   app.listen(PORT, () => {
     console.log(`[charlie] running http://127.0.0.1:${PORT} → ${getController()}`);
     try { setupWeatherPolling(); } catch {}
@@ -5368,6 +5366,7 @@ if (process.argv[1] === __filename) {
 }
 
 module.exports = {
+  app,
   __resetWizardSystemForTests: function() {
     resetWizardSystem();
   }
