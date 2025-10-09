@@ -12767,8 +12767,17 @@ function initializeSidebarNavigation() {
   document.querySelectorAll('.sidebar-group').forEach((group) => {
     const trigger = group.querySelector('.sidebar-group__trigger');
     const items = group.querySelector('.sidebar-group__items');
-    if (items) items.hidden = true;
-    trigger?.addEventListener('click', () => {
+    if (items) items.hidden = !group.classList.contains('is-expanded');
+    if (!(trigger instanceof HTMLElement)) {
+      return;
+    }
+
+    if (trigger.dataset.sidebarBound === 'true') {
+      return;
+    }
+    trigger.dataset.sidebarBound = 'true';
+
+    trigger.addEventListener('click', () => {
       const expanded = trigger.getAttribute('aria-expanded') === 'true';
       const next = !expanded;
       trigger.setAttribute('aria-expanded', String(next));
@@ -12784,6 +12793,15 @@ function initializeSidebarNavigation() {
   });
 
   document.querySelectorAll('[data-sidebar-link]').forEach((link) => {
+    if (!(link instanceof HTMLElement)) {
+      return;
+    }
+
+    if (link.dataset.sidebarLinkBound === 'true') {
+      return;
+    }
+    link.dataset.sidebarLinkBound = 'true';
+
     link.addEventListener('click', () => {
       const target = link.getAttribute('data-target') || 'overview';
       if (target === 'overview') {
