@@ -1179,6 +1179,14 @@ document.addEventListener('DOMContentLoaded', function() {
         { label: 'Firmware', type: 'select', id: 'sonoffFw', options: ['eWeLink (stock)', 'Tasmota', 'ESPHome'] },
         { label: 'Vendor', type: 'select', id: 'sonoffVendor', options: () => (window.DEVICE_MANUFACTURERS||[]).map(m=>m.name) }
       ]
+    },
+    Shelly: {
+      title: 'Shelly Device Setup',
+      instructions: `<b>Shelly Wi‑Fi Relays</b><br>Connect to your Shelly Cloud account or provide local device IPs to onboard relays for lighting and HVAC control.<br><br><b>Instructions:</b><ol><li>Enter your Shelly account email or LAN subnet.</li><li>Select the relay family you are configuring.</li></ol>`,
+      fields: [
+        { label: 'Shelly Account Email or IP Range', type: 'text', id: 'shellyAccount', placeholder: 'e.g. grower@email.com or 192.168.1.0/24' },
+        { label: 'Relay Family', type: 'select', id: 'shellyRelayFamily', options: ['Plus Series', 'Gen 1', 'Pro Series'] }
+      ]
     }
     // Add more ecosystems as needed...
   };
@@ -1374,9 +1382,9 @@ function showKasaWizard() {
     renderStep1();
   }
   [
-    ['btnMgrSwitchBot','SwitchBot'],
     ['btnMgrKasa','Kasa'],
-    ['btnMgrSonoff','Sonoff']
+    ['btnMgrSonoff','Sonoff'],
+    ['btnMgrShelly','Shelly']
     // Add more mappings as you implement more ecosystems
   ].forEach(([btnId, eco]) => {
     const btn = document.getElementById(btnId);
@@ -13550,8 +13558,6 @@ document.addEventListener('DOMContentLoaded', async () => {
   try {
     document.getElementById('btnScanIoTDevices')?.addEventListener('click', window.scanIoTDevices);
     document.getElementById('btnOpenSwitchBotManager')?.addEventListener('click', window.openSwitchBotManager);
-    document.getElementById('btnOpenKasaManager')?.addEventListener('click', window.openKasaManager);
-    document.getElementById('btnOpenShellyManager')?.addEventListener('click', window.openShellyManager);
   } catch (e) { console.warn('SwitchBot panel wiring failed', e); }
   if (document.getElementById('iotDevicesList')) {
     renderIoTDeviceCards(window.LAST_IOT_SCAN);
