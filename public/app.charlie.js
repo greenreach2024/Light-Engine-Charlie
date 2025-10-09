@@ -2224,6 +2224,83 @@ function scheduleSummary(schedule) {
   });
   return `${totalLabel} • ${parts.join(', ')}`;
 }
+
+function drawSparkline(canvas, values, options = {}) {
+  if (!canvas || typeof canvas.getContext !== 'function') return;
+  const ctx = canvas.getContext('2d');
+  const width = options.width || canvas.clientWidth || 120;
+  const height = options.height || canvas.clientHeight || 40;
+  canvas.width = width;
+  canvas.height = height;
+  ctx.clearRect(0, 0, width, height);
+
+  const numericValues = [];
+  if (Array.isArray(values)) {
+    values.forEach((value) => {
+      const num = Number(value);
+      if (Number.isFinite(num)) numericValues.push(num);
+    });
+  }
+  if (!numericValues.length) return;
+
+  const min = Math.min(...numericValues);
+  const max = Math.max(...numericValues);
+  const span = (max - min) || 1;
+  const color = options.color || 'rgba(13, 125, 125, 0.85)';
+  const lineWidth = options.lineWidth || 2;
+  const fill = options.fill === true;
+  const gradient = options.gradient;
+
+  if (fill) {
+    const grad = gradient
+      ? gradient(ctx, width, height)
+      : ctx.createLinearGradient(0, 0, 0, height);
+    if (!gradient) {
+      grad.addColorStop(0, color);
+      grad.addColorStop(1, 'rgba(255,255,255,0)');
+    }
+    ctx.fillStyle = grad;
+    ctx.beginPath();
+  }
+
+  ctx.lineWidth = lineWidth;
+  ctx.strokeStyle = color;
+  ctx.lineJoin = 'round';
+  ctx.lineCap = 'round';
+  ctx.beginPath();
+
+  const lastIndex = numericValues.length - 1;
+  let pointIndex = -1;
+  if (fill) {
+    ctx.moveTo(0, height);
+  }
+  if (!lastIndex) {
+    const y = height - ((numericValues[0] - min) / span) * height;
+    ctx.moveTo(0, y);
+    ctx.lineTo(width, y);
+  } else {
+    values.forEach((value) => {
+      const num = Number(value);
+      if (!Number.isFinite(num)) return;
+      pointIndex += 1;
+      const ratio = lastIndex === 0 ? 0 : pointIndex / lastIndex;
+      const x = ratio * width;
+      const y = height - ((num - min) / span) * height;
+      if (pointIndex === 0) {
+        ctx.moveTo(x, y);
+      } else {
+        ctx.lineTo(x, y);
+      }
+    });
+  }
+  ctx.stroke();
+
+  if (fill) {
+    ctx.lineTo(width, height);
+    ctx.closePath();
+    ctx.fill();
+  }
+}
 // Global helper: convert HH:MM string to minutes since midnight
 function toMinutes(hhmm) {
   if (typeof hhmm !== 'string') return 0;
@@ -9225,209 +9302,522 @@ function renderSchedules() {
   renderGrowRoomOverview();
 }
 
-function renderGrowRoomOverview() {
-  const summaryEl = document.getElementById('growOverviewSummary');
-  const gridEl = document.getElementById('growOverviewGrid');
-  if (!summaryEl || !gridEl) return;
+const OVERVIEW_METRIC_DEFS = [
+  { key: 'temperature', sensors: ['tempC', 'temperature'], label: 'Temp', unit: '°C', precision: 1 },
+  { key: 'humidity', sensors: ['rh', 'humidity'], label: 'Humidity', unit: '%RH', precision: 0 },
+  { key: 'vpd', sensors: ['vpd'], label: 'VPD', unit: 'kPa', precision: 2 },
+  { key: 'co2', sensors: ['co2', 'co2ppm'], label: 'CO₂', unit: 'ppm', precision: 0 }
+];
 
-  const rooms = Array.isArray(STATE.rooms) ? STATE.rooms : [];
-  const zones = Array.isArray(STATE.environment) ? STATE.environment : [];
-  const plans = Array.isArray(STATE.plans) ? STATE.plans : [];
-  const schedules = Array.isArray(STATE.schedules) ? STATE.schedules : [];
+const OVERVIEW_STATE = {
+  rooms: [],
+  timer: null,
+  step: 0,
+  tickPending: false,
+  roster: [],
+  previous: [],
+  wired: false
+};
 
-  const roomCount = rooms.length;
-  const zoneCount = zones.length;
-  const summaries = [
-    {
-      label: 'Grow Rooms',
-      value: roomCount
-        ? `${roomCount} room${roomCount === 1 ? '' : 's'}`
-        : zoneCount
-        ? `${zoneCount} zone${zoneCount === 1 ? '' : 's'}`
-        : 'None'
-    },
-    {
-      label: 'Plans running',
-      value:
-        plans.length === 0
-          ? 'None'
-          : (() => {
-              const names = plans.map((plan) => plan.name || 'Untitled plan').filter(Boolean);
-              const preview = names.slice(0, 2).join(', ');
-              const extra = names.length > 2 ? ` +${names.length - 2}` : '';
-              return `${preview}${extra}`;
-            })()
-    },
-    {
-      label: 'Schedules',
-      value:
-        schedules.length === 0
-          ? 'None'
-          : (() => {
-              const names = schedules.map((sched) => sched.name || 'Unnamed schedule').filter(Boolean);
-              const preview = names.slice(0, 2).join(', ');
-              const extra = names.length > 2 ? ` +${names.length - 2}` : '';
-              return `${preview}${extra}`;
-            })()
-    }
-  ];
-
-  summaryEl.innerHTML = summaries
-    .map(
-      (item) => `
-        <div class="grow-overview__summary-item">
-          <span class="grow-overview__summary-label">${escapeHtml(item.label)}</span>
-          <span class="grow-overview__summary-value">${escapeHtml(item.value)}</span>
-        </div>`
-    )
-    .join('');
-
-  const activeFeatures = Array.from(document.querySelectorAll('.ai-feature-card.active h3'))
-    .map((el) => el.textContent?.trim())
-    .filter(Boolean);
-
-  const matchZoneForRoom = (room) => {
-    if (!room) return null;
-    const identifiers = new Set(
-      [room.id, room.name]
-        .filter((value) => value !== undefined && value !== null)
-        .map((value) => String(value).toLowerCase())
-    );
-    if (!identifiers.size) return null;
-    return zones.find((zone) => {
-      const id = zone.id ? String(zone.id).toLowerCase() : '';
-      const name = zone.name ? String(zone.name).toLowerCase() : '';
-      const location = zone.location ? String(zone.location).toLowerCase() : '';
-      return identifiers.has(id) || identifiers.has(name) || identifiers.has(location);
-    }) || null;
+function getOverviewSourceData() {
+  return {
+    env: { zones: Array.isArray(STATE.environment) ? STATE.environment : [] },
+    rules: Array.isArray(STATE.preAutomationRules) ? STATE.preAutomationRules : (STATE.preAutomationRules?.rules || []),
+    plans: STATE.plans || [],
+    sched: STATE.schedules || [],
+    devs: Array.isArray(STATE.devices) ? STATE.devices : [],
+    groups: Array.isArray(STATE.groups) ? STATE.groups : []
   };
+}
 
-  const metricKeys = [
-    { key: 'tempC', label: 'Temp', unit: '°C', precision: 1 },
-    { key: 'rh', label: 'Humidity', unit: '%', precision: 1 },
-    { key: 'co2', label: 'CO₂', unit: ' ppm', precision: 0 },
-    { key: 'vpd', label: 'VPD', unit: ' kPa', precision: 2 }
-  ];
-
-  const formatMetricValue = (sensor, meta) => {
-    if (!sensor || typeof sensor.current !== 'number' || !Number.isFinite(sensor.current)) {
-      return '—';
-    }
-    const value = meta.precision != null ? sensor.current.toFixed(meta.precision) : String(sensor.current);
-    if (meta.unit.trim() === '%') {
-      return `${value}${meta.unit}`;
-    }
-    return `${value}${meta.unit}`;
+function toIdMap(collection) {
+  const map = new Map();
+  const push = (item, fallbackKey) => {
+    if (!item || typeof item !== 'object') return;
+    const id = item.id != null ? item.id : fallbackKey;
+    if (id == null) return;
+    map.set(String(id), { ...item, id: String(id) });
   };
-
-  const metricStatus = (sensor) => {
-    if (!sensor || typeof sensor.current !== 'number' || !Number.isFinite(sensor.current)) {
-      return 'unknown';
-    }
-    const min = sensor.setpoint?.min;
-    const max = sensor.setpoint?.max;
-    if (typeof min === 'number' && typeof max === 'number') {
-      return sensor.current >= min && sensor.current <= max ? 'ok' : 'warn';
-    }
-    return 'unknown';
-  };
-
-  const buildMetrics = (zone) => {
-    if (!zone || !zone.sensors) return '';
-    const items = metricKeys
-      .map((meta) => {
-        const sensor = zone.sensors?.[meta.key];
-        if (!sensor) return '';
-        const status = metricStatus(sensor);
-        const value = formatMetricValue(sensor, meta);
-        return `
-          <div class="grow-room-card__metric grow-room-card__metric--${status}">
-            <span class="grow-room-card__metric-label">${escapeHtml(meta.label)}</span>
-            <span class="grow-room-card__metric-value">${escapeHtml(value)}</span>
-          </div>`;
-      })
-      .filter(Boolean)
-      .join('');
-    return items;
-  };
-
-  const buildAiSection = () => {
-    if (!activeFeatures.length) {
-      return '<p class="tiny text-muted">AI features inactive.</p>';
-    }
-    return `
-      <ul class="grow-room-card__ai-list">
-        ${activeFeatures.map((name) => `<li class="grow-room-card__ai-chip">${escapeHtml(name)}</li>`).join('')}
-      </ul>`;
-  };
-
-  const cards = [];
-  if (rooms.length) {
-    rooms.forEach((room) => {
-      const zone = matchZoneForRoom(room);
-      const name = room.name || room.id || 'Grow Room';
-      const details = [];
-      const zonesList = Array.isArray(room.zones) ? room.zones.filter(Boolean) : [];
-      if (zonesList.length) {
-        details.push(`Zones: ${zonesList.map((item) => escapeHtml(item)).join(', ')}`);
+  if (!collection) return map;
+  if (Array.isArray(collection)) {
+    collection.forEach((item) => push(item));
+    return map;
+  }
+  if (Array.isArray(collection.plans)) {
+    collection.plans.forEach((item) => push(item));
+  }
+  if (Array.isArray(collection.schedules)) {
+    collection.schedules.forEach((item) => push(item));
+  }
+  if (typeof collection === 'object' && !Array.isArray(collection.plans) && !Array.isArray(collection.schedules)) {
+    Object.entries(collection).forEach(([key, value]) => {
+      if (Array.isArray(value)) {
+        value.forEach((item) => push(item));
+      } else {
+        push(value, key);
       }
-      if (room.layout?.type) {
-        details.push(`Layout: ${escapeHtml(room.layout.type)}`);
-      }
-      if (room.controlMethod) {
-        details.push(`Control: ${escapeHtml(room.controlMethod)}`);
-      }
-      const metaParts = [];
-      if (zone?.meta?.source) metaParts.push(`Source: ${escapeHtml(zone.meta.source)}`);
-      if (typeof zone?.meta?.battery === 'number') metaParts.push(`Battery: ${escapeHtml(`${zone.meta.battery}%`)}`);
-      if (typeof zone?.meta?.rssi === 'number') metaParts.push(`RSSI: ${escapeHtml(`${zone.meta.rssi} dBm`)}`);
-      const metrics = buildMetrics(zone);
-      cards.push(`
-        <article class="grow-room-card">
-          <div class="grow-room-card__header">
-            <h3>${escapeHtml(name)}</h3>
-            ${room.roomType ? `<span class="chip tiny">${escapeHtml(room.roomType)}</span>` : ''}
-          </div>
-          ${details.length ? `<div class="tiny text-muted">${details.join(' • ')}</div>` : ''}
-          ${metaParts.length ? `<div class="tiny text-muted">${metaParts.join(' • ')}</div>` : ''}
-          ${metrics ? `<div class="grow-room-card__metrics">${metrics}</div>` : '<p class="tiny text-muted">No telemetry available.</p>'}
-          <div class="grow-room-card__ai">
-            <span class="tiny text-muted">AI Features</span>
-            ${buildAiSection()}
-          </div>
-        </article>`);
-    });
-  } else if (zones.length) {
-    zones.forEach((zone) => {
-      const name = zone.name || zone.id || 'Zone';
-      const location = zone.location ? `Location: ${escapeHtml(zone.location)}` : '';
-      const metaParts = [];
-      if (zone.meta?.source) metaParts.push(`Source: ${escapeHtml(zone.meta.source)}`);
-      if (typeof zone.meta?.battery === 'number') metaParts.push(`Battery: ${escapeHtml(`${zone.meta.battery}%`)}`);
-      if (typeof zone.meta?.rssi === 'number') metaParts.push(`RSSI: ${escapeHtml(`${zone.meta.rssi} dBm`)}`);
-      const metrics = buildMetrics(zone);
-      cards.push(`
-        <article class="grow-room-card">
-          <div class="grow-room-card__header">
-            <h3>${escapeHtml(name)}</h3>
-          </div>
-          ${location ? `<div class="tiny text-muted">${location}</div>` : ''}
-          ${metaParts.length ? `<div class="tiny text-muted">${metaParts.join(' • ')}</div>` : ''}
-          ${metrics ? `<div class="grow-room-card__metrics">${metrics}</div>` : '<p class="tiny text-muted">No telemetry available.</p>'}
-          <div class="grow-room-card__ai">
-            <span class="tiny text-muted">AI Features</span>
-            ${buildAiSection()}
-          </div>
-        </article>`);
     });
   }
+  return map;
+}
 
-  if (!cards.length) {
-    gridEl.innerHTML = '<p class="tiny text-muted">Add a grow room to view live status and telemetry.</p>';
+function normalizeValue(value) {
+  return value == null ? '' : String(value).trim().toLowerCase();
+}
+
+function formatMetricValue(value, precision) {
+  if (!Number.isFinite(value)) return '—';
+  if (precision != null) {
+    return Number(value)
+      .toFixed(precision)
+      .replace(/\.0+$/, '')
+      .replace(/(\.[0-9]*?)0+$/, '$1');
+  }
+  return String(Math.round(value));
+}
+
+function extractMetric(zone, def) {
+  const metrics = { value: null, history: [] };
+  if (!zone || !def) return metrics;
+  const sensors = zone.sensors || {};
+  for (const key of def.sensors) {
+    const sensor = sensors[key];
+    if (sensor && typeof sensor === 'object') {
+      const cur = Number(sensor.current);
+      metrics.value = Number.isFinite(cur) ? cur : null;
+      if (Array.isArray(sensor.history)) {
+        metrics.history = sensor.history.slice(-120);
+      } else if (Array.isArray(sensor.hist)) {
+        metrics.history = sensor.hist.slice(-120);
+      }
+      return metrics;
+    }
+  }
+  const directMetrics = zone.metrics || {};
+  for (const key of def.sensors) {
+    if (directMetrics[key] != null) {
+      const cur = Number(directMetrics[key]);
+      metrics.value = Number.isFinite(cur) ? cur : null;
+      if (zone.hist && Array.isArray(zone.hist[key])) {
+        metrics.history = zone.hist[key].slice(-120);
+      }
+      return metrics;
+    }
+  }
+  for (const key of def.sensors) {
+    if (zone[key] != null) {
+      const cur = Number(zone[key]);
+      metrics.value = Number.isFinite(cur) ? cur : null;
+      return metrics;
+    }
+  }
+  return metrics;
+}
+
+function deriveOverviewRooms(data) {
+  const zones = Array.isArray(data.env?.zones) ? data.env.zones : [];
+  const fallbackRooms = Array.isArray(STATE.rooms) ? STATE.rooms : [];
+  const zoneList = zones.length ? zones : fallbackRooms;
+  const deviceList = Array.isArray(data.devs) ? data.devs : [];
+  const ruleList = Array.isArray(data.rules) ? data.rules : Array.isArray(data.rules?.rules) ? data.rules.rules : [];
+  const planMap = toIdMap(data.plans);
+  const scheduleMap = toIdMap(data.sched);
+  const groups = Array.isArray(data.groups) ? data.groups : [];
+  const aiMode = (window.GR_AI_MODE || 'off').toLowerCase();
+
+  return zoneList.map((zone) => {
+    const identifiers = new Set([
+      normalizeValue(zone?.id),
+      normalizeValue(zone?.name),
+      normalizeValue(zone?.room),
+      normalizeValue(zone?.roomId),
+      normalizeValue(zone?.location)
+    ].filter(Boolean));
+
+    const friendlyName = zone?.name || zone?.roomName || zone?.room || zone?.id || 'Grow Room';
+    const metrics = {};
+    const history = {};
+    OVERVIEW_METRIC_DEFS.forEach((def) => {
+      const sample = extractMetric(zone, def);
+      metrics[def.key] = sample.value;
+      history[def.key] = sample.history;
+    });
+
+    const devices = deviceList.filter((device) => {
+      if (!device) return false;
+      const deviceKeys = [
+        normalizeValue(device.room),
+        normalizeValue(device.roomId),
+        normalizeValue(device.roomName),
+        normalizeValue(device.zone),
+        normalizeValue(device.location?.room),
+        normalizeValue(device.location?.zone)
+      ];
+      return identifiers.size ? deviceKeys.some((key) => key && identifiers.has(key)) : false;
+    });
+
+    const group = groups.find((entry) => {
+      const groupKeys = [
+        normalizeValue(entry.room),
+        normalizeValue(entry.roomId),
+        normalizeValue(entry.roomName),
+        normalizeValue(entry.name)
+      ];
+      return groupKeys.some((key) => key && (identifiers.has(key)));
+    }) || null;
+
+    const plan = group ? planMap.get(String(group.plan)) : null;
+    const schedule = group ? scheduleMap.get(String(group.schedule)) : null;
+    const spectraSync = Boolean(plan && schedule);
+    const automationActive = ruleList.some((rule) => {
+      const ruleKeys = [
+        normalizeValue(rule.scope),
+        normalizeValue(rule.room),
+        normalizeValue(rule.roomId),
+        normalizeValue(rule.targetRoom)
+      ];
+      if (Array.isArray(rule.targets)) {
+        rule.targets.forEach((target) => ruleKeys.push(normalizeValue(target)));
+      }
+      return ruleKeys.some((key) => key && identifiers.has(key));
+    });
+
+    return {
+      id: String(zone?.id || zone?.roomId || zone?.name || zone?.room || friendlyName),
+      name: friendlyName,
+      metrics,
+      history,
+      devices,
+      plan,
+      schedule,
+      status: {
+        ai: aiMode,
+        auto: automationActive,
+        spectraSync
+      }
+    };
+  });
+}
+
+function renderOverviewSummary(summaryEl, rooms) {
+  if (!summaryEl) return;
+  if (!rooms.length) {
+    summaryEl.innerHTML = '<span class="tiny text-muted">No rooms connected yet.</span>';
     return;
   }
+  const totalRooms = rooms.length;
+  const fixtures = rooms.reduce((acc, room) => acc + (Array.isArray(room.devices) ? room.devices.length : 0), 0);
+  const aiOn = rooms.filter((room) => (room.status.ai || '').toLowerCase() !== 'off').length;
+  const automationOn = rooms.filter((room) => room.status.auto).length;
+  const spectraOn = rooms.filter((room) => room.status.spectraSync).length;
+  const ratio = (count) => (totalRooms ? `${count}/${totalRooms}` : '0');
+  const items = [
+    { label: 'Rooms', value: totalRooms },
+    { label: 'Fixtures', value: fixtures },
+    { label: 'AI Engaged', value: ratio(aiOn) },
+    { label: 'Automation Active', value: ratio(automationOn) },
+    { label: 'SpectraSync Active', value: ratio(spectraOn) }
+  ];
+  summaryEl.innerHTML = items
+    .map((item) => `
+      <div class="overview-summary__item">
+        <span class="overview-summary__label">${escapeHtml(item.label)}</span>
+        <span class="overview-summary__value">${escapeHtml(String(item.value))}</span>
+      </div>`)
+    .join('');
+}
 
-  gridEl.innerHTML = cards.join('');
+function renderOverviewGrid(gridEl, rooms) {
+  if (!gridEl) return;
+  if (!rooms.length) {
+    gridEl.innerHTML = '<p class="tiny text-muted">Add a grow room to view live telemetry.</p>';
+    return;
+  }
+  gridEl.innerHTML = '';
+  rooms.forEach((room) => {
+    const tile = document.createElement('article');
+    tile.className = 'room-tile';
+    const metricsMarkup = OVERVIEW_METRIC_DEFS.map((def) => {
+      const value = formatMetricValue(room.metrics[def.key], def.precision);
+      const unit = value === '—' ? '' : def.unit;
+      return `
+        <div class="metric" data-metric="${def.key}">
+          <div class="val">${escapeHtml(value)}</div>
+          <div class="unit">${escapeHtml(unit)}</div>
+          <canvas class="spark" data-key="${def.key}" aria-hidden="true"></canvas>
+        </div>`;
+    }).join('');
+    const planName = room.plan ? (room.plan.name || room.plan.title || room.plan.recipe || room.plan.id || 'Active plan') : '—';
+    const scheduleLabel = room.schedule ? scheduleSummary(room.schedule) : 'No schedule';
+    const badgeText = room.status.spectraSync ? 'Active' : 'Idle';
+    const fixtures = Array.isArray(room.devices) ? room.devices.length : 0;
+    tile.innerHTML = `
+      <div class="room-tile__hdr">
+        <div class="room-name">${escapeHtml(room.name)}</div>
+        <div class="room-status">
+          <span class="icon ai ${room.status.ai && room.status.ai !== 'off' ? 'on' : ''}" data-label="AI" title="${escapeHtml(`AI mode: ${(room.status.ai || 'off').toUpperCase()}`)}"></span>
+          <span class="icon auto ${room.status.auto ? 'on' : ''}" data-label="AU" title="${escapeHtml(`Automation: ${room.status.auto ? 'Active' : 'Off'}`)}"></span>
+          <span class="icon spectra ${room.status.spectraSync ? 'on' : ''}" data-label="SS" title="${escapeHtml(`SpectraSync: ${room.status.spectraSync ? 'Active' : 'Idle'}`)}"></span>
+        </div>
+      </div>
+      <div class="metrics">${metricsMarkup}</div>
+      <div class="plan-row">
+        <div>
+          <span class="label">Plan</span>
+          <span class="value">${escapeHtml(planName)}</span>
+        </div>
+        <div>
+          <span class="label">Schedule</span>
+          <span class="value" title="${escapeHtml(scheduleLabel)}">${escapeHtml(scheduleLabel)}</span>
+        </div>
+      </div>
+      <div class="plan-row">
+        <div>
+          <span class="label">SpectraSync</span>
+          <span class="badge">${escapeHtml(badgeText)}</span>
+        </div>
+        <div>
+          <span class="label">Fixtures</span>
+          <span class="value">${escapeHtml(String(fixtures))}</span>
+        </div>
+      </div>
+    `;
+    gridEl.appendChild(tile);
+    tile.querySelectorAll('canvas.spark').forEach((canvas) => {
+      const key = canvas.getAttribute('data-key');
+      const series = Array.isArray(room.history?.[key]) ? room.history[key] : [];
+      const samples = series.slice(-120);
+      drawSparkline(canvas, samples, { color: '#0d7d7d', lineWidth: 2 });
+    });
+  });
+}
+
+function populateDemoRooms(rooms) {
+  const select = document.getElementById('demoRoom');
+  const startBtn = document.getElementById('demoStart');
+  const stopBtn = document.getElementById('demoStop');
+  if (!select) return;
+  const previous = select.value;
+  const options = rooms
+    .map((room) => `<option value="${escapeHtml(room.id)}">${escapeHtml(room.name)}</option>`)
+    .join('');
+  const hasPrev = rooms.some((room) => String(room.id) === String(previous));
+  select.innerHTML = `<option value="" disabled ${hasPrev ? '' : 'selected'}>Select room…</option>${options}`;
+  if (hasPrev) {
+    select.value = previous;
+  } else if (rooms.length) {
+    select.selectedIndex = 1;
+  }
+  if (startBtn) startBtn.disabled = !rooms.length;
+  if (stopBtn && !OVERVIEW_STATE.timer) stopBtn.disabled = true;
+}
+
+function snapshotDevicePayload(device) {
+  if (!device || typeof device !== 'object') return null;
+  if (device.lastCommand && typeof device.lastCommand === 'object') {
+    const payload = {};
+    if (typeof device.lastCommand.status === 'string') payload.status = device.lastCommand.status;
+    if (typeof device.lastCommand.value === 'string') payload.value = device.lastCommand.value;
+    if (payload.status || payload.value) return payload;
+  }
+  if (typeof device.status === 'string') {
+    if (device.status.toLowerCase() === 'off') return { status: 'off', value: null };
+    if (typeof device.value === 'string') return { status: 'on', value: device.value };
+  }
+  if (typeof device.lastHex === 'string') {
+    return { status: 'on', value: device.lastHex };
+  }
+  if (device.state && typeof device.state === 'object') {
+    const payload = {};
+    if (typeof device.state.status === 'string') payload.status = device.state.status;
+    if (typeof device.state.value === 'string') payload.value = device.state.value;
+    if (payload.status || payload.value) return payload;
+  }
+  return null;
+}
+
+function deviceSupportsSpectrum(device) {
+  if (!device) return false;
+  if (typeof device.channels === 'number') return device.channels >= 4;
+  if (Array.isArray(device.channels)) return device.channels.length >= 4;
+  if (Array.isArray(device.channelNames)) return device.channelNames.length >= 4;
+  return true;
+}
+
+function clampChannel(value) {
+  const num = Number(value);
+  if (!Number.isFinite(num)) return 0;
+  return Math.max(0, Math.min(100, num));
+}
+
+function hex12(cw = 0, ww = 0, blue = 0, red = 0, extra1 = 0, extra2 = 0) {
+  return [cw, ww, blue, red, extra1, extra2]
+    .map((channel) => Math.round(clampChannel(channel)).toString(16).padStart(2, '0'))
+    .join('')
+    .toUpperCase();
+}
+
+const STATIC_ON = { status: 'on', value: hex12(20, 20, 0, 0) };
+const STATIC_OFF = { status: 'off', value: null };
+
+function stepHexDynamic(step) {
+  switch (step % 8) {
+    case 0: return hex12(5, 5, 0, 45);
+    case 1: return hex12(5, 5, 45, 0);
+    case 2: return hex12(40, 10, 0, 0);
+    case 3: return hex12(10, 40, 0, 0);
+    case 4: return hex12(20, 20, 10, 10);
+    case 5: return hex12(10, 10, 20, 20);
+    case 6: return hex12(0, 0, 0, 45);
+    default: return hex12(0, 0, 45, 0);
+  }
+}
+
+async function patchDeviceCommand(id, payload) {
+  if (!id) return;
+  const base = window.API_BASE || '';
+  const url = `${base}/api/devicedatas/device/${encodeURIComponent(id)}`;
+  const resp = await fetch(url, {
+    method: 'PATCH',
+    headers: _hdrs(),
+    body: JSON.stringify(payload)
+  });
+  if (!resp.ok) {
+    throw new Error(`Device ${id} patch failed (${resp.status})`);
+  }
+  try {
+    return await resp.json();
+  } catch {
+    return null;
+  }
+}
+
+function ensureOverviewDemoWired() {
+  if (OVERVIEW_STATE.wired) return;
+  OVERVIEW_STATE.wired = true;
+  const startBtn = document.getElementById('demoStart');
+  const stopBtn = document.getElementById('demoStop');
+  const bpmInput = document.getElementById('demoBpm');
+  const roomSelect = document.getElementById('demoRoom');
+  startBtn?.addEventListener('click', async () => {
+    const roomId = roomSelect?.value;
+    const bpm = bpmInput ? Number(bpmInput.value) : 90;
+    if (!roomId) {
+      showToast?.({ title: 'Demo Mode', msg: 'Select a room to start Demo Mode.', kind: 'info', icon: 'ℹ️' });
+      return;
+    }
+    startBtn.disabled = true;
+    try {
+      await startDemoFor(roomId, bpm);
+    } catch (error) {
+      console.error('Demo start failed', error);
+      showToast?.({ title: 'Demo Mode', msg: error.message || 'Unable to start demo.', kind: 'error', icon: '❌' });
+      startBtn.disabled = false;
+    }
+  });
+  stopBtn?.addEventListener('click', () => {
+    stopDemo();
+  });
+  document.addEventListener('keydown', (event) => {
+    if (event.key === 'Escape') {
+      stopDemo({ panic: true });
+    }
+  });
+}
+
+async function startDemoFor(roomId, bpm) {
+  const stopBtn = document.getElementById('demoStop');
+  const startBtn = document.getElementById('demoStart');
+  const normalized = normalizeValue(roomId);
+  const room = OVERVIEW_STATE.rooms.find((entry) => normalizeValue(entry.id) === normalized);
+  if (!room) {
+    throw new Error('Room not found for demo');
+  }
+  if (!Array.isArray(room.devices) || !room.devices.length) {
+    throw new Error('No fixtures assigned to this room yet.');
+  }
+  await stopDemo();
+  OVERVIEW_STATE.roster = room.devices.map((device) => device.id).filter(Boolean);
+  if (!OVERVIEW_STATE.roster.length) {
+    throw new Error('No addressable fixtures found in this room.');
+  }
+  OVERVIEW_STATE.previous = room.devices.map((device) => ({
+    id: device.id,
+    payload: snapshotDevicePayload(device)
+  }));
+  const bpmValue = Number.isFinite(Number(bpm)) ? Math.max(60, Math.min(140, Number(bpm))) : 90;
+  const interval = Math.max(250, Math.min(1000, Math.round(60000 / bpmValue)));
+  OVERVIEW_STATE.step = 0;
+  OVERVIEW_STATE.timer = setInterval(async () => {
+    if (OVERVIEW_STATE.tickPending) return;
+    OVERVIEW_STATE.tickPending = true;
+    try {
+      OVERVIEW_STATE.step += 1;
+      const tasks = room.devices.map(async (device, index) => {
+        const supportsSpectrum = deviceSupportsSpectrum(device);
+        const payload = supportsSpectrum
+          ? { status: 'on', value: stepHexDynamic(OVERVIEW_STATE.step + index) }
+          : (OVERVIEW_STATE.step % 2 ? STATIC_ON : STATIC_OFF);
+        await patchDeviceCommand(device.id, payload);
+      });
+      await Promise.all(tasks);
+    } catch (error) {
+      console.warn('Demo tick error', error);
+    } finally {
+      OVERVIEW_STATE.tickPending = false;
+    }
+  }, interval);
+  stopBtn && (stopBtn.disabled = false);
+  startBtn && (startBtn.disabled = true);
+  showToast?.({
+    title: 'Demo Mode',
+    msg: `Running tour in ${room.name} at ${bpmValue} BPM`,
+    kind: 'success',
+    icon: '🎛️'
+  });
+}
+
+async function stopDemo(options = {}) {
+  const { panic = false } = options;
+  const stopBtn = document.getElementById('demoStop');
+  const startBtn = document.getElementById('demoStart');
+  if (OVERVIEW_STATE.timer) {
+    clearInterval(OVERVIEW_STATE.timer);
+    OVERVIEW_STATE.timer = null;
+  }
+  OVERVIEW_STATE.step = 0;
+  OVERVIEW_STATE.tickPending = false;
+  stopBtn && (stopBtn.disabled = true);
+  startBtn && (startBtn.disabled = false);
+  if (OVERVIEW_STATE.previous.length) {
+    await Promise.all(
+      OVERVIEW_STATE.previous.map(async (snapshot) => {
+        try {
+          await patchDeviceCommand(snapshot.id, snapshot.payload || STATIC_OFF);
+        } catch (error) {
+          console.warn('Demo restore failed', snapshot.id, error);
+        }
+      })
+    );
+  }
+  OVERVIEW_STATE.previous = [];
+  OVERVIEW_STATE.roster = [];
+  if (!panic) {
+    showToast?.({ title: 'Demo Mode', msg: 'Demo stopped and fixtures restored.', kind: 'info', icon: '🛑' });
+  }
+}
+
+function renderGrowRoomOverview() {
+  const summaryEl = document.getElementById('growOverviewSummary');
+  const gridEl = document.getElementById('overviewGrid');
+  if (!summaryEl || !gridEl) return;
+  const data = getOverviewSourceData();
+  const rooms = deriveOverviewRooms(data);
+  OVERVIEW_STATE.rooms = rooms;
+  renderOverviewSummary(summaryEl, rooms);
+  renderOverviewGrid(gridEl, rooms);
+  populateDemoRooms(rooms);
+  ensureOverviewDemoWired();
 }
 
 function updateAutomationIndicator(status = {}) {
@@ -12579,27 +12969,6 @@ function hookRoomDevicePairing(roomWizardInstance) {
   });
 }
 
-
-// --- Grow Room Overview (move this above AI features to avoid ReferenceError) ---
-function renderGrowRoomOverview() {
-  const summaryEl = document.getElementById('growOverviewSummary');
-  const gridEl = document.getElementById('growOverviewGrid');
-  if (!summaryEl || !gridEl) return;
-
-  const rooms = Array.isArray(STATE.rooms) ? STATE.rooms : [];
-  const zones = Array.isArray(STATE.environment) ? STATE.environment : [];
-  const plans = Array.isArray(STATE.plans) ? STATE.plans : [];
-  const schedules = Array.isArray(STATE.schedules) ? STATE.schedules : [];
-
-  const roomCount = rooms.length;
-  const zoneCount = zones.length;
-  const summaries = [
-    {
-      // ...existing summary logic...
-    }
-  ];
-  // ...existing code to update DOM...
-}
 
 // --- Top Card and AI Features Management ---
 function initializeTopCard() {

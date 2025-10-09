@@ -212,18 +212,44 @@
           </div>
         </section>
 
-<section id="growRoomOverview" class="card card--panel">
-  <div class="row row--between row--center">
-    <div>
+<section id="growRoomOverview" class="card card--panel overview-panel">
+  <div class="overview-panel__header">
+    <div class="overview-panel__intro">
       <h2 class="section-title">Grow Room Overview</h2>
-      <p class="tiny text-muted">Live room metrics, schedules, and AI activity.</p>
+      <p class="tiny text-muted">Tour-ready telemetry, lighting status, and demo controls.</p>
     </div>
-    <div id="growOverviewSummary" class="grow-overview__summary">
+    <div id="growOverviewSummary" class="overview-summary" aria-live="polite">
       <span class="tiny text-muted">Loading overview…</span>
     </div>
   </div>
-  <div id="growOverviewGrid" class="grow-overview__grid">
+  <div class="overview-status-legend" aria-hidden="true">
+    <span class="legend-item"><span class="icon ai"></span>AI</span>
+    <span class="legend-item"><span class="icon auto"></span>Automation</span>
+    <span class="legend-item"><span class="icon spectra"></span>SpectraSync</span>
+  </div>
+  <div id="overviewGrid" class="overview-grid" aria-live="polite">
     <p class="tiny text-muted">Loading rooms…</p>
+  </div>
+  <div class="overview-demo" id="overviewDemo">
+    <div class="overview-demo__header">
+      <h3>Demo Mode</h3>
+      <p class="tiny text-muted">Showcase SpectraSync tours with rhythmic color and spectrum sweeps.</p>
+    </div>
+    <div class="overview-demo__controls">
+      <label class="demo-field" for="demoRoom">
+        <span>Room</span>
+        <select id="demoRoom"></select>
+      </label>
+      <label class="demo-field" for="demoBpm">
+        <span>BPM</span>
+        <input id="demoBpm" type="number" min="60" max="140" step="5" value="90" />
+      </label>
+      <div class="overview-demo__buttons">
+        <button id="demoStart" type="button" class="primary">Start Demo</button>
+        <button id="demoStop" type="button" class="ghost" disabled>Stop</button>
+      </div>
+    </div>
+    <p class="tiny text-muted overview-demo__hint">ESC to stop instantly. Dynamic fixtures cycle spectra; static fixtures pulse softly.</p>
   </div>
 </section>
       <section id="lightsStatusPanel" class="card card--panel">
