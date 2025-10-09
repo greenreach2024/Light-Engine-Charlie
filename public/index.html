@@ -322,9 +322,14 @@
                 IoT Devices
                 <span class="hint" tabindex="0" data-tip="Manage all connected IoT devices including SwitchBot, Kasa, Shelly, and GreenReach devices. View status, set names and locations, and identify controlled equipment.">?</span>
               </h2>
-              <div class="row row--gap-xs">
+              <div class="row row--gap-sm row--wrap" style="align-items:flex-start;">
                 <button id="btnScanIoTDevices" type="button" class="primary" title="Scan for all IoT devices">Scan for Devices</button>
-                <button id="btnOpenSwitchBotManager" type="button" class="ghost">SwitchBot Manager</button>
+                <div class="iot-action-group" role="group" aria-label="Device managers" style="display:flex;flex-direction:column;gap:4px;min-width:160px;">
+                  <span class="tiny text-muted" style="letter-spacing:0.02em;text-transform:uppercase;font-weight:600;">Device managers</span>
+                  <div class="row row--gap-xs">
+                    <button id="btnOpenSwitchBotManager" type="button" class="ghost">SwitchBot Manager</button>
+                  </div>
+                </div>
 <!-- Modal for SwitchBot Manager -->
 <div id="switchBotModal" class="modal" style="display:none;position:fixed;z-index:10000;left:0;top:0;width:100vw;height:100vh;background:rgba(0,0,0,0.4);align-items:center;justify-content:center;">
   <div style="background:#fff;border-radius:10px;max-width:90vw;max-height:90vh;width:900px;box-shadow:0 8px 32px rgba(0,0,0,0.25);position:relative;display:flex;flex-direction:column;">
@@ -332,13 +337,19 @@
     <iframe id="switchBotIframe" src="./switchbot.html" style="width:100%;height:80vh;border:none;border-radius:0 0 10px 10px;"></iframe>
   </div>
 </div>
-                <button id="btnOpenKasaManager" type="button" class="ghost">Kasa Manager</button>
-                <button id="btnOpenShellyManager" type="button" class="ghost">Shelly Manager</button>
-                <button id="btnShowIotSetup" type="button" class="ghost">IoT System Setup</button>
+                <div class="iot-action-group" role="group" aria-label="Device setup" style="display:flex;flex-direction:column;gap:4px;min-width:160px;">
+                  <span class="tiny text-muted" style="letter-spacing:0.02em;text-transform:uppercase;font-weight:600;">Device setup</span>
+                  <div class="row row--gap-xs">
+                    <button id="btnShowIotSetup" type="button" class="ghost">View setup options</button>
+                  </div>
+                </div>
               </div>
               <div id="iotEcosystemCard" class="card" style="display:none;margin:16px 0 0 0;padding:20px 24px 16px 24px;background:#f8fafc;border:1px solid #e5e7eb;border-radius:12px;">
+                <div style="display:flex;flex-direction:column;gap:4px;margin-bottom:12px;">
+                  <span class="tiny text-muted" style="letter-spacing:0.02em;text-transform:uppercase;font-weight:600;">Device setup options</span>
+                  <p class="tiny" style="margin:0;color:#475569;">Choose an ecosystem to start configuration for new hardware integrations.</p>
+                </div>
                 <div class="row row--gap-xs" id="iotEcosystemButtons" style="flex-wrap:wrap;">
-                  <button class="ghost" id="btnMgrSwitchBot">SwitchBot</button>
                   <button class="ghost" id="btnMgrKasa">Kasa</button>
                   <button class="ghost" id="btnMgrSonoff">Sonoff</button>
                   <button class="ghost" id="btnMgrShelly">Shelly</button>
