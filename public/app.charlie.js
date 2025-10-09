@@ -9225,211 +9225,6 @@ function renderSchedules() {
   renderGrowRoomOverview();
 }
 
-function renderGrowRoomOverview() {
-  const summaryEl = document.getElementById('growOverviewSummary');
-  const gridEl = document.getElementById('growOverviewGrid');
-  if (!summaryEl || !gridEl) return;
-
-  const rooms = Array.isArray(STATE.rooms) ? STATE.rooms : [];
-  const zones = Array.isArray(STATE.environment) ? STATE.environment : [];
-  const plans = Array.isArray(STATE.plans) ? STATE.plans : [];
-  const schedules = Array.isArray(STATE.schedules) ? STATE.schedules : [];
-
-  const roomCount = rooms.length;
-  const zoneCount = zones.length;
-  const summaries = [
-    {
-      label: 'Grow Rooms',
-      value: roomCount
-        ? `${roomCount} room${roomCount === 1 ? '' : 's'}`
-        : zoneCount
-        ? `${zoneCount} zone${zoneCount === 1 ? '' : 's'}`
-        : 'None'
-    },
-    {
-      label: 'Plans running',
-      value:
-        plans.length === 0
-          ? 'None'
-          : (() => {
-              const names = plans.map((plan) => plan.name || 'Untitled plan').filter(Boolean);
-              const preview = names.slice(0, 2).join(', ');
-              const extra = names.length > 2 ? ` +${names.length - 2}` : '';
-              return `${preview}${extra}`;
-            })()
-    },
-    {
-      label: 'Schedules',
-      value:
-        schedules.length === 0
-          ? 'None'
-          : (() => {
-              const names = schedules.map((sched) => sched.name || 'Unnamed schedule').filter(Boolean);
-              const preview = names.slice(0, 2).join(', ');
-              const extra = names.length > 2 ? ` +${names.length - 2}` : '';
-              return `${preview}${extra}`;
-            })()
-    }
-  ];
-
-  summaryEl.innerHTML = summaries
-    .map(
-      (item) => `
-        <div class="grow-overview__summary-item">
-          <span class="grow-overview__summary-label">${escapeHtml(item.label)}</span>
-          <span class="grow-overview__summary-value">${escapeHtml(item.value)}</span>
-        </div>`
-    )
-    .join('');
-
-  const activeFeatures = Array.from(document.querySelectorAll('.ai-feature-card.active h3'))
-    .map((el) => el.textContent?.trim())
-    .filter(Boolean);
-
-  const matchZoneForRoom = (room) => {
-    if (!room) return null;
-    const identifiers = new Set(
-      [room.id, room.name]
-        .filter((value) => value !== undefined && value !== null)
-        .map((value) => String(value).toLowerCase())
-    );
-    if (!identifiers.size) return null;
-    return zones.find((zone) => {
-      const id = zone.id ? String(zone.id).toLowerCase() : '';
-      const name = zone.name ? String(zone.name).toLowerCase() : '';
-      const location = zone.location ? String(zone.location).toLowerCase() : '';
-      return identifiers.has(id) || identifiers.has(name) || identifiers.has(location);
-    }) || null;
-  };
-
-  const metricKeys = [
-    { key: 'tempC', label: 'Temp', unit: '°C', precision: 1 },
-    { key: 'rh', label: 'Humidity', unit: '%', precision: 1 },
-    { key: 'co2', label: 'CO₂', unit: ' ppm', precision: 0 },
-    { key: 'vpd', label: 'VPD', unit: ' kPa', precision: 2 }
-  ];
-
-  const formatMetricValue = (sensor, meta) => {
-    if (!sensor || typeof sensor.current !== 'number' || !Number.isFinite(sensor.current)) {
-      return '—';
-    }
-    const value = meta.precision != null ? sensor.current.toFixed(meta.precision) : String(sensor.current);
-    if (meta.unit.trim() === '%') {
-      return `${value}${meta.unit}`;
-    }
-    return `${value}${meta.unit}`;
-  };
-
-  const metricStatus = (sensor) => {
-    if (!sensor || typeof sensor.current !== 'number' || !Number.isFinite(sensor.current)) {
-      return 'unknown';
-    }
-    const min = sensor.setpoint?.min;
-    const max = sensor.setpoint?.max;
-    if (typeof min === 'number' && typeof max === 'number') {
-      return sensor.current >= min && sensor.current <= max ? 'ok' : 'warn';
-    }
-    return 'unknown';
-  };
-
-  const buildMetrics = (zone) => {
-    if (!zone || !zone.sensors) return '';
-    const items = metricKeys
-      .map((meta) => {
-        const sensor = zone.sensors?.[meta.key];
-        if (!sensor) return '';
-        const status = metricStatus(sensor);
-        const value = formatMetricValue(sensor, meta);
-        return `
-          <div class="grow-room-card__metric grow-room-card__metric--${status}">
-            <span class="grow-room-card__metric-label">${escapeHtml(meta.label)}</span>
-            <span class="grow-room-card__metric-value">${escapeHtml(value)}</span>
-          </div>`;
-      })
-      .filter(Boolean)
-      .join('');
-    return items;
-  };
-
-  const buildAiSection = () => {
-    if (!activeFeatures.length) {
-      return '<p class="tiny text-muted">AI features inactive.</p>';
-    }
-    return `
-      <ul class="grow-room-card__ai-list">
-        ${activeFeatures.map((name) => `<li class="grow-room-card__ai-chip">${escapeHtml(name)}</li>`).join('')}
-      </ul>`;
-  };
-
-  const cards = [];
-  if (rooms.length) {
-    rooms.forEach((room) => {
-      const zone = matchZoneForRoom(room);
-      const name = room.name || room.id || 'Grow Room';
-      const details = [];
-      const zonesList = Array.isArray(room.zones) ? room.zones.filter(Boolean) : [];
-      if (zonesList.length) {
-        details.push(`Zones: ${zonesList.map((item) => escapeHtml(item)).join(', ')}`);
-      }
-      if (room.layout?.type) {
-        details.push(`Layout: ${escapeHtml(room.layout.type)}`);
-      }
-      if (room.controlMethod) {
-        details.push(`Control: ${escapeHtml(room.controlMethod)}`);
-      }
-      const metaParts = [];
-      if (zone?.meta?.source) metaParts.push(`Source: ${escapeHtml(zone.meta.source)}`);
-      if (typeof zone?.meta?.battery === 'number') metaParts.push(`Battery: ${escapeHtml(`${zone.meta.battery}%`)}`);
-      if (typeof zone?.meta?.rssi === 'number') metaParts.push(`RSSI: ${escapeHtml(`${zone.meta.rssi} dBm`)}`);
-      const metrics = buildMetrics(zone);
-      cards.push(`
-        <article class="grow-room-card">
-          <div class="grow-room-card__header">
-            <h3>${escapeHtml(name)}</h3>
-            ${room.roomType ? `<span class="chip tiny">${escapeHtml(room.roomType)}</span>` : ''}
-          </div>
-          ${details.length ? `<div class="tiny text-muted">${details.join(' • ')}</div>` : ''}
-          ${metaParts.length ? `<div class="tiny text-muted">${metaParts.join(' • ')}</div>` : ''}
-          ${metrics ? `<div class="grow-room-card__metrics">${metrics}</div>` : '<p class="tiny text-muted">No telemetry available.</p>'}
-          <div class="grow-room-card__ai">
-            <span class="tiny text-muted">AI Features</span>
-            ${buildAiSection()}
-          </div>
-        </article>`);
-    });
-  } else if (zones.length) {
-    zones.forEach((zone) => {
-      const name = zone.name || zone.id || 'Zone';
-      const location = zone.location ? `Location: ${escapeHtml(zone.location)}` : '';
-      const metaParts = [];
-      if (zone.meta?.source) metaParts.push(`Source: ${escapeHtml(zone.meta.source)}`);
-      if (typeof zone.meta?.battery === 'number') metaParts.push(`Battery: ${escapeHtml(`${zone.meta.battery}%`)}`);
-      if (typeof zone.meta?.rssi === 'number') metaParts.push(`RSSI: ${escapeHtml(`${zone.meta.rssi} dBm`)}`);
-      const metrics = buildMetrics(zone);
-      cards.push(`
-        <article class="grow-room-card">
-          <div class="grow-room-card__header">
-            <h3>${escapeHtml(name)}</h3>
-          </div>
-          ${location ? `<div class="tiny text-muted">${location}</div>` : ''}
-          ${metaParts.length ? `<div class="tiny text-muted">${metaParts.join(' • ')}</div>` : ''}
-          ${metrics ? `<div class="grow-room-card__metrics">${metrics}</div>` : '<p class="tiny text-muted">No telemetry available.</p>'}
-          <div class="grow-room-card__ai">
-            <span class="tiny text-muted">AI Features</span>
-            ${buildAiSection()}
-          </div>
-        </article>`);
-    });
-  }
-
-  if (!cards.length) {
-    gridEl.innerHTML = '<p class="tiny text-muted">Add a grow room to view live status and telemetry.</p>';
-    return;
-  }
-
-  gridEl.innerHTML = cards.join('');
-}
-
 function updateAutomationIndicator(status = {}) {
   const indicator = document.getElementById('automationIndicator');
   const statusEl = document.getElementById('automationIndicatorStatus');
@@ -12581,24 +12376,709 @@ function hookRoomDevicePairing(roomWizardInstance) {
 
 
 // --- Grow Room Overview (move this above AI features to avoid ReferenceError) ---
+const OVERVIEW_METRIC_META = [
+  { key: 'tempC', label: 'Temp', unit: '°C', precision: 1 },
+  { key: 'rh', label: 'Humidity', unit: '%', precision: 1 },
+  { key: 'vpd', label: 'VPD', unit: ' kPa', precision: 2 },
+  { key: 'co2', label: 'CO₂', unit: ' ppm', precision: 0 }
+];
+
+const OVERVIEW_ROOM_META = new Map();
+const DEMO_COLOR_SEQUENCE = ['640000000000', '006400000000', '000064000000', '000000640000', '404000200000'];
+const DEMO_SAFE_HEX = '737373730000';
+const DEMO_MIN_BPM = 60;
+const DEMO_MAX_BPM = 140;
+
+let DEMO_STATE = {
+  active: false,
+  roomKey: '',
+  roomLabel: '',
+  bpm: 90,
+  step: 0,
+  interval: 667,
+  devices: []
+};
+let DEMO_TIMER = null;
+
+function normalizeIdentifier(value) {
+  if (value === undefined || value === null) return '';
+  if (typeof value === 'string') return value.trim().toLowerCase();
+  if (typeof value === 'number') return String(value).trim().toLowerCase();
+  return '';
+}
+
+function collectRoomIdentifiers(room) {
+  const identifiers = new Set();
+  if (!room || typeof room !== 'object') return identifiers;
+  const add = (value) => {
+    const normalized = normalizeIdentifier(value);
+    if (normalized) identifiers.add(normalized);
+  };
+  add(room.id);
+  add(room.name);
+  add(room.roomId);
+  add(room.roomName);
+  add(room.location);
+  if (room.match) {
+    add(room.match.room);
+    add(room.match.roomId);
+    add(room.match.roomName);
+    add(room.match.zone);
+    add(room.match.zoneId);
+    add(room.match.zoneName);
+  }
+  if (Array.isArray(room.zones)) {
+    room.zones.forEach(add);
+  }
+  return identifiers;
+}
+
+function collectZoneIdentifiers(zone) {
+  const identifiers = new Set();
+  if (!zone || typeof zone !== 'object') return identifiers;
+  const add = (value) => {
+    const normalized = normalizeIdentifier(value);
+    if (normalized) identifiers.add(normalized);
+  };
+  add(zone.id);
+  add(zone.name);
+  add(zone.location);
+  if (zone.meta) {
+    add(zone.meta.room);
+    add(zone.meta.roomId);
+    add(zone.meta.roomName);
+    add(zone.meta.zone);
+    add(zone.meta.zoneId);
+    add(zone.meta.scope);
+  }
+  return identifiers;
+}
+
+function buildOverviewKey(room, zone, index) {
+  const base = firstNonEmptyString(room?.id, zone?.id, room?.name, zone?.name, `room-${index + 1}`);
+  const slug = String(base || '')
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, '-')
+    .replace(/^-+|-+$/g, '') || `room-${index + 1}`;
+  return `${slug}-${index}`;
+}
+
+function findZoneForRoom(room, zones) {
+  if (!room || !Array.isArray(zones) || !zones.length) return null;
+  const roomIds = collectRoomIdentifiers(room);
+  if (!roomIds.size) return null;
+  return zones.find((zone) => {
+    const zoneIds = collectZoneIdentifiers(zone);
+    return Array.from(zoneIds).some((value) => roomIds.has(value));
+  }) || null;
+}
+
+function findGroupForRoom(room, zone, groups) {
+  if (!Array.isArray(groups) || !groups.length) return null;
+  const identifiers = new Set([...collectRoomIdentifiers(room), ...collectZoneIdentifiers(zone)]);
+  if (!identifiers.size) return null;
+  return groups.find((group) => {
+    if (!group || typeof group !== 'object') return false;
+    const match = group.match || {};
+    const values = [
+      group.id,
+      group.name,
+      group.room,
+      group.roomId,
+      group.zone,
+      group.zoneId,
+      match.room,
+      match.roomId,
+      match.roomName,
+      match.zone,
+      match.zoneId,
+      match.zoneName
+    ];
+    if (values.some((value) => identifiers.has(normalizeIdentifier(value)))) return true;
+    if (Array.isArray(group.members)) {
+      return group.members.some((member) => {
+        if (!member || typeof member !== 'object') return false;
+        return [
+          member.room,
+          member.roomId,
+          member.roomName,
+          member.zone,
+          member.zoneId,
+          member.zoneName,
+          member.location?.room,
+          member.location?.zone
+        ].some((value) => identifiers.has(normalizeIdentifier(value)));
+      });
+    }
+    return false;
+  }) || null;
+}
+
+function formatOverviewMetricValue(sensor, meta) {
+  if (!sensor || typeof sensor.current !== 'number' || !Number.isFinite(sensor.current)) {
+    return '—';
+  }
+  const value = meta.precision != null ? sensor.current.toFixed(meta.precision) : String(sensor.current);
+  if (meta.unit.trim() === '%') {
+    return `${value}${meta.unit}`;
+  }
+  if (meta.unit.trim() === ' ppm') {
+    return `${Number(sensor.current).toLocaleString()}${meta.unit}`;
+  }
+  return `${value}${meta.unit}`;
+}
+
+function computeOverviewMetricStatus(sensor) {
+  if (!sensor || typeof sensor.current !== 'number' || !Number.isFinite(sensor.current)) {
+    return 'unknown';
+  }
+  const min = sensor.setpoint?.min;
+  const max = sensor.setpoint?.max;
+  if (typeof min === 'number' && typeof max === 'number') {
+    return sensor.current >= min && sensor.current <= max ? 'ok' : 'warn';
+  }
+  return 'unknown';
+}
+
+function buildOverviewMetrics(zone) {
+  return OVERVIEW_METRIC_META.map((meta) => {
+    const sensor = zone?.sensors?.[meta.key] || null;
+    return {
+      key: meta.key,
+      label: meta.label,
+      value: formatOverviewMetricValue(sensor, meta),
+      status: computeOverviewMetricStatus(sensor),
+      sensor
+    };
+  });
+}
+
+function resolvePlanInfo(planId) {
+  const plans = Array.isArray(STATE.plans) ? STATE.plans : [];
+  const normalized = normalizeIdentifier(planId);
+  if (!normalized) {
+    return { id: '', name: 'No plan assigned', detail: 'Assign a SpectraSync plan.', plan: null };
+  }
+  const plan = plans.find((entry) => normalizeIdentifier(entry.id) === normalized || normalizeIdentifier(entry.name) === normalized) || null;
+  if (!plan) {
+    return { id: planId, name: planId, detail: '', plan: null };
+  }
+  const parts = [];
+  if (plan.stage) parts.push(plan.stage);
+  if (plan.crop) parts.push(plan.crop);
+  if (typeof plan.ppfd === 'number') parts.push(`${plan.ppfd} µmol`);
+  if (typeof plan.dli === 'number') parts.push(`${plan.dli.toFixed(1)} DLI`);
+  return { id: plan.id, name: plan.name || plan.id, detail: parts.join(' • '), plan };
+}
+
+function resolveScheduleInfo(scheduleId) {
+  const schedules = Array.isArray(STATE.schedules) ? STATE.schedules : [];
+  const normalized = normalizeIdentifier(scheduleId);
+  if (!normalized) {
+    return { id: '', name: 'No schedule', detail: 'Assign a daily schedule.', schedule: null };
+  }
+  const schedule = schedules.find((entry) => normalizeIdentifier(entry.id) === normalized || normalizeIdentifier(entry.name) === normalized) || null;
+  if (!schedule) {
+    return { id: scheduleId, name: scheduleId, detail: '', schedule: null };
+  }
+  return { id: schedule.id, name: schedule.name || schedule.id, detail: scheduleSummary(schedule), schedule };
+}
+
+function gatherDevicesForRoom(room, zone) {
+  const devices = Array.isArray(STATE.devices) ? STATE.devices : [];
+  if (!devices.length) return [];
+  const identifiers = new Set([...collectRoomIdentifiers(room), ...collectZoneIdentifiers(zone)]);
+  if (!identifiers.size) return [];
+  return devices.filter((device) => {
+    if (!device || typeof device !== 'object') return false;
+    const values = [
+      device.id,
+      device.deviceId,
+      device.device_id,
+      device.room,
+      device.roomId,
+      device.roomName,
+      device.zone,
+      device.zoneId,
+      device.zoneName,
+      device.location?.room,
+      device.location?.zone
+    ];
+    return values.some((value) => identifiers.has(normalizeIdentifier(value)));
+  });
+}
+
+function valueMatchesIdentifiers(subject, identifiers, seen = new Set()) {
+  if (subject === null || subject === undefined) return false;
+  if (typeof subject === 'string' || typeof subject === 'number') {
+    return identifiers.has(normalizeIdentifier(subject));
+  }
+  if (Array.isArray(subject)) {
+    return subject.some((item) => valueMatchesIdentifiers(item, identifiers, seen));
+  }
+  if (typeof subject === 'object') {
+    if (seen.has(subject)) return false;
+    seen.add(subject);
+    return Object.values(subject).some((value) => valueMatchesIdentifiers(value, identifiers, seen));
+  }
+  return false;
+}
+
+function gatherRulesForRoom(room, zone, rules) {
+  if (!Array.isArray(rules) || !rules.length) return [];
+  const identifiers = new Set([...collectRoomIdentifiers(room), ...collectZoneIdentifiers(zone)]);
+  if (!identifiers.size) return [];
+  return rules.filter((rule) => {
+    if (!rule || typeof rule !== 'object') return false;
+    return (
+      valueMatchesIdentifiers(rule.scope, identifiers) ||
+      valueMatchesIdentifiers(rule.match, identifiers) ||
+      valueMatchesIdentifiers(rule.room, identifiers) ||
+      valueMatchesIdentifiers(rule.zone, identifiers) ||
+      valueMatchesIdentifiers(rule.rooms, identifiers) ||
+      valueMatchesIdentifiers(rule.targets, identifiers) ||
+      valueMatchesIdentifiers(rule.target, identifiers)
+    );
+  });
+}
+
+function deriveAutomationStatus(room, zone, rules, devices) {
+  const matches = gatherRulesForRoom(room, zone, rules);
+  const governed = Boolean(zone?.meta?.managedByPlugs || zone?.meta?.automation === 'on' || zone?.meta?.governance === 'automation');
+  const active = governed || matches.length > 0;
+  const detailParts = [];
+  if (matches.length) detailParts.push(`${matches.length} rule${matches.length === 1 ? '' : 's'}`);
+  if (governed) detailParts.push('controller');
+  if (Array.isArray(devices) && devices.length) detailParts.push(`${devices.length} fixture${devices.length === 1 ? '' : 's'}`);
+  const label = active ? `Automation active${detailParts.length ? ` • ${detailParts.join(' + ')}` : ''}` : 'Automation idle';
+  return { status: active ? 'on' : 'off', label, matches };
+}
+
+function deriveSpectraStatus(planInfo, scheduleInfo, devices) {
+  const hasPlan = Boolean(planInfo?.id);
+  const hasSchedule = Boolean(scheduleInfo?.id);
+  const active = hasPlan && hasSchedule;
+  const count = Array.isArray(devices) ? devices.length : 0;
+  const label = active
+    ? `SpectraSync active${count ? ` • ${count} fixture${count === 1 ? '' : 's'}` : ''}`
+    : 'SpectraSync idle';
+  return { status: active ? 'active' : 'idle', label };
+}
+
+function deriveAiPostureStatus() {
+  try {
+    if (typeof isIAAssistActive === 'function' && isIAAssistActive()) {
+      return { status: 'autopilot', label: 'Autopilot' };
+    }
+  } catch (error) {
+    console.warn('deriveAiPostureStatus error', error);
+  }
+  const activeCard = document.querySelector('.ai-feature-card.active[data-feature]');
+  if (activeCard) {
+    return { status: 'advisory', label: 'Advisory' };
+  }
+  const anyCard = document.querySelector('.ai-feature-card[data-feature]');
+  if (anyCard) {
+    return { status: 'advisory', label: 'Advisory' };
+  }
+  return { status: 'off', label: 'Off' };
+}
+
+function createOverviewMetricHTML(metric) {
+  const classes = [`overview-metric`, `overview-metric--${metric.status}`];
+  const interactive = metric.status !== 'unknown' && metric.sensor;
+  const attrs = [`data-metric="${escapeHtml(metric.key)}"`];
+  if (interactive) {
+    attrs.push('role="button"', 'tabindex="0"', `aria-label="View ${escapeHtml(metric.label)} trend"`);
+  } else {
+    attrs.push('aria-disabled="true"');
+  }
+  const trend = interactive ? '<canvas class="overview-metric__trend" width="220" height="48" aria-hidden="true"></canvas>' : '';
+  return `
+    <div ${attrs.join(' ')} class="${classes.join(' ')}">
+      <span class="overview-metric__label">${escapeHtml(metric.label)}</span>
+      <span class="overview-metric__value">${escapeHtml(metric.value)}</span>
+      ${trend}
+    </div>
+  `;
+}
+
+function createOverviewTile(entry) {
+  const aiClass = `overview-icon overview-icon--ai is-${entry.ai.status}`;
+  const automationClass = `overview-icon overview-icon--automation is-${entry.automation.status}`;
+  const spectraClass = `overview-icon overview-icon--spectra is-${entry.spectra.status}`;
+  const planDetail = entry.planInfo.detail ? `<span class="overview-plan__detail">${escapeHtml(entry.planInfo.detail)}</span>` : '';
+  const scheduleDetail = entry.scheduleInfo.detail ? `<span class="overview-plan__detail">${escapeHtml(entry.scheduleInfo.detail)}</span>` : '';
+  return `
+    <article class="overview-tile" data-room-key="${escapeHtml(entry.key)}">
+      <header class="overview-tile__header">
+        <div>
+          <h2 class="overview-tile__title">${escapeHtml(entry.name)}</h2>
+          ${entry.subtitle ? `<p class="overview-tile__subtitle">${escapeHtml(entry.subtitle)}</p>` : ''}
+        </div>
+        <div class="overview-tile__icons">
+          <span class="${aiClass}" title="AI Copilot: ${escapeHtml(entry.ai.label)}">
+            <span class="overview-icon__dot" aria-hidden="true"></span>
+            <span class="overview-icon__label">AI</span>
+            <span class="sr-only">AI status ${escapeHtml(entry.ai.label)}</span>
+          </span>
+          <span class="${automationClass}" title="${escapeHtml(entry.automation.label)}">
+            <span class="overview-icon__dot" aria-hidden="true"></span>
+            <span class="overview-icon__label">Automation</span>
+            <span class="sr-only">Automation status ${escapeHtml(entry.automation.label)}</span>
+          </span>
+          <span class="${spectraClass}" title="${escapeHtml(entry.spectra.label)}">
+            <span class="overview-icon__dot" aria-hidden="true"></span>
+            <span class="overview-icon__label">SpectraSync</span>
+            <span class="sr-only">SpectraSync status ${escapeHtml(entry.spectra.label)}</span>
+          </span>
+        </div>
+      </header>
+      <div class="overview-tile__metrics">
+        ${entry.metrics.map((metric) => createOverviewMetricHTML(metric)).join('')}
+      </div>
+      <div class="overview-tile__plans">
+        <div class="overview-plan">
+          <span class="overview-plan__label">Plan</span>
+          <span class="overview-plan__value">${escapeHtml(entry.planInfo.name)}</span>
+          ${planDetail}
+        </div>
+        <div class="overview-plan">
+          <span class="overview-plan__label">Schedule</span>
+          <span class="overview-plan__value">${escapeHtml(entry.scheduleInfo.name)}</span>
+          ${scheduleDetail}
+        </div>
+      </div>
+    </article>
+  `;
+}
+
+function hydrateOverviewTile(entry, tile) {
+  entry.metrics.forEach((metric) => {
+    const metricEl = tile.querySelector(`[data-metric="${metric.key}"]`);
+    if (!metricEl) return;
+    if (!metric.sensor || !entry.zone) return;
+    const canvas = metricEl.querySelector('canvas');
+    if (canvas) {
+      const values = Array.isArray(metric.sensor.history) ? metric.sensor.history.slice(-144).reverse() : [];
+      const color = metric.status === 'warn' ? '#ef4444' : metric.status === 'ok' ? '#22c55e' : '#facc15';
+      canvas.width = canvas.clientWidth || 220;
+      canvas.height = canvas.clientHeight || 48;
+      drawSparkline(canvas, values, { width: canvas.width, height: canvas.height, color });
+    }
+    const activate = (event) => {
+      if (event.type === 'keydown' && !['Enter', ' '].includes(event.key)) return;
+      if (event.type === 'keydown') event.preventDefault();
+      if (entry.zone) openEnvModal(entry.zone, metric.key);
+    };
+    metricEl.addEventListener('click', activate);
+    metricEl.addEventListener('keydown', activate);
+  });
+}
+
+function buildRoomSubtitle(room, zone, group) {
+  const parts = [];
+  const location = firstNonEmptyString(room?.location, zone?.location);
+  if (location) parts.push(location);
+  if (Array.isArray(room?.zones) && room.zones.length) parts.push(`Zones: ${room.zones.join(', ')}`);
+  if (zone?.meta?.source) parts.push(`Source: ${zone.meta.source}`);
+  if (group?.name) parts.push(`Group ${group.name}`);
+  return parts.join(' • ');
+}
+
 function renderGrowRoomOverview() {
-  const summaryEl = document.getElementById('growOverviewSummary');
-  const gridEl = document.getElementById('growOverviewGrid');
-  if (!summaryEl || !gridEl) return;
+  const gridEl = document.getElementById('overviewGrid');
+  if (!gridEl) return;
+  const roomSelect = document.getElementById('demoRoom');
+  const startBtn = document.getElementById('demoStart');
+  const stopBtn = document.getElementById('demoStop');
+  const bpmInput = document.getElementById('demoBpm');
+
+  gridEl.setAttribute('aria-busy', 'true');
 
   const rooms = Array.isArray(STATE.rooms) ? STATE.rooms : [];
   const zones = Array.isArray(STATE.environment) ? STATE.environment : [];
-  const plans = Array.isArray(STATE.plans) ? STATE.plans : [];
-  const schedules = Array.isArray(STATE.schedules) ? STATE.schedules : [];
+  const groups = Array.isArray(STATE.groups) ? STATE.groups : [];
+  const rules = Array.isArray(STATE.preAutomationRules) ? STATE.preAutomationRules : [];
+  const aiPosture = deriveAiPostureStatus();
 
-  const roomCount = rooms.length;
-  const zoneCount = zones.length;
-  const summaries = [
-    {
-      // ...existing summary logic...
+  const entries = [];
+
+  if (rooms.length) {
+    rooms.forEach((room, index) => {
+      const zone = findZoneForRoom(room, zones);
+      const group = findGroupForRoom(room, zone, groups);
+      const planId = firstNonEmptyString(room.plan, room.activePlan, room.currentPlan, zone?.meta?.plan, zone?.plan, group?.plan);
+      const scheduleId = firstNonEmptyString(room.schedule, room.activeSchedule, room.currentSchedule, zone?.meta?.schedule, zone?.schedule, group?.schedule);
+      const planInfo = resolvePlanInfo(planId);
+      const scheduleInfo = resolveScheduleInfo(scheduleId);
+      const metrics = buildOverviewMetrics(zone);
+      const devices = gatherDevicesForRoom(room, zone);
+      const automation = deriveAutomationStatus(room, zone, rules, devices);
+      const spectra = deriveSpectraStatus(planInfo, scheduleInfo, devices);
+      const key = buildOverviewKey(room, zone, index);
+      entries.push({
+        key,
+        name: room.name || room.id || `Room ${index + 1}`,
+        subtitle: buildRoomSubtitle(room, zone, group),
+        metrics,
+        planInfo,
+        scheduleInfo,
+        devices,
+        automation,
+        ai: aiPosture,
+        spectra,
+        zone,
+        room,
+        group,
+        roomLabel: room.name || room.id || zone?.name || `Room ${index + 1}`
+      });
+    });
+  } else if (zones.length) {
+    zones.forEach((zone, index) => {
+      const planInfo = resolvePlanInfo(zone?.meta?.plan || zone?.plan);
+      const scheduleInfo = resolveScheduleInfo(zone?.meta?.schedule || zone?.schedule);
+      const metrics = buildOverviewMetrics(zone);
+      const devices = gatherDevicesForRoom(null, zone);
+      const automation = deriveAutomationStatus(null, zone, rules, devices);
+      const spectra = deriveSpectraStatus(planInfo, scheduleInfo, devices);
+      const key = buildOverviewKey(null, zone, index);
+      const subtitleParts = [];
+      if (zone.location) subtitleParts.push(zone.location);
+      if (zone.meta?.source) subtitleParts.push(`Source: ${zone.meta.source}`);
+      entries.push({
+        key,
+        name: zone.name || zone.id || `Zone ${index + 1}`,
+        subtitle: subtitleParts.join(' • '),
+        metrics,
+        planInfo,
+        scheduleInfo,
+        devices,
+        automation,
+        ai: aiPosture,
+        spectra,
+        zone,
+        room: null,
+        group: null,
+        roomLabel: zone.name || zone.id || `Zone ${index + 1}`
+      });
+    });
+  }
+
+  OVERVIEW_ROOM_META.clear();
+  entries.forEach((entry) => OVERVIEW_ROOM_META.set(entry.key, entry));
+
+  if (roomSelect) {
+    const previous = roomSelect.value;
+    roomSelect.innerHTML = entries.map((entry) => `<option value="${escapeHtml(entry.key)}">${escapeHtml(entry.roomLabel)}</option>`).join('');
+    if (entries.length) {
+      roomSelect.disabled = false;
+      if (previous && OVERVIEW_ROOM_META.has(previous)) {
+        roomSelect.value = previous;
+      } else {
+        roomSelect.value = entries[0].key;
+      }
+    } else {
+      roomSelect.disabled = true;
     }
-  ];
-  // ...existing code to update DOM...
+  }
+
+  if (startBtn) startBtn.disabled = !entries.length && !DEMO_STATE.active;
+  if (stopBtn && !DEMO_STATE.active) stopBtn.disabled = entries.length === 0;
+  if (bpmInput && !DEMO_STATE.active) bpmInput.disabled = false;
+
+  if (DEMO_STATE.active) {
+    if (!OVERVIEW_ROOM_META.has(DEMO_STATE.roomKey)) {
+      stopDemoMode({ silent: false, flush: false, reason: 'room-missing' });
+    } else {
+      const refreshed = OVERVIEW_ROOM_META.get(DEMO_STATE.roomKey);
+      if (refreshed) {
+        DEMO_STATE.devices = refreshed.devices;
+        DEMO_STATE.roomLabel = refreshed.roomLabel;
+      }
+    }
+  }
+
+  if (!entries.length) {
+    gridEl.innerHTML = '<div class="overview-empty">Connect a grow room to see live conditions, schedules, and demo controls.</div>';
+    gridEl.setAttribute('aria-busy', 'false');
+    return;
+  }
+
+  gridEl.innerHTML = entries.map((entry) => createOverviewTile(entry)).join('');
+  entries.forEach((entry) => {
+    const tile = gridEl.querySelector(`[data-room-key="${entry.key}"]`);
+    if (tile) hydrateOverviewTile(entry, tile);
+  });
+  gridEl.setAttribute('aria-busy', 'false');
+}
+
+function controllerPatchDevice(deviceId, payload) {
+  const base = (window.API_BASE || '').replace(/\/+$/, '');
+  const url = `${base}/api/devicedatas/device/${encodeURIComponent(deviceId)}`;
+  return fetch(url, {
+    method: 'PATCH',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(payload)
+  }).then((resp) => {
+    if (!resp.ok) throw new Error(`Controller returned ${resp.status}`);
+    return resp.json().catch(() => ({}));
+  });
+}
+
+function clampBpm(value) {
+  const n = Number(value);
+  if (!Number.isFinite(n)) return 90;
+  return Math.min(DEMO_MAX_BPM, Math.max(DEMO_MIN_BPM, Math.round(n)));
+}
+
+function getDemoIntervalFromBpm(bpm) {
+  const clamped = clampBpm(bpm);
+  return Math.max(250, Math.round((60 / clamped) * 1000));
+}
+
+function getDemoPayload(step) {
+  if (step % 2 === 1) {
+    return { status: 'off', value: null };
+  }
+  const index = Math.floor(step / 2) % DEMO_COLOR_SEQUENCE.length;
+  return { status: 'on', value: DEMO_COLOR_SEQUENCE[index] };
+}
+
+async function runDemoTick() {
+  if (!DEMO_STATE.active || !Array.isArray(DEMO_STATE.devices) || !DEMO_STATE.devices.length) return;
+  const payload = getDemoPayload(DEMO_STATE.step);
+  const commands = DEMO_STATE.devices.map((device) => {
+    const id = firstNonEmptyString(device.id, device.deviceId, device.device_id);
+    if (!id) return Promise.resolve();
+    return controllerPatchDevice(id, payload).catch((error) => {
+      console.warn('Demo patch failed', id, error);
+    });
+  });
+  await Promise.all(commands);
+  DEMO_STATE.step = (DEMO_STATE.step + 1) % (DEMO_COLOR_SEQUENCE.length * 2);
+}
+
+function scheduleDemoTick() {
+  clearTimeout(DEMO_TIMER);
+  DEMO_TIMER = setTimeout(async () => {
+    if (!DEMO_STATE.active) return;
+    await runDemoTick();
+    if (DEMO_STATE.active) {
+      scheduleDemoTick();
+    }
+  }, DEMO_STATE.interval);
+}
+
+function stopDemoMode({ silent = false, flush = true, reason = '' } = {}) {
+  if (!DEMO_STATE.active && !reason) return;
+  clearTimeout(DEMO_TIMER);
+  const wasActive = DEMO_STATE.active;
+  const label = DEMO_STATE.roomLabel;
+  const devices = DEMO_STATE.devices || [];
+  DEMO_STATE = { active: false, roomKey: '', roomLabel: '', bpm: 90, step: 0, interval: 667, devices: [] };
+
+  const roomSelect = document.getElementById('demoRoom');
+  const bpmInput = document.getElementById('demoBpm');
+  const startBtn = document.getElementById('demoStart');
+  const stopBtn = document.getElementById('demoStop');
+
+  if (roomSelect) roomSelect.disabled = !OVERVIEW_ROOM_META.size;
+  if (bpmInput) bpmInput.disabled = false;
+  if (startBtn) startBtn.disabled = !OVERVIEW_ROOM_META.size;
+  if (stopBtn) stopBtn.disabled = true;
+
+  if (flush && devices.length) {
+    Promise.all(devices.map((device) => {
+      const id = firstNonEmptyString(device.id, device.deviceId, device.device_id);
+      if (!id) return Promise.resolve();
+      return controllerPatchDevice(id, { status: 'on', value: DEMO_SAFE_HEX }).catch((error) => {
+        console.warn('Demo reset failed', id, error);
+      });
+    })).catch(() => {});
+  }
+
+  if (wasActive && !silent) {
+    const kind = reason === 'room-missing' ? 'warn' : 'info';
+    const icon = reason === 'room-missing' ? '⚠️' : '⏹️';
+    const msg = reason === 'room-missing' ? 'Room is no longer available.' : `Demo ended for ${label}.`;
+    showToast({ title: 'Demo stopped', msg, kind, icon });
+  }
+}
+
+function startDemoMode() {
+  const roomSelect = document.getElementById('demoRoom');
+  const bpmInput = document.getElementById('demoBpm');
+  const startBtn = document.getElementById('demoStart');
+  const stopBtn = document.getElementById('demoStop');
+  if (!roomSelect || !bpmInput || !startBtn || !stopBtn) return;
+
+  const roomKey = roomSelect.value;
+  if (!roomKey || !OVERVIEW_ROOM_META.has(roomKey)) {
+    showToast({ title: 'Demo mode', msg: 'Select a room to start demo mode.', kind: 'warn', icon: '⚠️' });
+    return;
+  }
+
+  const entry = OVERVIEW_ROOM_META.get(roomKey);
+  const bpm = clampBpm(bpmInput.value);
+  const devices = (entry?.devices || []).filter((device) => firstNonEmptyString(device.id, device.deviceId, device.device_id));
+  if (!devices.length) {
+    showToast({ title: 'Demo mode', msg: 'No controllable fixtures found for this room.', kind: 'warn', icon: '⚠️' });
+    return;
+  }
+
+  stopDemoMode({ silent: true, flush: false });
+
+  DEMO_STATE = {
+    active: true,
+    roomKey,
+    roomLabel: entry.roomLabel,
+    bpm,
+    step: 0,
+    interval: getDemoIntervalFromBpm(bpm),
+    devices
+  };
+
+  startBtn.disabled = true;
+  roomSelect.disabled = true;
+  bpmInput.disabled = true;
+  stopBtn.disabled = false;
+
+  showToast({ title: 'Demo started', msg: `${entry.roomLabel} at ${bpm} BPM`, kind: 'info', icon: '🎛️' });
+
+  runDemoTick().finally(() => {
+    if (DEMO_STATE.active) scheduleDemoTick();
+  });
+}
+
+function initOverviewDemoControls() {
+  const startBtn = document.getElementById('demoStart');
+  const stopBtn = document.getElementById('demoStop');
+  const bpmInput = document.getElementById('demoBpm');
+  const roomSelect = document.getElementById('demoRoom');
+
+  startBtn?.addEventListener('click', startDemoMode);
+  stopBtn?.addEventListener('click', () => stopDemoMode({ silent: false }));
+
+  if (bpmInput) {
+    bpmInput.addEventListener('change', () => {
+      const clamped = clampBpm(bpmInput.value);
+      bpmInput.value = clamped;
+      if (DEMO_STATE.active) {
+        DEMO_STATE.bpm = clamped;
+        DEMO_STATE.interval = getDemoIntervalFromBpm(clamped);
+      }
+    });
+  }
+
+  if (roomSelect) {
+    roomSelect.addEventListener('change', () => {
+      if (DEMO_STATE.active) {
+        stopDemoMode({ silent: false });
+      }
+    });
+  }
 }
 
 // --- Top Card and AI Features Management ---
@@ -12864,6 +13344,7 @@ document.addEventListener('DOMContentLoaded', async () => {
     if (typeof wireHints === 'function') wireHints();
     if (typeof wireGlobalEvents === 'function') wireGlobalEvents();
     if (typeof initializeSidebarNavigation === 'function') initializeSidebarNavigation();
+    initOverviewDemoControls();
 
     document.getElementById('btnLaunchPairWizard')?.addEventListener('click', () => {
       if (typeof DEVICE_PAIR_WIZARD !== 'undefined' && DEVICE_PAIR_WIZARD?.open) DEVICE_PAIR_WIZARD.open();

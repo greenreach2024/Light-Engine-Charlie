@@ -91,6 +91,30 @@
     <main class="dashboard-main">
 
       <section class="dashboard-panel dashboard-panel--overview is-active" data-panel="overview">
+      <!-- Overview hero -->
+      <section id="overview" class="overview" aria-labelledby="overviewTitle">
+        <header class="overview__hdr">
+          <div>
+            <h1 id="overviewTitle">Overview</h1>
+            <p class="overview__subtitle">Tour-ready status for every grow room</p>
+          </div>
+          <div class="overview__legend" aria-label="Status legend">
+            <span class="overview__legend-item"><span class="icon ai" aria-hidden="true"></span>AI</span>
+            <span class="overview__legend-item"><span class="icon auto" aria-hidden="true"></span>Automation</span>
+            <span class="overview__legend-item"><span class="icon spectra" aria-hidden="true"></span>SpectraSync</span>
+            <div class="overview__demo" role="group" aria-label="Demo mode controls">
+              <label for="demoRoom">Room</label>
+              <select id="demoRoom" name="demoRoom" aria-label="Demo room"></select>
+              <label for="demoBpm">BPM</label>
+              <input id="demoBpm" type="number" min="60" max="140" step="1" value="90" aria-label="Demo tempo">
+              <button id="demoStart" type="button" class="primary">Start Demo</button>
+              <button id="demoStop" type="button" class="ghost" disabled>Stop</button>
+            </div>
+          </div>
+        </header>
+        <div id="overviewGrid" class="overview__grid" aria-live="polite"></div>
+      </section>
+
       <section id="topCard" class="card card--hero top-card">
               <div class="row row--between row--center top-card__content">
                 <!-- Left side: Farm branding -->
@@ -212,20 +236,6 @@
           </div>
         </section>
 
-<section id="growRoomOverview" class="card card--panel">
-  <div class="row row--between row--center">
-    <div>
-      <h2 class="section-title">Grow Room Overview</h2>
-      <p class="tiny text-muted">Live room metrics, schedules, and AI activity.</p>
-    </div>
-    <div id="growOverviewSummary" class="grow-overview__summary">
-      <span class="tiny text-muted">Loading overview…</span>
-    </div>
-  </div>
-  <div id="growOverviewGrid" class="grow-overview__grid">
-    <p class="tiny text-muted">Loading rooms…</p>
-  </div>
-</section>
       <section id="lightsStatusPanel" class="card card--panel">
             <div class="row row--between row--center">
               <h2 class="section-title">
