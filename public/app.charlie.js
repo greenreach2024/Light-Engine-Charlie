@@ -2562,8 +2562,17 @@ async function loadJSON(url) {
 }
 // Light Engine Charlie - Comprehensive Dashboard Application
 // Global API fetch helper
+function resolveApiUrl(url) {
+  if (!url && url !== '') return url;
+  const text = String(url);
+  if (/^https?:/i.test(text)) return text;
+  const base = (window.API_BASE || '').replace(/\/+$/, '');
+  if (!text) return base || '/';
+  return text.startsWith('/') ? `${base}${text}` : `${base}/${text}`;
+}
+
 async function api(url, opts = {}) {
-  const resp = await fetch(url, opts);
+  const resp = await fetch(resolveApiUrl(url), opts);
   if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
   return await resp.json();
 }
@@ -12408,16 +12417,11 @@ function hex12(cw, ww, bl, rd) {
 }
 
 const OVERVIEW_ROOM_META = new Map();
-const DEMO_COLOR_SEQUENCE = [
-  hex12(0, 0, 0, 100),
-  hex12(0, 0, 100, 0),
-  hex12(75, 20, 0, 0),
-  hex12(20, 70, 0, 20),
-  hex12(60, 40, 30, 30)
-];
 const DEMO_SAFE_HEX = '737373730000';
 const DEMO_MIN_BPM = 60;
 const DEMO_MAX_BPM = 140;
+const DEMO_STATIC_ON = Object.freeze({ status: 'on', value: hex12(20, 20, 0, 0) });
+const DEMO_STATIC_OFF = Object.freeze({ status: 'off', value: null });
 
 let DEMO_STATE = {
   active: false,
@@ -12425,10 +12429,93 @@ let DEMO_STATE = {
   roomLabel: '',
   bpm: 90,
   step: 0,
-  interval: 667,
+  interval: getDemoIntervalFromBpm(90),
   devices: []
 };
 let DEMO_TIMER = null;
+let DEMO_SNAPSHOT = new Map();
+
+function deviceSupportsSpectrum(device) {
+  if (!device || typeof device !== 'object') return true;
+  if (Array.isArray(device.channels)) return device.channels.length >= 4;
+  const channelCount = Number(
+    device.channels ??
+    device.channelCount ??
+    device.channel_count ??
+    device.lightChannels ??
+    device.channelTotal
+  );
+  if (Number.isFinite(channelCount) && channelCount >= 4) return true;
+  const spectrumType = firstNonEmptyString(
+    device.spectrumType,
+    device.spectrum_type,
+    device.type,
+    device.deviceType
+  ).toLowerCase();
+  return /(dynamic|spectrum|rgbw|rg|cw)/.test(spectrumType || '');
+}
+
+function stepHexDynamic(step) {
+  const beat = Number(step) % 8;
+  switch (beat) {
+    case 0: return hex12(5, 5, 0, 45);
+    case 1: return hex12(5, 5, 45, 0);
+    case 2: return hex12(40, 10, 0, 0);
+    case 3: return hex12(10, 40, 0, 0);
+    case 4: return hex12(20, 20, 10, 10);
+    case 5: return hex12(10, 10, 20, 20);
+    case 6: return hex12(0, 0, 0, 45);
+    case 7: default: return hex12(0, 0, 45, 0);
+  }
+}
+
+function snapshotDeviceState(device) {
+  const statusRaw = firstNonEmptyString(
+    device?.status,
+    device?.power,
+    device?.lastState?.status,
+    device?.onOffStatus === true ? 'on' : '',
+    device?.onOffStatus === false ? 'off' : ''
+  ).toLowerCase();
+  const status = statusRaw === 'on' ? 'on' : 'off';
+  const value = firstNonEmptyString(
+    device?.valueHex,
+    device?.hexValue,
+    device?.value,
+    device?.lastValue,
+    device?.lastCommand?.value,
+    device?.command?.value,
+    device?.lastKnownHex
+  );
+  return {
+    status,
+    value: typeof value === 'string' && value.trim() ? value : null
+  };
+}
+
+function refreshDemoSnapshot(devices) {
+  const next = new Map();
+  (devices || []).forEach((device) => {
+    const id = firstNonEmptyString(device?.id, device?.deviceId, device?.device_id);
+    if (!id) return;
+    if (DEMO_SNAPSHOT.has(id)) {
+      next.set(id, DEMO_SNAPSHOT.get(id));
+    } else {
+      next.set(id, snapshotDeviceState(device));
+    }
+  });
+  DEMO_SNAPSHOT = next;
+}
+
+function getRestorePayload(snapshot, restore) {
+  if (!restore || !snapshot) {
+    return { status: 'off', value: null };
+  }
+  if (snapshot.status === 'off') {
+    return { status: 'off', value: null };
+  }
+  return { status: 'on', value: snapshot.value || DEMO_SAFE_HEX };
+}
 
 function normalizeIdentifier(value) {
   if (value === undefined || value === null) return '';
@@ -12943,6 +13030,7 @@ function renderGrowRoomOverview() {
       if (refreshed) {
         DEMO_STATE.devices = refreshed.devices;
         DEMO_STATE.roomLabel = refreshed.roomLabel;
+        refreshDemoSnapshot(refreshed.devices);
       }
     }
   }
@@ -12962,8 +13050,7 @@ function renderGrowRoomOverview() {
 }
 
 function controllerPatchDevice(deviceId, payload) {
-  const base = (window.API_BASE || '').replace(/\/+$/, '');
-  const url = `${base}/api/devicedatas/device/${encodeURIComponent(deviceId)}`;
+  const url = resolveApiUrl(`/api/devicedatas/device/${encodeURIComponent(deviceId)}`);
   return fetch(url, {
     method: 'PATCH',
     headers: { 'Content-Type': 'application/json' },
@@ -12982,29 +13069,25 @@ function clampBpm(value) {
 
 function getDemoIntervalFromBpm(bpm) {
   const clamped = clampBpm(bpm);
-  return Math.max(250, Math.round((60 / clamped) * 1000));
-}
-
-function getDemoPayload(step) {
-  if (step % 2 === 1) {
-    return { status: 'off', value: null };
-  }
-  const index = Math.floor(step / 2) % DEMO_COLOR_SEQUENCE.length;
-  return { status: 'on', value: DEMO_COLOR_SEQUENCE[index] };
+  const interval = Math.round((60 / clamped) * 1000);
+  return Math.max(250, Math.min(1000, interval));
 }
 
 async function runDemoTick() {
   if (!DEMO_STATE.active || !Array.isArray(DEMO_STATE.devices) || !DEMO_STATE.devices.length) return;
-  const payload = getDemoPayload(DEMO_STATE.step);
+  const step = DEMO_STATE.step;
   const commands = DEMO_STATE.devices.map((device) => {
     const id = firstNonEmptyString(device.id, device.deviceId, device.device_id);
     if (!id) return Promise.resolve();
+    const payload = deviceSupportsSpectrum(device)
+      ? { status: 'on', value: stepHexDynamic(step) }
+      : (step % 2 === 0 ? { ...DEMO_STATIC_ON } : { ...DEMO_STATIC_OFF });
     return controllerPatchDevice(id, payload).catch((error) => {
       console.warn('Demo patch failed', id, error);
     });
   });
   await Promise.all(commands);
-  DEMO_STATE.step = (DEMO_STATE.step + 1) % (DEMO_COLOR_SEQUENCE.length * 2);
+  DEMO_STATE.step = (step + 1) % 64;
 }
 
 function scheduleDemoTick() {
@@ -13018,13 +13101,24 @@ function scheduleDemoTick() {
   }, DEMO_STATE.interval);
 }
 
-function stopDemoMode({ silent = false, flush = true, reason = '' } = {}) {
+function stopDemoMode({ silent = false, flush = true, reason = '', restore = true } = {}) {
   if (!DEMO_STATE.active && !reason) return;
   clearTimeout(DEMO_TIMER);
   const wasActive = DEMO_STATE.active;
-  const label = DEMO_STATE.roomLabel;
-  const devices = DEMO_STATE.devices || [];
-  DEMO_STATE = { active: false, roomKey: '', roomLabel: '', bpm: 90, step: 0, interval: 667, devices: [] };
+  const label = DEMO_STATE.roomLabel || 'selected room';
+  const devices = Array.isArray(DEMO_STATE.devices) ? [...DEMO_STATE.devices] : [];
+  const snapshotEntries = Array.from(DEMO_SNAPSHOT.entries());
+
+  DEMO_STATE = {
+    active: false,
+    roomKey: '',
+    roomLabel: '',
+    bpm: 90,
+    step: 0,
+    interval: getDemoIntervalFromBpm(90),
+    devices: []
+  };
+  DEMO_SNAPSHOT = new Map();
 
   const roomSelect = document.getElementById('demoRoom');
   const bpmInput = document.getElementById('demoBpm');
@@ -13036,20 +13130,36 @@ function stopDemoMode({ silent = false, flush = true, reason = '' } = {}) {
   if (startBtn) startBtn.disabled = !OVERVIEW_ROOM_META.size;
   if (stopBtn) stopBtn.disabled = true;
 
-  if (flush && devices.length) {
-    Promise.all(devices.map((device) => {
-      const id = firstNonEmptyString(device.id, device.deviceId, device.device_id);
-      if (!id) return Promise.resolve();
-      return controllerPatchDevice(id, { status: 'on', value: DEMO_SAFE_HEX }).catch((error) => {
-        console.warn('Demo reset failed', id, error);
+  if (flush) {
+    const targets = snapshotEntries.length
+      ? snapshotEntries
+      : devices.map((device) => [firstNonEmptyString(device?.id, device?.deviceId, device?.device_id), null]);
+    const commands = targets
+      .filter(([id]) => Boolean(id))
+      .map(([id, snapshot]) => {
+        const payload = getRestorePayload(snapshot, restore);
+        return controllerPatchDevice(id, payload).catch((error) => {
+          console.warn('Demo reset failed', id, error);
+        });
       });
-    })).catch(() => {});
+    if (commands.length) {
+      Promise.all(commands).catch(() => {});
+    }
   }
 
   if (wasActive && !silent) {
-    const kind = reason === 'room-missing' ? 'warn' : 'info';
-    const icon = reason === 'room-missing' ? '⚠️' : '⏹️';
-    const msg = reason === 'room-missing' ? 'Room is no longer available.' : `Demo ended for ${label}.`;
+    let kind = 'info';
+    let icon = '⏹️';
+    let msg = `Demo ended for ${label}.`;
+    if (reason === 'room-missing') {
+      kind = 'warn';
+      icon = '⚠️';
+      msg = 'Room is no longer available.';
+    } else if (reason === 'panic') {
+      kind = 'warn';
+      icon = '🛑';
+      msg = 'Demo interrupted (panic stop).';
+    }
     showToast({ title: 'Demo stopped', msg, kind, icon });
   }
 }
@@ -13076,6 +13186,9 @@ function startDemoMode() {
   }
 
   stopDemoMode({ silent: true, flush: false });
+
+  DEMO_SNAPSHOT = new Map();
+  refreshDemoSnapshot(devices);
 
   DEMO_STATE = {
     active: true,
@@ -13123,6 +13236,15 @@ function initOverviewDemoControls() {
     roomSelect.addEventListener('change', () => {
       if (DEMO_STATE.active) {
         stopDemoMode({ silent: false });
+      }
+    });
+  }
+
+  if (!window._demoPanicBound) {
+    window._demoPanicBound = true;
+    window.addEventListener('keydown', (event) => {
+      if (event.key === 'Escape') {
+        stopDemoMode({ silent: false, restore: false, reason: 'panic' });
       }
     });
   }
