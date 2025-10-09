@@ -120,6 +120,30 @@ function saveGroupsFile(groups) {
   }
 }
 
+async function fetchKnownDeviceIds() {
+  try {
+    const controller = getController();
+    if (!controller) return new Set();
+    const url = `${controller.replace(/\/$/, '')}/api/devicedatas`;
+    const response = await fetch(url, { method: 'GET', headers: { accept: 'application/json' } }).catch(() => null);
+    if (!response || !response.ok) return new Set();
+    const body = await response.json().catch(() => ({}));
+    const devices = Array.isArray(body?.data) ? body.data : [];
+    const ids = new Set();
+    devices.forEach((device) => {
+      if (!device || typeof device !== 'object') return;
+      const raw = device.id ?? device.deviceId ?? device.device_id ?? device.deviceID;
+      if (raw == null) return;
+      const id = String(raw).trim();
+      if (id) ids.add(id);
+    });
+    return ids;
+  } catch (err) {
+    console.warn('[groups] Unable to fetch controller device ids:', err.message);
+    return new Set();
+  }
+}
+
 function normalizeMemberEntry(entry) {
   if (entry == null) return null;
   if (typeof entry === 'string') {
@@ -145,71 +169,72 @@ function normalizeGroupForResponse(group) {
   if (!group || typeof group !== 'object') return null;
   const id = typeof group.id === 'string' ? group.id.trim() : '';
   const name = typeof group.name === 'string' ? group.name.trim() : '';
+  const label = typeof group.label === 'string' ? group.label.trim() : name;
   const matchRaw = group.match && typeof group.match === 'object' ? group.match : null;
-  const room = matchRaw ? String(matchRaw.room ?? '').trim() : '';
-  const zone = matchRaw ? String(matchRaw.zone ?? '').trim() : '';
-  const hasMatch = !!(room && zone);
+  const room = String(group.room ?? matchRaw?.room ?? '').trim();
+  const zone = String(group.zone ?? matchRaw?.zone ?? '').trim();
   const membersSource = Array.isArray(group.members) ? group.members : Array.isArray(group.lights) ? group.lights : [];
   const members = membersSource.map(normalizeMemberEntry).filter(Boolean);
 
-  const response = { id, name };
+  const response = { id, name: name || label || id };
+  if (label) response.label = label;
+  if (room) response.room = room;
+  if (zone) response.zone = zone;
   if (typeof group.plan === 'string' && group.plan.trim()) response.plan = group.plan.trim();
   if (typeof group.schedule === 'string' && group.schedule.trim()) response.schedule = group.schedule.trim();
   if (group.pendingSpectrum && typeof group.pendingSpectrum === 'object') response.pendingSpectrum = group.pendingSpectrum;
-
-  if (hasMatch) {
-    response.match = { room, zone };
-  }
-  if (members.length > 0) {
-    response.members = members;
+  if (room || zone) response.match = { room, zone };
+  if (members.length > 0) response.members = members;
+  if (!response.members && Array.isArray(group.lights)) {
+    response.members = group.lights.map(normalizeMemberEntry).filter(Boolean);
   }
   return response;
 }
 
-function parseIncomingGroup(raw) {
+function parseIncomingGroup(raw, knownDeviceIds = null) {
   if (!raw || typeof raw !== 'object') throw new Error('Group payload must be an object.');
   const id = String(raw.id ?? raw.groupId ?? '').trim();
   if (!id) throw new Error('Group id is required.');
   const name = typeof raw.name === 'string' ? raw.name.trim() : '';
+  const label = typeof raw.label === 'string' ? raw.label.trim() : '';
 
   const matchRaw = raw.match && typeof raw.match === 'object' ? raw.match : null;
-  const matchRoom = matchRaw ? String(matchRaw.room ?? '').trim() : '';
-  const matchZone = matchRaw ? String(matchRaw.zone ?? '').trim() : '';
-  const hasMatch = !!(matchRoom && matchZone);
+  const room = String(raw.room ?? raw.roomId ?? matchRaw?.room ?? '').trim();
+  if (!room) throw new Error('Group room is required.');
+  const zone = String(raw.zone ?? raw.zoneId ?? matchRaw?.zone ?? '').trim();
 
   const membersSource = Array.isArray(raw.members) ? raw.members : Array.isArray(raw.lights) ? raw.lights : [];
   const members = membersSource.map(normalizeMemberEntry).filter(Boolean);
-  const hasMembers = members.length > 0;
+  if (!members.length) throw new Error('Group requires a non-empty members[] list.');
 
-  if (!hasMatch && !hasMembers) throw new Error('Group requires match.room + match.zone or a non-empty members[] list.');
+  const normalizedMembers = members.map((entry) => ({ id: String(entry.id).trim() })).filter((entry) => !!entry.id);
+  if (!normalizedMembers.length) throw new Error('Group members require valid ids.');
+  if (knownDeviceIds && knownDeviceIds.size) {
+    const unknown = normalizedMembers
+      .map((entry) => entry.id)
+      .filter((entry) => entry && !knownDeviceIds.has(entry));
+    if (unknown.length) {
+      throw new Error(`Unknown device id(s): ${unknown.join(', ')}`);
+    }
+  }
 
-  const stored = { ...raw, id, name };
+  const stored = {
+    ...raw,
+    id,
+    name: name || label || id,
+    label: label || name || id,
+    room,
+    zone,
+    match: { room, zone },
+    lights: normalizedMembers.map((entry) => ({ id: entry.id })),
+    members: normalizedMembers.map((entry) => entry.id),
+  };
   if (typeof stored.plan === 'string') stored.plan = stored.plan.trim();
   if (typeof stored.schedule === 'string') stored.schedule = stored.schedule.trim();
   if (!stored.plan) delete stored.plan;
   if (!stored.schedule) delete stored.schedule;
 
-  if (hasMatch) {
-    stored.match = { room: matchRoom, zone: matchZone };
-  } else {
-    delete stored.match;
-  }
-  stored.lights = members;
-  delete stored.members;
-
-  const response = { id, name };
-  if (stored.plan) response.plan = stored.plan;
-  if (stored.schedule) response.schedule = stored.schedule;
-  if (stored.pendingSpectrum && typeof stored.pendingSpectrum === 'object') {
-    response.pendingSpectrum = stored.pendingSpectrum;
-  }
-  if (hasMatch) {
-    response.match = { room: matchRoom, zone: matchZone };
-  }
-  if (hasMembers) {
-    response.members = members;
-  }
-
+  const response = normalizeGroupForResponse(stored);
   return { stored, response };
 }
 function loadControllerFromDisk(){
@@ -2953,7 +2978,7 @@ app.get('/groups', (req, res) => {
   }
 });
 
-app.post('/groups', (req, res) => {
+app.post('/groups', async (req, res) => {
   setCors(req, res);
   const body = req.body ?? {};
   const incoming = Array.isArray(body.groups) ? body.groups : (Array.isArray(body) ? body : null);
@@ -2961,14 +2986,8 @@ app.post('/groups', (req, res) => {
     return res.status(400).json({ ok: false, error: 'Expected { groups: [...] } payload.' });
   }
   try {
-    const parsed = incoming.map((g) => {
-      if (g.match && (typeof g.match === 'object')) {
-        const room = String(g.match.room ?? '').trim();
-        const zone = String(g.match.zone ?? '').trim();
-        if (!room || !zone) throw new Error('Group match{} must include both room and zone.');
-      }
-      return parseIncomingGroup(g);
-    });
+    const knownIds = await fetchKnownDeviceIds();
+    const parsed = incoming.map((g) => parseIncomingGroup(g, knownIds));
     const stored = parsed.map((item) => item.stored);
     if (!saveGroupsFile(stored)) {
       return res.status(500).json({ ok: false, error: 'Failed to persist groups.' });
@@ -2979,7 +2998,7 @@ app.post('/groups', (req, res) => {
   }
 });
 
-app.put('/groups/:id', (req, res) => {
+app.put('/groups/:id', async (req, res) => {
   setCors(req, res);
   const id = String(req.params.id || '').trim();
   if (!id) return res.status(400).json({ ok: false, error: 'Group id is required.' });
@@ -2988,12 +3007,8 @@ app.put('/groups/:id', (req, res) => {
   if (idx === -1) return res.status(404).json({ ok: false, error: `Group '${id}' not found.` });
   try {
     const merged = { ...req.body, id };
-    if (merged.match && (typeof merged.match === 'object')) {
-      const room = String(merged.match.room ?? '').trim();
-      const zone = String(merged.match.zone ?? '').trim();
-      if (!room || !zone) throw new Error('Group match{} must include both room and zone.');
-    }
-    const { stored, response } = parseIncomingGroup(merged);
+    const knownIds = await fetchKnownDeviceIds();
+    const { stored, response } = parseIncomingGroup(merged, knownIds);
     existing[idx] = stored;
     if (!saveGroupsFile(existing)) {
       return res.status(500).json({ ok: false, error: 'Failed to persist groups.' });
