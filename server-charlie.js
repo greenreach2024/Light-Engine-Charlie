@@ -159,7 +159,8 @@ function normalizeGroupForResponse(group) {
 
   if (hasMatch) {
     response.match = { room, zone };
-  } else {
+  }
+  if (members.length > 0) {
     response.members = members;
   }
   return response;
@@ -180,7 +181,6 @@ function parseIncomingGroup(raw) {
   const members = membersSource.map(normalizeMemberEntry).filter(Boolean);
   const hasMembers = members.length > 0;
 
-  if (hasMatch && hasMembers) throw new Error('Group cannot include both match and members.');
   if (!hasMatch && !hasMembers) throw new Error('Group requires match.room + match.zone or a non-empty members[] list.');
 
   const stored = { ...raw, id, name };
@@ -191,11 +191,10 @@ function parseIncomingGroup(raw) {
 
   if (hasMatch) {
     stored.match = { room: matchRoom, zone: matchZone };
-    stored.lights = [];
   } else {
     delete stored.match;
-    stored.lights = members;
   }
+  stored.lights = members;
   delete stored.members;
 
   const response = { id, name };
@@ -206,7 +205,8 @@ function parseIncomingGroup(raw) {
   }
   if (hasMatch) {
     response.match = { room: matchRoom, zone: matchZone };
-  } else {
+  }
+  if (hasMembers) {
     response.members = members;
   }
 
@@ -2961,16 +2961,11 @@ app.post('/groups', (req, res) => {
     return res.status(400).json({ ok: false, error: 'Expected { groups: [...] } payload.' });
   }
   try {
-    // Systemic hardening: reject partial match{} and prevent stale members[]
     const parsed = incoming.map((g) => {
-      // If match is present, require both room and zone
       if (g.match && (typeof g.match === 'object')) {
         const room = String(g.match.room ?? '').trim();
         const zone = String(g.match.zone ?? '').trim();
         if (!room || !zone) throw new Error('Group match{} must include both room and zone.');
-        // If match is set, members[] must not be present or must be empty
-        if (Array.isArray(g.members) && g.members.length > 0) throw new Error('Group with match{} cannot include members[].');
-        if (Array.isArray(g.lights) && g.lights.length > 0) throw new Error('Group with match{} cannot include lights[].');
       }
       return parseIncomingGroup(g);
     });
@@ -2993,13 +2988,10 @@ app.put('/groups/:id', (req, res) => {
   if (idx === -1) return res.status(404).json({ ok: false, error: `Group '${id}' not found.` });
   try {
     const merged = { ...req.body, id };
-    // Systemic hardening: reject partial match{} and prevent stale members[]
     if (merged.match && (typeof merged.match === 'object')) {
       const room = String(merged.match.room ?? '').trim();
       const zone = String(merged.match.zone ?? '').trim();
       if (!room || !zone) throw new Error('Group match{} must include both room and zone.');
-      if (Array.isArray(merged.members) && merged.members.length > 0) throw new Error('Group with match{} cannot include members[].');
-      if (Array.isArray(merged.lights) && merged.lights.length > 0) throw new Error('Group with match{} cannot include lights[].');
     }
     const { stored, response } = parseIncomingGroup(merged);
     existing[idx] = stored;
