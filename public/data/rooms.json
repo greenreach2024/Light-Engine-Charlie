@@ -1,23 +1,11 @@
 {
   "rooms": [
     {
-<<<<<<< HEAD
-      "id": "greenreach-room-1",
-      "name": "GreenReach Room 1",
-      "location": "",
-      "hardwareCats": [
-        "dehumidifier"
-      ],
-      "hardwareOrder": [
-        "dehumidifier"
-      ],
-=======
       "id": "room-prop",
       "name": "Propagation Bay",
       "location": "Main Campus",
       "hardwareCats": ["light", "dehumidifier"],
       "hardwareOrder": ["light", "dehumidifier"],
->>>>>>> d35f85d3775380eea787a9a2bfaf982cb487be71
       "layout": {
         "type": "benches",
         "rows": 2,
@@ -27,67 +15,11 @@
       "zones": ["Propagation North"],
       "fixtures": [
         {
-<<<<<<< HEAD
-          "id": "F00001",
-          "deviceName": "F00001",
-          "name": "GROW3 TopLight MH Model-300W-22G12",
-          "model": "Model-300W-22G12",
-          "vendor": "GROW3",
-          "watts": 300,
-          "type": "light",
-          "onOffStatus": 1,
-          "online": true
-        },
-        {
-          "id": "F00002",
-          "deviceName": "F00002",
-          "name": "GROW3 TopLight MH Model-300W-22G12",
-          "model": "Model-300W-22G12",
-          "vendor": "GROW3",
-          "watts": 300,
-          "type": "light",
-          "onOffStatus": 1,
-          "online": true
-        },
-        {
-          "id": "F00003",
-          "deviceName": "F00003",
-          "name": "GROW3 TopLight MH Model-300W-22G12",
-          "model": "Model-300W-22G12",
-          "vendor": "GROW3",
-          "watts": 300,
-          "type": "light",
-          "onOffStatus": 1,
-          "online": true
-        },
-        {
-          "id": "F00005",
-          "deviceName": "F00005",
-          "name": "GROW3 TopLight MH Model-300W-22G12",
-          "model": "Model-300W-22G12",
-          "vendor": "GROW3",
-          "watts": 300,
-          "type": "light",
-          "onOffStatus": 1,
-          "online": true
-        },
-        {
-          "id": "F00004",
-          "deviceName": "F00004",
-          "name": "GROW3 TopLight MH Model-300W-22G12",
-          "model": "Model-300W-22G12",
-          "vendor": "GROW3",
-          "watts": 300,
-          "type": "light",
-          "onOffStatus": 1,
-          "online": false
-=======
           "id": "fixture-prop-toplight",
           "vendor": "GROW3",
           "model": "TopLight MH Model-300W-22G12",
           "count": 2,
           "zone": "Propagation North"
->>>>>>> d35f85d3775380eea787a9a2bfaf982cb487be71
         }
       ],
       "controlMethod": "local",
@@ -126,8 +58,6 @@
       },
       "seriesCount": 1,
       "category": {
-<<<<<<< HEAD
-=======
         "light": {
           "selectedEquipment": [
             {
@@ -163,35 +93,18 @@
         }
       },
       "_categoryProgress": {
->>>>>>> d35f85d3775380eea787a9a2bfaf982cb487be71
         "light": {
           "selectedEquipment": [
             {
               "category": "light",
-<<<<<<< HEAD
-              "vendor": "",
-              "model": "",
-              "count": 5,
-              "zone": "Zone 1"
-=======
               "vendor": "GROW3",
               "model": "TopLight MH Model-300W-22G12",
               "count": 2,
               "zone": "Propagation North"
->>>>>>> d35f85d3775380eea787a9a2bfaf982cb487be71
             }
           ]
         },
         "dehumidifier": {
-<<<<<<< HEAD
-          "selectedEquipment": [],
-          "wifi": false,
-          "wired": false,
-          "count": 0
-        }
-      },
-      "_categoryProgress": {}
-=======
           "selectedEquipment": [
             {
               "category": "dehumidifier",
@@ -308,20 +221,8 @@
               "zone": "Flower East"
             }
           ]
-        },
-        "hvac": {
-          "selectedEquipment": [
-            {
-              "category": "hvac",
-              "vendor": "TrolMaster",
-              "model": "Hydro-X Pro",
-              "control": "Modbus",
-              "count": 1
-            }
-          ]
         }
       }
->>>>>>> d35f85d3775380eea787a9a2bfaf982cb487be71
     }
   ]
 }
