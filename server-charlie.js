@@ -16,6 +16,7 @@ import {
   getWizardDefaultInputs,
   cloneWizardStep
 } from './server/wizards/index.js';
+import buyerRouter from './server/buyer/routes.js';
 
 const app = express();
 const parsedPort = Number.parseInt(process.env.PORT ?? '', 10);
@@ -283,6 +284,7 @@ function asyncHandler(fn) {
 }
 
 app.use(express.json({ limit: "1mb" }));
+app.use(buyerRouter);
 
 // --- Automation Rules Engine ---
 const automationEngine = new AutomationRulesEngine();
