@@ -12391,8 +12391,30 @@ const OVERVIEW_METRIC_META = [
   { key: 'co2', label: 'CO₂', unit: ' ppm', precision: 0 }
 ];
 
+function clamp01(x) {
+  return Math.max(0, Math.min(1, Number.isFinite(x) ? x : 0));
+}
+
+function pctToByte64(pct) {
+  const ratio = clamp01((Number(pct) || 0) / 100);
+  return Math.round(ratio * 0x64)
+    .toString(16)
+    .padStart(2, '0')
+    .toUpperCase();
+}
+
+function hex12(cw, ww, bl, rd) {
+  return `${pctToByte64(cw)}${pctToByte64(ww)}${pctToByte64(bl)}${pctToByte64(rd)}0000`;
+}
+
 const OVERVIEW_ROOM_META = new Map();
-const DEMO_COLOR_SEQUENCE = ['640000000000', '006400000000', '000064000000', '000000640000', '404000200000'];
+const DEMO_COLOR_SEQUENCE = [
+  hex12(0, 0, 0, 100),
+  hex12(0, 0, 100, 0),
+  hex12(75, 20, 0, 0),
+  hex12(20, 70, 0, 20),
+  hex12(60, 40, 30, 30)
+];
 const DEMO_SAFE_HEX = '737373730000';
 const DEMO_MIN_BPM = 60;
 const DEMO_MAX_BPM = 140;
@@ -12524,17 +12546,20 @@ function findGroupForRoom(room, zone, groups) {
 }
 
 function formatOverviewMetricValue(sensor, meta) {
+  const unit = (meta.unit || '').trim();
   if (!sensor || typeof sensor.current !== 'number' || !Number.isFinite(sensor.current)) {
-    return '—';
+    return { value: '—', unit, full: '—' };
   }
-  const value = meta.precision != null ? sensor.current.toFixed(meta.precision) : String(sensor.current);
-  if (meta.unit.trim() === '%') {
-    return `${value}${meta.unit}`;
+  let valueText;
+  if (unit === 'ppm') {
+    valueText = Number(sensor.current).toLocaleString();
+  } else if (meta.precision != null) {
+    valueText = Number(sensor.current).toFixed(meta.precision);
+  } else {
+    valueText = String(sensor.current);
   }
-  if (meta.unit.trim() === ' ppm') {
-    return `${Number(sensor.current).toLocaleString()}${meta.unit}`;
-  }
-  return `${value}${meta.unit}`;
+  const full = `${valueText}${meta.unit}`;
+  return { value: valueText, unit, full };
 }
 
 function computeOverviewMetricStatus(sensor) {
@@ -12552,10 +12577,13 @@ function computeOverviewMetricStatus(sensor) {
 function buildOverviewMetrics(zone) {
   return OVERVIEW_METRIC_META.map((meta) => {
     const sensor = zone?.sensors?.[meta.key] || null;
+    const formatted = formatOverviewMetricValue(sensor, meta);
     return {
       key: meta.key,
       label: meta.label,
-      value: formatOverviewMetricValue(sensor, meta),
+      value: formatted.value,
+      unit: formatted.unit,
+      full: formatted.full,
       status: computeOverviewMetricStatus(sensor),
       sensor
     };
@@ -12694,7 +12722,7 @@ function deriveAiPostureStatus() {
 }
 
 function createOverviewMetricHTML(metric) {
-  const classes = [`overview-metric`, `overview-metric--${metric.status}`];
+  const classes = ['metric', `metric--${metric.status}`];
   const interactive = metric.status !== 'unknown' && metric.sensor;
   const attrs = [`data-metric="${escapeHtml(metric.key)}"`];
   if (interactive) {
@@ -12702,59 +12730,67 @@ function createOverviewMetricHTML(metric) {
   } else {
     attrs.push('aria-disabled="true"');
   }
-  const trend = interactive ? '<canvas class="overview-metric__trend" width="220" height="48" aria-hidden="true"></canvas>' : '';
+  const trend = interactive
+    ? '<canvas class="spark" width="220" height="36" aria-hidden="true"></canvas>'
+    : '';
+  const unitText = metric.value === '—' ? '' : metric.unit;
+  const unit = unitText ? `<div class="unit">${escapeHtml(unitText)}</div>` : '<div class="unit">&nbsp;</div>';
+  const title = metric.full && metric.full !== '—'
+    ? ` title="${escapeHtml(`${metric.label}: ${metric.full}`)}"`
+    : '';
   return `
-    <div ${attrs.join(' ')} class="${classes.join(' ')}">
-      <span class="overview-metric__label">${escapeHtml(metric.label)}</span>
-      <span class="overview-metric__value">${escapeHtml(metric.value)}</span>
+    <div ${attrs.join(' ')} class="${classes.join(' ')}"${title}>
+      <div class="label">${escapeHtml(metric.label)}</div>
+      <div class="val">${escapeHtml(metric.value)}</div>
+      ${unit}
       ${trend}
     </div>
   `;
 }
 
 function createOverviewTile(entry) {
-  const aiClass = `overview-icon overview-icon--ai is-${entry.ai.status}`;
-  const automationClass = `overview-icon overview-icon--automation is-${entry.automation.status}`;
-  const spectraClass = `overview-icon overview-icon--spectra is-${entry.spectra.status}`;
-  const planDetail = entry.planInfo.detail ? `<span class="overview-plan__detail">${escapeHtml(entry.planInfo.detail)}</span>` : '';
-  const scheduleDetail = entry.scheduleInfo.detail ? `<span class="overview-plan__detail">${escapeHtml(entry.scheduleInfo.detail)}</span>` : '';
+  const aiOn = entry.ai.status && entry.ai.status !== 'off';
+  const automationOn = entry.automation.status === 'on';
+  const spectraOn = entry.spectra.status === 'active';
+  const planDetail = entry.planInfo.detail
+    ? `<span class="detail">${escapeHtml(entry.planInfo.detail)}</span>`
+    : '';
+  const scheduleDetail = entry.scheduleInfo.detail
+    ? `<span class="detail">${escapeHtml(entry.scheduleInfo.detail)}</span>`
+    : '';
   return `
-    <article class="overview-tile" data-room-key="${escapeHtml(entry.key)}">
-      <header class="overview-tile__header">
+    <article class="room-tile" data-room-key="${escapeHtml(entry.key)}">
+      <header class="room-tile__hdr">
         <div>
-          <h2 class="overview-tile__title">${escapeHtml(entry.name)}</h2>
-          ${entry.subtitle ? `<p class="overview-tile__subtitle">${escapeHtml(entry.subtitle)}</p>` : ''}
+          <h2 class="room-name">${escapeHtml(entry.name)}</h2>
+          ${entry.subtitle ? `<p class="room-subtitle">${escapeHtml(entry.subtitle)}</p>` : ''}
         </div>
-        <div class="overview-tile__icons">
-          <span class="${aiClass}" title="AI Copilot: ${escapeHtml(entry.ai.label)}">
-            <span class="overview-icon__dot" aria-hidden="true"></span>
-            <span class="overview-icon__label">AI</span>
-            <span class="sr-only">AI status ${escapeHtml(entry.ai.label)}</span>
+        <div class="room-status" aria-label="Status icons">
+          <span class="icon ai ${aiOn ? 'on' : ''}" title="AI Copilot: ${escapeHtml(entry.ai.label)}">
+            <span class="sr-only">AI ${escapeHtml(entry.ai.label)}</span>
           </span>
-          <span class="${automationClass}" title="${escapeHtml(entry.automation.label)}">
-            <span class="overview-icon__dot" aria-hidden="true"></span>
-            <span class="overview-icon__label">Automation</span>
-            <span class="sr-only">Automation status ${escapeHtml(entry.automation.label)}</span>
+          <span class="icon auto ${automationOn ? 'on' : ''}" title="${escapeHtml(entry.automation.label)}">
+            <span class="sr-only">Automation ${escapeHtml(entry.automation.label)}</span>
           </span>
-          <span class="${spectraClass}" title="${escapeHtml(entry.spectra.label)}">
-            <span class="overview-icon__dot" aria-hidden="true"></span>
-            <span class="overview-icon__label">SpectraSync</span>
-            <span class="sr-only">SpectraSync status ${escapeHtml(entry.spectra.label)}</span>
+          <span class="icon spectra ${spectraOn ? 'on' : ''}" title="${escapeHtml(entry.spectra.label)}">
+            <span class="sr-only">SpectraSync ${escapeHtml(entry.spectra.label)}</span>
           </span>
         </div>
       </header>
-      <div class="overview-tile__metrics">
+      <div class="metrics">
         ${entry.metrics.map((metric) => createOverviewMetricHTML(metric)).join('')}
       </div>
-      <div class="overview-tile__plans">
-        <div class="overview-plan">
-          <span class="overview-plan__label">Plan</span>
-          <span class="overview-plan__value">${escapeHtml(entry.planInfo.name)}</span>
+      <div class="plan-row">
+        <span class="label">Plan</span>
+        <div class="plan-row__value">
+          <span class="badge">${escapeHtml(entry.planInfo.name)}</span>
           ${planDetail}
         </div>
-        <div class="overview-plan">
-          <span class="overview-plan__label">Schedule</span>
-          <span class="overview-plan__value">${escapeHtml(entry.scheduleInfo.name)}</span>
+      </div>
+      <div class="plan-row">
+        <span class="label">Schedule</span>
+        <div class="plan-row__value">
+          <span class="badge">${escapeHtml(entry.scheduleInfo.name)}</span>
           ${scheduleDetail}
         </div>
       </div>
@@ -12764,15 +12800,18 @@ function createOverviewTile(entry) {
 
 function hydrateOverviewTile(entry, tile) {
   entry.metrics.forEach((metric) => {
-    const metricEl = tile.querySelector(`[data-metric="${metric.key}"]`);
+    const metricEl = tile.querySelector(`.metric[data-metric="${metric.key}"]`);
     if (!metricEl) return;
-    if (!metric.sensor || !entry.zone) return;
-    const canvas = metricEl.querySelector('canvas');
+    if (!metric.sensor || !entry.zone) {
+      metricEl.setAttribute('aria-disabled', 'true');
+      return;
+    }
+    const canvas = metricEl.querySelector('canvas.spark');
     if (canvas) {
       const values = Array.isArray(metric.sensor.history) ? metric.sensor.history.slice(-144).reverse() : [];
-      const color = metric.status === 'warn' ? '#ef4444' : metric.status === 'ok' ? '#22c55e' : '#facc15';
+      const color = metric.status === 'warn' ? '#ef4444' : metric.status === 'ok' ? '#22c55e' : '#f59e0b';
       canvas.width = canvas.clientWidth || 220;
-      canvas.height = canvas.clientHeight || 48;
+      canvas.height = canvas.clientHeight || 36;
       drawSparkline(canvas, values, { width: canvas.width, height: canvas.height, color });
     }
     const activate = (event) => {
