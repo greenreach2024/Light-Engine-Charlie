@@ -9,6 +9,23 @@
   <script src="./app.charlie.js?v=charlie-0.5" defer></script>
 </head>
 <body>
+  <template id="aiAutomationClusterTemplate">
+    <div class="ai-automation-cluster" role="group" aria-label="AI, Automation, and SpectraSync controls">
+      <button type="button" class="chip" data-control="ai">
+        <span class="icon ai" aria-hidden="true"></span>
+        <span class="chip__status" data-status></span>
+      </button>
+      <button type="button" class="chip" data-control="automation">
+        <span class="icon auto" aria-hidden="true"></span>
+        <span class="chip__status" data-status></span>
+      </button>
+      <button type="button" class="chip" data-control="spectra">
+        <span class="icon spectra" aria-hidden="true"></span>
+        <span class="chip__status" data-status></span>
+      </button>
+      <span class="chip chip--tour-lock" data-role="tour-lock" hidden>Tour Lock</span>
+    </div>
+  </template>
   <div class="dashboard-shell">
 
 <aside class="dashboard-sidebar" aria-label="Setup and management navigation">

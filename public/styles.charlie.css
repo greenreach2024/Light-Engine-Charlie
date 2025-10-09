@@ -3824,6 +3824,118 @@ input[type="range"]#grd {
   opacity: 1;
 }
 
+.ai-automation-cluster {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.ai-automation-cluster button.chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  border-radius: 9999px;
+  border: 1px solid var(--gr-border, #E5E7EB);
+  background: var(--gr-bg, #f8fafc);
+  color: #475569;
+  font-weight: 600;
+  font-size: 0.75rem;
+  padding: 6px 12px;
+  cursor: pointer;
+  transition: transform 0.15s ease, box-shadow 0.15s ease, background 0.15s ease;
+}
+
+.ai-automation-cluster button.chip .icon {
+  opacity: 1;
+}
+
+.ai-automation-cluster button.chip:hover {
+  transform: translateY(-1px);
+  box-shadow: 0 6px 14px rgba(15, 23, 42, 0.08);
+}
+
+.ai-automation-cluster button.chip:focus-visible {
+  outline: 2px solid var(--gr-primary, #2563eb);
+  outline-offset: 2px;
+}
+
+.ai-automation-cluster button.chip[aria-pressed="true"] {
+  box-shadow: 0 0 0 2px rgba(37, 99, 235, 0.15);
+}
+
+.ai-automation-cluster button.chip[data-mode="autopilot"] {
+  background: #dbeafe;
+  border-color: #1d4ed8;
+  color: #1d4ed8;
+}
+
+.ai-automation-cluster button.chip[data-mode="advisory"][aria-pressed="true"] {
+  background: #fef3c7;
+  border-color: #f59e0b;
+  color: #b45309;
+}
+
+.ai-automation-cluster button.chip[data-mode="off"] {
+  background: #f1f5f9;
+  border-color: #e2e8f0;
+  color: #64748b;
+}
+
+.ai-automation-cluster button.chip[data-state="on"] {
+  background: #dcfce7;
+  border-color: #10b981;
+  color: #047857;
+}
+
+.ai-automation-cluster button.chip[data-state="paused"] {
+  background: #fee2e2;
+  border-color: #f97316;
+  color: #b91c1c;
+}
+
+.ai-automation-cluster button.chip[data-state="idle"] {
+  background: #f1f5f9;
+  border-color: #e2e8f0;
+  color: #64748b;
+}
+
+.ai-automation-cluster button.chip[data-state="off"] {
+  background: #f1f5f9;
+  border-color: #e2e8f0;
+  color: #64748b;
+}
+
+.ai-automation-cluster button.chip[data-state="active"] {
+  background: #ede9fe;
+  border-color: #7c3aed;
+  color: #5b21b6;
+}
+
+.ai-automation-cluster .chip--tour-lock {
+  display: inline-flex;
+  align-items: center;
+  padding: 6px 12px;
+  border-radius: 9999px;
+  background: #f97316;
+  color: #fff;
+  font-weight: 600;
+  font-size: 0.75rem;
+  letter-spacing: 0.02em;
+  cursor: default;
+}
+
+.ai-automation-cluster .chip--tour-lock:focus-visible {
+  outline: 2px solid rgba(249, 115, 22, 0.5);
+  outline-offset: 2px;
+}
+
+.card--spotlight {
+  box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.25);
+  transition: box-shadow 0.3s ease;
+}
+
 .metrics {
   display: grid;
   grid-template-columns: repeat(4, 1fr);
