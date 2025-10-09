@@ -91,7 +91,45 @@
     <main class="dashboard-main">
 
       <section class="dashboard-panel dashboard-panel--overview is-active" data-panel="overview">
-      <section id="topCard" class="card card--hero top-card">
+        <section class="overview" id="overviewPanel">
+          <div class="overview__hdr">
+            <div>
+              <h2 class="section-title" style="margin-bottom:4px;">Grow Room Overview</h2>
+              <p class="tiny text-muted" style="margin:0;">Large-format status for tours, showcases, and lobby displays.</p>
+            </div>
+            <div class="overview__legend" role="list" aria-label="Status legend">
+              <span class="overview__legend-item" role="listitem" aria-label="AI posture indicator">
+                <span class="icon ai" aria-hidden="true"></span>
+                <span class="legend-text" aria-hidden="true">AI</span>
+              </span>
+              <span class="overview__legend-item" role="listitem" aria-label="Automation indicator">
+                <span class="icon auto" aria-hidden="true"></span>
+                <span class="legend-text" aria-hidden="true">Automation</span>
+              </span>
+              <span class="overview__legend-item" role="listitem" aria-label="SpectraSync indicator">
+                <span class="icon spectra" aria-hidden="true"></span>
+                <span class="legend-text" aria-hidden="true">SpectraSync</span>
+              </span>
+            </div>
+          </div>
+          <div class="overview__controls">
+            <label for="overviewDemoRoom">Demo room
+              <select id="overviewDemoRoom" aria-label="Select room for demo mode">
+                <option value="">Select room</option>
+              </select>
+            </label>
+            <label for="overviewDemoBpm">Tempo
+              <input id="overviewDemoBpm" type="range" min="60" max="140" step="5" value="90" aria-describedby="overviewDemoBpmDisplay">
+            </label>
+            <span id="overviewDemoBpmDisplay" class="tiny text-muted" aria-live="polite">90 BPM</span>
+            <button type="button" class="primary" id="overviewDemoStart">Start Demo</button>
+            <button type="button" class="ghost" id="overviewDemoStop" disabled>Stop</button>
+            <span class="overview__demo-status" id="overviewDemoStatus" aria-live="polite">Demo idle</span>
+          </div>
+          <div id="overviewStatus" class="tiny text-muted" aria-live="polite"></div>
+          <div id="overviewGrid" class="overview__grid" role="list"></div>
+        </section>
+        <section id="topCard" class="card card--hero top-card">
               <div class="row row--between row--center top-card__content">
                 <!-- Left side: Farm branding -->
                 <div class="row row--center row--gap-md flex-1">
@@ -116,7 +154,7 @@
                 </div>
               </div>
             </section>
-      <section id="environmentalAiCard" class="card card--feature">
+        <section id="environmentalAiCard" class="card card--feature">
               <div class="row row--between row--center mb-md">
                 <h2 class="section-title">Environmental & AI Features</h2>
                 <span class="tiny text-muted">Autonomous Growing Intelligence</span>
@@ -212,20 +250,6 @@
           </div>
         </section>
 
-<section id="growRoomOverview" class="card card--panel">
-  <div class="row row--between row--center">
-    <div>
-      <h2 class="section-title">Grow Room Overview</h2>
-      <p class="tiny text-muted">Live room metrics, schedules, and AI activity.</p>
-    </div>
-    <div id="growOverviewSummary" class="grow-overview__summary">
-      <span class="tiny text-muted">Loading overview…</span>
-    </div>
-  </div>
-  <div id="growOverviewGrid" class="grow-overview__grid">
-    <p class="tiny text-muted">Loading rooms…</p>
-  </div>
-</section>
       <section id="lightsStatusPanel" class="card card--panel">
             <div class="row row--between row--center">
               <h2 class="section-title">

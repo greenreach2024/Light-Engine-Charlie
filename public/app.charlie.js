@@ -108,6 +108,72 @@ function _hdrs(extra = {}) {
     ...extra
   };
 }
+
+function clamp01(x) {
+  const n = Number(x);
+  if (!Number.isFinite(n)) return 0;
+  if (n <= 0) return 0;
+  if (n >= 1) return 1;
+  return n;
+}
+
+function pctToByte64(percent) {
+  const n = Number(percent);
+  if (!Number.isFinite(n)) return '00';
+  const clamped = clamp01(n / 100);
+  return Math.round(clamped * 0x64)
+    .toString(16)
+    .toUpperCase()
+    .padStart(2, '0');
+}
+
+function hex12(cw = 0, ww = 0, bl = 0, rd = 0) {
+  return `${pctToByte64(cw)}${pctToByte64(ww)}${pctToByte64(bl)}${pctToByte64(rd)}0000`;
+}
+
+if (typeof window.hex12 !== 'function') {
+  window.hex12 = hex12;
+}
+
+if (typeof window.drawSparkline !== 'function') {
+  window.drawSparkline = function drawSparkline(canvas, values, opts = {}) {
+    if (!canvas || typeof canvas.getContext !== 'function') return;
+    const ctx = canvas.getContext('2d');
+    const width = Number(opts.width) || canvas.width || 160;
+    const height = Number(opts.height) || canvas.height || 32;
+    canvas.width = width;
+    canvas.height = height;
+    ctx.clearRect(0, 0, width, height);
+    if (!Array.isArray(values) || !values.length) return;
+    const numeric = values
+      .map((v) => Number(v))
+      .filter((v) => Number.isFinite(v));
+    if (!numeric.length) return;
+    const min = Math.min(...numeric);
+    const max = Math.max(...numeric);
+    const span = max - min || 1;
+    const color = opts.color || '#2563EB';
+    ctx.lineWidth = opts.lineWidth || 2;
+    ctx.strokeStyle = color;
+    ctx.beginPath();
+    let started = false;
+    values.forEach((value, idx) => {
+      const v = Number(value);
+      if (!Number.isFinite(v)) return;
+      const x = (idx / Math.max(values.length - 1, 1)) * (width - 2) + 1;
+      const y = height - ((v - min) / span) * (height - 2) - 1;
+      if (!started) {
+        ctx.moveTo(x, y);
+        started = true;
+      } else {
+        ctx.lineTo(x, y);
+      }
+    });
+    ctx.stroke();
+  };
+}
+
+const drawSparkline = window.drawSparkline;
 // --- DEMO PATCH: Auto-populate STATE.lightSetups from GreenReach Room 1 fixtures ---
 document.addEventListener('DOMContentLoaded', function() {
   if (!window.STATE) window.STATE = {};
@@ -8029,6 +8095,7 @@ async function loadAllData() {
     STATE.schedules = schedules?.schedules || [];
     STATE.plans = plans?.plans || [];
   STATE.environment = environment?.zones || [];
+  STATE.lastEnvAt = Date.now();
     STATE.calibrations = calibrations?.calibrations || [];
     STATE._calibrationCache = new Map();
     STATE.spdLibrary = normalizeSpdLibrary(spdLibrary);
@@ -9225,211 +9292,888 @@ function renderSchedules() {
   renderGrowRoomOverview();
 }
 
-function renderGrowRoomOverview() {
-  const summaryEl = document.getElementById('growOverviewSummary');
-  const gridEl = document.getElementById('growOverviewGrid');
-  if (!summaryEl || !gridEl) return;
 
-  const rooms = Array.isArray(STATE.rooms) ? STATE.rooms : [];
-  const zones = Array.isArray(STATE.environment) ? STATE.environment : [];
-  const plans = Array.isArray(STATE.plans) ? STATE.plans : [];
-  const schedules = Array.isArray(STATE.schedules) ? STATE.schedules : [];
+const OVERVIEW_HISTORY_POINTS = 120;
+const OVERVIEW_DEMO_SAFE_HEX = hex12(45, 45, 0, 0);
+const OVERVIEW_DEMO_SEQUENCE = [
+  { label: 'Sky wash', payload: { status: 'on', value: hex12(85, 25, 15, 10) } },
+  { label: 'Sunrise blend', payload: { status: 'on', value: hex12(60, 40, 10, 35) } },
+  { label: 'Crimson bloom', payload: { status: 'on', value: hex12(40, 25, 15, 64) } },
+  { label: 'Spectrum blue', payload: { status: 'on', value: hex12(30, 20, 60, 25) } },
+  { label: 'Tour showcase', payload: { status: 'on', value: hex12(70, 70, 0, 0) } },
+  { label: 'Spectra pause', payload: { status: 'off', value: null } },
+];
 
-  const roomCount = rooms.length;
-  const zoneCount = zones.length;
-  const summaries = [
-    {
-      label: 'Grow Rooms',
-      value: roomCount
-        ? `${roomCount} room${roomCount === 1 ? '' : 's'}`
-        : zoneCount
-        ? `${zoneCount} zone${zoneCount === 1 ? '' : 's'}`
-        : 'None'
+const OVERVIEW_DEMO_STATE = {
+  timer: null,
+  step: 0,
+  bpm: 90,
+  roomId: '',
+  devices: [],
+  sequence: OVERVIEW_DEMO_SEQUENCE.slice(),
+  busy: false,
+};
+
+const OVERVIEW_METRICS_CONFIG = [
+  {
+    key: 'temp',
+    label: 'Temp',
+    unit: '°F',
+    color: '#f97316',
+    precision: 1,
+    modalKey: 'tempC',
+    resolve(zone) {
+      const sensor = zone?.sensors?.tempC;
+      const toF = (c) => (Number.isFinite(c) ? ((c * 9) / 5) + 32 : null);
+      const current = Number.isFinite(sensor?.current) ? toF(sensor.current) : null;
+      const history = Array.isArray(sensor?.history)
+        ? sensor.history
+            .slice(-OVERVIEW_HISTORY_POINTS)
+            .map((value) => {
+              const converted = toF(Number(value));
+              return Number.isFinite(converted) ? Number(converted.toFixed(3)) : null;
+            })
+            .filter((value) => value !== null)
+        : [];
+      return { current, history, hasSensor: Boolean(sensor) };
     },
-    {
-      label: 'Plans running',
-      value:
-        plans.length === 0
-          ? 'None'
-          : (() => {
-              const names = plans.map((plan) => plan.name || 'Untitled plan').filter(Boolean);
-              const preview = names.slice(0, 2).join(', ');
-              const extra = names.length > 2 ? ` +${names.length - 2}` : '';
-              return `${preview}${extra}`;
-            })()
+    format(value) {
+      return value.toFixed(1);
+    }
+  },
+  {
+    key: 'rh',
+    label: 'RH',
+    unit: '%',
+    color: '#22c55e',
+    precision: 0,
+    modalKey: 'rh',
+    resolve(zone) {
+      const sensor = zone?.sensors?.rh;
+      const current = Number.isFinite(sensor?.current) ? sensor.current : null;
+      const history = Array.isArray(sensor?.history)
+        ? sensor.history
+            .slice(-OVERVIEW_HISTORY_POINTS)
+            .map((value) => {
+              const num = Number(value);
+              return Number.isFinite(num) ? Number(num.toFixed(2)) : null;
+            })
+            .filter((value) => value !== null)
+        : [];
+      return { current, history, hasSensor: Boolean(sensor) };
     },
-    {
-      label: 'Schedules',
-      value:
-        schedules.length === 0
-          ? 'None'
-          : (() => {
-              const names = schedules.map((sched) => sched.name || 'Unnamed schedule').filter(Boolean);
-              const preview = names.slice(0, 2).join(', ');
-              const extra = names.length > 2 ? ` +${names.length - 2}` : '';
-              return `${preview}${extra}`;
-            })()
+    format(value) {
+      return Math.round(value).toString();
     }
-  ];
-
-  summaryEl.innerHTML = summaries
-    .map(
-      (item) => `
-        <div class="grow-overview__summary-item">
-          <span class="grow-overview__summary-label">${escapeHtml(item.label)}</span>
-          <span class="grow-overview__summary-value">${escapeHtml(item.value)}</span>
-        </div>`
-    )
-    .join('');
-
-  const activeFeatures = Array.from(document.querySelectorAll('.ai-feature-card.active h3'))
-    .map((el) => el.textContent?.trim())
-    .filter(Boolean);
-
-  const matchZoneForRoom = (room) => {
-    if (!room) return null;
-    const identifiers = new Set(
-      [room.id, room.name]
-        .filter((value) => value !== undefined && value !== null)
-        .map((value) => String(value).toLowerCase())
-    );
-    if (!identifiers.size) return null;
-    return zones.find((zone) => {
-      const id = zone.id ? String(zone.id).toLowerCase() : '';
-      const name = zone.name ? String(zone.name).toLowerCase() : '';
-      const location = zone.location ? String(zone.location).toLowerCase() : '';
-      return identifiers.has(id) || identifiers.has(name) || identifiers.has(location);
-    }) || null;
-  };
-
-  const metricKeys = [
-    { key: 'tempC', label: 'Temp', unit: '°C', precision: 1 },
-    { key: 'rh', label: 'Humidity', unit: '%', precision: 1 },
-    { key: 'co2', label: 'CO₂', unit: ' ppm', precision: 0 },
-    { key: 'vpd', label: 'VPD', unit: ' kPa', precision: 2 }
-  ];
-
-  const formatMetricValue = (sensor, meta) => {
-    if (!sensor || typeof sensor.current !== 'number' || !Number.isFinite(sensor.current)) {
-      return '—';
-    }
-    const value = meta.precision != null ? sensor.current.toFixed(meta.precision) : String(sensor.current);
-    if (meta.unit.trim() === '%') {
-      return `${value}${meta.unit}`;
-    }
-    return `${value}${meta.unit}`;
-  };
-
-  const metricStatus = (sensor) => {
-    if (!sensor || typeof sensor.current !== 'number' || !Number.isFinite(sensor.current)) {
-      return 'unknown';
-    }
-    const min = sensor.setpoint?.min;
-    const max = sensor.setpoint?.max;
-    if (typeof min === 'number' && typeof max === 'number') {
-      return sensor.current >= min && sensor.current <= max ? 'ok' : 'warn';
-    }
-    return 'unknown';
-  };
-
-  const buildMetrics = (zone) => {
-    if (!zone || !zone.sensors) return '';
-    const items = metricKeys
-      .map((meta) => {
-        const sensor = zone.sensors?.[meta.key];
-        if (!sensor) return '';
-        const status = metricStatus(sensor);
-        const value = formatMetricValue(sensor, meta);
-        return `
-          <div class="grow-room-card__metric grow-room-card__metric--${status}">
-            <span class="grow-room-card__metric-label">${escapeHtml(meta.label)}</span>
-            <span class="grow-room-card__metric-value">${escapeHtml(value)}</span>
-          </div>`;
-      })
-      .filter(Boolean)
-      .join('');
-    return items;
-  };
-
-  const buildAiSection = () => {
-    if (!activeFeatures.length) {
-      return '<p class="tiny text-muted">AI features inactive.</p>';
-    }
-    return `
-      <ul class="grow-room-card__ai-list">
-        ${activeFeatures.map((name) => `<li class="grow-room-card__ai-chip">${escapeHtml(name)}</li>`).join('')}
-      </ul>`;
-  };
-
-  const cards = [];
-  if (rooms.length) {
-    rooms.forEach((room) => {
-      const zone = matchZoneForRoom(room);
-      const name = room.name || room.id || 'Grow Room';
-      const details = [];
-      const zonesList = Array.isArray(room.zones) ? room.zones.filter(Boolean) : [];
-      if (zonesList.length) {
-        details.push(`Zones: ${zonesList.map((item) => escapeHtml(item)).join(', ')}`);
+  },
+  {
+    key: 'vpd',
+    label: 'VPD',
+    unit: 'kPa',
+    color: '#0ea5e9',
+    precision: 2,
+    modalKey: 'vpd',
+    resolve(zone) {
+      const sensors = zone?.sensors || {};
+      const vpdSensor = sensors.vpd;
+      let current = null;
+      if (Number.isFinite(vpdSensor?.current)) {
+        current = Number(vpdSensor.current);
+      } else if (Number.isFinite(sensors.tempC?.current) && Number.isFinite(sensors.rh?.current)) {
+        current = computeVpd(sensors.tempC.current, sensors.rh.current);
       }
-      if (room.layout?.type) {
-        details.push(`Layout: ${escapeHtml(room.layout.type)}`);
+      let history = [];
+      if (Array.isArray(vpdSensor?.history) && vpdSensor.history.length) {
+        history = vpdSensor.history
+          .slice(-OVERVIEW_HISTORY_POINTS)
+          .map((value) => {
+            const num = Number(value);
+            return Number.isFinite(num) ? Number(num.toFixed(3)) : null;
+          })
+          .filter((value) => value !== null);
+      } else if (Array.isArray(sensors.tempC?.history) && Array.isArray(sensors.rh?.history)) {
+        const tempHistory = sensors.tempC.history.slice(-OVERVIEW_HISTORY_POINTS);
+        const rhHistory = sensors.rh.history.slice(-OVERVIEW_HISTORY_POINTS);
+        const len = Math.min(tempHistory.length, rhHistory.length);
+        history = [];
+        for (let i = 0; i < len; i += 1) {
+          const tempSample = Number(tempHistory[tempHistory.length - len + i]);
+          const rhSample = Number(rhHistory[rhHistory.length - len + i]);
+          const computed = computeVpd(tempSample, rhSample);
+          if (Number.isFinite(computed)) {
+            history.push(Number(computed.toFixed(3)));
+          }
+        }
       }
-      if (room.controlMethod) {
-        details.push(`Control: ${escapeHtml(room.controlMethod)}`);
-      }
-      const metaParts = [];
-      if (zone?.meta?.source) metaParts.push(`Source: ${escapeHtml(zone.meta.source)}`);
-      if (typeof zone?.meta?.battery === 'number') metaParts.push(`Battery: ${escapeHtml(`${zone.meta.battery}%`)}`);
-      if (typeof zone?.meta?.rssi === 'number') metaParts.push(`RSSI: ${escapeHtml(`${zone.meta.rssi} dBm`)}`);
-      const metrics = buildMetrics(zone);
-      cards.push(`
-        <article class="grow-room-card">
-          <div class="grow-room-card__header">
-            <h3>${escapeHtml(name)}</h3>
-            ${room.roomType ? `<span class="chip tiny">${escapeHtml(room.roomType)}</span>` : ''}
-          </div>
-          ${details.length ? `<div class="tiny text-muted">${details.join(' • ')}</div>` : ''}
-          ${metaParts.length ? `<div class="tiny text-muted">${metaParts.join(' • ')}</div>` : ''}
-          ${metrics ? `<div class="grow-room-card__metrics">${metrics}</div>` : '<p class="tiny text-muted">No telemetry available.</p>'}
-          <div class="grow-room-card__ai">
-            <span class="tiny text-muted">AI Features</span>
-            ${buildAiSection()}
-          </div>
-        </article>`);
-    });
-  } else if (zones.length) {
-    zones.forEach((zone) => {
-      const name = zone.name || zone.id || 'Zone';
-      const location = zone.location ? `Location: ${escapeHtml(zone.location)}` : '';
-      const metaParts = [];
-      if (zone.meta?.source) metaParts.push(`Source: ${escapeHtml(zone.meta.source)}`);
-      if (typeof zone.meta?.battery === 'number') metaParts.push(`Battery: ${escapeHtml(`${zone.meta.battery}%`)}`);
-      if (typeof zone.meta?.rssi === 'number') metaParts.push(`RSSI: ${escapeHtml(`${zone.meta.rssi} dBm`)}`);
-      const metrics = buildMetrics(zone);
-      cards.push(`
-        <article class="grow-room-card">
-          <div class="grow-room-card__header">
-            <h3>${escapeHtml(name)}</h3>
-          </div>
-          ${location ? `<div class="tiny text-muted">${location}</div>` : ''}
-          ${metaParts.length ? `<div class="tiny text-muted">${metaParts.join(' • ')}</div>` : ''}
-          ${metrics ? `<div class="grow-room-card__metrics">${metrics}</div>` : '<p class="tiny text-muted">No telemetry available.</p>'}
-          <div class="grow-room-card__ai">
-            <span class="tiny text-muted">AI Features</span>
-            ${buildAiSection()}
-          </div>
-        </article>`);
-    });
+      return { current, history, hasSensor: Boolean(vpdSensor) };
+    },
+    format(value) {
+      return value.toFixed(2);
+    }
+  },
+  {
+    key: 'co2',
+    label: 'CO₂',
+    unit: 'ppm',
+    color: '#6366f1',
+    precision: 0,
+    modalKey: 'co2',
+    resolve(zone) {
+      const sensor = zone?.sensors?.co2;
+      const current = Number.isFinite(sensor?.current) ? sensor.current : null;
+      const history = Array.isArray(sensor?.history)
+        ? sensor.history
+            .slice(-OVERVIEW_HISTORY_POINTS)
+            .map((value) => {
+              const num = Number(value);
+              return Number.isFinite(num) ? Number(num.toFixed(0)) : null;
+            })
+            .filter((value) => value !== null)
+        : [];
+      return { current, history, hasSensor: Boolean(sensor) };
+    },
+    format(value) {
+      return Math.round(value).toLocaleString();
+    }
   }
+];
 
-  if (!cards.length) {
-    gridEl.innerHTML = '<p class="tiny text-muted">Add a grow room to view live status and telemetry.</p>';
-    return;
-  }
-
-  gridEl.innerHTML = cards.join('');
+function normalizeToken(value) {
+  if (value === undefined || value === null) return '';
+  return String(value).trim().toLowerCase();
 }
 
+function cToF(tempC) {
+  if (!Number.isFinite(tempC)) return null;
+  return ((tempC * 9) / 5) + 32;
+}
+
+function computeVpd(tempC, rh) {
+  if (!Number.isFinite(tempC) || !Number.isFinite(rh)) return null;
+  const saturation = 0.6108 * Math.exp((17.27 * tempC) / (tempC + 237.3));
+  const actual = saturation * (rh / 100);
+  const vpd = saturation - actual;
+  return Number.isFinite(vpd) ? vpd : null;
+}
+
+function combineHistories(historyArrays, limit = OVERVIEW_HISTORY_POINTS) {
+  if (!Array.isArray(historyArrays) || !historyArrays.length) return [];
+  const sanitized = historyArrays
+    .map((arr) => (Array.isArray(arr) ? arr.map((value) => Number(value)).filter((value) => Number.isFinite(value)) : []))
+    .filter((arr) => arr.length);
+  if (!sanitized.length) return [];
+  const maxLen = Math.max(...sanitized.map((arr) => arr.length));
+  const take = Math.min(maxLen, limit);
+  const combined = [];
+  for (let offset = take; offset > 0; offset -= 1) {
+    let sum = 0;
+    let count = 0;
+    sanitized.forEach((arr) => {
+      const idx = arr.length - offset;
+      if (idx >= 0) {
+        const value = arr[idx];
+        if (Number.isFinite(value)) {
+          sum += value;
+          count += 1;
+        }
+      }
+    });
+    if (count) {
+      combined.push(Number((sum / count).toFixed(3)));
+    }
+  }
+  return combined;
+}
+
+function collectOverviewRooms() {
+  const rooms = Array.isArray(STATE.rooms) ? STATE.rooms : [];
+  const farmRooms = Array.isArray(STATE.farm?.rooms) ? STATE.farm.rooms : [];
+  const map = new Map();
+  const push = (room) => {
+    if (!room) return;
+    const key = normalizeToken(room.id || room.name || room.location);
+    if (!key) return;
+    if (!map.has(key)) {
+      const copy = { ...room };
+      if (copy && copy.zones && !Array.isArray(copy.zones)) copy.zones = [copy.zones];
+      map.set(key, copy);
+    } else {
+      const existing = map.get(key);
+      const mergedZones = [];
+      const z1 = Array.isArray(existing.zones) ? existing.zones : [];
+      const z2 = Array.isArray(room.zones) ? room.zones : room.zones ? [room.zones] : [];
+      [...z1, ...z2].forEach((value) => {
+        if (value && !mergedZones.some((z) => normalizeToken(z) === normalizeToken(value))) mergedZones.push(value);
+      });
+      map.set(key, { ...existing, ...room, zones: mergedZones.length ? mergedZones : undefined });
+    }
+  };
+  rooms.forEach(push);
+  farmRooms.forEach(push);
+  if (!map.size) {
+    const zones = Array.isArray(STATE.environment) ? STATE.environment : [];
+    zones.forEach((zone) => {
+      const identifier = normalizeToken(zone.location || zone.name || zone.id);
+      if (!identifier) return;
+      if (!map.has(identifier)) {
+        map.set(identifier, {
+          id: zone.location || zone.id || zone.name,
+          name: zone.location || zone.name || zone.id || 'Grow Room',
+          zones: zone.id ? [zone.id] : [],
+          location: zone.location || ''
+        });
+      }
+    });
+  }
+  return Array.from(map.values());
+}
+
+function findGroupsForRoom(room) {
+  const groups = Array.isArray(STATE.groups) ? STATE.groups : [];
+  if (!groups.length || !room) return [];
+  const needles = new Set();
+  const add = (value) => {
+    const token = normalizeToken(value);
+    if (token) needles.add(token);
+  };
+  add(room.id);
+  add(room.name);
+  add(room.location);
+  const zoneList = Array.isArray(room.zones) ? room.zones : room.zones ? [room.zones] : [];
+  zoneList.forEach(add);
+  if (room.grouping) {
+    const grouping = room.grouping;
+    const groupingZones = Array.isArray(grouping.zones) ? grouping.zones : grouping.zones ? [grouping.zones] : [];
+    const groupingGroups = Array.isArray(grouping.groups) ? grouping.groups : grouping.groups ? [grouping.groups] : [];
+    groupingZones.forEach(add);
+    groupingGroups.forEach(add);
+    add(grouping.zone);
+  }
+  return groups.filter((group) => {
+    const match = group?.match || {};
+    const tokens = [
+      group?.id,
+      group?.name,
+      match.room,
+      match.roomId,
+      match.roomName,
+      match.zone,
+      match.zoneId,
+      match.zoneName
+    ].map(normalizeToken);
+    if (tokens.some((token) => token && needles.has(token))) return true;
+    if (Array.isArray(group?.members)) {
+      return group.members.some((member) => {
+        const memberTokens = [
+          member?.room,
+          member?.zone,
+          member?.roomId,
+          member?.zoneId,
+          member?.id,
+          member?.deviceId
+        ].map(normalizeToken);
+        return memberTokens.some((token) => token && needles.has(token));
+      });
+    }
+    return false;
+  });
+}
+
+function findZonesForRoom(room) {
+  const zones = Array.isArray(STATE.environment) ? STATE.environment : [];
+  if (!room || !zones.length) return [];
+  const needles = new Set();
+  const add = (value) => {
+    const token = normalizeToken(value);
+    if (token) needles.add(token);
+  };
+  add(room.id);
+  add(room.name);
+  add(room.location);
+  const zoneList = Array.isArray(room.zones) ? room.zones : room.zones ? [room.zones] : [];
+  zoneList.forEach(add);
+  if (room.grouping) {
+    const grouping = room.grouping;
+    const groupingZones = Array.isArray(grouping.zones) ? grouping.zones : grouping.zones ? [grouping.zones] : [];
+    const groupingGroups = Array.isArray(grouping.groups) ? grouping.groups : grouping.groups ? [grouping.groups] : [];
+    groupingZones.forEach(add);
+    groupingGroups.forEach(add);
+    add(grouping.zone);
+  }
+  const matched = zones.filter((zone) => {
+    const zoneTokens = [
+      zone?.id,
+      zone?.name,
+      zone?.location,
+      zone?.meta?.room,
+      zone?.meta?.roomId,
+      zone?.meta?.zone
+    ].map(normalizeToken);
+    return zoneTokens.some((token) => token && needles.has(token));
+  });
+  if (matched.length) return matched;
+  return zones.filter((zone) => normalizeToken(zone?.location) && needles.has(normalizeToken(zone.location)));
+}
+
+function buildRoomMetrics(room, zones) {
+  return OVERVIEW_METRICS_CONFIG.map((config) => {
+    const perZone = (zones || []).map((zone) => {
+      const resolved = config.resolve(zone) || {};
+      return {
+        zoneId: zone?.id,
+        current: Number.isFinite(resolved.current) ? resolved.current : null,
+        history: Array.isArray(resolved.history) ? resolved.history : [],
+        hasSensor: Boolean(resolved.hasSensor)
+      };
+    });
+    const values = perZone.map((entry) => entry.current).filter((value) => Number.isFinite(value));
+    const current = values.length ? values.reduce((acc, value) => acc + value, 0) / values.length : null;
+    const history = combineHistories(perZone.map((entry) => entry.history));
+    const zoneId = perZone.find((entry) => Number.isFinite(entry.current))?.zoneId
+      || perZone.find((entry) => entry.history.length)?.zoneId
+      || zones?.[0]?.id
+      || '';
+    const modalKey = perZone.some((entry) => entry.hasSensor) ? config.modalKey : '';
+    let displayValue = '—';
+    if (Number.isFinite(current)) {
+      if (typeof config.format === 'function') {
+        displayValue = config.format(current);
+      } else {
+        const precision = typeof config.precision === 'number' ? config.precision : 1;
+        displayValue = current.toFixed(precision);
+      }
+    }
+    return {
+      key: config.key,
+      label: config.label,
+      unit: config.unit,
+      color: config.color,
+      displayValue,
+      history,
+      zoneId,
+      modalKey,
+      hasData: Number.isFinite(current) || history.length > 0
+    };
+  });
+}
+
+function getRoomPlan(room, groups) {
+  const plans = Array.isArray(STATE.plans) ? STATE.plans : [];
+  if (!plans.length) return null;
+  const candidates = [];
+  const add = (value) => {
+    if (!value && value !== 0) return;
+    const str = String(value).trim();
+    if (str) candidates.push(str);
+  };
+  add(room?.planId);
+  add(room?.plan);
+  if (room?.grouping) {
+    add(room.grouping.planId);
+    add(room.grouping.plan);
+  }
+  (groups || []).forEach((group) => {
+    add(group?.plan);
+    add(group?.planId);
+    add(group?.recipeId);
+  });
+  for (const candidate of candidates) {
+    const byId = plans.find((plan) => String(plan.id) === candidate);
+    if (byId) return byId;
+  }
+  for (const candidate of candidates) {
+    const byName = plans.find((plan) => normalizeToken(plan.name) === normalizeToken(candidate));
+    if (byName) return byName;
+  }
+  return null;
+}
+
+function getRoomSchedule(room, groups) {
+  const schedules = Array.isArray(STATE.schedules) ? STATE.schedules : [];
+  if (!schedules.length) return null;
+  const candidates = [];
+  const add = (value) => {
+    if (!value && value !== 0) return;
+    const str = String(value).trim();
+    if (str) candidates.push(str);
+  };
+  add(room?.scheduleId);
+  add(room?.schedule);
+  if (room?.grouping) {
+    add(room.grouping.scheduleId);
+    add(room.grouping.schedule);
+  }
+  (groups || []).forEach((group) => {
+    add(group?.schedule);
+    add(group?.scheduleId);
+  });
+  for (const candidate of candidates) {
+    const byId = schedules.find((schedule) => String(schedule.id) === candidate);
+    if (byId) return byId;
+  }
+  for (const candidate of candidates) {
+    const byName = schedules.find((schedule) => normalizeToken(schedule.name) === normalizeToken(candidate));
+    if (byName) return byName;
+  }
+  return null;
+}
+
+function summariseSchedule(schedule) {
+  if (!schedule) return 'No schedule';
+  const cycles = Array.isArray(schedule.cycles) ? schedule.cycles : [];
+  const first = cycles[0] || {};
+  const startMinutes = parseCycleTime(first.on);
+  const endMinutes = parseCycleTime(first.off);
+  const startLabel = formatCycleTime(startMinutes);
+  const durationMinutes = computeDurationMinutes(startMinutes, endMinutes);
+  const durationLabel = durationMinutes !== null ? formatDuration(durationMinutes) : '—';
+  let ramp = schedule.rampMinutes ?? schedule.ramp ?? schedule.rampUp ?? schedule.rampDown;
+  let rampLabel = '—';
+  if (typeof ramp === 'number' && Number.isFinite(ramp)) {
+    rampLabel = `${Math.round(ramp)}m`;
+  } else if (typeof ramp === 'string' && ramp.trim()) {
+    rampLabel = ramp.trim();
+  }
+  const extraCycles = cycles.length > 1 ? ` • ${cycles.length} cycles` : '';
+  return `${startLabel || '—'} • ${durationLabel} • Ramp ${rampLabel}${extraCycles}`;
+}
+
+function parseCycleTime(value) {
+  if (value === undefined || value === null) return null;
+  if (typeof value === 'number' && Number.isFinite(value)) return value;
+  const str = String(value).trim();
+  if (!str) return null;
+  if (/^\d{1,2}:\d{2}$/.test(str)) {
+    const [hh, mm] = str.split(':').map((segment) => Number(segment));
+    if (Number.isFinite(hh) && Number.isFinite(mm)) {
+      return (hh * 60) + mm;
+    }
+  }
+  const num = Number(str);
+  return Number.isFinite(num) ? num : null;
+}
+
+function formatCycleTime(minutes) {
+  if (!Number.isFinite(minutes)) return '';
+  const hh = Math.floor(minutes / 60) % 24;
+  const mm = Math.floor(minutes % 60);
+  return `${String(hh).padStart(2, '0')}:${String(mm).padStart(2, '0')}`;
+}
+
+function computeDurationMinutes(start, end) {
+  if (!Number.isFinite(start) || !Number.isFinite(end)) return null;
+  let duration = end - start;
+  if (duration <= 0) duration += 1440;
+  return duration;
+}
+
+function formatDuration(minutes) {
+  if (!Number.isFinite(minutes)) return '—';
+  const hours = Math.floor(minutes / 60);
+  const mins = Math.round(minutes % 60);
+  if (mins === 0) return `${hours}h`;
+  if (hours === 0) return `${mins}m`;
+  return `${hours}h ${mins}m`;
+}
+
+function getAiPostureDescriptor() {
+  const source = STATE.aiPosture || STATE.farm?.ai?.mode || STATE.farm?.ai?.posture || STATE.farm?.aiMode;
+  const token = normalizeToken(source) || 'advisory';
+  if (['autopilot', 'auto', 'autonomous'].includes(token)) {
+    return { label: 'Autopilot', active: true };
+  }
+  if (['off', 'manual', 'disabled'].includes(token)) {
+    return { label: 'Off', active: false };
+  }
+  if (['advisory', 'assist', 'guide'].includes(token)) {
+    return { label: 'Advisory', active: true };
+  }
+  const label = token ? token.charAt(0).toUpperCase() + token.slice(1) : 'Advisory';
+  return { label, active: token !== 'off' };
+}
+
+function roomHasAutomation(room, zones, groups) {
+  const rules = Array.isArray(STATE.preAutomationRules) ? STATE.preAutomationRules : [];
+  const needles = new Set();
+  const add = (value) => {
+    const token = normalizeToken(value);
+    if (token) needles.add(token);
+  };
+  add(room?.id);
+  add(room?.name);
+  add(room?.location);
+  (Array.isArray(room?.zones) ? room.zones : room?.zones ? [room.zones] : []).forEach(add);
+  (zones || []).forEach((zone) => {
+    add(zone?.id);
+    add(zone?.name);
+    add(zone?.location);
+    add(zone?.meta?.room);
+    add(zone?.meta?.zone);
+  });
+  (groups || []).forEach((group) => {
+    add(group?.id);
+    add(group?.name);
+    const match = group?.match || {};
+    add(match.room);
+    add(match.roomId);
+    add(match.roomName);
+    add(match.zone);
+    add(match.zoneId);
+    add(match.zoneName);
+  });
+  if ((zones || []).some((zone) => zone?.meta?.automationActive || normalizeToken(zone?.meta?.governance) === 'auto')) {
+    return true;
+  }
+  if (!rules.length || !needles.size) return false;
+  return rules.some((rule) => {
+    try {
+      const payload = JSON.stringify(rule || {}).toLowerCase();
+      return Array.from(needles).some((needle) => needle && payload.includes(needle));
+    } catch (err) {
+      return false;
+    }
+  });
+}
+
+function roomHasSpectraSync(plan, schedule) {
+  if (!plan || !schedule) return false;
+  if (schedule.active === false) return false;
+  return true;
+}
+
+function updateOverviewDemoRoomOptions(rooms = []) {
+  const select = document.getElementById('overviewDemoRoom');
+  if (!select) return;
+  const current = select.value;
+  const options = ['<option value="">Select room</option>'];
+  rooms.forEach((room) => {
+    const value = String(room.id || room.name || room.location || '').trim() || (room.name || '');
+    const label = room.name || room.id || 'Grow Room';
+    options.push(`<option value="${escapeHtml(value)}">${escapeHtml(label)}</option>`);
+  });
+  const markup = options.join('');
+  if (select.innerHTML !== markup) {
+    select.innerHTML = markup;
+  }
+  if (current && Array.from(select.options).some((option) => option.value === current)) {
+    select.value = current;
+  } else if (!Array.from(select.options).some((option) => option.value === select.value)) {
+    select.value = '';
+  }
+  if (OVERVIEW_DEMO_STATE.timer && OVERVIEW_DEMO_STATE.roomId) {
+    const stillExists = rooms.some((room) => normalizeToken(room.id || room.name) === normalizeToken(OVERVIEW_DEMO_STATE.roomId));
+    if (!stillExists) {
+      stopOverviewDemo({ skipOff: true, silent: true });
+      OVERVIEW_DEMO_STATE.devices = [];
+      OVERVIEW_DEMO_STATE.roomId = '';
+    }
+  }
+}
+
+function getDevicesForRoom(room, groups) {
+  const devices = Array.isArray(STATE.devices) ? STATE.devices : [];
+  if (!devices.length) return [];
+  const needles = new Set();
+  const add = (value) => {
+    const token = normalizeToken(value);
+    if (token) needles.add(token);
+  };
+  add(room?.id);
+  add(room?.name);
+  add(room?.location);
+  (Array.isArray(room?.zones) ? room.zones : room?.zones ? [room.zones] : []).forEach(add);
+  (groups || []).forEach((group) => {
+    add(group?.id);
+    add(group?.name);
+    const match = group?.match || {};
+    add(match.room);
+    add(match.roomId);
+    add(match.roomName);
+    add(match.zone);
+    add(match.zoneId);
+    add(match.zoneName);
+    if (Array.isArray(group?.members)) {
+      group.members.forEach((member) => {
+        add(member?.room);
+        add(member?.zone);
+      });
+    }
+  });
+  let matched = devices.filter((device) => {
+    const tokens = [
+      device?.id,
+      device?.deviceId,
+      device?.name,
+      device?.room,
+      device?.roomId,
+      device?.roomName,
+      device?.location?.room,
+      device?.zone,
+      device?.zoneId,
+      device?.zoneName,
+      device?.location?.zone
+    ].map(normalizeToken);
+    if (tokens.some((token) => token && needles.has(token))) return true;
+    if (Array.isArray(device?.rooms) && device.rooms.some((value) => needles.has(normalizeToken(value)))) return true;
+    if (Array.isArray(device?.zones) && device.zones.some((value) => needles.has(normalizeToken(value)))) return true;
+    return false;
+  });
+  if (matched.length) return matched;
+  const memberIds = new Set();
+  (groups || []).forEach((group) => {
+    (group?.members || []).forEach((member) => {
+      const id = member?.id || member?.deviceId;
+      const token = normalizeToken(id);
+      if (token) memberIds.add(token);
+    });
+  });
+  if (!memberIds.size) return matched;
+  matched = devices.filter((device) => memberIds.has(normalizeToken(device?.id || device?.deviceId)));
+  return matched;
+}
+
+function setupOverviewDemoControls() {
+  const bpmInput = document.getElementById('overviewDemoBpm');
+  const bpmDisplay = document.getElementById('overviewDemoBpmDisplay');
+  if (bpmInput && bpmDisplay) {
+    const update = () => {
+      const bpm = Math.min(140, Math.max(60, Math.round(Number(bpmInput.value) || 90)));
+      bpmInput.value = String(bpm);
+      bpmDisplay.textContent = `${bpm} BPM`;
+      OVERVIEW_DEMO_STATE.bpm = bpm;
+    };
+    bpmInput.addEventListener('input', update);
+    bpmInput.addEventListener('change', update);
+    update();
+  }
+  document.getElementById('overviewDemoStart')?.addEventListener('click', startOverviewDemo);
+  document.getElementById('overviewDemoStop')?.addEventListener('click', () => stopOverviewDemo());
+}
+
+function startOverviewDemo() {
+  const select = document.getElementById('overviewDemoRoom');
+  const bpmInput = document.getElementById('overviewDemoBpm');
+  const startBtn = document.getElementById('overviewDemoStart');
+  const stopBtn = document.getElementById('overviewDemoStop');
+  const statusEl = document.getElementById('overviewDemoStatus');
+  if (!select || !select.value) {
+    showToast?.({ title: 'Select room', msg: 'Choose a room to start Demo Mode.', kind: 'info', icon: 'ℹ️' });
+    return;
+  }
+  const rooms = collectOverviewRooms();
+  const room = rooms.find((entry) => String(entry.id || entry.name || entry.location || '').trim() === select.value);
+  if (!room) {
+    showToast?.({ title: 'Room not found', msg: 'Selected room is unavailable.', kind: 'warn', icon: '⚠️' });
+    return;
+  }
+  const groups = findGroupsForRoom(room);
+  const devices = getDevicesForRoom(room, groups);
+  if (!devices.length) {
+    showToast?.({ title: 'No lights detected', msg: `No controllable lights found for ${room.name || room.id}.`, kind: 'warn', icon: '⚠️' });
+    return;
+  }
+  const bpm = Math.min(140, Math.max(60, Math.round(Number(bpmInput?.value) || OVERVIEW_DEMO_STATE.bpm || 90)));
+  if (bpmInput) bpmInput.value = String(bpm);
+  stopOverviewDemo({ skipOff: true, silent: true });
+  OVERVIEW_DEMO_STATE.devices = devices;
+  OVERVIEW_DEMO_STATE.roomId = room.id || room.name || '';
+  OVERVIEW_DEMO_STATE.sequence = OVERVIEW_DEMO_SEQUENCE.slice();
+  OVERVIEW_DEMO_STATE.step = 0;
+  OVERVIEW_DEMO_STATE.bpm = bpm;
+  if (startBtn) startBtn.disabled = true;
+  if (stopBtn) stopBtn.disabled = false;
+  if (statusEl) statusEl.textContent = `Demo running — ${room.name || room.id} @ ${bpm} BPM`;
+  const interval = Math.max(250, Math.round((60 / bpm) * 1000));
+  runOverviewDemoTick(true);
+  OVERVIEW_DEMO_STATE.timer = setInterval(runOverviewDemoTick, interval);
+  showToast?.({ title: 'Demo mode', msg: `Showcasing ${room.name || room.id} at ${bpm} BPM.`, kind: 'success', icon: '🎛️' });
+}
+
+function stopOverviewDemo(options = {}) {
+  const { skipOff = false, silent = false } = options || {};
+  if (OVERVIEW_DEMO_STATE.timer) {
+    clearInterval(OVERVIEW_DEMO_STATE.timer);
+    OVERVIEW_DEMO_STATE.timer = null;
+  }
+  OVERVIEW_DEMO_STATE.busy = false;
+  OVERVIEW_DEMO_STATE.step = 0;
+  const startBtn = document.getElementById('overviewDemoStart');
+  const stopBtn = document.getElementById('overviewDemoStop');
+  const statusEl = document.getElementById('overviewDemoStatus');
+  if (startBtn) startBtn.disabled = false;
+  if (stopBtn) stopBtn.disabled = true;
+  if (statusEl) statusEl.textContent = 'Demo idle';
+  if (!skipOff && OVERVIEW_DEMO_STATE.devices.length) {
+    sendOverviewDemoPayload(OVERVIEW_DEMO_STATE.devices, { status: 'on', value: OVERVIEW_DEMO_SAFE_HEX })
+      .catch((err) => console.warn('Demo reset failed', err));
+  }
+  if (!skipOff) {
+    OVERVIEW_DEMO_STATE.devices = [];
+    OVERVIEW_DEMO_STATE.roomId = '';
+  }
+  if (!silent && !skipOff) {
+    showToast?.({ title: 'Demo stopped', msg: 'Returned lights to showcase default.', kind: 'info', icon: '🛑' });
+  }
+}
+
+function runOverviewDemoTick(initial = false) {
+  if (!OVERVIEW_DEMO_STATE.devices.length) {
+    if (OVERVIEW_DEMO_STATE.timer) {
+      clearInterval(OVERVIEW_DEMO_STATE.timer);
+      OVERVIEW_DEMO_STATE.timer = null;
+    }
+    return;
+  }
+  if (OVERVIEW_DEMO_STATE.busy) return;
+  const sequence = OVERVIEW_DEMO_STATE.sequence || OVERVIEW_DEMO_SEQUENCE;
+  if (!sequence.length) return;
+  const stepIndex = OVERVIEW_DEMO_STATE.step % sequence.length;
+  const step = sequence[stepIndex];
+  OVERVIEW_DEMO_STATE.step = stepIndex + 1;
+  OVERVIEW_DEMO_STATE.busy = true;
+  const statusEl = document.getElementById('overviewDemoStatus');
+  if (statusEl) statusEl.textContent = step.label;
+  sendOverviewDemoPayload(OVERVIEW_DEMO_STATE.devices, step.payload)
+    .catch((error) => {
+      console.warn('Demo payload failed', error);
+      showToast?.({ title: 'Demo error', msg: error?.message || 'Controller request failed.', kind: 'error', icon: '⚠️' });
+      stopOverviewDemo({ skipOff: true, silent: true });
+    })
+    .finally(() => {
+      OVERVIEW_DEMO_STATE.busy = false;
+      if (statusEl && !OVERVIEW_DEMO_STATE.timer) statusEl.textContent = 'Demo idle';
+    });
+}
+
+async function sendOverviewDemoPayload(devices, payload) {
+  if (!Array.isArray(devices) || !devices.length) return;
+  const base = window.API_BASE || '';
+  const body = JSON.stringify(payload);
+  const headers = _hdrs();
+  await Promise.all(devices.map(async (device) => {
+    const identifier = device?.id || device?.deviceId || device?.name;
+    if (!identifier) return;
+    const url = `${base}/api/devicedatas/device/${encodeURIComponent(identifier)}`;
+    const response = await fetch(url, { method: 'PATCH', headers, body });
+    if (!response.ok) {
+      const text = await response.text().catch(() => '');
+      throw new Error(text || `HTTP ${response.status}`);
+    }
+  }));
+}
+
+function renderGrowRoomOverview() {
+  const gridEl = document.getElementById('overviewGrid');
+  const statusEl = document.getElementById('overviewStatus');
+  if (!gridEl) return;
+  const rooms = collectOverviewRooms();
+  updateOverviewDemoRoomOptions(rooms);
+  if (!rooms.length) {
+    gridEl.innerHTML = '<p class="tiny text-muted">Add a grow room to see live conditions.</p>';
+    if (statusEl) statusEl.textContent = 'No rooms available.';
+    return;
+  }
+  const cards = rooms.map((room) => {
+    const groups = findGroupsForRoom(room);
+    const zones = findZonesForRoom(room);
+    const metrics = buildRoomMetrics(room, zones);
+    const plan = getRoomPlan(room, groups);
+    const schedule = getRoomSchedule(room, groups);
+    const ai = getAiPostureDescriptor();
+    const automationActive = roomHasAutomation(room, zones, groups);
+    const spectraActive = roomHasSpectraSync(plan, schedule);
+    const automationLabel = automationActive ? 'enabled' : 'idle';
+    const spectraLabel = spectraActive ? 'active' : 'idle';
+    const statusDescription = [
+      `AI posture: ${ai.label}`,
+      `Automation ${automationLabel}`,
+      `SpectraSync ${spectraLabel}`,
+    ].join('; ');
+    const subtitleParts = [];
+    if (room.location && normalizeToken(room.location) !== normalizeToken(room.name)) {
+      subtitleParts.push(room.location);
+    }
+    if (!subtitleParts.length && zones.length) {
+      const zoneNames = zones.map((zone) => zone?.name).filter(Boolean);
+      if (zoneNames.length) subtitleParts.push(zoneNames.join(', '));
+    }
+    const subtitle = subtitleParts.join(' • ');
+    const scheduleSummary = schedule ? summariseSchedule(schedule) : 'No schedule';
+    const planLabel = plan ? (plan.name || plan.id || 'Plan') : 'Not assigned';
+    return `
+      <article class="room-tile" role="listitem" data-room-id="${escapeHtml(String(room.id || room.name || 'room'))}">
+        <div class="room-tile__hdr">
+          <div>
+            <div class="room-name">${escapeHtml(room.name || room.id || 'Grow Room')}</div>
+            ${subtitle ? `<div class="tiny text-muted">${escapeHtml(subtitle)}</div>` : ''}
+          </div>
+          <div class="room-status" role="img" aria-label="${escapeHtml(statusDescription)}" title="${escapeHtml(statusDescription)}">
+            <span class="icon ai ${ai.active ? 'on' : ''}" title="AI posture: ${escapeHtml(ai.label)}" aria-hidden="true"></span>
+            <span class="icon auto ${automationActive ? 'on' : ''}" title="Automation ${escapeHtml(automationLabel)}" aria-hidden="true"></span>
+            <span class="icon spectra ${spectraActive ? 'on' : ''}" title="SpectraSync ${escapeHtml(spectraLabel)}" aria-hidden="true"></span>
+          </div>
+        </div>
+        <div class="metrics">
+          ${metrics.map((metric) => `
+            <div class="metric" data-metric-key="${metric.key}" data-zone-id="${metric.zoneId || ''}" data-modal-key="${metric.modalKey || ''}" data-color="${metric.color}" data-history="${metric.history.join('|')}">
+              <div class="val">${escapeHtml(metric.displayValue)}</div>
+              <div class="unit">${escapeHtml(metric.unit)}</div>
+              <canvas class="spark" width="220" height="36" aria-hidden="true"></canvas>
+            </div>`).join('')}
+        </div>
+        <div class="plan-row">
+          <span>Plan</span>
+          <span class="badge">${escapeHtml(planLabel)}</span>
+        </div>
+        <div class="plan-row">
+          <span>Schedule</span>
+          <span>${escapeHtml(scheduleSummary)}</span>
+        </div>
+      </article>
+    `;
+  }).join('');
+  gridEl.innerHTML = cards;
+  gridEl.querySelectorAll('.metric').forEach((metricEl) => {
+    const historyStr = metricEl.getAttribute('data-history') || '';
+    const color = metricEl.getAttribute('data-color') || '#2563EB';
+    const history = historyStr
+      .split('|')
+      .map((value) => Number(value))
+      .filter((value) => Number.isFinite(value));
+    const canvas = metricEl.querySelector('canvas.spark');
+    if (canvas) {
+      if (history.length) {
+        drawSparkline(canvas, history, { width: canvas.width || 220, height: canvas.height || 36, color });
+      } else {
+        const ctx = canvas.getContext && canvas.getContext('2d');
+        if (ctx) ctx.clearRect(0, 0, canvas.width || 0, canvas.height || 0);
+      }
+    }
+    const modalKey = metricEl.getAttribute('data-modal-key');
+    const zoneId = metricEl.getAttribute('data-zone-id');
+    if (typeof openEnvModal === 'function' && modalKey && zoneId) {
+      const zone = (STATE.environment || []).find((entry) => {
+        const idMatch = normalizeToken(entry?.id) === normalizeToken(zoneId);
+        const nameMatch = normalizeToken(entry?.name) === normalizeToken(zoneId);
+        return idMatch || nameMatch;
+      });
+      if (zone && zone?.sensors?.[modalKey]) {
+        metricEl.style.cursor = 'zoom-in';
+        metricEl.onclick = () => openEnvModal(zone, modalKey);
+      } else {
+        metricEl.style.cursor = history.length ? 'default' : 'default';
+        metricEl.onclick = null;
+      }
+    } else {
+      metricEl.style.cursor = history.length ? 'default' : 'default';
+      metricEl.onclick = null;
+    }
+  });
+  if (statusEl) {
+    const updated = STATE.lastEnvAt ? new Date(STATE.lastEnvAt).toLocaleTimeString() : '';
+    statusEl.textContent = `Showing ${rooms.length} room${rooms.length === 1 ? '' : 's'}${updated ? ` • Env updated ${updated}` : ''}`;
+  }
+}
 function updateAutomationIndicator(status = {}) {
   const indicator = document.getElementById('automationIndicator');
   const statusEl = document.getElementById('automationIndicatorStatus');
@@ -9709,6 +10453,7 @@ async function reloadEnvironment() {
     const payload = await api('/env');
     STATE.preAutomationEnv = payload?.env || { scopes: {} };
     STATE.environment = Array.isArray(payload?.zones) ? payload.zones : [];
+    STATE.lastEnvAt = Date.now();
     renderEnvironment();
     $('#envStatus')?.replaceChildren(document.createTextNode(`Updated ${new Date().toLocaleTimeString()}`));
   } catch (e) {
@@ -12580,27 +13325,6 @@ function hookRoomDevicePairing(roomWizardInstance) {
 }
 
 
-// --- Grow Room Overview (move this above AI features to avoid ReferenceError) ---
-function renderGrowRoomOverview() {
-  const summaryEl = document.getElementById('growOverviewSummary');
-  const gridEl = document.getElementById('growOverviewGrid');
-  if (!summaryEl || !gridEl) return;
-
-  const rooms = Array.isArray(STATE.rooms) ? STATE.rooms : [];
-  const zones = Array.isArray(STATE.environment) ? STATE.environment : [];
-  const plans = Array.isArray(STATE.plans) ? STATE.plans : [];
-  const schedules = Array.isArray(STATE.schedules) ? STATE.schedules : [];
-
-  const roomCount = rooms.length;
-  const zoneCount = zones.length;
-  const summaries = [
-    {
-      // ...existing summary logic...
-    }
-  ];
-  // ...existing code to update DOM...
-}
-
 // --- Top Card and AI Features Management ---
 function initializeTopCard() {
   // ...existing code...
@@ -12843,6 +13567,7 @@ document.addEventListener('DOMContentLoaded', async () => {
   window.testFreshWizard = function() {
     if (window.freshLightWizard) window.freshLightWizard.open();
   };
+  try { setupOverviewDemoControls(); } catch (e) { console.warn('Overview controls init failed', e); }
   // --- End UI and wizard setup ---
 
   // Now run the rest of the async logic

@@ -3338,3 +3338,60 @@ input[type="range"]#grd {
   color: #166534;
   border-color: #bbf7d0;
 }
+
+/* Overview layout */
+.overview { padding: 16px 20px; }
+.overview__hdr { display:flex; align-items:center; gap:20px; flex-wrap:wrap; }
+.overview__legend { display:flex; align-items:center; gap:14px; margin-left:auto; }
+.overview__legend .icon { width:14px; height:14px; border-radius:3px; display:inline-block; opacity:.6 }
+.overview__legend-item { display:flex; align-items:center; gap:6px; }
+.overview__legend .legend-text { font-size:.85rem; letter-spacing:.01em; }
+.icon.ai { background: currentColor; color:#888; }
+.icon.auto { background: currentColor; color:#888; }
+.icon.spectra { background: currentColor; color:#888; }
+
+.overview__grid {
+  display:grid;
+  grid-template-columns: repeat(auto-fill, minmax(360px, 1fr));
+  gap: 16px;
+}
+
+.room-tile {
+  border-radius: 12px;
+  border: 1px solid #e5e5e5;
+  padding: 18px;
+  background: #fff;
+  box-shadow: 0 1px 3px rgba(0,0,0,.05);
+}
+
+.room-tile__hdr { display:flex; align-items:center; justify-content:space-between; }
+.room-name { font-size: 1.4rem; font-weight: 700; letter-spacing:.2px; }
+
+.room-status { display:flex; gap:8px; }
+.room-status .icon { opacity:.35 }
+.room-status .on { opacity:1 }
+
+.metrics {
+  display:grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 12px; margin-top: 10px;
+}
+.metric { text-align:center; cursor:default; }
+.metric .val { font-size: 1.8rem; font-weight: 800; line-height:1.1 }
+.metric .unit { font-size:.9rem; opacity:.7 }
+
+.spark { height: 36px; margin-top: 6px; }
+
+.plan-row {
+  margin-top: 12px; display:flex; align-items:center; justify-content:space-between;
+  font-size: .95rem; color:#333;
+}
+.plan-row .badge { background:#f3f5ff; color:#3949ab; padding:4px 8px; border-radius:6px; font-weight:600 }
+
+.overview__controls { display:flex; align-items:center; gap:12px; flex-wrap:wrap; margin-top:16px; }
+.overview__controls label { display:flex; flex-direction:column; font-size:.85rem; color:#475569; gap:4px; }
+.overview__controls select,
+.overview__controls input[type="number"] { min-width:160px; padding:6px 10px; border-radius:6px; border:1px solid #d4d4d4; font-size:1rem; }
+.overview__controls input[type="range"] { min-width:160px; }
+.overview__controls button { min-width:108px; }
+.overview__demo-status { font-size:.85rem; color:#475569; margin-left:auto; }
