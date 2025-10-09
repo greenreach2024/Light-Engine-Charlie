@@ -1,3 +1,6 @@
+// Feature flag: opt-in to simplified room-only group matching
+const ROOM_ONLY_GROUPS = (window.GROUPS_ROOM_ONLY !== false);
+
 // Phase-3: Enforce strict group member selection logic
 function computeGroupMembers(group, allDevices) {
   const normalize = (value) => (typeof value === 'string' ? value.trim().toLowerCase() : '');
@@ -16,24 +19,36 @@ function computeGroupMembers(group, allDevices) {
   const zoneNeedles = toNeedles([match.zone, match.zoneId, match.zoneName]);
   const hasRoom = roomNeedles.length > 0;
   const hasZone = zoneNeedles.length > 0;
-  if (!hasRoom || !hasZone) return [];
+  const requireZone = !ROOM_ONLY_GROUPS;
+  if (!hasRoom) return [];
+  if (requireZone && !hasZone) return [];
 
-  const candidates = (allDevices || []).filter((device) => {
+  const devicePool = Array.isArray(allDevices) && allDevices.length
+    ? allDevices
+    : (ROOM_ONLY_GROUPS && Array.isArray(window.STATE?.devices) ? window.STATE.devices : []);
+
+  const candidates = (devicePool || []).filter((device) => {
     if (!device) return false;
     const roomValues = toNeedles([
       device.room,
       device.roomId,
       device.roomName,
       device.location?.room,
+      device.meta?.room,
+      device.meta?.roomId,
+      device.meta?.roomName,
     ]);
     const zoneValues = toNeedles([
       device.zone,
       device.zoneId,
       device.zoneName,
       device.location?.zone,
+      device.meta?.zone,
+      device.meta?.zoneId,
+      device.meta?.zoneName,
     ]);
     const roomMatch = roomValues.some((value) => roomNeedles.includes(value));
-    const zoneMatch = zoneValues.some((value) => zoneNeedles.includes(value));
+    const zoneMatch = requireZone ? zoneValues.some((value) => zoneNeedles.includes(value)) : true;
     return roomMatch && zoneMatch;
   });
 
@@ -90,7 +105,11 @@ function getActiveGroupMembers(group, selectionOverride = null) {
         })
     : [];
 
-  return computeGroupMembers({ ...activeGroup, match }, normalizedLights);
+  const devicePool = ROOM_ONLY_GROUPS && (!normalizedLights || normalizedLights.length === 0)
+    ? (Array.isArray(STATE?.devices) ? STATE.devices : [])
+    : normalizedLights;
+
+  return computeGroupMembers({ ...activeGroup, match }, devicePool);
 }
 // Utility: Always include x-pin header for farm writes (mirrors Recipe Bridge _hdrs)
 function _hdrs(extra = {}) {
@@ -318,8 +337,9 @@ function collectRoomsFromState() {
 }
 
 function updateGroupActionStates({ hasGroup = false, hasRoom = false, hasZone = false } = {}) {
-  const applyDisabled = !(hasGroup && hasRoom && hasZone);
-  const saveDisabled = !(hasRoom && hasZone);
+  const requireZone = !ROOM_ONLY_GROUPS;
+  const applyDisabled = !(hasGroup && hasRoom && (requireZone ? hasZone : true));
+  const saveDisabled = !(hasRoom && (requireZone ? hasZone : true));
   ['grpApply', 'grpOn', 'grpOff'].forEach((id) => {
     const btn = document.getElementById(id);
     if (btn) btn.disabled = applyDisabled;
@@ -353,16 +373,47 @@ function seedGroupRoomZoneDropdowns() {
     if (!fixtureSummary) return;
     const roomId = roomSel.value;
 const zoneValue = zoneSel ? zoneSel.value : '';
+const zoneSelected = ROOM_ONLY_GROUPS ? true : !!(zoneValue && zoneValue.trim());
 updateGroupActionStates({
   hasGroup: Boolean(STATE?.currentGroup),
   hasRoom: !!roomId,
-  hasZone: !!(zoneValue && zoneValue.trim()),
+  hasZone: zoneSelected,
   selection: buildSelection()
 });
 if (!roomId) {
   fixtureSummary.innerHTML = '<span style="color:#64748b;font-size:13px;">Select a room to view lights.</span>';
   return;
 }
+
+    if (ROOM_ONLY_GROUPS) {
+      const devices = Array.isArray(STATE?.devices) ? STATE.devices : [];
+      const normalizedRoom = String(roomId || '').trim().toLowerCase();
+      const roomDevices = devices.filter((device) => {
+        if (!device) return false;
+        const candidates = [
+          device.room,
+          device.roomId,
+          device.roomName,
+          device.location?.room,
+          device.location?.name,
+          device.meta?.room,
+          device.meta?.roomId,
+          device.meta?.roomName,
+        ]
+          .map((value) => (typeof value === 'string' ? value.trim().toLowerCase() : ''))
+          .filter(Boolean);
+        return candidates.includes(normalizedRoom);
+      });
+      if (!roomDevices.length) {
+        fixtureSummary.innerHTML = '<span style="color:#64748b;font-size:13px;">No controller lights are assigned to this room.</span>';
+      } else {
+        const items = roomDevices
+          .map((device) => `<div style="font-size:13px;">${escapeHtml(device.deviceName || device.name || `Device ${device.id}`)} <span style="color:#94a3b8;">#${escapeHtml(String(device.id || ''))}</span></div>`)
+          .join('');
+        fixtureSummary.innerHTML = items;
+      }
+      return;
+    }
     const setups = (window.STATE?.lightSetups || []).filter(s => (s.room === roomId || s.room === (window.STATE?.rooms?.find(r=>r.id===roomId)?.name)));
     if (!setups.length) {
       fixtureSummary.innerHTML = '<span style="color:#64748b;font-size:13px;">No lights configured for this room.</span>';
@@ -555,11 +606,12 @@ function isForSelection(lightMeta, selectedRoom, selectedZone) {
     (sel.name && lit.name && lit.name === sel.name) ||
     (sel.name && lit.id && lit.id === sel.name);
   if (!(idMatch || nameMatch)) return false;
+  const zoneRequired = !ROOM_ONLY_GROUPS;
   if (selectedZone === undefined) return true;
   const targetZone = normZone(selectedZone);
-  if (!targetZone) return true;
+  if (!targetZone) return !zoneRequired || !ROOM_ONLY_GROUPS;
   const lightZone = normZone(lightMeta?.zone ?? lightMeta?.zoneId ?? lightMeta?.zoneName);
-  return lightZone === targetZone;
+  return zoneRequired ? (lightZone === targetZone) : true;
 }
 
 // --- Build the candidate set strictly from Room+Zone ------------------------
@@ -567,15 +619,17 @@ function isForSelection(lightMeta, selectedRoom, selectedZone) {
 function collectCandidatesForSelection(selectedRoom, selectedZone) {
   const rooms = collectRoomsFromState() || [];
   const sel = resolveRoomRef(selectedRoom, rooms);
+  const zoneRequired = !ROOM_ONLY_GROUPS;
   const targetZone = normZone(selectedZone);
-  if ((!sel.id && !sel.name) || !targetZone) return [];
+  if (!sel.id && !sel.name) return [];
+  if (zoneRequired && !targetZone) return [];
 
   const outMap = new Map();
 
   function ensureCandidate(id, payload) {
     if (!id) return;
     const payloadZone = normZone(payload.zone ?? payload.zoneId ?? payload.zoneName);
-    if (payloadZone !== targetZone) return;
+    if (zoneRequired && payloadZone !== targetZone) return;
     if (!outMap.has(id)) {
       outMap.set(id, { ...payload, zone: payloadZone });
     }
@@ -584,7 +638,7 @@ function collectCandidatesForSelection(selectedRoom, selectedZone) {
   (STATE?.lightSetups || []).forEach((setup) => {
     const sRoom = resolveRoomRef(setup?.room, rooms);
     const candidateZone = normZone(setup?.zone);
-    if (!candidateZone) return;
+    if (zoneRequired && !candidateZone) return;
     if (!isForSelection({ roomId: sRoom.id, room: sRoom.name, zone: candidateZone }, sel, targetZone)) return;
     (setup?.fixtures || []).forEach((fixture) => {
       if (!fixture) return;
@@ -608,7 +662,7 @@ function collectCandidatesForSelection(selectedRoom, selectedZone) {
     if (!fixture) return;
     const fRoom = resolveRoomRef(fixture?.roomId ?? fixture?.room, rooms);
     const candidateZone = normZone(fixture.zone ?? fixture.zoneId ?? fixture.zoneName);
-    if (!candidateZone) return;
+    if (zoneRequired && !candidateZone) return;
     if (!isForSelection({ roomId: fRoom.id, room: fRoom.name, zone: candidateZone }, sel, targetZone)) return;
     const id = stableLightId(fixture);
     ensureCandidate(id, {
@@ -635,7 +689,7 @@ function collectCandidatesForSelection(selectedRoom, selectedZone) {
       device?.location?.zoneName ??
       (Array.isArray(device?.zones) ? device.zones[0] : '')
     );
-    if (!candidateZone) return;
+    if (zoneRequired && !candidateZone) return;
     if (!isForSelection({ roomId: dRoom.id, room: dRoom.name, zone: candidateZone }, sel, targetZone)) return;
     const id = stableLightId(device);
     ensureCandidate(id, {
@@ -653,7 +707,7 @@ function collectCandidatesForSelection(selectedRoom, selectedZone) {
     if (!metaId) return;
     const mRoom = resolveRoomRef(meta?.roomId ?? meta?.room ?? meta?.roomName, rooms);
     const candidateZone = normZone(meta?.zone ?? meta?.zoneId ?? meta?.zoneName);
-    if (!candidateZone) return;
+    if (zoneRequired && !candidateZone) return;
     if (!isForSelection({ roomId: mRoom.id, room: mRoom.name, zone: candidateZone }, sel, targetZone)) return;
     ensureCandidate(String(metaId), {
       ...meta,
@@ -677,8 +731,11 @@ function collectCandidatesForSelection(selectedRoom, selectedZone) {
 function computeRostersForSelection(selectedRoom, selectedZone) {
   const rooms = collectRoomsFromState() || [];
   const selection = resolveRoomRef(selectedRoom, rooms);
+  const zoneRequired = !ROOM_ONLY_GROUPS;
   const targetZone = normZone(selectedZone);
-  if ((!selection.id && !selection.name) || !targetZone) return { assigned: [], ungrouped: [] };
+  if ((!selection.id && !selection.name) || (zoneRequired && !targetZone)) {
+    return { assigned: [], ungrouped: [] };
+  }
 
   const candidates = collectCandidatesForSelection(selectedRoom, targetZone);
   if (!candidates.length) return { assigned: [], ungrouped: [] };
@@ -687,36 +744,28 @@ function computeRostersForSelection(selectedRoom, selectedZone) {
   (STATE?.groups || []).forEach((group) => {
     if (!group) return;
     const match = group.match && typeof group.match === 'object' ? group.match : null;
-    if (match) {
-      const matchZone = normZone(match.zone);
-      if (matchZone && matchZone === targetZone) {
-        const matchRoom = resolveRoomRef(match.room, rooms);
-        if (isForSelection({ roomId: matchRoom.id, room: matchRoom.name, zone: matchZone }, selection, targetZone)) {
-          candidates.forEach((candidate) => {
-            if (candidate?.id) assignedIds.add(candidate.id);
-          });
-        }
-      }
-      return;
-    }
+    const roomRef = resolveRoomRef(
+      match?.room ?? group.room ?? group.roomId ?? group.roomName,
+      rooms
+    );
+    const matchZone = normZone(match?.zone ?? group.zone ?? group.zoneId ?? group.zoneName);
+    const matchesSelection = isForSelection(
+      { roomId: roomRef.id, room: roomRef.name, zone: matchZone },
+      selection,
+      zoneRequired ? targetZone : ''
+    );
+    if (!matchesSelection) return;
+    if (zoneRequired && matchZone && targetZone && matchZone !== targetZone) return;
 
-    (Array.isArray(group?.lights) ? group.lights : []).forEach((light) => {
-      if (!light) return;
-      const normalized = typeof light === 'string' ? { id: String(light).trim() } : light;
+    const members = Array.isArray(group?.lights)
+      ? group.lights
+      : Array.isArray(group?.members)
+        ? group.members
+        : [];
+    members.forEach((member) => {
+      const normalized = typeof member === 'string' ? { id: String(member).trim() } : member;
       if (!normalized?.id) return;
-      const matchesSelection = isForSelection(
-        {
-          roomId: normalized.roomId ?? normalized.room,
-          room: normalized.roomName ?? normalized.room,
-          zone: normalized.zone,
-        },
-        selection,
-        targetZone
-      );
-      if (!matchesSelection) return;
-      const id = typeof light === 'string' ? String(light).trim() : stableLightId(light);
-      if (!id) return;
-      assignedIds.add(id);
+      assignedIds.add(String(normalized.id));
     });
   });
 
@@ -724,7 +773,8 @@ function computeRostersForSelection(selectedRoom, selectedZone) {
   const ungrouped = [];
   candidates.forEach((candidate) => {
     if (!candidate?.id) return;
-    (assignedIds.has(candidate.id) ? assigned : ungrouped).push(candidate);
+    const id = String(candidate.id);
+    (assignedIds.has(id) ? assigned : ungrouped).push(candidate);
   });
 
   return { assigned, ungrouped };
@@ -2625,8 +2675,21 @@ function normalizeFarmDoc(farm) {
 }
 // Global JSON loader
 async function loadJSON(url) {
-  const resp = await fetch(url);
+  const resp = await fetch(resolveApiUrl(url));
   if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+  return await resp.json();
+}
+
+async function saveJSON(url, payload, { method = 'POST', headers = {}, expectJson = true } = {}) {
+  const resp = await fetch(resolveApiUrl(url), {
+    method,
+    headers: { ..._hdrs(), ...headers },
+    body: JSON.stringify(payload ?? {}),
+  });
+  if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+  if (!expectJson) return null;
+  const contentType = resp.headers.get('content-type') || '';
+  if (!contentType.toLowerCase().includes('application/json')) return null;
   return await resp.json();
 }
 // Light Engine Charlie - Comprehensive Dashboard Application
@@ -8096,7 +8159,7 @@ async function loadAllData() {
     
     // Load static data files
     const [groups, schedules, plans, environment, calibrations, spdLibrary, deviceMeta, deviceKB, equipmentKB, deviceManufacturers, farm, rooms, switchbotDevices] = await Promise.all([
-      loadJSON('./data/groups.json'),
+      api('/groups').catch((err) => { console.warn('Failed to load /groups', err); return { ok: false, groups: [] }; }),
       loadJSON('./data/schedules.json'),
       loadJSON('./data/plans.json'),
       api('/env'),
@@ -8111,7 +8174,38 @@ async function loadAllData() {
       loadJSON('./data/switchbot-devices.json')
     ]);
 
-  STATE.groups = groups?.groups || [];
+  const incomingGroups = Array.isArray(groups?.groups)
+    ? groups.groups
+    : (Array.isArray(groups) ? groups : []);
+  STATE.groups = incomingGroups.map((group) => {
+    if (!group || typeof group !== 'object') return group;
+    const room = group.room ?? group.roomId ?? group.match?.room ?? '';
+    const zone = group.zone ?? group.zoneId ?? group.match?.zone ?? '';
+    const label = group.label || group.name || group.id || '';
+    const membersRaw = Array.isArray(group.members)
+      ? group.members
+      : Array.isArray(group.lights)
+        ? group.lights
+        : [];
+    const lights = membersRaw.map((entry) => {
+      if (typeof entry === 'string') return { id: entry };
+      if (entry && typeof entry === 'object') {
+        const id = entry.id || entry.deviceId || entry.device_id || entry.deviceID;
+        return id ? { ...entry, id: String(id) } : null;
+      }
+      return null;
+    }).filter(Boolean);
+    return {
+      ...group,
+      name: label,
+      label,
+      room,
+      zone,
+      match: room || zone ? { room, zone } : group.match,
+      lights,
+      members: lights.map((light) => ({ id: light.id })),
+    };
+  });
     STATE.schedules = schedules?.schedules || [];
     STATE.plans = plans?.plans || [];
   STATE.environment = environment?.zones || [];
@@ -8340,10 +8434,10 @@ function renderGroups() {
       const idx = STATE.groups.findIndex(g => g.id === group.id);
       if (idx >= 0) {
         STATE.groups[idx] = { ...group };
-        Promise.resolve(saveJSON('./data/groups.json', { groups: STATE.groups }))
+        Promise.resolve(saveJSON('/groups', { groups: STATE.groups }))
           .then(async () => {
             // Reload groups from disk to ensure persistence
-            const groupsReloaded = await loadJSON('./data/groups.json');
+            const groupsReloaded = await api('/groups');
             if (groupsReloaded && Array.isArray(groupsReloaded.groups)) {
               STATE.groups = groupsReloaded.groups;
               normalizeGroupsInState();
@@ -10444,7 +10538,7 @@ function wireGlobalEvents() {
 
     const { roomId: selectedRoomId, roomName: selectedRoomName, zone: selectedZone } = getSelectedGroupRoomZone();
     const hasRoomSelection = !!(selectedRoomValue && selectedRoomValue.trim());
-    const hasZoneSelection = !!(selectedZoneValue && selectedZoneValue.trim());
+    const hasZoneSelection = ROOM_ONLY_GROUPS ? true : !!(selectedZoneValue && selectedZoneValue.trim());
     const hasFilters = hasRoomSelection && hasZoneSelection;
 
     const selectionPayload = {
@@ -10525,7 +10619,9 @@ function wireGlobalEvents() {
     // Meta status: roster count and online
     if (groupsStatus) {
       if (!hasFilters) {
-        groupsStatus.textContent = 'Select a room and zone to preview this group.';
+        groupsStatus.textContent = ROOM_ONLY_GROUPS
+          ? 'Select a room to preview this group.'
+          : 'Select a room and zone to preview this group.';
       } else {
         try {
           const filteredIds = filteredLights.map((entry) => entry.id).filter(Boolean);
@@ -10535,9 +10631,14 @@ function wireGlobalEvents() {
           const online = targets.filter((d) => d && d.online !== false).length;
           const planName = STATE.plans.find((p) => p.id === group.plan)?.name || '—';
           const schedName = STATE.schedules.find((s) => s.id === group.schedule)?.name || '—';
-          groupsStatus.textContent = `${filteredLights.length} light(s) • ${online} online • Plan: ${planName} • Schedule: ${schedName}`;
+          const roomLabel = hasRoomSelection ? selectedRoomValue : '';
+          const zoneLabel = ROOM_ONLY_GROUPS ? '' : selectedZoneValue;
+          const locationLabel = [roomLabel, zoneLabel].filter(Boolean).join(' · ');
+          groupsStatus.textContent = `${filteredLights.length} light(s) • ${online} online${locationLabel ? ` • ${locationLabel}` : ''} • Plan: ${planName} • Schedule: ${schedName}`;
         } catch {
-          groupsStatus.textContent = 'Select a room and zone to preview this group.';
+          groupsStatus.textContent = ROOM_ONLY_GROUPS
+            ? 'Select a room to preview this group.'
+            : 'Select a room and zone to preview this group.';
         }
       }
     }
@@ -10568,12 +10669,16 @@ function wireGlobalEvents() {
     if (groupRosterEmpty) {
       if (!hasFilters) {
         groupRosterEmpty.style.display = 'block';
-        groupRosterEmpty.textContent = 'Select a room and zone to view this group.';
+        groupRosterEmpty.textContent = ROOM_ONLY_GROUPS
+          ? 'Select a room to view this group.'
+          : 'Select a room and zone to view this group.';
       } else if (filteredLights.length) {
         groupRosterEmpty.style.display = 'none';
       } else {
         groupRosterEmpty.style.display = 'block';
-        groupRosterEmpty.textContent = 'No lights in this group for the selected room and zone.';
+        groupRosterEmpty.textContent = ROOM_ONLY_GROUPS
+          ? 'No lights in this group for the selected room.'
+          : 'No lights in this group for the selected room and zone.';
       }
     }
 
@@ -10581,12 +10686,12 @@ function wireGlobalEvents() {
     if (ungroupedList) {
       const { rawRoom, roomId, roomName, zone } = getSelectedGroupRoomZone();
       const selectedRoom = roomId || roomName ? { id: roomId, name: roomName } : rawRoom;
-      const zoneValue = normZone(zone);
+      const zoneValue = ROOM_ONLY_GROUPS ? '' : normZone(zone);
       const hasRoom =
         typeof selectedRoom === 'string'
           ? !!selectedRoom.trim()
           : !!(selectedRoom && (selectedRoom.id || selectedRoom.name));
-      const hasZone = !!zoneValue;
+      const hasZone = ROOM_ONLY_GROUPS ? true : !!zoneValue;
       const roster = hasRoom && hasZone ? computeRostersForSelection(selectedRoom, zoneValue) : { assigned: [], ungrouped: [] };
       const assignedIds = new Set((roster.assigned || []).map((entry) => entry.id).filter(Boolean));
       const ungrouped = roster.ungrouped || [];
@@ -10594,7 +10699,9 @@ function wireGlobalEvents() {
       if (!hasRoom || !hasZone) {
         if (ungroupedEmpty) {
           ungroupedEmpty.style.display = 'block';
-          ungroupedEmpty.textContent = 'Select a room and zone to view configured lights.';
+          ungroupedEmpty.textContent = ROOM_ONLY_GROUPS
+            ? 'Select a room to view configured lights.'
+            : 'Select a room and zone to view configured lights.';
         }
       } else if (!ungrouped.length) {
         if (ungroupedEmpty) {
@@ -10602,7 +10709,9 @@ function wireGlobalEvents() {
           const hasAnyCandidates = (roster.assigned || []).length > 0;
           ungroupedEmpty.textContent = hasAnyCandidates
             ? 'All lights are assigned to groups.'
-            : 'No lights found for this room and zone.';
+            : ROOM_ONLY_GROUPS
+              ? 'No lights found for this room.'
+              : 'No lights found for this room and zone.';
         }
       } else {
         if (ungroupedEmpty) ungroupedEmpty.style.display = 'none';
@@ -10657,11 +10766,11 @@ function wireGlobalEvents() {
         });
       }
       if (ungroupedStatus) {
-        if (!hasRoom || !hasZone) {
-          ungroupedStatus.textContent = 'Select a room and zone';
-        } else {
-          ungroupedStatus.textContent = `${ungrouped.length} ungrouped`;
-        }
+      if (!hasRoom || !hasZone) {
+        ungroupedStatus.textContent = ROOM_ONLY_GROUPS ? 'Select a room' : 'Select a room and zone';
+      } else {
+        ungroupedStatus.textContent = `${ungrouped.length} ungrouped`;
+      }
       }
     }
     // Removed rendering of light cards in group card as requested.
@@ -10804,7 +10913,7 @@ function wireGlobalEvents() {
       if (group) group.schedule = edited.id;
       await Promise.all([
         saveJSON('./data/schedules.json', { schedules: STATE.schedules }),
-        saveJSON('./data/groups.json', { groups: STATE.groups })
+        saveJSON('/groups', { groups: STATE.groups })
       ]);
       updateGroupUI(group);
       setStatus('Saved group schedule');
@@ -10859,7 +10968,7 @@ function wireGlobalEvents() {
     if (groupsStatus) groupsStatus.textContent = 'Group saved';
   });
   btnReloadGroups?.addEventListener('click', async () => {
-    const data = await loadJSON('./data/groups.json');
+    const data = await api('/groups');
     STATE.groups = data?.groups || [];
     normalizeGroupsInState();
     renderGroups();
@@ -10909,7 +11018,7 @@ function wireGlobalEvents() {
   });
 
   async function saveGroups() {
-    const ok = await saveJSON('./data/groups.json', { groups: STATE.groups });
+    const ok = await saveJSON('/groups', { groups: STATE.groups });
     if (ok) {
       setStatus('Groups saved');
       // Update controller assignments when groups change
@@ -11098,7 +11207,7 @@ function wireGlobalEvents() {
     STATE.schedules = STATE.schedules.filter(s => s.id !== id);
     // Unlink from any groups referencing it
     STATE.groups.forEach(g => { if (g.schedule === id) g.schedule = ''; });
-    await Promise.all([saveSchedules(), saveJSON('./data/groups.json', { groups: STATE.groups })]);
+    await Promise.all([saveSchedules(), saveJSON('/groups', { groups: STATE.groups })]);
     renderSchedules();
     setStatus(`Deleted schedule ${id}`);
   });
@@ -11186,7 +11295,7 @@ function wireGlobalEvents() {
       // File-only: persist to groups.json as a pending mix so a Room Wizard or future apply can use it
       try {
         STATE.currentGroup.pendingSpectrum = { ...mix, updatedAt: new Date().toISOString() };
-        await saveJSON('./data/groups.json', { groups: STATE.groups });
+        await saveJSON('/groups', { groups: STATE.groups });
         setStatus('Saved spectrum to file only (pending)');
         showToast({ title: 'Saved to file only', msg: 'Pending spectrum saved to groups.json', kind: 'info', icon: '💾' });
       } catch (e) {
