@@ -12503,6 +12503,7 @@ let DEMO_STATE = {
 };
 let DEMO_TIMER = null;
 let DEMO_SNAPSHOT = new Map();
+const DEMO_LOCKS = new Map();
 
 function deviceSupportsSpectrum(device) {
   if (!device || typeof device !== 'object') return true;
@@ -12576,16 +12577,6 @@ function refreshDemoSnapshot(devices) {
   DEMO_SNAPSHOT = next;
 }
 
-function getRestorePayload(snapshot, restore) {
-  if (!restore || !snapshot) {
-    return { status: 'off', value: null };
-  }
-  if (snapshot.status === 'off') {
-    return { status: 'off', value: null };
-  }
-  return { status: 'on', value: snapshot.value || DEMO_SAFE_HEX };
-}
-
 function normalizeIdentifier(value) {
   if (value === undefined || value === null) return '';
   if (typeof value === 'string') return value.trim().toLowerCase();
@@ -12638,6 +12629,158 @@ function collectZoneIdentifiers(zone) {
     add(zone.meta.scope);
   }
   return identifiers;
+}
+
+function normalizeAiMode(value, fallback = 'advisory') {
+  const raw = firstNonEmptyString(value);
+  if (!raw) return fallback;
+  const normalized = String(raw).trim().toLowerCase();
+  if (/off|disable|manual|pause/.test(normalized)) return 'off';
+  if (/auto|pilot|autonomous|always/.test(normalized)) return 'autopilot';
+  if (/advisory|assist|guide/.test(normalized)) return 'advisory';
+  return fallback;
+}
+
+function detectAiMode(room, zone, fallbackMode = 'advisory') {
+  const identifiers = new Set([...collectRoomIdentifiers(room), ...collectZoneIdentifiers(zone)]);
+  const fallback = normalizeAiMode(fallbackMode, 'advisory');
+  const aiState = STATE.ai || STATE.aiAssist || STATE.aiSettings || STATE.aiConfig || {};
+
+  const explicitMode = normalizeAiMode(
+    firstNonEmptyString(
+      zone?.meta?.aiMode,
+      zone?.meta?.ai?.mode,
+      zone?.aiMode,
+      room?.meta?.aiMode,
+      room?.aiMode,
+      room?.ai?.mode
+    ),
+    ''
+  );
+  if (explicitMode) return explicitMode;
+
+  const matchesIdentifiers = (candidate) => {
+    if (!identifiers.size) return false;
+    return valueMatchesIdentifiers(candidate, identifiers);
+  };
+
+  if (matchesIdentifiers(aiState?.disabledRooms) || matchesIdentifiers(aiState?.offRooms) || matchesIdentifiers(aiState?.off)) {
+    return 'off';
+  }
+  if (matchesIdentifiers(aiState?.autopilotRooms) || matchesIdentifiers(aiState?.autopilot) || matchesIdentifiers(aiState?.roomsAutopilot)) {
+    return 'autopilot';
+  }
+
+  const aiRooms = aiState?.rooms;
+  if (identifiers.size && aiRooms) {
+    const processEntry = (entry, key) => {
+      if (!entry) return null;
+      const mode = normalizeAiMode(entry.mode || entry.status || entry.posture || entry);
+      if (!mode) return null;
+      if (key) {
+        const normalizedKey = normalizeIdentifier(key);
+        if (normalizedKey && identifiers.has(normalizedKey)) return mode;
+      }
+      if (matchesIdentifiers(entry.scope) || matchesIdentifiers(entry.match) || matchesIdentifiers(entry.room) || matchesIdentifiers(entry.zone) || matchesIdentifiers(entry.rooms) || matchesIdentifiers(entry.targets)) {
+        return mode;
+      }
+      return null;
+    };
+
+    if (Array.isArray(aiRooms)) {
+      for (const entry of aiRooms) {
+        const mode = processEntry(entry);
+        if (mode) return mode;
+      }
+    } else if (typeof aiRooms === 'object') {
+      for (const [key, entry] of Object.entries(aiRooms)) {
+        const mode = processEntry(entry, key);
+        if (mode) return mode;
+      }
+    }
+  }
+
+  const globalMode = normalizeAiMode(aiState?.mode || aiState?.status || aiState?.posture || STATE.aiMode, '');
+  if (globalMode) {
+    if (globalMode === 'off') return 'off';
+    if (globalMode === 'autopilot') return 'autopilot';
+    if (globalMode === 'advisory') return 'advisory';
+  }
+
+  return fallback;
+}
+
+function deriveRoomAiStatus(room, zone, fallbackMode = 'advisory', fallbackLabel = 'Advisory') {
+  const mode = detectAiMode(room, zone, fallbackMode);
+  let label = fallbackLabel || 'Advisory';
+  let description = 'AI Copilot providing advisory insights for this room.';
+
+  if (mode === 'autopilot') {
+    label = 'Autopilot';
+    description = 'AI Copilot is actively steering this room in autopilot mode.';
+  } else if (mode === 'off') {
+    label = 'Off';
+    description = 'AI Copilot is paused for this room.';
+  } else if (!fallbackLabel || fallbackLabel.toLowerCase() === 'off') {
+    label = 'Advisory';
+  }
+
+  return { status: mode, label, description, shortLabel: label };
+}
+
+function normalizeMinutesValue(value) {
+  const minutes = Number(value);
+  if (!Number.isFinite(minutes)) return 0;
+  const rounded = Math.round(minutes);
+  return ((rounded % 1440) + 1440) % 1440;
+}
+
+function getMinutesInTimezone(timezone) {
+  const now = new Date();
+  if (typeof Intl !== 'undefined' && Intl.DateTimeFormat) {
+    try {
+      const formatter = new Intl.DateTimeFormat('en-US', { hour12: false, hour: '2-digit', minute: '2-digit', timeZone: timezone || Intl.DateTimeFormat().resolvedOptions().timeZone });
+      const parts = formatter.formatToParts(now);
+      const hour = Number(parts.find((part) => part.type === 'hour')?.value || now.getHours());
+      const minute = Number(parts.find((part) => part.type === 'minute')?.value || now.getMinutes());
+      return normalizeMinutesValue(hour * 60 + minute);
+    } catch (error) {
+      // fall through to local time
+    }
+  }
+  return normalizeMinutesValue(now.getHours() * 60 + now.getMinutes());
+}
+
+function scheduleCycleIncludes(cycle, nowMinutes) {
+  if (!cycle) return false;
+  const startMinutes = normalizeMinutesValue(toMinutes(cycle.on));
+  const endMinutes = normalizeMinutesValue(toMinutes(cycle.off));
+  const rampUp = normalizeMinutesValue(Number(cycle?.ramp?.up ?? cycle?.ramp?.start ?? cycle?.rampUp ?? cycle?.ramp_start ?? 0));
+  const rampDown = normalizeMinutesValue(Number(cycle?.ramp?.down ?? cycle?.ramp?.end ?? cycle?.rampDown ?? cycle?.ramp_end ?? 0));
+  const start = normalizeMinutesValue(startMinutes - rampUp);
+  const end = normalizeMinutesValue(endMinutes + rampDown);
+
+  if (start === end) return true;
+  if (start < end) {
+    return nowMinutes >= start && nowMinutes < end;
+  }
+  return nowMinutes >= start || nowMinutes < end;
+}
+
+function isScheduleActiveNow(schedule) {
+  if (!schedule || typeof schedule !== 'object') return false;
+  const cycles = Array.isArray(schedule.cycles) ? schedule.cycles.filter(Boolean) : [];
+  if (!cycles.length) return false;
+
+  const tz = firstNonEmptyString(
+    schedule.timezone,
+    schedule.timeZone,
+    STATE?.farm?.timezone,
+    STATE?.timezone,
+    STATE?.config?.timezone
+  );
+  const nowMinutes = getMinutesInTimezone(tz);
+  return cycles.some((cycle) => scheduleCycleIncludes(cycle, nowMinutes));
 }
 
 function buildOverviewKey(room, zone, index) {
@@ -12844,18 +12987,48 @@ function deriveAutomationStatus(room, zone, rules, devices) {
   if (governed) detailParts.push('controller');
   if (Array.isArray(devices) && devices.length) detailParts.push(`${devices.length} fixture${devices.length === 1 ? '' : 's'}`);
   const label = active ? `Automation active${detailParts.length ? ` • ${detailParts.join(' + ')}` : ''}` : 'Automation idle';
-  return { status: active ? 'on' : 'off', label, matches };
+  const description = active
+    ? label
+    : matches.length
+      ? `Automation armed with ${matches.length} rule${matches.length === 1 ? '' : 's'}.`
+      : 'Automation is idle for this room.';
+  return {
+    status: active ? 'on' : 'off',
+    label,
+    matches,
+    governed,
+    description,
+    shortLabel: active ? 'On' : 'Off'
+  };
 }
 
 function deriveSpectraStatus(planInfo, scheduleInfo, devices) {
   const hasPlan = Boolean(planInfo?.id);
   const hasSchedule = Boolean(scheduleInfo?.id);
-  const active = hasPlan && hasSchedule;
+  const scheduled = hasPlan && hasSchedule;
   const count = Array.isArray(devices) ? devices.length : 0;
-  const label = active
-    ? `SpectraSync active${count ? ` • ${count} fixture${count === 1 ? '' : 's'}` : ''}`
-    : 'SpectraSync idle';
-  return { status: active ? 'active' : 'idle', label };
+  const activeNow = scheduled && isScheduleActiveNow(scheduleInfo?.schedule);
+  let label;
+  if (!scheduled) {
+    label = 'SpectraSync idle';
+  } else if (activeNow) {
+    label = `SpectraSync active${count ? ` • ${count} fixture${count === 1 ? '' : 's'}` : ''}`;
+  } else {
+    label = 'SpectraSync scheduled • Outside photoperiod';
+  }
+  const description = scheduled
+    ? activeNow
+      ? 'Lights are in an active SpectraSync photoperiod window right now.'
+      : 'SpectraSync has a schedule, but the current time is outside the photoperiod window.'
+    : 'Assign a plan and schedule to enable SpectraSync.';
+  return {
+    status: scheduled && activeNow ? 'active' : 'idle',
+    label,
+    active: scheduled,
+    activeNow,
+    description,
+    shortLabel: scheduled ? (activeNow ? 'Active' : 'Idle') : 'Idle'
+  };
 }
 
 function deriveAiPostureStatus() {
@@ -12905,9 +13078,6 @@ function createOverviewMetricHTML(metric) {
 }
 
 function createOverviewTile(entry) {
-  const aiOn = entry.ai.status && entry.ai.status !== 'off';
-  const automationOn = entry.automation.status === 'on';
-  const spectraOn = entry.spectra.status === 'active';
   const planDetail = entry.planInfo.detail
     ? `<span class="detail">${escapeHtml(entry.planInfo.detail)}</span>`
     : '';
@@ -12921,17 +13091,7 @@ function createOverviewTile(entry) {
           <h2 class="room-name">${escapeHtml(entry.name)}</h2>
           ${entry.subtitle ? `<p class="room-subtitle">${escapeHtml(entry.subtitle)}</p>` : ''}
         </div>
-        <div class="room-status" aria-label="Status icons">
-          <span class="icon ai ${aiOn ? 'on' : ''}" title="AI Copilot: ${escapeHtml(entry.ai.label)}">
-            <span class="sr-only">AI ${escapeHtml(entry.ai.label)}</span>
-          </span>
-          <span class="icon auto ${automationOn ? 'on' : ''}" title="${escapeHtml(entry.automation.label)}">
-            <span class="sr-only">Automation ${escapeHtml(entry.automation.label)}</span>
-          </span>
-          <span class="icon spectra ${spectraOn ? 'on' : ''}" title="${escapeHtml(entry.spectra.label)}">
-            <span class="sr-only">SpectraSync ${escapeHtml(entry.spectra.label)}</span>
-          </span>
-        </div>
+        <div class="room-status" data-role="ai-cluster" aria-live="polite"></div>
       </header>
       <div class="metrics">
         ${entry.metrics.map((metric) => createOverviewMetricHTML(metric)).join('')}
@@ -12954,7 +13114,158 @@ function createOverviewTile(entry) {
   `;
 }
 
+function addControlTipHandlers(node) {
+  if (!node) return;
+  const tip = node.getAttribute('data-tip') || node.getAttribute('title');
+  if (!tip) return;
+  node.setAttribute('data-tip', tip);
+  const show = () => {
+    if (typeof showTipFor === 'function') showTipFor(node);
+  };
+  const hide = () => {
+    if (typeof hideTip === 'function') hideTip();
+  };
+  node.addEventListener('mouseenter', show);
+  node.addEventListener('mouseleave', hide);
+  node.addEventListener('focus', show);
+  node.addEventListener('blur', hide);
+}
+
+function handleAiControlClick(entry) {
+  if (!entry || !entry.ai) return;
+  const msg = entry.ai.description || entry.ai.label || 'AI Copilot';
+  if (typeof showToast === 'function') {
+    showToast({
+      title: `${entry.roomLabel} • AI`,
+      msg,
+      kind: entry.ai.status === 'off' ? 'warn' : 'info',
+      icon: '🤖'
+    });
+  }
+  const card = document.getElementById('environmentalAiCard');
+  if (card && typeof card.scrollIntoView === 'function') {
+    card.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    card.classList.add('card--spotlight');
+    setTimeout(() => card.classList.remove('card--spotlight'), 1200);
+  }
+}
+
+function handleAutomationControlClick(entry) {
+  if (!entry || !entry.automation) return;
+  const msg = entry.automation.description || entry.automation.label || 'Automation status';
+  if (typeof showToast === 'function') {
+    showToast({
+      title: `${entry.roomLabel} • Automation`,
+      msg,
+      kind: entry.automation.status === 'on' ? 'success' : entry.automation.paused ? 'warn' : 'info',
+      icon: '⚙️'
+    });
+  }
+}
+
+function handleSpectraControlClick(entry) {
+  if (!entry || !entry.spectra) return;
+  const msg = entry.spectra.description || entry.spectra.label || 'SpectraSync status';
+  if (typeof showToast === 'function') {
+    showToast({
+      title: `${entry.roomLabel} • SpectraSync`,
+      msg,
+      kind: entry.spectra.status === 'active' ? 'success' : entry.spectra.paused ? 'warn' : 'info',
+      icon: '🌈'
+    });
+  }
+  const card = document.getElementById('spectraSyncFeature');
+  if (card && typeof card.scrollIntoView === 'function') {
+    card.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    card.classList.add('card--spotlight');
+    setTimeout(() => card.classList.remove('card--spotlight'), 1200);
+  }
+}
+
+function mountAiAutomationCluster(entry, tile) {
+  const host = tile?.querySelector('[data-role="ai-cluster"]');
+  const template = document.getElementById('aiAutomationClusterTemplate');
+  if (!host || !template) return;
+  host.innerHTML = '';
+  const fragment = template.content.cloneNode(true);
+  host.appendChild(fragment);
+  const cluster = host.querySelector('.ai-automation-cluster');
+  if (!cluster) return;
+  cluster.dataset.roomKey = entry.key || '';
+
+  const aiBtn = cluster.querySelector('[data-control="ai"]');
+  if (aiBtn) {
+    const mode = entry.ai?.status || 'off';
+    aiBtn.dataset.mode = mode;
+    aiBtn.setAttribute('aria-pressed', mode !== 'off' ? 'true' : 'false');
+    aiBtn.setAttribute('aria-label', `AI ${entry.ai?.label || 'status'} for ${entry.roomLabel}`);
+    const labelEl = aiBtn.querySelector('[data-status]');
+    if (labelEl) labelEl.textContent = entry.ai?.shortLabel || entry.ai?.label || 'AI';
+    if (entry.ai?.description || entry.ai?.label) {
+      const tip = entry.ai.description || entry.ai.label;
+      aiBtn.setAttribute('data-tip', tip);
+      aiBtn.title = tip;
+      addControlTipHandlers(aiBtn);
+    }
+    aiBtn.addEventListener('click', () => handleAiControlClick(entry));
+  }
+
+  const automationBtn = cluster.querySelector('[data-control="automation"]');
+  if (automationBtn) {
+    const state = entry.automation?.paused ? 'paused' : entry.automation?.status || 'off';
+    automationBtn.dataset.state = state;
+    automationBtn.setAttribute('aria-pressed', state === 'on' ? 'true' : 'false');
+    automationBtn.setAttribute('aria-label', `Automation ${entry.automation?.label || 'status'} for ${entry.roomLabel}`);
+    const labelEl = automationBtn.querySelector('[data-status]');
+    if (labelEl) labelEl.textContent = entry.automation?.shortLabel || (state === 'on' ? 'On' : state === 'paused' ? 'Paused' : 'Off');
+    if (entry.automation?.description || entry.automation?.label) {
+      const tip = entry.automation.description || entry.automation.label;
+      automationBtn.setAttribute('data-tip', tip);
+      automationBtn.title = tip;
+      addControlTipHandlers(automationBtn);
+    }
+    automationBtn.addEventListener('click', () => handleAutomationControlClick(entry));
+  }
+
+  const spectraBtn = cluster.querySelector('[data-control="spectra"]');
+  if (spectraBtn) {
+    let state = 'idle';
+    if (entry.spectra?.paused) state = 'paused';
+    else if (entry.spectra?.activeNow) state = 'active';
+    spectraBtn.dataset.state = state;
+    spectraBtn.setAttribute('aria-pressed', state === 'active' ? 'true' : 'false');
+    spectraBtn.setAttribute('aria-label', `SpectraSync ${entry.spectra?.label || 'status'} for ${entry.roomLabel}`);
+    const labelEl = spectraBtn.querySelector('[data-status]');
+    if (labelEl) labelEl.textContent = entry.spectra?.shortLabel || (state === 'active' ? 'Active' : state === 'paused' ? 'Paused' : 'Idle');
+    if (entry.spectra?.description || entry.spectra?.label) {
+      const tip = entry.spectra.description || entry.spectra.label;
+      spectraBtn.setAttribute('data-tip', tip);
+      spectraBtn.title = tip;
+      addControlTipHandlers(spectraBtn);
+    }
+    spectraBtn.addEventListener('click', () => handleSpectraControlClick(entry));
+  }
+
+  const lockChip = cluster.querySelector('[data-role="tour-lock"]');
+  if (lockChip) {
+    if (entry.demoLocked) {
+      lockChip.hidden = false;
+      lockChip.setAttribute('data-tip', 'Demo mode active • Automation and SpectraSync are paused.');
+      lockChip.title = 'Demo mode active • Automation and SpectraSync are paused.';
+      lockChip.setAttribute('aria-label', `Tour lock active for ${entry.roomLabel}`);
+      lockChip.setAttribute('role', 'status');
+      lockChip.tabIndex = 0;
+      addControlTipHandlers(lockChip);
+    } else {
+      lockChip.hidden = true;
+      lockChip.removeAttribute('role');
+      lockChip.removeAttribute('tabindex');
+    }
+  }
+}
+
 function hydrateOverviewTile(entry, tile) {
+  mountAiAutomationCluster(entry, tile);
   entry.metrics.forEach((metric) => {
     const metricEl = tile.querySelector(`.metric[data-metric="${metric.key}"]`);
     if (!metricEl) return;
@@ -12990,6 +13301,37 @@ function buildRoomSubtitle(room, zone, group) {
   return parts.join(' • ');
 }
 
+function applyDemoLock(entry) {
+  if (!entry) return;
+  if (!DEMO_LOCKS.has(entry.key)) {
+    entry.demoLocked = false;
+    return;
+  }
+  entry.demoLocked = true;
+  entry.automation = {
+    ...entry.automation,
+    status: 'off',
+    shortLabel: 'Paused',
+    label: 'Automation paused for demo',
+    description: 'Automation paused while demo mode is active.',
+    paused: true
+  };
+  entry.spectra = {
+    ...entry.spectra,
+    status: 'idle',
+    shortLabel: 'Paused',
+    label: 'SpectraSync paused for demo',
+    description: 'SpectraSync paused while demo mode is active.',
+    activeNow: false,
+    paused: true
+  };
+  entry.ai = {
+    ...entry.ai,
+    description: `${entry.ai.description || entry.ai.label || 'AI Copilot'} • Demo mode active.`,
+    shortLabel: entry.ai.shortLabel || entry.ai.label
+  };
+}
+
 function renderGrowRoomOverview() {
   const gridEl = document.getElementById('overviewGrid');
   if (!gridEl) return;
@@ -13005,6 +13347,8 @@ function renderGrowRoomOverview() {
   const groups = Array.isArray(STATE.groups) ? STATE.groups : [];
   const rules = Array.isArray(STATE.preAutomationRules) ? STATE.preAutomationRules : [];
   const aiPosture = deriveAiPostureStatus();
+  const fallbackAiMode = normalizeAiMode(aiPosture?.status || 'advisory', 'advisory');
+  const fallbackAiLabel = aiPosture?.label || (fallbackAiMode === 'autopilot' ? 'Autopilot' : fallbackAiMode === 'off' ? 'Off' : 'Advisory');
 
   const entries = [];
 
@@ -13020,8 +13364,9 @@ function renderGrowRoomOverview() {
       const devices = gatherDevicesForRoom(room, zone);
       const automation = deriveAutomationStatus(room, zone, rules, devices);
       const spectra = deriveSpectraStatus(planInfo, scheduleInfo, devices);
+      const ai = deriveRoomAiStatus(room, zone, fallbackAiMode, fallbackAiLabel);
       const key = buildOverviewKey(room, zone, index);
-      entries.push({
+      const entry = {
         key,
         name: room.name || room.id || `Room ${index + 1}`,
         subtitle: buildRoomSubtitle(room, zone, group),
@@ -13030,13 +13375,15 @@ function renderGrowRoomOverview() {
         scheduleInfo,
         devices,
         automation,
-        ai: aiPosture,
+        ai,
         spectra,
         zone,
         room,
         group,
         roomLabel: room.name || room.id || zone?.name || `Room ${index + 1}`
-      });
+      };
+      applyDemoLock(entry);
+      entries.push(entry);
     });
   } else if (zones.length) {
     zones.forEach((zone, index) => {
@@ -13046,11 +13393,12 @@ function renderGrowRoomOverview() {
       const devices = gatherDevicesForRoom(null, zone);
       const automation = deriveAutomationStatus(null, zone, rules, devices);
       const spectra = deriveSpectraStatus(planInfo, scheduleInfo, devices);
+      const ai = deriveRoomAiStatus(null, zone, fallbackAiMode, fallbackAiLabel);
       const key = buildOverviewKey(null, zone, index);
       const subtitleParts = [];
       if (zone.location) subtitleParts.push(zone.location);
       if (zone.meta?.source) subtitleParts.push(`Source: ${zone.meta.source}`);
-      entries.push({
+      const entry = {
         key,
         name: zone.name || zone.id || `Zone ${index + 1}`,
         subtitle: subtitleParts.join(' • '),
@@ -13059,15 +13407,24 @@ function renderGrowRoomOverview() {
         scheduleInfo,
         devices,
         automation,
-        ai: aiPosture,
+        ai,
         spectra,
         zone,
         room: null,
         group: null,
         roomLabel: zone.name || zone.id || `Zone ${index + 1}`
-      });
+      };
+      applyDemoLock(entry);
+      entries.push(entry);
     });
   }
+
+  const entryKeys = new Set(entries.map((entry) => entry.key));
+  Array.from(DEMO_LOCKS.keys()).forEach((key) => {
+    if (!entryKeys.has(key)) {
+      DEMO_LOCKS.delete(key);
+    }
+  });
 
   OVERVIEW_ROOM_META.clear();
   entries.forEach((entry) => OVERVIEW_ROOM_META.set(entry.key, entry));
@@ -13093,7 +13450,7 @@ function renderGrowRoomOverview() {
 
   if (DEMO_STATE.active) {
     if (!OVERVIEW_ROOM_META.has(DEMO_STATE.roomKey)) {
-      stopDemoMode({ silent: false, flush: false, reason: 'room-missing' });
+      stopDemoMode({ silent: false, flush: false, reason: 'room-missing', refresh: false });
     } else {
       const refreshed = OVERVIEW_ROOM_META.get(DEMO_STATE.roomKey);
       if (refreshed) {
@@ -13170,13 +13527,14 @@ function scheduleDemoTick() {
   }, DEMO_STATE.interval);
 }
 
-function stopDemoMode({ silent = false, flush = true, reason = '', restore = true } = {}) {
+function stopDemoMode({ silent = false, flush = true, reason = '', restore = true, refresh = true } = {}) {
   if (!DEMO_STATE.active && !reason) return;
   clearTimeout(DEMO_TIMER);
   const wasActive = DEMO_STATE.active;
   const label = DEMO_STATE.roomLabel || 'selected room';
   const devices = Array.isArray(DEMO_STATE.devices) ? [...DEMO_STATE.devices] : [];
   const snapshotEntries = Array.from(DEMO_SNAPSHOT.entries());
+  const lockedKey = DEMO_STATE.roomKey;
 
   DEMO_STATE = {
     active: false,
@@ -13200,20 +13558,29 @@ function stopDemoMode({ silent = false, flush = true, reason = '', restore = tru
   if (stopBtn) stopBtn.disabled = true;
 
   if (flush) {
-    const targets = snapshotEntries.length
-      ? snapshotEntries
-      : devices.map((device) => [firstNonEmptyString(device?.id, device?.deviceId, device?.device_id), null]);
-    const commands = targets
-      .filter(([id]) => Boolean(id))
-      .map(([id, snapshot]) => {
-        const payload = getRestorePayload(snapshot, restore);
-        return controllerPatchDevice(id, payload).catch((error) => {
-          console.warn('Demo reset failed', id, error);
-        });
-      });
+    const targetIds = new Set();
+    snapshotEntries.forEach(([id]) => {
+      if (id) targetIds.add(id);
+    });
+    devices.forEach((device) => {
+      const id = firstNonEmptyString(device?.id, device?.deviceId, device?.device_id);
+      if (id) targetIds.add(id);
+    });
+    const commands = Array.from(targetIds).map((id) =>
+      controllerPatchDevice(id, { status: 'off', value: null }).catch((error) => {
+        console.warn('Demo reset failed', id, error);
+      })
+    );
     if (commands.length) {
       Promise.all(commands).catch(() => {});
     }
+  }
+
+  if (lockedKey) {
+    DEMO_LOCKS.delete(lockedKey);
+  }
+  if (refresh) {
+    renderGrowRoomOverview();
   }
 
   if (wasActive && !silent) {
@@ -13269,6 +13636,8 @@ function startDemoMode() {
     devices
   };
 
+  DEMO_LOCKS.set(roomKey, { startedAt: Date.now() });
+
   startBtn.disabled = true;
   roomSelect.disabled = true;
   bpmInput.disabled = true;
@@ -13279,6 +13648,8 @@ function startDemoMode() {
   runDemoTick().finally(() => {
     if (DEMO_STATE.active) scheduleDemoTick();
   });
+
+  renderGrowRoomOverview();
 }
 
 function initOverviewDemoControls() {
