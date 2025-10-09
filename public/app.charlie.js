@@ -2247,6 +2247,75 @@ function minutesToHHMM(mins) {
   const m = Math.round(mins % 60);
   return `${h.toString().padStart(2, '0')}:${m.toString().padStart(2, '0')}`;
 }
+
+function drawSparkline(canvas, values = [], options = {}) {
+  if (!canvas || (typeof HTMLCanvasElement !== 'undefined' && !(canvas instanceof HTMLCanvasElement))) return;
+  const ctx = canvas.getContext('2d');
+  if (!ctx) return;
+
+  const safeValues = Array.isArray(values)
+    ? values
+        .map((value) => Number(value))
+        .filter((value) => Number.isFinite(value))
+    : [];
+
+  const width = Math.max(1, Math.round(options.width || canvas.width || 120));
+  const height = Math.max(1, Math.round(options.height || canvas.height || 40));
+  if (canvas.width !== width) canvas.width = width;
+  if (canvas.height !== height) canvas.height = height;
+
+  ctx.clearRect(0, 0, width, height);
+
+  const strokeColor = options.color || '#0ea5e9';
+  const fallbackColor = '#cbd5f5';
+  const paddingX = 4;
+  const paddingY = 4;
+  const spanX = Math.max(1, width - paddingX * 2);
+  const spanY = Math.max(1, height - paddingY * 2);
+
+  ctx.lineWidth = 1.5;
+  ctx.lineJoin = 'round';
+  ctx.lineCap = 'round';
+
+  if (!safeValues.length) {
+    ctx.strokeStyle = fallbackColor;
+    ctx.beginPath();
+    ctx.moveTo(paddingX, height - paddingY - spanY / 2);
+    ctx.lineTo(width - paddingX, height - paddingY - spanY / 2);
+    ctx.stroke();
+    return;
+  }
+
+  const min = Math.min(...safeValues);
+  const max = Math.max(...safeValues);
+  const span = max - min;
+
+  ctx.strokeStyle = strokeColor;
+  ctx.beginPath();
+
+  let lastX = paddingX;
+  let lastY = height - paddingY;
+
+  safeValues.forEach((value, index) => {
+    const progress = safeValues.length === 1 ? 0.5 : index / (safeValues.length - 1);
+    const x = paddingX + progress * spanX;
+    const ratio = span === 0 ? 0.5 : (value - min) / span;
+    const y = height - paddingY - ratio * spanY;
+    if (index === 0) {
+      ctx.moveTo(x, y);
+    } else {
+      ctx.lineTo(x, y);
+    }
+    lastX = x;
+    lastY = y;
+  });
+  ctx.stroke();
+
+  ctx.fillStyle = strokeColor;
+  ctx.beginPath();
+  ctx.arc(lastX, lastY, 2.5, 0, Math.PI * 2);
+  ctx.fill();
+}
 // Global lights status UI initializer stub
 function initLightsStatusUI() {
   // TODO: Replace with real lights status UI initialization if needed
