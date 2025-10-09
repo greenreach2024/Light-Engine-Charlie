@@ -12384,6 +12384,39 @@ function hookRoomDevicePairing(roomWizardInstance) {
 
 
 // --- Grow Room Overview (move this above AI features to avoid ReferenceError) ---
+function drawSparkline(canvas, values, options = {}) {
+  if (!(canvas instanceof HTMLCanvasElement)) return;
+  const ctx = canvas.getContext('2d');
+  if (!ctx) return;
+  const width = options.width || canvas.clientWidth || canvas.width || 120;
+  const height = options.height || canvas.clientHeight || canvas.height || 40;
+  canvas.width = width;
+  canvas.height = height;
+  ctx.clearRect(0, 0, width, height);
+  if (!Array.isArray(values) || !values.length) return;
+  const min = Math.min(...values);
+  const max = Math.max(...values);
+  const span = max - min || 1;
+  const color = options.color || '#0ea5e9';
+  const lineWidth = options.lineWidth || 2;
+  ctx.beginPath();
+  const count = values.length;
+  values.forEach((value, index) => {
+    const x = count === 1 ? width : (index / (count - 1)) * width;
+    const y = height - ((value - min) / span) * height;
+    if (index === 0) {
+      ctx.moveTo(x, y);
+    } else {
+      ctx.lineTo(x, y);
+    }
+  });
+  ctx.strokeStyle = color;
+  ctx.lineWidth = lineWidth;
+  ctx.lineJoin = 'round';
+  ctx.lineCap = 'round';
+  ctx.stroke();
+}
+
 const OVERVIEW_METRIC_META = [
   { key: 'tempC', label: 'Temp', unit: '°C', precision: 1 },
   { key: 'rh', label: 'Humidity', unit: '%', precision: 1 },
@@ -12392,7 +12425,20 @@ const OVERVIEW_METRIC_META = [
 ];
 
 const OVERVIEW_ROOM_META = new Map();
-const DEMO_COLOR_SEQUENCE = ['640000000000', '006400000000', '000064000000', '000000640000', '404000200000'];
+const DEMO_DYNAMIC_SEQUENCE = [
+  { cw: 5, ww: 5, bl: 0, rd: 45 },
+  { cw: 5, ww: 5, bl: 45, rd: 0 },
+  { cw: 40, ww: 10, bl: 0, rd: 0 },
+  { cw: 10, ww: 40, bl: 0, rd: 0 },
+  { cw: 20, ww: 20, bl: 10, rd: 10 },
+  { cw: 10, ww: 10, bl: 20, rd: 20 },
+  { cw: 0, ww: 0, bl: 0, rd: 45 },
+  { cw: 0, ww: 0, bl: 45, rd: 0 }
+];
+const DEMO_STATIC_ON_MIX = { cw: 20, ww: 20, bl: 0, rd: 0, fr: 0, uv: 0 };
+const DEMO_STATIC_CYCLE = 4;
+const DEMO_STEPS_TOTAL = DEMO_DYNAMIC_SEQUENCE.length * DEMO_STATIC_CYCLE;
+const DEMO_STATIC_OFF_PAYLOAD = { status: 'off', value: null };
 const DEMO_SAFE_HEX = '737373730000';
 const DEMO_MIN_BPM = 60;
 const DEMO_MAX_BPM = 140;
@@ -12404,9 +12450,123 @@ let DEMO_STATE = {
   bpm: 90,
   step: 0,
   interval: 667,
-  devices: []
+  devices: [],
+  snapshots: new Map()
 };
 let DEMO_TIMER = null;
+let DEMO_ESCAPE_WIRED = false;
+
+function deviceSupportsSpectrum(device) {
+  if (!device || typeof device !== 'object') return true;
+  const mix = device.calibratedDriverMix || device.driverMix || device.driver_mix;
+  if (mix && typeof mix === 'object') {
+    const hasBlue = Object.prototype.hasOwnProperty.call(mix, 'bl');
+    const hasRed = Object.prototype.hasOwnProperty.call(mix, 'rd');
+    if (hasBlue || hasRed) return true;
+    const numericKeys = Object.keys(mix).filter((key) => typeof mix[key] === 'number');
+    if (numericKeys.length && !hasBlue && !hasRed) return false;
+  }
+  const channels = device.channels;
+  if (typeof channels === 'number') return channels >= 4;
+  if (Array.isArray(channels)) return channels.length >= 4;
+  const channelCount = Number(device.channelCount || device.channel_count);
+  if (Number.isFinite(channelCount)) return channelCount >= 4;
+  const channelMap = device.channel_map;
+  if (Array.isArray(channelMap)) return channelMap.length >= 4;
+  const capabilities = device.capabilities;
+  if (Array.isArray(capabilities)) {
+    if (capabilities.some((cap) => String(cap).toLowerCase().includes('spectrum'))) return true;
+  } else if (capabilities && typeof capabilities === 'object') {
+    if (Object.values(capabilities).some((cap) => String(cap).toLowerCase().includes('spectrum'))) return true;
+  }
+  return true;
+}
+
+function captureDeviceSnapshot(device) {
+  if (!device || typeof device !== 'object') return null;
+  const id = firstNonEmptyString(device.id, device.deviceId, device.device_id);
+  if (!id) return null;
+  const statusCandidates = [
+    device.onOffStatus?.status,
+    device.onOffStatus?.state,
+    device.status,
+    device.state,
+    device.power,
+    device.lastCommand?.status,
+    device.lastKnownState?.status,
+    device.lastKnownState?.state
+  ];
+  let status = '';
+  for (const candidate of statusCandidates) {
+    if (candidate == null) continue;
+    const text = String(candidate).trim();
+    if (!text) continue;
+    status = text.toLowerCase();
+    break;
+  }
+  const valueCandidates = [
+    device.driverHex,
+    device.hex12,
+    device.lastHex,
+    device.value,
+    device.hex,
+    device.onOffStatus?.value,
+    device.lastKnownState?.value
+  ];
+  let value = '';
+  for (const candidate of valueCandidates) {
+    if (typeof candidate === 'string' && candidate.trim()) {
+      value = candidate.trim().toUpperCase();
+      break;
+    }
+  }
+  if (!value) {
+    const mix = device.calibratedDriverMix || device.driverMix || device.driver_mix;
+    if (mix && typeof mix === 'object') {
+      try {
+        value = buildDeviceHexForMix(mix, id).hex;
+      } catch (error) {
+        console.warn('demo snapshot hex build failed', id, error);
+      }
+    }
+  }
+  const isExplicitOff = status ? ['off', '0', 'false', 'standby', 'inactive', 'disabled'].includes(status) : false;
+  if (isExplicitOff) {
+    return { status: 'off', value: null };
+  }
+  if (!status && !value) {
+    return { status: 'off', value: null };
+  }
+  return { status: 'on', value: value || DEMO_SAFE_HEX };
+}
+
+function buildDemoRoster(devices = []) {
+  if (!Array.isArray(devices)) return [];
+  const roster = [];
+  devices.forEach((device) => {
+    if (!device || typeof device !== 'object') return;
+    const id = firstNonEmptyString(device.id, device.deviceId, device.device_id);
+    if (!id) return;
+    const dynamic = deviceSupportsSpectrum(device);
+    let staticOnHex = null;
+    if (!dynamic) {
+      try {
+        staticOnHex = buildDeviceHexForMix(DEMO_STATIC_ON_MIX, id).hex;
+      } catch (error) {
+        console.warn('demo static mix build failed', id, error);
+        staticOnHex = DEMO_SAFE_HEX;
+      }
+    }
+    roster.push({
+      id,
+      label: firstNonEmptyString(device.deviceName, device.name, id),
+      device,
+      dynamic,
+      staticOnHex
+    });
+  });
+  return roster;
+}
 
 function normalizeIdentifier(value) {
   if (value === undefined || value === null) return '';
@@ -12902,8 +13062,32 @@ function renderGrowRoomOverview() {
     } else {
       const refreshed = OVERVIEW_ROOM_META.get(DEMO_STATE.roomKey);
       if (refreshed) {
-        DEMO_STATE.devices = refreshed.devices;
+        const roster = buildDemoRoster(refreshed.devices);
+        DEMO_STATE.devices = roster;
         DEMO_STATE.roomLabel = refreshed.roomLabel;
+        if (DEMO_STATE.snapshots instanceof Map) {
+          const updatedSnapshots = new Map();
+          roster.forEach((entry) => {
+            if (DEMO_STATE.snapshots.has(entry.id)) {
+              updatedSnapshots.set(entry.id, DEMO_STATE.snapshots.get(entry.id));
+            } else {
+              const snapshot = captureDeviceSnapshot(entry.device);
+              if (snapshot) {
+                updatedSnapshots.set(entry.id, snapshot);
+              }
+            }
+          });
+          DEMO_STATE.snapshots = updatedSnapshots;
+        } else {
+          const freshSnapshots = new Map();
+          roster.forEach((entry) => {
+            const snapshot = captureDeviceSnapshot(entry.device);
+            if (snapshot) {
+              freshSnapshots.set(entry.id, snapshot);
+            }
+          });
+          DEMO_STATE.snapshots = freshSnapshots;
+        }
       }
     }
   }
@@ -12946,26 +13130,47 @@ function getDemoIntervalFromBpm(bpm) {
   return Math.max(250, Math.round((60 / clamped) * 1000));
 }
 
-function getDemoPayload(step) {
-  if (step % 2 === 1) {
-    return { status: 'off', value: null };
-  }
-  const index = Math.floor(step / 2) % DEMO_COLOR_SEQUENCE.length;
-  return { status: 'on', value: DEMO_COLOR_SEQUENCE[index] };
-}
-
 async function runDemoTick() {
   if (!DEMO_STATE.active || !Array.isArray(DEMO_STATE.devices) || !DEMO_STATE.devices.length) return;
-  const payload = getDemoPayload(DEMO_STATE.step);
-  const commands = DEMO_STATE.devices.map((device) => {
-    const id = firstNonEmptyString(device.id, device.deviceId, device.device_id);
+  const step = DEMO_STATE.step % DEMO_STEPS_TOTAL;
+  const dynamicMix = DEMO_DYNAMIC_SEQUENCE[step % DEMO_DYNAMIC_SEQUENCE.length];
+  const staticPhase = step % DEMO_STATIC_CYCLE;
+  const staticOn = staticPhase < DEMO_STATIC_CYCLE / 2;
+  const commands = DEMO_STATE.devices.map((entry) => {
+    const id = entry?.id;
     if (!id) return Promise.resolve();
+    if (entry.dynamic) {
+      try {
+        const { hex } = buildDeviceHexForMix(dynamicMix, id);
+        return controllerPatchDevice(id, { status: 'on', value: hex }).catch((error) => {
+          console.warn('Demo patch failed', id, error);
+        });
+      } catch (error) {
+        console.warn('demo dynamic mix build failed', id, error);
+        return Promise.resolve();
+      }
+    }
+    let value = entry.staticOnHex;
+    if (staticOn) {
+      if (!value) {
+        try {
+          value = buildDeviceHexForMix(DEMO_STATIC_ON_MIX, id).hex;
+        } catch (error) {
+          console.warn('demo static mix build failed', id, error);
+          value = DEMO_SAFE_HEX;
+        }
+        entry.staticOnHex = value;
+      }
+    }
+    const payload = staticOn
+      ? { status: 'on', value }
+      : { ...DEMO_STATIC_OFF_PAYLOAD };
     return controllerPatchDevice(id, payload).catch((error) => {
       console.warn('Demo patch failed', id, error);
     });
   });
   await Promise.all(commands);
-  DEMO_STATE.step = (DEMO_STATE.step + 1) % (DEMO_COLOR_SEQUENCE.length * 2);
+  DEMO_STATE.step = (DEMO_STATE.step + 1) % DEMO_STEPS_TOTAL;
 }
 
 function scheduleDemoTick() {
@@ -12982,10 +13187,20 @@ function scheduleDemoTick() {
 function stopDemoMode({ silent = false, flush = true, reason = '' } = {}) {
   if (!DEMO_STATE.active && !reason) return;
   clearTimeout(DEMO_TIMER);
+  DEMO_TIMER = null;
   const wasActive = DEMO_STATE.active;
   const label = DEMO_STATE.roomLabel;
-  const devices = DEMO_STATE.devices || [];
-  DEMO_STATE = { active: false, roomKey: '', roomLabel: '', bpm: 90, step: 0, interval: 667, devices: [] };
+  const snapshots = DEMO_STATE.snapshots instanceof Map ? new Map(DEMO_STATE.snapshots) : new Map();
+  DEMO_STATE = {
+    active: false,
+    roomKey: '',
+    roomLabel: '',
+    bpm: 90,
+    step: 0,
+    interval: 667,
+    devices: [],
+    snapshots: new Map()
+  };
 
   const roomSelect = document.getElementById('demoRoom');
   const bpmInput = document.getElementById('demoBpm');
@@ -12997,20 +13212,37 @@ function stopDemoMode({ silent = false, flush = true, reason = '' } = {}) {
   if (startBtn) startBtn.disabled = !OVERVIEW_ROOM_META.size;
   if (stopBtn) stopBtn.disabled = true;
 
-  if (flush && devices.length) {
-    Promise.all(devices.map((device) => {
-      const id = firstNonEmptyString(device.id, device.deviceId, device.device_id);
-      if (!id) return Promise.resolve();
-      return controllerPatchDevice(id, { status: 'on', value: DEMO_SAFE_HEX }).catch((error) => {
-        console.warn('Demo reset failed', id, error);
-      });
-    })).catch(() => {});
+  if (flush && snapshots.size) {
+    const restores = [];
+    snapshots.forEach((snapshot, deviceId) => {
+      if (!deviceId || !snapshot) return;
+      const payload = snapshot.status === 'off'
+        ? { status: 'off', value: null }
+        : { status: 'on', value: snapshot.value || DEMO_SAFE_HEX };
+      restores.push(
+        controllerPatchDevice(deviceId, payload).catch((error) => {
+          console.warn('Demo reset failed', deviceId, error);
+        })
+      );
+    });
+    if (restores.length) {
+      Promise.all(restores).catch(() => {});
+    }
   }
 
   if (wasActive && !silent) {
-    const kind = reason === 'room-missing' ? 'warn' : 'info';
-    const icon = reason === 'room-missing' ? '⚠️' : '⏹️';
-    const msg = reason === 'room-missing' ? 'Room is no longer available.' : `Demo ended for ${label}.`;
+    let kind = 'info';
+    let icon = '⏹️';
+    let msg = `Demo ended for ${label}.`;
+    if (reason === 'room-missing') {
+      kind = 'warn';
+      icon = '⚠️';
+      msg = 'Room is no longer available.';
+    } else if (reason === 'panic') {
+      kind = 'error';
+      icon = '🛑';
+      msg = label ? `Demo panic stop for ${label}.` : 'Demo panic stop.';
+    }
     showToast({ title: 'Demo stopped', msg, kind, icon });
   }
 }
@@ -13030,8 +13262,9 @@ function startDemoMode() {
 
   const entry = OVERVIEW_ROOM_META.get(roomKey);
   const bpm = clampBpm(bpmInput.value);
-  const devices = (entry?.devices || []).filter((device) => firstNonEmptyString(device.id, device.deviceId, device.device_id));
-  if (!devices.length) {
+  const rawDevices = (entry?.devices || []).filter((device) => firstNonEmptyString(device.id, device.deviceId, device.device_id));
+  const roster = buildDemoRoster(rawDevices);
+  if (!roster.length) {
     showToast({ title: 'Demo mode', msg: 'No controllable fixtures found for this room.', kind: 'warn', icon: '⚠️' });
     return;
   }
@@ -13045,9 +13278,22 @@ function startDemoMode() {
     bpm,
     step: 0,
     interval: getDemoIntervalFromBpm(bpm),
-    devices
+    devices: roster,
+    snapshots: (() => {
+      const map = new Map();
+      roster.forEach((item) => {
+        const snapshot = captureDeviceSnapshot(item.device);
+        if (snapshot) {
+          map.set(item.id, snapshot);
+        } else {
+          map.set(item.id, { status: 'off', value: null });
+        }
+      });
+      return map;
+    })()
   };
 
+  bpmInput.value = bpm;
   startBtn.disabled = true;
   roomSelect.disabled = true;
   bpmInput.disabled = true;
@@ -13076,6 +13322,7 @@ function initOverviewDemoControls() {
       if (DEMO_STATE.active) {
         DEMO_STATE.bpm = clamped;
         DEMO_STATE.interval = getDemoIntervalFromBpm(clamped);
+        scheduleDemoTick();
       }
     });
   }
@@ -13086,6 +13333,15 @@ function initOverviewDemoControls() {
         stopDemoMode({ silent: false });
       }
     });
+  }
+
+  if (!DEMO_ESCAPE_WIRED) {
+    document.addEventListener('keydown', (event) => {
+      if (event.key === 'Escape' && DEMO_STATE.active) {
+        stopDemoMode({ silent: false, reason: 'panic' });
+      }
+    });
+    DEMO_ESCAPE_WIRED = true;
   }
 }
 
