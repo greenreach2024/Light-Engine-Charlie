@@ -13252,20 +13252,20 @@ function setActivePanel(panelId = 'overview') {
 
 function initializeSidebarNavigation() {
   console.log('[DEBUG] initializeSidebarNavigation called');
+  // Robust event delegation for sidebar-group__trigger
   document.querySelectorAll('.sidebar-group').forEach((group) => {
-    const trigger = group.querySelector('.sidebar-group__trigger');
     const items = group.querySelector('.sidebar-group__items');
     if (items) items.hidden = !group.classList.contains('is-expanded');
-    if (!(trigger instanceof HTMLElement)) {
-      return;
-    }
+  });
 
-    if (trigger.dataset.sidebarBound === 'true') {
-      return;
-    }
-    trigger.dataset.sidebarBound = 'true';
-
-    trigger.addEventListener('click', () => {
+  // Event delegation: handle all sidebar-group__trigger clicks at the nav level
+  const sidebarNav = document.querySelector('.sidebar-nav');
+  if (sidebarNav && !sidebarNav.dataset.sidebarDelegationBound) {
+    sidebarNav.addEventListener('click', function(e) {
+      const trigger = e.target.closest('.sidebar-group__trigger');
+      if (!trigger) return;
+      const group = trigger.closest('.sidebar-group');
+      const items = group?.querySelector('.sidebar-group__items');
       const expanded = trigger.getAttribute('aria-expanded') === 'true';
       const next = !expanded;
       trigger.setAttribute('aria-expanded', String(next));
@@ -13278,7 +13278,8 @@ function initializeSidebarNavigation() {
         }
       }
     });
-  });
+    sidebarNav.dataset.sidebarDelegationBound = 'true';
+  }
 
   document.querySelectorAll('[data-sidebar-link]').forEach((link) => {
     if (!(link instanceof HTMLElement)) {

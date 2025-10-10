@@ -955,8 +955,8 @@ const SWITCHBOT_TOKEN = process.env.SWITCHBOT_TOKEN || "4e6fc805b4a0dd7ed693af1d
 const SWITCHBOT_SECRET = process.env.SWITCHBOT_SECRET || "141c0bc9906ab1f4f73dd9f0c298046b";
 const SWITCHBOT_API_BASE = 'https://api.switch-bot.com/v1.1';
 const SWITCHBOT_API_TIMEOUT_MS = Number(process.env.SWITCHBOT_API_TIMEOUT_MS || 8000);
-const SWITCHBOT_DEVICE_CACHE_TTL_MS = Number(process.env.SWITCHBOT_DEVICE_CACHE_TTL_MS || 600_000); // 10 minutes
-const SWITCHBOT_STATUS_CACHE_TTL_MS = Number(process.env.SWITCHBOT_STATUS_CACHE_TTL_MS || 300_000); // 5 minutes
+const SWITCHBOT_DEVICE_CACHE_TTL_MS = Number(process.env.SWITCHBOT_DEVICE_CACHE_TTL_MS || 1_800_000); // 30 minutes
+const SWITCHBOT_STATUS_CACHE_TTL_MS = Number(process.env.SWITCHBOT_STATUS_CACHE_TTL_MS || 900_000); // 15 minutes
 const SWITCHBOT_RATE_LIMIT_MS = Number(process.env.SWITCHBOT_RATE_LIMIT_MS || 6000); // 6 seconds between requests (10 per minute max)
 
 // Rate limiting state

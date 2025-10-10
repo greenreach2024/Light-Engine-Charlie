@@ -1,3 +1,7 @@
+/* Ensure [hidden] attribute hides elements (for sidebar dropdowns and others) */
+[hidden] {
+  display: none !important;
+}
 /* IoT Scan Progress Bar */
 #iotScanBarContainer {
   width: 100%;
@@ -381,8 +385,10 @@ h3 { font-size: 1.125rem; }
 
 .sidebar-group__icon::before {
   content: '▸';
-  font-size: 0.75rem;
+  font-size: 1.5rem;
+  font-weight: bold;
   color: var(--medium);
+  line-height: 1;
 }
 
 .sidebar-group.is-expanded .sidebar-group__icon {
