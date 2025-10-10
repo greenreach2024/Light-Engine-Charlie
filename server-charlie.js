@@ -76,6 +76,8 @@ const DATA_DIR = path.resolve("./public/data");
 const FARM_PATH = path.join(DATA_DIR, 'farm.json');
 const CONTROLLER_PATH = path.join(DATA_DIR, 'controller.json');
 const GROUPS_PATH = path.join(DATA_DIR, 'groups.json');
+const PLANS_PATH = path.join(DATA_DIR, 'plans.json');
+const SCHEDULES_PATH = path.join(DATA_DIR, 'schedules.json');
 const UI_DATA_RESOURCES = new Map([
   ['farm', 'farm.json'],
   ['groups', 'groups.json'],
@@ -116,6 +118,56 @@ function saveGroupsFile(groups) {
     return true;
   } catch (err) {
     console.error('[groups] Failed to write groups.json:', err.message);
+    return false;
+  }
+}
+
+function loadPlansFile() {
+  ensureDataDir();
+  try {
+    if (!fs.existsSync(PLANS_PATH)) return [];
+    const raw = JSON.parse(fs.readFileSync(PLANS_PATH, 'utf8'));
+    if (Array.isArray(raw)) return raw;
+    if (raw && Array.isArray(raw.plans)) return raw.plans;
+    return [];
+  } catch (err) {
+    console.warn('[plans] Failed to read plans.json:', err.message);
+    return [];
+  }
+}
+
+function savePlansFile(plans) {
+  ensureDataDir();
+  try {
+    fs.writeFileSync(PLANS_PATH, JSON.stringify({ plans }, null, 2));
+    return true;
+  } catch (err) {
+    console.error('[plans] Failed to write plans.json:', err.message);
+    return false;
+  }
+}
+
+function loadSchedulesFile() {
+  ensureDataDir();
+  try {
+    if (!fs.existsSync(SCHEDULES_PATH)) return [];
+    const raw = JSON.parse(fs.readFileSync(SCHEDULES_PATH, 'utf8'));
+    if (Array.isArray(raw)) return raw;
+    if (raw && Array.isArray(raw.schedules)) return raw.schedules;
+    return [];
+  } catch (err) {
+    console.warn('[sched] Failed to read schedules.json:', err.message);
+    return [];
+  }
+}
+
+function saveSchedulesFile(schedules) {
+  ensureDataDir();
+  try {
+    fs.writeFileSync(SCHEDULES_PATH, JSON.stringify({ schedules }, null, 2));
+    return true;
+  } catch (err) {
+    console.error('[sched] Failed to write schedules.json:', err.message);
     return false;
   }
 }
@@ -236,6 +288,71 @@ function parseIncomingGroup(raw, knownDeviceIds = null) {
 
   const response = normalizeGroupForResponse(stored);
   return { stored, response };
+}
+
+function normalizePlanEntry(raw, fallbackId = '') {
+  if (!raw || typeof raw !== 'object') return null;
+  const id = String(raw.id ?? fallbackId ?? '').trim();
+  if (!id) return null;
+  const plan = { ...raw, id };
+  if (!plan.name || typeof plan.name !== 'string' || !plan.name.trim()) {
+    plan.name = id;
+  }
+  if (typeof plan.photoperiod === 'string') plan.photoperiod = plan.photoperiod.trim();
+  return plan;
+}
+
+function parseIncomingPlans(body) {
+  let entries = [];
+  if (!body) throw new Error('Plan payload required.');
+  if (Array.isArray(body)) {
+    entries = body;
+  } else if (Array.isArray(body.plans)) {
+    entries = body.plans;
+  } else if (typeof body === 'object') {
+    entries = Object.entries(body).map(([id, value]) => ({ id, ...(value && typeof value === 'object' ? value : {}) }));
+  }
+  const normalized = entries
+    .map((entry, idx) => normalizePlanEntry(entry, entry?.id ?? `plan-${idx + 1}`))
+    .filter(Boolean);
+  if (!normalized.length) {
+    if (Array.isArray(body?.plans) && body.plans.length === 0) return [];
+    if (Array.isArray(body) && body.length === 0) return [];
+    throw new Error('At least one plan entry is required.');
+  }
+  return normalized;
+}
+
+function normalizeScheduleEntry(raw) {
+  if (!raw || typeof raw !== 'object') return null;
+  const idCandidate = [raw.id, raw.scheduleId, raw.deviceId, raw.device_id, raw.deviceID]
+    .map((value) => (typeof value === 'string' ? value.trim() : ''))
+    .find((value) => !!value);
+  if (!idCandidate) return null;
+  const schedule = { ...raw, id: idCandidate };
+  if (typeof schedule.planKey === 'string') schedule.planKey = schedule.planKey.trim();
+  if (typeof schedule.period === 'string') schedule.period = schedule.period.trim();
+  if (typeof schedule.start === 'string') schedule.start = schedule.start.trim();
+  return schedule;
+}
+
+function parseIncomingSchedules(body) {
+  if (!body) throw new Error('Schedule payload required.');
+  let entries = [];
+  if (Array.isArray(body)) {
+    entries = body;
+  } else if (Array.isArray(body.schedules)) {
+    entries = body.schedules;
+  } else if (typeof body === 'object') {
+    entries = [body];
+  }
+  const normalized = entries.map(normalizeScheduleEntry).filter(Boolean);
+  if (!normalized.length) {
+    if (Array.isArray(body?.schedules) && body.schedules.length === 0) return [];
+    if (Array.isArray(body) && body.length === 0) return [];
+    throw new Error('At least one schedule entry is required.');
+  }
+  return normalized;
 }
 function loadControllerFromDisk(){
   try {
@@ -3016,6 +3133,82 @@ app.put('/groups/:id', async (req, res) => {
     return res.json({ ok: true, group: response });
   } catch (err) {
     return res.status(400).json({ ok: false, error: err.message });
+  }
+});
+
+app.options('/plans', (req, res) => { setCors(req, res); res.status(204).end(); });
+app.get('/plans', (req, res) => {
+  try {
+    setCors(req, res);
+    const plans = loadPlansFile();
+    res.json({ ok: true, plans: plans.map((plan) => normalizePlanEntry(plan, plan?.id)).filter(Boolean) });
+  } catch (err) {
+    res.status(500).json({ ok: false, error: err.message });
+  }
+});
+
+app.post('/plans', (req, res) => {
+  try {
+    setCors(req, res);
+    const plans = parseIncomingPlans(req.body);
+    if (Array.isArray(req.body?.plans) && req.body.plans.length === 0) {
+      if (!savePlansFile([])) {
+        return res.status(500).json({ ok: false, error: 'Failed to persist plans.' });
+      }
+      return res.json({ ok: true, plans: [] });
+    }
+    if (Array.isArray(req.body) && req.body.length === 0) {
+      if (!savePlansFile([])) {
+        return res.status(500).json({ ok: false, error: 'Failed to persist plans.' });
+      }
+      return res.json({ ok: true, plans: [] });
+    }
+    if (!savePlansFile(plans)) {
+      return res.status(500).json({ ok: false, error: 'Failed to persist plans.' });
+    }
+    res.json({ ok: true, plans });
+  } catch (err) {
+    res.status(400).json({ ok: false, error: err.message });
+  }
+});
+
+app.options('/sched', (req, res) => { setCors(req, res); res.status(204).end(); });
+app.get('/sched', (req, res) => {
+  try {
+    setCors(req, res);
+    const schedules = loadSchedulesFile().map(normalizeScheduleEntry).filter(Boolean);
+    res.json({ ok: true, schedules });
+  } catch (err) {
+    res.status(500).json({ ok: false, error: err.message });
+  }
+});
+
+app.post('/sched', (req, res) => {
+  try {
+    setCors(req, res);
+    const incoming = parseIncomingSchedules(req.body);
+    if ((Array.isArray(req.body?.schedules) && req.body.schedules.length === 0) ||
+        (Array.isArray(req.body) && req.body.length === 0)) {
+      if (!saveSchedulesFile([])) {
+        return res.status(500).json({ ok: false, error: 'Failed to persist schedules.' });
+      }
+      return res.json({ ok: true, schedules: [] });
+    }
+    const existing = loadSchedulesFile();
+    const map = new Map(existing.map((entry) => {
+      const normalized = normalizeScheduleEntry(entry);
+      return normalized ? [normalized.id, normalized] : null;
+    }).filter(Boolean));
+    for (const schedule of incoming) {
+      map.set(schedule.id, schedule);
+    }
+    const merged = Array.from(map.values());
+    if (!saveSchedulesFile(merged)) {
+      return res.status(500).json({ ok: false, error: 'Failed to persist schedules.' });
+    }
+    res.json({ ok: true, schedules: merged });
+  } catch (err) {
+    res.status(400).json({ ok: false, error: err.message });
   }
 });
 

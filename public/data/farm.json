@@ -1,121 +1,12 @@
 {
-  "farmName": "",
-  "location": {},
+  "farmName": "GreenReach Demo Farm",
+  "location": "Showroom",
   "rooms": [
-    {
-      "id": "room-prop",
-      "name": "Grow Room 1",
-      "location": "",
-      "hardwareCats": [
-        "dehumidifier"
-      ],
-      "hardwareOrder": [
-        "dehumidifier"
-      ],
-      "layout": {
-        "type": "",
-        "rows": 0,
-        "racks": 0,
-        "levels": 0
-      },
-      "zones": [
-        "Testing"
-      ],
-      "fixtures": [],
-      "controlMethod": null,
-      "devices": [],
-      "sensors": {
-        "categories": [],
-        "placements": {}
-      },
-      "energy": "",
-      "energyHours": 0,
-      "targetPpfd": 0,
-      "photoperiod": 0,
-      "connectivity": {
-        "hasHub": null,
-        "hubType": "",
-        "hubIp": "",
-        "cloudTenant": "Azure"
-      },
-      "roles": {
-        "admin": [],
-        "operator": [],
-        "viewer": []
-      },
-      "grouping": {
-        "groups": [],
-        "planId": "",
-        "scheduleId": ""
-      },
-      "seriesCount": 0,
-      "category": {
-        "dehumidifier": {
-          "selectedEquipment": [],
-          "wifi": false,
-          "wired": false,
-          "count": 0
-        }
-      },
-      "_categoryProgress": {}
-    },
-    {
-      "id": "room-flower",
-      "name": "Flower Bay",
-      "location": "",
-      "hardwareCats": [
-        "fans"
-      ],
-      "hardwareOrder": [
-        "fans"
-      ],
-      "layout": {
-        "type": "",
-        "rows": 0,
-        "racks": 0,
-        "levels": 0
-      },
-      "zones": [
-        "Flower East"
-      ],
-      "fixtures": [],
-      "controlMethod": null,
-      "devices": [],
-      "sensors": {
-        "categories": [],
-        "placements": {}
-      },
-      "energy": "",
-      "energyHours": 0,
-      "targetPpfd": 0,
-      "photoperiod": 0,
-      "connectivity": {
-        "hasHub": null,
-        "hubType": "",
-        "hubIp": "",
-        "cloudTenant": "Azure"
-      },
-      "roles": {
-        "admin": [],
-        "operator": [],
-        "viewer": []
-      },
-      "grouping": {
-        "groups": [],
-        "planId": "",
-        "scheduleId": ""
-      },
-      "seriesCount": 0,
-      "category": {
-        "fans": {
-          "count": 0,
-          "manufacturer": "",
-          "wifi": false,
-          "wired": false
-        }
-      },
-      "_categoryProgress": {}
-    }
+    "Propagation Bay",
+    "Flower Bay"
   ],
-  "zones": []
+  "zones": [
+    "Propagation North",
+    "Flower East"
+  ]
 }
