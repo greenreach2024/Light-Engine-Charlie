@@ -1,6 +1,20 @@
 // Feature flag: opt-in to simplified room-only group matching
 const ROOM_ONLY_GROUPS = (window.GROUPS_ROOM_ONLY !== false);
 
+const groupsSetupState = (window._groupsSetupState = window._groupsSetupState || {
+  groups: [],
+  devices: [],
+  planMap: {},
+  rooms: [],
+  zones: [],
+  currentRoom: '',
+  currentMembers: new Set(),
+  selectedGroupId: null,
+  refreshChecklist: null,
+  refreshNameOptions: null,
+  syncToGroupSelection: null,
+});
+
 // Phase-3: Enforce strict group member selection logic
 function computeGroupMembers(group, allDevices) {
   const normalize = (value) => (typeof value === 'string' ? value.trim().toLowerCase() : '');
@@ -283,6 +297,10 @@ async function mountGroupsSetup() {
   const root = document.getElementById('groups-setup');
   if (!root) return;
 
+  const state = groupsSetupState;
+  state.currentMembers = ensureMembersSet(state.currentMembers);
+  state.selectedGroupId = null;
+
   let farm = {};
   try {
     farm = await jget('/farm');
@@ -291,7 +309,10 @@ async function mountGroupsSetup() {
     farm = {};
   }
 
-  const planMap = await getPlanMap();
+  state.rooms = Array.isArray(farm?.rooms) ? [...farm.rooms] : [];
+  state.zones = Array.isArray(farm?.zones) ? [...farm.zones] : [];
+
+  state.planMap = await getPlanMap();
 
   let devRaw = {};
   try {
@@ -301,108 +322,219 @@ async function mountGroupsSetup() {
     devRaw = {};
   }
 
-  const devices = Array.isArray(devRaw?.data)
+  const controllerDevices = Array.isArray(devRaw?.data)
     ? devRaw.data
-    : (Array.isArray(devRaw) ? devRaw : []);
+    : Array.isArray(devRaw)
+      ? devRaw
+      : [];
+  state.devices = controllerDevices
+    .map((entry) => normalizeControllerDeviceForGroups(entry))
+    .filter(Boolean);
 
-  const rooms = Array.isArray(farm?.rooms) ? [...farm.rooms] : [];
-  let zones = Array.isArray(farm?.zones) ? [...farm.zones] : [];
+  let groupResponse = {};
+  try {
+    groupResponse = await jget('/groups');
+  } catch (err) {
+    console.warn('Failed to load existing groups for setup card', err);
+    groupResponse = {};
+  }
+  state.groups = Array.isArray(groupResponse?.groups) ? groupResponse.groups : [];
 
-  const selRoom = document.getElementById('grp-room');
-  if (selRoom) {
-    selRoom.innerHTML = '';
-    rooms.forEach((room) => {
+  const roomSelect = document.getElementById('grp-room');
+  const zoneInput = document.getElementById('grp-zone');
+  const zoneList = document.getElementById('zones-list');
+  const labelInput = document.getElementById('grp-label');
+  const labelList = document.getElementById('grp-name-list');
+  const planSelect = document.getElementById('grp-plan');
+
+  if (roomSelect) {
+    roomSelect.innerHTML = '';
+    state.rooms.forEach((room) => {
+      if (!room) return;
       const option = document.createElement('option');
       option.value = room;
       option.textContent = room;
-      selRoom.appendChild(option);
+      roomSelect.appendChild(option);
     });
   }
 
-  const dl = document.getElementById('zones-list');
-  if (dl) {
-    dl.innerHTML = '';
-    zones.forEach((zone) => {
+  if (zoneList) {
+    zoneList.innerHTML = '';
+    state.zones.forEach((zone) => {
+      if (!zone) return;
       const option = document.createElement('option');
       option.value = zone;
-      dl.appendChild(option);
+      zoneList.appendChild(option);
     });
   }
 
-  const selPlan = document.getElementById('grp-plan');
-  if (selPlan) {
-    const existingDefault = selPlan.querySelector('option[value=""]');
+  if (planSelect) {
+    const existingDefault = planSelect.querySelector('option[value=""]');
     if (!existingDefault) {
       const defaultOption = document.createElement('option');
       defaultOption.value = '';
       defaultOption.textContent = '(no plan)';
-      selPlan.appendChild(defaultOption);
+      planSelect.appendChild(defaultOption);
     }
-    Object.keys(planMap).forEach((planKey) => {
-      const hasOption = Array.from(selPlan.options || []).some((opt) => opt.value === planKey);
+    Object.keys(state.planMap || {}).forEach((planKey) => {
+      if (!planKey) return;
+      const hasOption = Array.from(planSelect.options || []).some((opt) => opt.value === planKey);
       if (hasOption) return;
       const option = document.createElement('option');
       option.value = planKey;
       option.textContent = planKey;
-      selPlan.appendChild(option);
+      planSelect.appendChild(option);
     });
   }
 
-  if (selRoom) {
-    selRoom.addEventListener('change', () => renderRoomDevices(selRoom.value, devices));
-    if (rooms.length) {
-      selRoom.value = rooms[0];
-      renderRoomDevices(selRoom.value, devices);
+  const updateGroupNameOptions = (roomValue) => {
+    if (!labelList) return;
+    labelList.innerHTML = '';
+    const roomKey = normalizeRoomKey(roomValue);
+    if (!roomKey) return;
+    const matches = (state.groups || [])
+      .filter((group) => normalizeRoomKey(group?.room || group?.match?.room || group?.roomId) === roomKey)
+      .slice()
+      .sort((a, b) => {
+        const nameA = firstNonEmptyString(a?.name, a?.label, a?.id);
+        const nameB = firstNonEmptyString(b?.name, b?.label, b?.id);
+        return nameA.localeCompare(nameB, undefined, { sensitivity: 'base' });
+      });
+    matches.forEach((group) => {
+      const opt = document.createElement('option');
+      const label = firstNonEmptyString(group?.name, group?.label, group?.id);
+      opt.value = label;
+      const zone = firstNonEmptyString(group?.zone, group?.match?.zone);
+      opt.label = zone ? `${label} (${zone})` : label;
+      labelList.appendChild(opt);
+    });
+  };
+
+  const refreshChecklist = () => {
+    renderRoomDevices(state.currentRoom, state.devices, state.currentMembers);
+  };
+
+  const evaluateGroupSelection = () => {
+    const roomValue = state.currentRoom;
+    if (!roomValue) {
+      state.currentMembers = ensureMembersSet(new Set());
+      refreshChecklist();
+      return;
     }
+    const zoneValue = zoneInput ? zoneInput.value : '';
+    const labelValue = labelInput ? labelInput.value : '';
+    const match = findGroupForForm(state.groups, roomValue, zoneValue, labelValue);
+    if (match) {
+      state.selectedGroupId = match.id;
+      state.currentMembers = ensureMembersSet(new Set(extractGroupMemberIds(match)));
+      if (zoneInput) zoneInput.value = firstNonEmptyString(match?.zone, match?.match?.zone) || '';
+      if (labelInput) labelInput.value = firstNonEmptyString(match?.name, match?.label, match?.id);
+      if (planSelect) planSelect.value = match?.plan || '';
+    }
+    refreshChecklist();
+    updateGroupNameOptions(roomValue);
+  };
+
+  const handleRoomChange = () => {
+    const value = roomSelect ? roomSelect.value : '';
+    state.currentRoom = value;
+    state.selectedGroupId = null;
+    state.currentMembers = ensureMembersSet(new Set());
+    if (zoneInput) zoneInput.value = '';
+    if (labelInput) labelInput.value = '';
+    if (planSelect) planSelect.value = '';
+    updateGroupNameOptions(value);
+    refreshChecklist();
+  };
+
+  state.refreshChecklist = refreshChecklist;
+  state.refreshNameOptions = updateGroupNameOptions;
+  state.syncToGroupSelection = evaluateGroupSelection;
+
+  if (roomSelect) {
+    roomSelect.addEventListener('change', () => {
+      handleRoomChange();
+      evaluateGroupSelection();
+    });
+    if (state.rooms.length) {
+      roomSelect.value = state.rooms[0];
+      handleRoomChange();
+      evaluateGroupSelection();
+    } else {
+      refreshChecklist();
+    }
+  } else {
+    refreshChecklist();
   }
 
+  zoneInput?.addEventListener('input', evaluateGroupSelection);
+  zoneInput?.addEventListener('change', evaluateGroupSelection);
+  labelInput?.addEventListener('input', evaluateGroupSelection);
+  labelInput?.addEventListener('change', evaluateGroupSelection);
+
   const btnSave = document.getElementById('btn-save-group');
-  if (btnSave) btnSave.addEventListener('click', () => saveGroupFromUI(devices));
+  if (btnSave) btnSave.addEventListener('click', () => saveGroupFromUI());
 
   const btnApply = document.getElementById('btn-apply-now');
-  if (btnApply) btnApply.addEventListener('click', () => applyNow(devices));
+  if (btnApply) btnApply.addEventListener('click', () => applyNow());
 
   const btnClone = document.getElementById('btn-clone-group');
-  if (btnClone) btnClone.addEventListener('click', () => cloneGroupUI());
+  if (btnClone)
+    btnClone.addEventListener('click', () => {
+      cloneGroupUI();
+      state.selectedGroupId = null;
+    });
 
   const btnSeed = document.getElementById('btn-seed-demo');
-  if (btnSeed) btnSeed.addEventListener('click', () => seedDemo(window.GROUP_PLAN_MAP || planMap, devices, farm));
+  if (btnSeed) btnSeed.addEventListener('click', () => seedDemo(window.GROUP_PLAN_MAP || state.planMap, controllerDevices, farm));
 
   const btnAddZone = document.getElementById('btn-add-zone');
   if (btnAddZone) {
     btnAddZone.addEventListener('click', async () => {
-      const zoneInput = document.getElementById('grp-zone');
-      const z = (zoneInput?.value || '').trim();
-      if (!z) return;
-      const uniqueZones = Array.from(new Set([...zones, z]));
+      const inputValue = (zoneInput?.value || '').trim();
+      if (!inputValue) return;
+      const uniqueZones = Array.from(new Set([...state.zones, inputValue]));
       try {
         await jpost('/farm', { ...farm, zones: uniqueZones });
-        zones = uniqueZones;
-        if (dl) {
-          dl.innerHTML = '';
-          zones.forEach((zone) => {
+        state.zones = uniqueZones;
+        farm = { ...farm, zones: uniqueZones };
+        if (zoneList) {
+          zoneList.innerHTML = '';
+          state.zones.forEach((zone) => {
+            if (!zone) return;
             const option = document.createElement('option');
             option.value = zone;
-            dl.appendChild(option);
+            zoneList.appendChild(option);
           });
         }
-        farm = { ...farm, zones: uniqueZones };
-        alert(`Zone "${z}" added to farm.`);
+        if (typeof showToast === 'function') {
+          showToast({ title: 'Zone added', msg: `Zone "${inputValue}" added to farm.`, kind: 'success', icon: '➕' });
+        } else {
+          alert(`Zone "${inputValue}" added to farm.`);
+        }
       } catch (err) {
         console.error('Failed to add zone to farm', err);
-        alert('Could not add zone. Please try again.');
+        if (typeof showToast === 'function') {
+          showToast({ title: 'Zone add failed', msg: err?.message || String(err), kind: 'warn', icon: '⚠️' });
+        } else {
+          alert('Could not add zone. Please try again.');
+        }
       }
     });
   }
 }
 
-function renderRoomDevices(room, devices) {
+function renderRoomDevices(room, devices, membersSet = groupsSetupState.currentMembers) {
   const list = document.getElementById('grp-members');
   if (!list) return;
 
+  const normalizedMembers = ensureMembersSet(membersSet);
+  groupsSetupState.currentMembers = normalizedMembers;
+
+  const targetKey = normalizeRoomKey(room);
   list.innerHTML = '';
-  const target = (room || '').trim().toLowerCase();
-  if (!target) {
+
+  if (!targetKey) {
     const li = document.createElement('li');
     li.className = 'empty';
     li.textContent = 'Select a room to view available lights.';
@@ -410,16 +542,18 @@ function renderRoomDevices(room, devices) {
     return;
   }
 
-  const matched = (Array.isArray(devices) ? devices : []).filter((device) => {
-    const roomValues = [
-      device?.meta?.room,
-      device?.meta?.roomName,
-      device?.room,
-      device?.roomName,
-      device?.location?.room
-    ].filter(Boolean).map((value) => String(value).trim().toLowerCase());
-    return roomValues.includes(target);
-  });
+  const deviceList = Array.isArray(devices) ? devices : [];
+  const normalizedDevices = deviceList
+    .map((device) => {
+      if (!device) return null;
+      if (Array.isArray(device.roomKeys)) return device;
+      return normalizeControllerDeviceForGroups(device);
+    })
+    .filter(Boolean);
+
+  const matched = normalizedDevices.filter((device) =>
+    Array.isArray(device.roomKeys) && device.roomKeys.includes(targetKey)
+  );
 
   if (!matched.length) {
     const li = document.createElement('li');
@@ -429,62 +563,140 @@ function renderRoomDevices(room, devices) {
     return;
   }
 
-  matched.forEach((device) => {
-    const id = device?.id;
-    if (!id) return;
-    const li = document.createElement('li');
-    const label = document.createElement('label');
-    const input = document.createElement('input');
-    input.type = 'checkbox';
-    input.value = String(id);
-    const span = document.createElement('span');
-    span.textContent = device?.deviceName || `Device #${id}`;
-    label.appendChild(input);
-    label.appendChild(span);
-    li.appendChild(label);
-    list.appendChild(li);
-  });
+  matched
+    .slice()
+    .sort((a, b) => (a.deviceName || '').localeCompare(b.deviceName || '', undefined, { sensitivity: 'base' }))
+    .forEach((device) => {
+      const id = firstNonEmptyString(device.id, device.deviceId, device.device_id, device.deviceID);
+      if (!id) return;
+      const li = document.createElement('li');
+      const label = document.createElement('label');
+      const input = document.createElement('input');
+      input.type = 'checkbox';
+      input.value = id;
+      input.checked = normalizedMembers.has(id);
+      input.addEventListener('change', () => {
+        if (input.checked) {
+          normalizedMembers.add(id);
+        } else {
+          normalizedMembers.delete(id);
+        }
+      });
+      const span = document.createElement('span');
+      span.textContent = device.deviceName || `Device ${id}`;
+      span.title = id;
+      label.appendChild(input);
+      label.appendChild(span);
+      li.appendChild(label);
+      list.appendChild(li);
+    });
 }
 
-async function saveGroupFromUI(_devices) {
+async function saveGroupFromUI() {
   const roomField = document.getElementById('grp-room');
   const zoneField = document.getElementById('grp-zone');
   const labelField = document.getElementById('grp-label');
   const planField = document.getElementById('grp-plan');
-  const list = document.getElementById('grp-members');
 
-  if (!roomField || !labelField || !list) return;
+  if (!roomField || !labelField) return;
 
+  const state = groupsSetupState;
   const room = (roomField.value || '').trim();
   if (!room) {
-    alert('Choose a room first.');
+    if (typeof showToast === 'function') {
+      showToast({ title: 'Room required', msg: 'Choose a room before saving.', kind: 'warn', icon: '⚠️' });
+    } else {
+      alert('Choose a room first.');
+    }
     return;
   }
 
-  const zone = (zoneField?.value || '').trim();
-  const label = (labelField.value || '').trim() || `${room} Group`;
-  const plan = (planField?.value || '').trim();
-
-  const checkboxes = Array.from(list.querySelectorAll('input[type="checkbox"]'));
-  const members = checkboxes.filter((input) => input.checked).map((input) => input.value);
+  const zoneRaw = (zoneField?.value || '').trim();
+  const labelRaw = (labelField.value || '').trim();
+  const planRaw = (planField?.value || '').trim();
+  const groupName = labelRaw || `${room} Group`;
+  const membersSet = ensureMembersSet(state.currentMembers);
+  const members = Array.from(membersSet).map((id) => String(id).trim()).filter(Boolean);
 
   if (!members.length) {
-    alert('Select at least one light to include in the group.');
+    if (typeof showToast === 'function') {
+      showToast({ title: 'No lights selected', msg: 'Check at least one light to include in the group.', kind: 'warn', icon: '⚠️' });
+    } else {
+      alert('Select at least one light to include in the group.');
+    }
     return;
   }
 
-  const id = `group:${room.replace(/\s+/g, '')}:${(zone || 'All').replace(/\s+/g, '')}:${label.replace(/\s+/g, '_')}`;
+  const existingGroups = Array.isArray(state.groups) ? [...state.groups] : [];
+  const existing = state.selectedGroupId
+    ? existingGroups.find((group) => String(group?.id || '').trim() === state.selectedGroupId)
+    : findGroupForForm(existingGroups, room, zoneRaw, labelRaw, { allowLabelFallback: true });
 
+  const id = existing
+    ? existing.id
+    : generateGroupId(room, zoneRaw, groupName, existingGroups.map((group) => group?.id).filter(Boolean));
+
+  const zone = zoneRaw;
+  const nextGroup = {
+    ...(existing || {}),
+    id,
+    name: groupName,
+    label: groupName,
+    room,
+    zone,
+    match: { room, zone },
+    members,
+    lights: members.map((memberId) => ({ id: memberId })),
+  };
+  if (planRaw) {
+    nextGroup.plan = planRaw;
+  } else if (nextGroup.plan) {
+    delete nextGroup.plan;
+  }
+
+  const merged = existing
+    ? existingGroups.map((group) => (String(group?.id || '').trim() === id ? nextGroup : group))
+    : [...existingGroups, nextGroup];
+
+  let persistedGroups = merged;
   try {
-    await jpost('/groups', { id, label, room, zone, members });
+    const response = await saveJSON('/groups', { groups: merged });
+    if (response && Array.isArray(response.groups)) {
+      persistedGroups = response.groups;
+    }
   } catch (err) {
     console.error('Failed to save group', err);
-    alert('Could not save group. Please try again.');
+    if (typeof showToast === 'function') {
+      showToast({ title: 'Save failed', msg: err?.message || String(err), kind: 'warn', icon: '⚠️' });
+    } else {
+      alert('Could not save group. Please try again.');
+    }
     return;
   }
 
-  if (plan) {
-    const planSpec = (await getPlanMap())[plan] || {};
+  state.groups = persistedGroups;
+  state.selectedGroupId = id;
+  state.currentMembers = ensureMembersSet(new Set(members));
+
+  if (typeof state.refreshNameOptions === 'function') {
+    state.refreshNameOptions(room);
+  }
+  if (typeof state.syncToGroupSelection === 'function') {
+    state.syncToGroupSelection();
+  } else if (typeof state.refreshChecklist === 'function') {
+    state.refreshChecklist();
+  }
+
+  const successMsg = existing ? 'Group updated' : 'Group created';
+  if (typeof showToast === 'function') {
+    const zoneLabel = zone ? ` • ${zone}` : '';
+    showToast({ title: successMsg, msg: `${groupName} in ${room}${zoneLabel}`, kind: 'success', icon: '✅' });
+  } else {
+    alert(`${successMsg}.`);
+  }
+
+  if (planRaw) {
+    const planSpec = (state.planMap && state.planMap[planRaw]) || {};
     const photoperiod = planSpec.photoperiod || '16/8';
     const durationHours = parsePhotoperiodHours(photoperiod);
     try {
@@ -496,18 +708,21 @@ async function saveGroupFromUI(_devices) {
         durationHours,
         rampUpMin: planSpec?.ramp?.sunrise || 10,
         rampDownMin: planSpec?.ramp?.sunset || 10,
-        planKey: plan
+        planKey: planRaw,
+        name: `${groupName} Schedule`,
       });
     } catch (err) {
       console.error('Failed to attach schedule', err);
-      alert('Group saved but schedule could not be created.');
-      return;
+      if (typeof showToast === 'function') {
+        showToast({ title: 'Schedule not saved', msg: err?.message || String(err), kind: 'warn', icon: '⚠️' });
+      } else {
+        alert('Group saved but schedule could not be created.');
+      }
     }
   }
-  alert('Group saved' + (plan ? ' and scheduled.' : ''));
 }
 
-async function applyNow(_devices) {
+async function applyNow() {
   const planField = document.getElementById('grp-plan');
   const list = document.getElementById('grp-members');
   if (!planField || !list) return;
@@ -562,6 +777,9 @@ function cloneGroupUI() {
   const label = window.prompt('New group name?', suggestion);
   if (!label) return;
   labelField.value = label;
+  if (groupsSetupState) {
+    groupsSetupState.selectedGroupId = null;
+  }
 }
 
 async function seedDemo(plans, devices, farm) {
@@ -583,7 +801,10 @@ async function seedDemo(plans, devices, farm) {
 
   try {
     await jpost('/plans', DEMO_PLANS);
-    await getPlanMap(true);
+    const refreshedPlans = await getPlanMap(true);
+    if (refreshedPlans && typeof refreshedPlans === 'object') {
+      groupsSetupState.planMap = refreshedPlans;
+    }
   } catch (err) {
     console.error('Failed to seed demo plans', err);
   }
@@ -594,6 +815,7 @@ async function seedDemo(plans, devices, farm) {
     ...(window.GROUP_PLAN_MAP || {}),
     ...DEMO_PLANS
   };
+  groupsSetupState.planMap = { ...(groupsSetupState.planMap || {}), ...window.GROUP_PLAN_MAP };
   const planSelect = document.getElementById('grp-plan');
   if (planSelect) {
     Object.keys(DEMO_PLANS).forEach((key) => {
@@ -636,32 +858,58 @@ async function seedDemo(plans, devices, farm) {
     label: 'Propagation North — Demo',
     room: 'Propagation Bay',
     zone: 'Propagation North',
-    members: [ID1, ID2].filter(Boolean)
+    members: [ID1, ID2].filter(Boolean),
+    plan: 'GR-Propagation-BL55',
   };
   const gFlow = {
     id: 'group:FlowerBay:FlowerEast:Demo',
     label: 'Flower East — Demo',
     room: 'Flower Bay',
     zone: 'Flower East',
-    members: [ID3, ID4, ID5].filter(Boolean)
+    members: [ID3, ID4, ID5].filter(Boolean),
+    plan: 'GR-Flower-RD60',
   };
 
-  try {
-    await jpost('/groups', gProp);
-  } catch (err) {
+  const demoGroups = [gProp, gFlow]
+    .filter((group) => Array.isArray(group.members) && group.members.length)
+    .map((group) => ({
+      id: group.id,
+      name: group.label,
+      label: group.label,
+      room: group.room,
+      zone: group.zone,
+      match: { room: group.room, zone: group.zone },
+      members: group.members,
+      lights: group.members.map((memberId) => ({ id: memberId })),
+      plan: group.plan,
+    }));
+
+  if (demoGroups.length) {
+    const state = groupsSetupState;
+    const existingGroups = Array.isArray(state.groups) ? [...state.groups] : [];
+    const groupMap = new Map(existingGroups.map((group) => [String(group?.id || ''), group]));
+    demoGroups.forEach((group) => {
+      groupMap.set(String(group.id), group);
+    });
+    const mergedGroups = Array.from(groupMap.values());
     try {
-      await jput(`/groups/${encodeURIComponent(gProp.id)}`, gProp);
-    } catch (errPut) {
-      console.error('Failed to seed propagation group', errPut);
-    }
-  }
-  try {
-    await jpost('/groups', gFlow);
-  } catch (err) {
-    try {
-      await jput(`/groups/${encodeURIComponent(gFlow.id)}`, gFlow);
-    } catch (errPut) {
-      console.error('Failed to seed flower group', errPut);
+      const response = await saveJSON('/groups', { groups: mergedGroups });
+      const persisted = response && Array.isArray(response.groups) ? response.groups : mergedGroups;
+      state.groups = persisted;
+      if (typeof state.refreshNameOptions === 'function') {
+        state.refreshNameOptions(state.currentRoom);
+      }
+      if (typeof state.syncToGroupSelection === 'function') {
+        state.syncToGroupSelection();
+      }
+      if (typeof showToast === 'function') {
+        showToast({ title: 'Demo groups seeded', msg: 'Propagation and Flower demo groups saved.', kind: 'success', icon: '🌱' });
+      }
+    } catch (err) {
+      console.error('Failed to persist demo groups', err);
+      if (typeof showToast === 'function') {
+        showToast({ title: 'Demo groups failed', msg: err?.message || String(err), kind: 'warn', icon: '⚠️' });
+      }
     }
   }
 
@@ -728,6 +976,7 @@ async function seedDemo(plans, devices, farm) {
       zoneList.appendChild(option);
     });
   }
+  groupsSetupState.zones = updatedZones;
 
   const hexProp = mixHEX12({ cw: 20, ww: 20, bl: 55, rd: 25 });
   for (const id of gProp.members) {
@@ -739,7 +988,11 @@ async function seedDemo(plans, devices, farm) {
     await jpatch(`/api/devicedatas/device/${id}`, { status: 'on', value: hexFlow });
   }
 
-  alert('GreenReach Demo seeded: groups, plans, schedules and live ON are set.');
+  if (typeof showToast === 'function') {
+    showToast({ title: 'Demo seeded', msg: 'Plans, groups, schedules, and live ON applied.', kind: 'success', icon: '🚀' });
+  } else {
+    alert('GreenReach Demo seeded: groups, plans, schedules and live ON are set.');
+  }
 }
 // Fallbacks for device pick state if not defined elsewhere
 if (typeof getDevicePickState !== 'function') {
@@ -1573,6 +1826,156 @@ function formatVendorModel(vendor, model) {
   const vendorText = typeof vendor === 'string' ? vendor.trim() : '';
   const modelText = typeof model === 'string' ? model.trim() : '';
   return [vendorText, modelText].filter(Boolean).join(' ').trim();
+}
+
+function normalizeTextKey(value) {
+  return value == null ? '' : String(value).trim().toLowerCase();
+}
+
+function normalizeRoomKey(value) {
+  return normalizeTextKey(value);
+}
+
+function normalizeZoneKey(value) {
+  return normalizeTextKey(value);
+}
+
+function ensureMembersSet(value) {
+  if (value instanceof Set) return value;
+  const next = new Set();
+  if (Array.isArray(value)) {
+    value.forEach((entry) => {
+      if (entry == null) return;
+      const id = String(entry).trim();
+      if (id) next.add(id);
+    });
+    return next;
+  }
+  if (value && typeof value === 'object' && typeof value.forEach === 'function') {
+    try {
+      value.forEach((entry) => {
+        if (entry == null) return;
+        const id = String(entry).trim();
+        if (id) next.add(id);
+      });
+      return next;
+    } catch {}
+  }
+  return next;
+}
+
+function normalizeControllerDeviceForGroups(device) {
+  if (!device || typeof device !== 'object') return null;
+  const rawId = firstNonEmptyString(device.id, device.deviceId, device.device_id, device.deviceID);
+  const id = rawId ? String(rawId).trim() : '';
+  if (!id) return null;
+  const roomCandidates = [
+    device?.meta?.room,
+    device?.meta?.roomName,
+    device?.room,
+    device?.roomName,
+    device?.location?.room,
+    device?.location?.roomName,
+  ]
+    .map(normalizeRoomKey)
+    .filter(Boolean);
+  const roomKeys = Array.from(new Set(roomCandidates));
+  const deviceName = firstNonEmptyString(
+    device?.deviceName,
+    device?.name,
+    device?.label,
+    formatVendorModel(device?.vendor, device?.model),
+    formatVendorModel(device?.manufacturer, device?.model),
+    id
+  );
+  return { ...device, id, deviceName, roomKeys };
+}
+
+function extractGroupMemberIds(group) {
+  const members = new Set();
+  const addEntry = (entry) => {
+    if (!entry) return;
+    if (typeof entry === 'string') {
+      const id = entry.trim();
+      if (id) members.add(id);
+      return;
+    }
+    if (typeof entry === 'object' && entry.id) {
+      const id = String(entry.id).trim();
+      if (id) members.add(id);
+    }
+  };
+  if (Array.isArray(group?.members)) {
+    group.members.forEach(addEntry);
+  }
+  if (Array.isArray(group?.lights)) {
+    group.lights.forEach(addEntry);
+  }
+  return Array.from(members);
+}
+
+function findGroupForForm(groups, room, zone, name, options = {}) {
+  const roomKey = normalizeRoomKey(room);
+  if (!roomKey) return null;
+  const zoneKey = normalizeZoneKey(zone);
+  const nameKey = normalizeTextKey(name);
+  const entries = Array.isArray(groups) ? groups : [];
+  const candidates = entries.filter((group) =>
+    normalizeRoomKey(group?.room || group?.match?.room || group?.roomId) === roomKey
+  );
+  if (!candidates.length) return null;
+
+  let matches = candidates;
+  if (zoneKey) {
+    const zoneMatches = matches.filter(
+      (group) => normalizeZoneKey(group?.zone || group?.match?.zone || group?.zoneId) === zoneKey
+    );
+    if (zoneMatches.length) {
+      matches = zoneMatches;
+    }
+  }
+
+  if (nameKey) {
+    const labelMatches = matches.filter((group) =>
+      normalizeTextKey(firstNonEmptyString(group?.name, group?.label, group?.id)) === nameKey
+    );
+    if (labelMatches.length === 1) return labelMatches[0];
+    if (labelMatches.length) matches = labelMatches;
+  }
+
+  if (matches.length === 1) return matches[0];
+
+  if (options && options.allowLabelFallback && nameKey) {
+    const fallback = candidates.filter((group) =>
+      normalizeTextKey(firstNonEmptyString(group?.name, group?.label, group?.id)) === nameKey
+    );
+    if (fallback.length === 1) return fallback[0];
+  }
+
+  return null;
+}
+
+function slugifyGroupToken(value, fallback = 'group') {
+  const text = String(value ?? '').trim().toLowerCase();
+  if (!text) return fallback;
+  const token = text.replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '');
+  return token || fallback;
+}
+
+function generateGroupId(room, zone, label, existingIds = []) {
+  const slugRoom = slugifyGroupToken(room, 'room');
+  const slugZone = slugifyGroupToken(zone || 'all', 'all');
+  const slugLabel = slugifyGroupToken(label, 'group');
+  const base = `group:${slugRoom}:${slugZone}:${slugLabel}`;
+  const ids = new Set((existingIds || []).map((id) => String(id || '')));
+  if (!ids.has(base)) return base;
+  let counter = 2;
+  let candidate = `${base}-${counter}`;
+  while (ids.has(candidate)) {
+    counter += 1;
+    candidate = `${base}-${counter}`;
+  }
+  return candidate;
 }
 
 function resolveLightNameFromState(id, source) {
