@@ -119,6 +119,116 @@
       }
     },
     {
+      "id": "room-greenreach",
+      "name": "GreenReach Demo Lab",
+      "location": "Main Campus",
+      "hardwareCats": ["light", "sensors"],
+      "hardwareOrder": ["light", "sensors"],
+      "layout": {
+        "type": "benches",
+        "rows": 1,
+        "racks": 1,
+        "levels": 1
+      },
+      "zones": ["Demo Row"],
+      "fixtures": [
+        {
+          "id": "fixture-greenreach-demo",
+          "vendor": "GROW3",
+          "model": "TopLight MH Model-300W-22G12",
+          "count": 1,
+          "zone": "Demo Row"
+        }
+      ],
+      "controlMethod": "controller",
+      "devices": [
+        { "id": "light-006", "type": "light" }
+      ],
+      "sensors": {
+        "categories": ["environment"],
+        "placements": {
+          "environment": [
+            { "type": "Temp/Humidity", "location": "center canopy" }
+          ]
+        }
+      },
+      "energy": "120V dedicated",
+      "energyHours": 16,
+      "targetPpfd": 400,
+      "photoperiod": 16,
+      "connectivity": {
+        "hasHub": false,
+        "wifi": true
+      },
+      "roles": {
+        "admin": ["demo.operator"],
+        "operator": ["demo.tech"],
+        "viewer": []
+      },
+      "grouping": {
+        "groups": ["greenreach-demo"],
+        "planId": "demo-propagation",
+        "scheduleId": "schedule-demo-16h"
+      },
+      "seriesCount": 1,
+      "category": {
+        "light": {
+          "selectedEquipment": [
+            {
+              "category": "light",
+              "vendor": "GROW3",
+              "model": "TopLight MH Model-300W-22G12",
+              "count": 1,
+              "zone": "Demo Row"
+            }
+          ],
+          "wifi": true,
+          "wired": false,
+          "count": 1,
+          "manufacturer": "GROW3",
+          "model": "TopLight MH Model-300W-22G12"
+        },
+        "sensors": {
+          "selectedEquipment": [
+            {
+              "category": "sensors",
+              "vendor": "GreenReach",
+              "model": "EnviroSense",
+              "count": 1
+            }
+          ],
+          "wifi": true,
+          "wired": false,
+          "count": 1,
+          "manufacturer": "GreenReach",
+          "model": "EnviroSense"
+        }
+      },
+      "_categoryProgress": {
+        "light": {
+          "selectedEquipment": [
+            {
+              "category": "light",
+              "vendor": "GROW3",
+              "model": "TopLight MH Model-300W-22G12",
+              "count": 1,
+              "zone": "Demo Row"
+            }
+          ]
+        },
+        "sensors": {
+          "selectedEquipment": [
+            {
+              "category": "sensors",
+              "vendor": "GreenReach",
+              "model": "EnviroSense",
+              "count": 1
+            }
+          ]
+        }
+      }
+    },
+    {
       "id": "room-flower",
       "name": "Flower Bay",
       "location": "Main Campus",
