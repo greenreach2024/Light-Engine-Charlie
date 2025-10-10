@@ -1,3 +1,6 @@
+// Feature flag: opt-in to simplified room-only group matching
+const ROOM_ONLY_GROUPS = (window.GROUPS_ROOM_ONLY !== false);
+
 // Phase-3: Enforce strict group member selection logic
 function computeGroupMembers(group, allDevices) {
   const normalize = (value) => (typeof value === 'string' ? value.trim().toLowerCase() : '');
@@ -16,24 +19,36 @@ function computeGroupMembers(group, allDevices) {
   const zoneNeedles = toNeedles([match.zone, match.zoneId, match.zoneName]);
   const hasRoom = roomNeedles.length > 0;
   const hasZone = zoneNeedles.length > 0;
-  if (!hasRoom || !hasZone) return [];
+  const requireZone = !ROOM_ONLY_GROUPS;
+  if (!hasRoom) return [];
+  if (requireZone && !hasZone) return [];
 
-  const candidates = (allDevices || []).filter((device) => {
+  const devicePool = Array.isArray(allDevices) && allDevices.length
+    ? allDevices
+    : (ROOM_ONLY_GROUPS && Array.isArray(window.STATE?.devices) ? window.STATE.devices : []);
+
+  const candidates = (devicePool || []).filter((device) => {
     if (!device) return false;
     const roomValues = toNeedles([
       device.room,
       device.roomId,
       device.roomName,
       device.location?.room,
+      device.meta?.room,
+      device.meta?.roomId,
+      device.meta?.roomName,
     ]);
     const zoneValues = toNeedles([
       device.zone,
       device.zoneId,
       device.zoneName,
       device.location?.zone,
+      device.meta?.zone,
+      device.meta?.zoneId,
+      device.meta?.zoneName,
     ]);
     const roomMatch = roomValues.some((value) => roomNeedles.includes(value));
-    const zoneMatch = zoneValues.some((value) => zoneNeedles.includes(value));
+    const zoneMatch = requireZone ? zoneValues.some((value) => zoneNeedles.includes(value)) : true;
     return roomMatch && zoneMatch;
   });
 
@@ -90,7 +105,11 @@ function getActiveGroupMembers(group, selectionOverride = null) {
         })
     : [];
 
-  return computeGroupMembers({ ...activeGroup, match }, normalizedLights);
+  const devicePool = ROOM_ONLY_GROUPS && (!normalizedLights || normalizedLights.length === 0)
+    ? (Array.isArray(STATE?.devices) ? STATE.devices : [])
+    : normalizedLights;
+
+  return computeGroupMembers({ ...activeGroup, match }, devicePool);
 }
 // Utility: Always include x-pin header for farm writes (mirrors Recipe Bridge _hdrs)
 function _hdrs(extra = {}) {
@@ -109,8 +128,18 @@ function _hdrs(extra = {}) {
   };
 }
 // --- DEMO PATCH: Auto-populate STATE.lightSetups from GreenReach Room 1 fixtures ---
-document.addEventListener('DOMContentLoaded', function() {
+document.addEventListener('DOMContentLoaded', async () => {
+  window.GROUPS_ROOM_ONLY = true;
+  window.GROUPS_PLANS = true;
+
   if (!window.STATE) window.STATE = {};
+
+  try {
+    await mountGroupsSetup();
+  } catch (e) {
+    console.error(e);
+  }
+
   if (!Array.isArray(window.STATE.rooms)) return;
   const room = window.STATE.rooms.find(r => r.name === 'GreenReach Room 1' || r.id === 'greenreach-room-1');
   if (!room || !Array.isArray(room.fixtures) || !room.fixtures.length) return;
@@ -136,6 +165,549 @@ document.addEventListener('DOMContentLoaded', function() {
   ];
   window.dispatchEvent(new CustomEvent('lightSetupsChanged'));
 });
+
+async function readJson(response) {
+  const text = await response.text();
+  if (!text) return {};
+  try {
+    return JSON.parse(text);
+  } catch (err) {
+    console.warn('Failed to parse JSON response', err);
+    return {};
+  }
+}
+
+async function jget(path) {
+  const response = await fetch((window.API_BASE || '') + path, {
+    headers: { 'Accept': 'application/json' }
+  });
+  if (!response.ok) {
+    throw new Error(`GET ${path} failed: ${response.status}`);
+  }
+  return readJson(response);
+}
+
+async function jpost(path, body) {
+  const response = await fetch((window.API_BASE || '') + path, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', 'Accept': 'application/json' },
+    body: JSON.stringify(body)
+  });
+  if (!response.ok) {
+    throw new Error(`POST ${path} failed: ${response.status}`);
+  }
+  return readJson(response);
+}
+
+async function jput(path, body) {
+  const response = await fetch((window.API_BASE || '') + path, {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json', 'Accept': 'application/json' },
+    body: JSON.stringify(body)
+  });
+  if (!response.ok) {
+    throw new Error(`PUT ${path} failed: ${response.status}`);
+  }
+  return readJson(response);
+}
+
+async function jpatch(path, body) {
+  const response = await fetch((window.API_BASE || '') + path, {
+    method: 'PATCH',
+    headers: { 'Content-Type': 'application/json', 'Accept': 'application/json' },
+    body: JSON.stringify(body)
+  });
+  if (!response.ok) {
+    throw new Error(`PATCH ${path} failed: ${response.status}`);
+  }
+  return readJson(response);
+}
+
+function pctToHex(p) {
+  const v = Math.round(Math.max(0, Math.min(100, Number(p) || 0)) * 0.64);
+  return v.toString(16).padStart(2, '0');
+}
+
+function mixHEX12(ch) {
+  const { cw = 0, ww = 0, bl = 0, rd = 0 } = ch || {};
+  return `${pctToHex(cw)}${pctToHex(ww)}${pctToHex(bl)}${pctToHex(rd)}0000`;
+}
+
+function normalizePlanMap(plansData) {
+  if (!plansData) return {};
+  if (Array.isArray(plansData)) {
+    return plansData.reduce((acc, plan) => {
+      const key = plan?.id || plan?.name;
+      if (key) acc[key] = plan;
+      return acc;
+    }, {});
+  }
+  if (Array.isArray(plansData?.plans)) {
+    return plansData.plans.reduce((acc, plan) => {
+      const key = plan?.id || plan?.name;
+      if (key) acc[key] = plan;
+      return acc;
+    }, {});
+  }
+  if (plansData && typeof plansData === 'object') {
+    return { ...plansData };
+  }
+  return {};
+}
+
+function parsePhotoperiodHours(photoperiod) {
+  if (!photoperiod) return 16;
+  const first = String(photoperiod).split('/')[0];
+  const hours = Number(first);
+  return Number.isFinite(hours) && hours > 0 ? hours : 16;
+}
+
+async function getPlanMap(force = false) {
+  if (!force && window.GROUP_PLAN_MAP && Object.keys(window.GROUP_PLAN_MAP).length) {
+    return window.GROUP_PLAN_MAP;
+  }
+  try {
+    const raw = await jget('/plans');
+    const map = normalizePlanMap(raw);
+    window.GROUP_PLAN_MAP = map;
+    return map;
+  } catch (err) {
+    console.error('Failed to load plans', err);
+    return {};
+  }
+}
+
+async function mountGroupsSetup() {
+  if (!window.GROUPS_ROOM_ONLY) return;
+
+  const root = document.getElementById('groups-setup');
+  if (!root) return;
+
+  let farm = {};
+  try {
+    farm = await jget('/farm');
+  } catch (err) {
+    console.error('Failed to load farm profile', err);
+    farm = {};
+  }
+
+  const planMap = await getPlanMap();
+
+  let devRaw = {};
+  try {
+    devRaw = await jget('/api/devicedatas');
+  } catch (err) {
+    console.error('Failed to load devices from controller', err);
+    devRaw = {};
+  }
+
+  const devices = Array.isArray(devRaw?.data)
+    ? devRaw.data
+    : (Array.isArray(devRaw) ? devRaw : []);
+
+  const rooms = Array.isArray(farm?.rooms) ? [...farm.rooms] : [];
+  let zones = Array.isArray(farm?.zones) ? [...farm.zones] : [];
+
+  const selRoom = document.getElementById('grp-room');
+  if (selRoom) {
+    selRoom.innerHTML = '';
+    rooms.forEach((room) => {
+      const option = document.createElement('option');
+      option.value = room;
+      option.textContent = room;
+      selRoom.appendChild(option);
+    });
+  }
+
+  const dl = document.getElementById('zones-list');
+  if (dl) {
+    dl.innerHTML = '';
+    zones.forEach((zone) => {
+      const option = document.createElement('option');
+      option.value = zone;
+      dl.appendChild(option);
+    });
+  }
+
+  const selPlan = document.getElementById('grp-plan');
+  if (selPlan) {
+    const existingDefault = selPlan.querySelector('option[value=""]');
+    if (!existingDefault) {
+      const defaultOption = document.createElement('option');
+      defaultOption.value = '';
+      defaultOption.textContent = '(no plan)';
+      selPlan.appendChild(defaultOption);
+    }
+    Object.keys(planMap).forEach((planKey) => {
+      const hasOption = Array.from(selPlan.options || []).some((opt) => opt.value === planKey);
+      if (hasOption) return;
+      const option = document.createElement('option');
+      option.value = planKey;
+      option.textContent = planKey;
+      selPlan.appendChild(option);
+    });
+  }
+
+  if (selRoom) {
+    selRoom.addEventListener('change', () => renderRoomDevices(selRoom.value, devices));
+    if (rooms.length) {
+      selRoom.value = rooms[0];
+      renderRoomDevices(selRoom.value, devices);
+    }
+  }
+
+  const btnSave = document.getElementById('btn-save-group');
+  if (btnSave) btnSave.addEventListener('click', () => saveGroupFromUI());
+
+  const btnApply = document.getElementById('btn-apply-now');
+  if (btnApply) btnApply.addEventListener('click', () => applyNow());
+
+  const btnClone = document.getElementById('btn-clone-group');
+  if (btnClone) btnClone.addEventListener('click', () => cloneGroupUI());
+
+  const btnSeed = document.getElementById('btn-seed-demo');
+  if (btnSeed) btnSeed.addEventListener('click', () => seedDemo(window.GROUP_PLAN_MAP || planMap, devices, farm));
+
+  const btnAddZone = document.getElementById('btn-add-zone');
+  if (btnAddZone) {
+    btnAddZone.addEventListener('click', async () => {
+      const zoneInput = document.getElementById('grp-zone');
+      const z = (zoneInput?.value || '').trim();
+      if (!z) return;
+      const uniqueZones = Array.from(new Set([...zones, z]));
+      try {
+        await jpost('/farm', { ...farm, zones: uniqueZones });
+        zones = uniqueZones;
+        if (dl) {
+          dl.innerHTML = '';
+          zones.forEach((zone) => {
+            const option = document.createElement('option');
+            option.value = zone;
+            dl.appendChild(option);
+          });
+        }
+        farm = { ...farm, zones: uniqueZones };
+        alert(`Zone "${z}" added to farm.`);
+      } catch (err) {
+        console.error('Failed to add zone to farm', err);
+        alert('Could not add zone. Please try again.');
+      }
+    });
+  }
+}
+
+function renderRoomDevices(room, devices) {
+  const list = document.getElementById('grp-members');
+  if (!list) return;
+
+  list.innerHTML = '';
+  const target = (room || '').trim().toLowerCase();
+  if (!target) {
+    const li = document.createElement('li');
+    li.className = 'empty';
+    li.textContent = 'Select a room to view available lights.';
+    list.appendChild(li);
+    return;
+  }
+
+  const matched = (Array.isArray(devices) ? devices : []).filter((device) => {
+    const roomValues = [
+      device?.meta?.room,
+      device?.meta?.roomName,
+      device?.room,
+      device?.roomName,
+      device?.location?.room
+    ].filter(Boolean).map((value) => String(value).trim().toLowerCase());
+    return roomValues.includes(target);
+  });
+
+  if (!matched.length) {
+    const li = document.createElement('li');
+    li.className = 'empty';
+    li.textContent = 'No lights found for this room.';
+    list.appendChild(li);
+    return;
+  }
+
+  matched.forEach((device) => {
+    const id = device?.id;
+    if (!id) return;
+    const li = document.createElement('li');
+    const label = document.createElement('label');
+    const input = document.createElement('input');
+    input.type = 'checkbox';
+    input.value = String(id);
+    const span = document.createElement('span');
+    span.textContent = device?.deviceName || `Device #${id}`;
+    label.appendChild(input);
+    label.appendChild(span);
+    li.appendChild(label);
+    list.appendChild(li);
+  });
+}
+
+async function saveGroupFromUI() {
+  const roomField = document.getElementById('grp-room');
+  const zoneField = document.getElementById('grp-zone');
+  const labelField = document.getElementById('grp-label');
+  const planField = document.getElementById('grp-plan');
+  const list = document.getElementById('grp-members');
+
+  if (!roomField || !labelField || !list) return;
+
+  const room = (roomField.value || '').trim();
+  if (!room) {
+    alert('Choose a room first.');
+    return;
+  }
+
+  const zone = (zoneField?.value || '').trim();
+  const label = (labelField.value || '').trim() || `${room} Group`;
+  const plan = (planField?.value || '').trim();
+
+  const checkboxes = Array.from(list.querySelectorAll('input[type="checkbox"]'));
+  const members = checkboxes.filter((input) => input.checked).map((input) => input.value);
+
+  if (!members.length) {
+    alert('Select at least one light to include in the group.');
+    return;
+  }
+
+  const safe = (value, fallback) => {
+    const v = (value || fallback || '').replace(/[^a-z0-9]+/gi, '');
+    return v || 'Group';
+  };
+
+  const id = `group:${safe(room)}:${safe(zone || 'All')}:${safe(label, 'Group')}`;
+
+  try {
+    await jpost('/groups', { id, label, room, zone, members });
+  } catch (err) {
+    console.error('Failed to save group', err);
+    alert('Could not save group. Please try again.');
+    return;
+  }
+
+  if (plan) {
+    const planMap = await getPlanMap();
+    const planSpec = planMap[plan] || {};
+    const photoperiod = planSpec.photoperiod || '16/8';
+    const durationHours = parsePhotoperiodHours(photoperiod);
+    try {
+      await jpost('/sched', {
+        id,
+        period: '1d',
+        photoperiod: [photoperiod],
+        start: '06:00',
+        durationHours,
+        rampUpMin: planSpec?.ramp?.sunrise || 10,
+        rampDownMin: planSpec?.ramp?.sunset || 10,
+        planKey: plan
+      });
+    } catch (err) {
+      console.error('Failed to attach schedule', err);
+      alert('Group saved but schedule could not be created.');
+      return;
+    }
+    alert('Group saved and scheduled.');
+  } else {
+    alert('Group saved.');
+  }
+}
+
+async function applyNow() {
+  const planField = document.getElementById('grp-plan');
+  const list = document.getElementById('grp-members');
+  if (!planField || !list) return;
+
+  const planKey = (planField.value || '').trim();
+  if (!planKey) {
+    alert('Pick a Plan first (or save without applying).');
+    return;
+  }
+
+  const ids = Array.from(list.querySelectorAll('input[type="checkbox"]:checked')).map((input) => input.value);
+  if (!ids.length) {
+    alert('Select at least one light before applying a plan.');
+    return;
+  }
+
+  const planMap = await getPlanMap();
+  const planSpec = planMap[planKey] || {};
+  const ch = Array.isArray(planSpec?.days)
+    ? planSpec.days[0] || {}
+    : (planSpec?.days ? Object.values(planSpec.days)[0] || {} : {});
+  const hex = mixHEX12({
+    cw: ch.cw ?? 35,
+    ww: ch.ww ?? 35,
+    bl: ch.bl ?? 15,
+    rd: ch.rd ?? 15
+  });
+
+  let success = 0;
+  let failure = 0;
+  for (const id of ids) {
+    try {
+      await jpatch(`/api/devicedatas/device/${id}`, { status: 'on', value: hex });
+      success += 1;
+    } catch (err) {
+      console.error(`Failed to apply plan to device ${id}`, err);
+      failure += 1;
+    }
+  }
+
+  if (failure) {
+    alert(`Applied plan ${planKey} to ${success} light(s). ${failure} failed.`);
+  } else {
+    alert(`Applied plan ${planKey} to ${success} light(s).`);
+  }
+}
+
+function cloneGroupUI() {
+  const labelField = document.getElementById('grp-label');
+  if (!labelField) return;
+  const current = labelField.value || '';
+  const suggestion = current ? `${current} (Clone)` : '';
+  const label = window.prompt('New group name?', suggestion);
+  if (!label) return;
+  labelField.value = label;
+}
+
+async function seedDemo(planMap, devices, farm) {
+  const confirmed = window.confirm('Seed the GreenReach demo groups and schedules?');
+  if (!confirmed) return;
+
+  const seeds = [
+    {
+      room: 'Propagation Bay',
+      zone: 'Propagation North',
+      label: 'Propagation North — Demo',
+      plan: 'GR-Propagation-BL55',
+      start: '06:00'
+    },
+    {
+      room: 'Flower Bay',
+      zone: 'Flower East',
+      label: 'Flower East — Demo',
+      plan: 'GR-Flower-RD60',
+      start: '18:00'
+    }
+  ];
+
+  const planLookup = normalizePlanMap(planMap || window.GROUP_PLAN_MAP || {});
+  const deviceList = Array.isArray(devices) ? devices : [];
+  const zoneSet = new Set(Array.isArray(farm?.zones) ? farm.zones : []);
+  const created = [];
+  const errors = [];
+
+  for (const seed of seeds) {
+    const roomKey = seed.room?.trim().toLowerCase();
+    if (!roomKey) continue;
+    const members = deviceList
+      .filter((device) => {
+        const roomValues = [
+          device?.meta?.room,
+          device?.room,
+          device?.location?.room
+        ].filter(Boolean).map((value) => String(value).trim().toLowerCase());
+        return roomValues.includes(roomKey);
+      })
+      .filter((device) => {
+        if (!seed.zone) return true;
+        const zoneValues = [
+          device?.meta?.zone,
+          device?.zone,
+          device?.location?.zone
+        ].filter(Boolean).map((value) => String(value).trim().toLowerCase());
+        return zoneValues.includes(seed.zone.trim().toLowerCase());
+      })
+      .map((device) => String(device?.id))
+      .filter(Boolean);
+
+    const safe = (value, fallback) => {
+      const v = (value || fallback || '').replace(/[^a-z0-9]+/gi, '');
+      return v || 'Group';
+    };
+
+    const id = `group:${safe(seed.room)}:${safe(seed.zone, 'All')}:${safe('Demo')}`;
+    const payload = {
+      id,
+      label: seed.label,
+      room: seed.room,
+      zone: seed.zone,
+      members
+    };
+
+    try {
+      await jpost('/groups', payload);
+    } catch (err) {
+      try {
+        await jput(`/groups/${encodeURIComponent(id)}`, payload);
+      } catch (errPut) {
+        console.error('Failed to seed group', seed, errPut);
+        errors.push(`Group ${seed.label}`);
+        continue;
+      }
+    }
+
+    const planSpec = planLookup[seed.plan] || {};
+    const photoperiod = planSpec.photoperiod || '16/8';
+    const durationHours = parsePhotoperiodHours(photoperiod);
+    const schedulePayload = {
+      id,
+      period: '1d',
+      photoperiod: [photoperiod],
+      start: seed.start || '06:00',
+      durationHours,
+      rampUpMin: planSpec?.ramp?.sunrise || 10,
+      rampDownMin: planSpec?.ramp?.sunset || 10,
+      planKey: seed.plan
+    };
+
+    try {
+      await jpost('/sched', schedulePayload);
+    } catch (err) {
+      try {
+        await jput(`/sched/${encodeURIComponent(id)}`, schedulePayload);
+      } catch (errPut) {
+        console.error('Failed to seed schedule', seed, errPut);
+        errors.push(`Schedule for ${seed.label}`);
+      }
+    }
+
+    if (seed.zone) {
+      zoneSet.add(seed.zone);
+    }
+    created.push({ label: seed.label, members: members.length, plan: seed.plan });
+  }
+
+  const zoneList = Array.from(zoneSet);
+  if (zoneList.length !== (Array.isArray(farm?.zones) ? farm.zones.length : 0)) {
+    try {
+      await jpost('/farm', { ...farm, zones: zoneList });
+      farm = { ...farm, zones: zoneList };
+      const dl = document.getElementById('zones-list');
+      if (dl) {
+        dl.innerHTML = '';
+        zoneList.forEach((zone) => {
+          const option = document.createElement('option');
+          option.value = zone;
+          dl.appendChild(option);
+        });
+      }
+    } catch (err) {
+      console.error('Failed to update farm zones during seeding', err);
+      errors.push('Farm zones');
+    }
+  }
+
+  if (created.length) {
+    const summary = created.map((item) => `${item.label} (${item.members} lights, ${item.plan})`).join(', ');
+    alert(`Demo seeded: ${summary}.` + (errors.length ? ` Issues: ${errors.join(', ')}.` : ''));
+  } else {
+    alert('No demo groups were created. Check room, zone, and plan availability.');
+  }
+}
 // Fallbacks for device pick state if not defined elsewhere
 if (typeof getDevicePickState !== 'function') {
   window.getDevicePickState = function() {
@@ -318,8 +890,9 @@ function collectRoomsFromState() {
 }
 
 function updateGroupActionStates({ hasGroup = false, hasRoom = false, hasZone = false } = {}) {
-  const applyDisabled = !(hasGroup && hasRoom && hasZone);
-  const saveDisabled = !(hasRoom && hasZone);
+  const requireZone = !ROOM_ONLY_GROUPS;
+  const applyDisabled = !(hasGroup && hasRoom && (requireZone ? hasZone : true));
+  const saveDisabled = !(hasRoom && (requireZone ? hasZone : true));
   ['grpApply', 'grpOn', 'grpOff'].forEach((id) => {
     const btn = document.getElementById(id);
     if (btn) btn.disabled = applyDisabled;
@@ -353,16 +926,47 @@ function seedGroupRoomZoneDropdowns() {
     if (!fixtureSummary) return;
     const roomId = roomSel.value;
 const zoneValue = zoneSel ? zoneSel.value : '';
+const zoneSelected = ROOM_ONLY_GROUPS ? true : !!(zoneValue && zoneValue.trim());
 updateGroupActionStates({
   hasGroup: Boolean(STATE?.currentGroup),
   hasRoom: !!roomId,
-  hasZone: !!(zoneValue && zoneValue.trim()),
+  hasZone: zoneSelected,
   selection: buildSelection()
 });
 if (!roomId) {
   fixtureSummary.innerHTML = '<span style="color:#64748b;font-size:13px;">Select a room to view lights.</span>';
   return;
 }
+
+    if (ROOM_ONLY_GROUPS) {
+      const devices = Array.isArray(STATE?.devices) ? STATE.devices : [];
+      const normalizedRoom = String(roomId || '').trim().toLowerCase();
+      const roomDevices = devices.filter((device) => {
+        if (!device) return false;
+        const candidates = [
+          device.room,
+          device.roomId,
+          device.roomName,
+          device.location?.room,
+          device.location?.name,
+          device.meta?.room,
+          device.meta?.roomId,
+          device.meta?.roomName,
+        ]
+          .map((value) => (typeof value === 'string' ? value.trim().toLowerCase() : ''))
+          .filter(Boolean);
+        return candidates.includes(normalizedRoom);
+      });
+      if (!roomDevices.length) {
+        fixtureSummary.innerHTML = '<span style="color:#64748b;font-size:13px;">No controller lights are assigned to this room.</span>';
+      } else {
+        const items = roomDevices
+          .map((device) => `<div style="font-size:13px;">${escapeHtml(device.deviceName || device.name || `Device ${device.id}`)} <span style="color:#94a3b8;">#${escapeHtml(String(device.id || ''))}</span></div>`)
+          .join('');
+        fixtureSummary.innerHTML = items;
+      }
+      return;
+    }
     const setups = (window.STATE?.lightSetups || []).filter(s => (s.room === roomId || s.room === (window.STATE?.rooms?.find(r=>r.id===roomId)?.name)));
     if (!setups.length) {
       fixtureSummary.innerHTML = '<span style="color:#64748b;font-size:13px;">No lights configured for this room.</span>';
@@ -555,11 +1159,12 @@ function isForSelection(lightMeta, selectedRoom, selectedZone) {
     (sel.name && lit.name && lit.name === sel.name) ||
     (sel.name && lit.id && lit.id === sel.name);
   if (!(idMatch || nameMatch)) return false;
+  const zoneRequired = !ROOM_ONLY_GROUPS;
   if (selectedZone === undefined) return true;
   const targetZone = normZone(selectedZone);
-  if (!targetZone) return true;
+  if (!targetZone) return !zoneRequired || !ROOM_ONLY_GROUPS;
   const lightZone = normZone(lightMeta?.zone ?? lightMeta?.zoneId ?? lightMeta?.zoneName);
-  return lightZone === targetZone;
+  return zoneRequired ? (lightZone === targetZone) : true;
 }
 
 // --- Build the candidate set strictly from Room+Zone ------------------------
@@ -567,15 +1172,17 @@ function isForSelection(lightMeta, selectedRoom, selectedZone) {
 function collectCandidatesForSelection(selectedRoom, selectedZone) {
   const rooms = collectRoomsFromState() || [];
   const sel = resolveRoomRef(selectedRoom, rooms);
+  const zoneRequired = !ROOM_ONLY_GROUPS;
   const targetZone = normZone(selectedZone);
-  if ((!sel.id && !sel.name) || !targetZone) return [];
+  if (!sel.id && !sel.name) return [];
+  if (zoneRequired && !targetZone) return [];
 
   const outMap = new Map();
 
   function ensureCandidate(id, payload) {
     if (!id) return;
     const payloadZone = normZone(payload.zone ?? payload.zoneId ?? payload.zoneName);
-    if (payloadZone !== targetZone) return;
+    if (zoneRequired && payloadZone !== targetZone) return;
     if (!outMap.has(id)) {
       outMap.set(id, { ...payload, zone: payloadZone });
     }
@@ -584,7 +1191,7 @@ function collectCandidatesForSelection(selectedRoom, selectedZone) {
   (STATE?.lightSetups || []).forEach((setup) => {
     const sRoom = resolveRoomRef(setup?.room, rooms);
     const candidateZone = normZone(setup?.zone);
-    if (!candidateZone) return;
+    if (zoneRequired && !candidateZone) return;
     if (!isForSelection({ roomId: sRoom.id, room: sRoom.name, zone: candidateZone }, sel, targetZone)) return;
     (setup?.fixtures || []).forEach((fixture) => {
       if (!fixture) return;
@@ -608,7 +1215,7 @@ function collectCandidatesForSelection(selectedRoom, selectedZone) {
     if (!fixture) return;
     const fRoom = resolveRoomRef(fixture?.roomId ?? fixture?.room, rooms);
     const candidateZone = normZone(fixture.zone ?? fixture.zoneId ?? fixture.zoneName);
-    if (!candidateZone) return;
+    if (zoneRequired && !candidateZone) return;
     if (!isForSelection({ roomId: fRoom.id, room: fRoom.name, zone: candidateZone }, sel, targetZone)) return;
     const id = stableLightId(fixture);
     ensureCandidate(id, {
@@ -635,7 +1242,7 @@ function collectCandidatesForSelection(selectedRoom, selectedZone) {
       device?.location?.zoneName ??
       (Array.isArray(device?.zones) ? device.zones[0] : '')
     );
-    if (!candidateZone) return;
+    if (zoneRequired && !candidateZone) return;
     if (!isForSelection({ roomId: dRoom.id, room: dRoom.name, zone: candidateZone }, sel, targetZone)) return;
     const id = stableLightId(device);
     ensureCandidate(id, {
@@ -653,7 +1260,7 @@ function collectCandidatesForSelection(selectedRoom, selectedZone) {
     if (!metaId) return;
     const mRoom = resolveRoomRef(meta?.roomId ?? meta?.room ?? meta?.roomName, rooms);
     const candidateZone = normZone(meta?.zone ?? meta?.zoneId ?? meta?.zoneName);
-    if (!candidateZone) return;
+    if (zoneRequired && !candidateZone) return;
     if (!isForSelection({ roomId: mRoom.id, room: mRoom.name, zone: candidateZone }, sel, targetZone)) return;
     ensureCandidate(String(metaId), {
       ...meta,
@@ -677,8 +1284,11 @@ function collectCandidatesForSelection(selectedRoom, selectedZone) {
 function computeRostersForSelection(selectedRoom, selectedZone) {
   const rooms = collectRoomsFromState() || [];
   const selection = resolveRoomRef(selectedRoom, rooms);
+  const zoneRequired = !ROOM_ONLY_GROUPS;
   const targetZone = normZone(selectedZone);
-  if ((!selection.id && !selection.name) || !targetZone) return { assigned: [], ungrouped: [] };
+  if ((!selection.id && !selection.name) || (zoneRequired && !targetZone)) {
+    return { assigned: [], ungrouped: [] };
+  }
 
   const candidates = collectCandidatesForSelection(selectedRoom, targetZone);
   if (!candidates.length) return { assigned: [], ungrouped: [] };
@@ -687,36 +1297,28 @@ function computeRostersForSelection(selectedRoom, selectedZone) {
   (STATE?.groups || []).forEach((group) => {
     if (!group) return;
     const match = group.match && typeof group.match === 'object' ? group.match : null;
-    if (match) {
-      const matchZone = normZone(match.zone);
-      if (matchZone && matchZone === targetZone) {
-        const matchRoom = resolveRoomRef(match.room, rooms);
-        if (isForSelection({ roomId: matchRoom.id, room: matchRoom.name, zone: matchZone }, selection, targetZone)) {
-          candidates.forEach((candidate) => {
-            if (candidate?.id) assignedIds.add(candidate.id);
-          });
-        }
-      }
-      return;
-    }
+    const roomRef = resolveRoomRef(
+      match?.room ?? group.room ?? group.roomId ?? group.roomName,
+      rooms
+    );
+    const matchZone = normZone(match?.zone ?? group.zone ?? group.zoneId ?? group.zoneName);
+    const matchesSelection = isForSelection(
+      { roomId: roomRef.id, room: roomRef.name, zone: matchZone },
+      selection,
+      zoneRequired ? targetZone : ''
+    );
+    if (!matchesSelection) return;
+    if (zoneRequired && matchZone && targetZone && matchZone !== targetZone) return;
 
-    (Array.isArray(group?.lights) ? group.lights : []).forEach((light) => {
-      if (!light) return;
-      const normalized = typeof light === 'string' ? { id: String(light).trim() } : light;
+    const members = Array.isArray(group?.lights)
+      ? group.lights
+      : Array.isArray(group?.members)
+        ? group.members
+        : [];
+    members.forEach((member) => {
+      const normalized = typeof member === 'string' ? { id: String(member).trim() } : member;
       if (!normalized?.id) return;
-      const matchesSelection = isForSelection(
-        {
-          roomId: normalized.roomId ?? normalized.room,
-          room: normalized.roomName ?? normalized.room,
-          zone: normalized.zone,
-        },
-        selection,
-        targetZone
-      );
-      if (!matchesSelection) return;
-      const id = typeof light === 'string' ? String(light).trim() : stableLightId(light);
-      if (!id) return;
-      assignedIds.add(id);
+      assignedIds.add(String(normalized.id));
     });
   });
 
@@ -724,7 +1326,8 @@ function computeRostersForSelection(selectedRoom, selectedZone) {
   const ungrouped = [];
   candidates.forEach((candidate) => {
     if (!candidate?.id) return;
-    (assignedIds.has(candidate.id) ? assigned : ungrouped).push(candidate);
+    const id = String(candidate.id);
+    (assignedIds.has(id) ? assigned : ungrouped).push(candidate);
   });
 
   return { assigned, ungrouped };
@@ -2247,6 +2850,75 @@ function minutesToHHMM(mins) {
   const m = Math.round(mins % 60);
   return `${h.toString().padStart(2, '0')}:${m.toString().padStart(2, '0')}`;
 }
+
+function drawSparkline(canvas, values = [], options = {}) {
+  if (!canvas || (typeof HTMLCanvasElement !== 'undefined' && !(canvas instanceof HTMLCanvasElement))) return;
+  const ctx = canvas.getContext('2d');
+  if (!ctx) return;
+
+  const safeValues = Array.isArray(values)
+    ? values
+        .map((value) => Number(value))
+        .filter((value) => Number.isFinite(value))
+    : [];
+
+  const width = Math.max(1, Math.round(options.width || canvas.width || 120));
+  const height = Math.max(1, Math.round(options.height || canvas.height || 40));
+  if (canvas.width !== width) canvas.width = width;
+  if (canvas.height !== height) canvas.height = height;
+
+  ctx.clearRect(0, 0, width, height);
+
+  const strokeColor = options.color || '#0ea5e9';
+  const fallbackColor = '#cbd5f5';
+  const paddingX = 4;
+  const paddingY = 4;
+  const spanX = Math.max(1, width - paddingX * 2);
+  const spanY = Math.max(1, height - paddingY * 2);
+
+  ctx.lineWidth = 1.5;
+  ctx.lineJoin = 'round';
+  ctx.lineCap = 'round';
+
+  if (!safeValues.length) {
+    ctx.strokeStyle = fallbackColor;
+    ctx.beginPath();
+    ctx.moveTo(paddingX, height - paddingY - spanY / 2);
+    ctx.lineTo(width - paddingX, height - paddingY - spanY / 2);
+    ctx.stroke();
+    return;
+  }
+
+  const min = Math.min(...safeValues);
+  const max = Math.max(...safeValues);
+  const span = max - min;
+
+  ctx.strokeStyle = strokeColor;
+  ctx.beginPath();
+
+  let lastX = paddingX;
+  let lastY = height - paddingY;
+
+  safeValues.forEach((value, index) => {
+    const progress = safeValues.length === 1 ? 0.5 : index / (safeValues.length - 1);
+    const x = paddingX + progress * spanX;
+    const ratio = span === 0 ? 0.5 : (value - min) / span;
+    const y = height - paddingY - ratio * spanY;
+    if (index === 0) {
+      ctx.moveTo(x, y);
+    } else {
+      ctx.lineTo(x, y);
+    }
+    lastX = x;
+    lastY = y;
+  });
+  ctx.stroke();
+
+  ctx.fillStyle = strokeColor;
+  ctx.beginPath();
+  ctx.arc(lastX, lastY, 2.5, 0, Math.PI * 2);
+  ctx.fill();
+}
 // Global lights status UI initializer stub
 function initLightsStatusUI() {
   // TODO: Replace with real lights status UI initialization if needed
@@ -2556,14 +3228,36 @@ function normalizeFarmDoc(farm) {
 }
 // Global JSON loader
 async function loadJSON(url) {
-  const resp = await fetch(url);
+  const resp = await fetch(resolveApiUrl(url));
   if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+  return await resp.json();
+}
+
+async function saveJSON(url, payload, { method = 'POST', headers = {}, expectJson = true } = {}) {
+  const resp = await fetch(resolveApiUrl(url), {
+    method,
+    headers: { ..._hdrs(), ...headers },
+    body: JSON.stringify(payload ?? {}),
+  });
+  if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+  if (!expectJson) return null;
+  const contentType = resp.headers.get('content-type') || '';
+  if (!contentType.toLowerCase().includes('application/json')) return null;
   return await resp.json();
 }
 // Light Engine Charlie - Comprehensive Dashboard Application
 // Global API fetch helper
+function resolveApiUrl(url) {
+  if (!url && url !== '') return url;
+  const text = String(url);
+  if (/^https?:/i.test(text)) return text;
+  const base = (window.API_BASE || '').replace(/\/+$/, '');
+  if (!text) return base || '/';
+  return text.startsWith('/') ? `${base}${text}` : `${base}/${text}`;
+}
+
 async function api(url, opts = {}) {
-  const resp = await fetch(url, opts);
+  const resp = await fetch(resolveApiUrl(url), opts);
   if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
   return await resp.json();
 }
@@ -8018,7 +8712,7 @@ async function loadAllData() {
     
     // Load static data files
     const [groups, schedules, plans, environment, calibrations, spdLibrary, deviceMeta, deviceKB, equipmentKB, deviceManufacturers, farm, rooms, switchbotDevices] = await Promise.all([
-      loadJSON('./data/groups.json'),
+      api('/groups').catch((err) => { console.warn('Failed to load /groups', err); return { ok: false, groups: [] }; }),
       loadJSON('./data/schedules.json'),
       loadJSON('./data/plans.json'),
       api('/env'),
@@ -8033,7 +8727,38 @@ async function loadAllData() {
       loadJSON('./data/switchbot-devices.json')
     ]);
 
-  STATE.groups = groups?.groups || [];
+  const incomingGroups = Array.isArray(groups?.groups)
+    ? groups.groups
+    : (Array.isArray(groups) ? groups : []);
+  STATE.groups = incomingGroups.map((group) => {
+    if (!group || typeof group !== 'object') return group;
+    const room = group.room ?? group.roomId ?? group.match?.room ?? '';
+    const zone = group.zone ?? group.zoneId ?? group.match?.zone ?? '';
+    const label = group.label || group.name || group.id || '';
+    const membersRaw = Array.isArray(group.members)
+      ? group.members
+      : Array.isArray(group.lights)
+        ? group.lights
+        : [];
+    const lights = membersRaw.map((entry) => {
+      if (typeof entry === 'string') return { id: entry };
+      if (entry && typeof entry === 'object') {
+        const id = entry.id || entry.deviceId || entry.device_id || entry.deviceID;
+        return id ? { ...entry, id: String(id) } : null;
+      }
+      return null;
+    }).filter(Boolean);
+    return {
+      ...group,
+      name: label,
+      label,
+      room,
+      zone,
+      match: room || zone ? { room, zone } : group.match,
+      lights,
+      members: lights.map((light) => ({ id: light.id })),
+    };
+  });
     STATE.schedules = schedules?.schedules || [];
     STATE.plans = plans?.plans || [];
   STATE.environment = environment?.zones || [];
@@ -8262,10 +8987,10 @@ function renderGroups() {
       const idx = STATE.groups.findIndex(g => g.id === group.id);
       if (idx >= 0) {
         STATE.groups[idx] = { ...group };
-        Promise.resolve(saveJSON('./data/groups.json', { groups: STATE.groups }))
+        Promise.resolve(saveJSON('/groups', { groups: STATE.groups }))
           .then(async () => {
             // Reload groups from disk to ensure persistence
-            const groupsReloaded = await loadJSON('./data/groups.json');
+            const groupsReloaded = await api('/groups');
             if (groupsReloaded && Array.isArray(groupsReloaded.groups)) {
               STATE.groups = groupsReloaded.groups;
               normalizeGroupsInState();
@@ -10366,7 +11091,7 @@ function wireGlobalEvents() {
 
     const { roomId: selectedRoomId, roomName: selectedRoomName, zone: selectedZone } = getSelectedGroupRoomZone();
     const hasRoomSelection = !!(selectedRoomValue && selectedRoomValue.trim());
-    const hasZoneSelection = !!(selectedZoneValue && selectedZoneValue.trim());
+    const hasZoneSelection = ROOM_ONLY_GROUPS ? true : !!(selectedZoneValue && selectedZoneValue.trim());
     const hasFilters = hasRoomSelection && hasZoneSelection;
 
     const selectionPayload = {
@@ -10447,7 +11172,9 @@ function wireGlobalEvents() {
     // Meta status: roster count and online
     if (groupsStatus) {
       if (!hasFilters) {
-        groupsStatus.textContent = 'Select a room and zone to preview this group.';
+        groupsStatus.textContent = ROOM_ONLY_GROUPS
+          ? 'Select a room to preview this group.'
+          : 'Select a room and zone to preview this group.';
       } else {
         try {
           const filteredIds = filteredLights.map((entry) => entry.id).filter(Boolean);
@@ -10457,9 +11184,14 @@ function wireGlobalEvents() {
           const online = targets.filter((d) => d && d.online !== false).length;
           const planName = STATE.plans.find((p) => p.id === group.plan)?.name || '—';
           const schedName = STATE.schedules.find((s) => s.id === group.schedule)?.name || '—';
-          groupsStatus.textContent = `${filteredLights.length} light(s) • ${online} online • Plan: ${planName} • Schedule: ${schedName}`;
+          const roomLabel = hasRoomSelection ? selectedRoomValue : '';
+          const zoneLabel = ROOM_ONLY_GROUPS ? '' : selectedZoneValue;
+          const locationLabel = [roomLabel, zoneLabel].filter(Boolean).join(' · ');
+          groupsStatus.textContent = `${filteredLights.length} light(s) • ${online} online${locationLabel ? ` • ${locationLabel}` : ''} • Plan: ${planName} • Schedule: ${schedName}`;
         } catch {
-          groupsStatus.textContent = 'Select a room and zone to preview this group.';
+          groupsStatus.textContent = ROOM_ONLY_GROUPS
+            ? 'Select a room to preview this group.'
+            : 'Select a room and zone to preview this group.';
         }
       }
     }
@@ -10490,12 +11222,16 @@ function wireGlobalEvents() {
     if (groupRosterEmpty) {
       if (!hasFilters) {
         groupRosterEmpty.style.display = 'block';
-        groupRosterEmpty.textContent = 'Select a room and zone to view this group.';
+        groupRosterEmpty.textContent = ROOM_ONLY_GROUPS
+          ? 'Select a room to view this group.'
+          : 'Select a room and zone to view this group.';
       } else if (filteredLights.length) {
         groupRosterEmpty.style.display = 'none';
       } else {
         groupRosterEmpty.style.display = 'block';
-        groupRosterEmpty.textContent = 'No lights in this group for the selected room and zone.';
+        groupRosterEmpty.textContent = ROOM_ONLY_GROUPS
+          ? 'No lights in this group for the selected room.'
+          : 'No lights in this group for the selected room and zone.';
       }
     }
 
@@ -10503,12 +11239,12 @@ function wireGlobalEvents() {
     if (ungroupedList) {
       const { rawRoom, roomId, roomName, zone } = getSelectedGroupRoomZone();
       const selectedRoom = roomId || roomName ? { id: roomId, name: roomName } : rawRoom;
-      const zoneValue = normZone(zone);
+      const zoneValue = ROOM_ONLY_GROUPS ? '' : normZone(zone);
       const hasRoom =
         typeof selectedRoom === 'string'
           ? !!selectedRoom.trim()
           : !!(selectedRoom && (selectedRoom.id || selectedRoom.name));
-      const hasZone = !!zoneValue;
+      const hasZone = ROOM_ONLY_GROUPS ? true : !!zoneValue;
       const roster = hasRoom && hasZone ? computeRostersForSelection(selectedRoom, zoneValue) : { assigned: [], ungrouped: [] };
       const assignedIds = new Set((roster.assigned || []).map((entry) => entry.id).filter(Boolean));
       const ungrouped = roster.ungrouped || [];
@@ -10516,7 +11252,9 @@ function wireGlobalEvents() {
       if (!hasRoom || !hasZone) {
         if (ungroupedEmpty) {
           ungroupedEmpty.style.display = 'block';
-          ungroupedEmpty.textContent = 'Select a room and zone to view configured lights.';
+          ungroupedEmpty.textContent = ROOM_ONLY_GROUPS
+            ? 'Select a room to view configured lights.'
+            : 'Select a room and zone to view configured lights.';
         }
       } else if (!ungrouped.length) {
         if (ungroupedEmpty) {
@@ -10524,7 +11262,9 @@ function wireGlobalEvents() {
           const hasAnyCandidates = (roster.assigned || []).length > 0;
           ungroupedEmpty.textContent = hasAnyCandidates
             ? 'All lights are assigned to groups.'
-            : 'No lights found for this room and zone.';
+            : ROOM_ONLY_GROUPS
+              ? 'No lights found for this room.'
+              : 'No lights found for this room and zone.';
         }
       } else {
         if (ungroupedEmpty) ungroupedEmpty.style.display = 'none';
@@ -10579,11 +11319,11 @@ function wireGlobalEvents() {
         });
       }
       if (ungroupedStatus) {
-        if (!hasRoom || !hasZone) {
-          ungroupedStatus.textContent = 'Select a room and zone';
-        } else {
-          ungroupedStatus.textContent = `${ungrouped.length} ungrouped`;
-        }
+      if (!hasRoom || !hasZone) {
+        ungroupedStatus.textContent = ROOM_ONLY_GROUPS ? 'Select a room' : 'Select a room and zone';
+      } else {
+        ungroupedStatus.textContent = `${ungrouped.length} ungrouped`;
+      }
       }
     }
     // Removed rendering of light cards in group card as requested.
@@ -10726,7 +11466,7 @@ function wireGlobalEvents() {
       if (group) group.schedule = edited.id;
       await Promise.all([
         saveJSON('./data/schedules.json', { schedules: STATE.schedules }),
-        saveJSON('./data/groups.json', { groups: STATE.groups })
+        saveJSON('/groups', { groups: STATE.groups })
       ]);
       updateGroupUI(group);
       setStatus('Saved group schedule');
@@ -10781,7 +11521,7 @@ function wireGlobalEvents() {
     if (groupsStatus) groupsStatus.textContent = 'Group saved';
   });
   btnReloadGroups?.addEventListener('click', async () => {
-    const data = await loadJSON('./data/groups.json');
+    const data = await api('/groups');
     STATE.groups = data?.groups || [];
     normalizeGroupsInState();
     renderGroups();
@@ -10831,7 +11571,7 @@ function wireGlobalEvents() {
   });
 
   async function saveGroups() {
-    const ok = await saveJSON('./data/groups.json', { groups: STATE.groups });
+    const ok = await saveJSON('/groups', { groups: STATE.groups });
     if (ok) {
       setStatus('Groups saved');
       // Update controller assignments when groups change
@@ -11020,7 +11760,7 @@ function wireGlobalEvents() {
     STATE.schedules = STATE.schedules.filter(s => s.id !== id);
     // Unlink from any groups referencing it
     STATE.groups.forEach(g => { if (g.schedule === id) g.schedule = ''; });
-    await Promise.all([saveSchedules(), saveJSON('./data/groups.json', { groups: STATE.groups })]);
+    await Promise.all([saveSchedules(), saveJSON('/groups', { groups: STATE.groups })]);
     renderSchedules();
     setStatus(`Deleted schedule ${id}`);
   });
@@ -11108,7 +11848,7 @@ function wireGlobalEvents() {
       // File-only: persist to groups.json as a pending mix so a Room Wizard or future apply can use it
       try {
         STATE.currentGroup.pendingSpectrum = { ...mix, updatedAt: new Date().toISOString() };
-        await saveJSON('./data/groups.json', { groups: STATE.groups });
+        await saveJSON('/groups', { groups: STATE.groups });
         setStatus('Saved spectrum to file only (pending)');
         showToast({ title: 'Saved to file only', msg: 'Pending spectrum saved to groups.json', kind: 'info', icon: '💾' });
       } catch (e) {
@@ -12391,11 +13131,28 @@ const OVERVIEW_METRIC_META = [
   { key: 'co2', label: 'CO₂', unit: ' ppm', precision: 0 }
 ];
 
+function clamp01(x) {
+  return Math.max(0, Math.min(1, Number.isFinite(x) ? x : 0));
+}
+
+function pctToByte64(pct) {
+  const ratio = clamp01((Number(pct) || 0) / 100);
+  return Math.round(ratio * 0x64)
+    .toString(16)
+    .padStart(2, '0')
+    .toUpperCase();
+}
+
+function hex12(cw, ww, bl, rd) {
+  return `${pctToByte64(cw)}${pctToByte64(ww)}${pctToByte64(bl)}${pctToByte64(rd)}0000`;
+}
+
 const OVERVIEW_ROOM_META = new Map();
-const DEMO_COLOR_SEQUENCE = ['640000000000', '006400000000', '000064000000', '000000640000', '404000200000'];
 const DEMO_SAFE_HEX = '737373730000';
 const DEMO_MIN_BPM = 60;
 const DEMO_MAX_BPM = 140;
+const DEMO_STATIC_ON = Object.freeze({ status: 'on', value: hex12(20, 20, 0, 0) });
+const DEMO_STATIC_OFF = Object.freeze({ status: 'off', value: null });
 
 let DEMO_STATE = {
   active: false,
@@ -12403,10 +13160,84 @@ let DEMO_STATE = {
   roomLabel: '',
   bpm: 90,
   step: 0,
-  interval: 667,
+  interval: getDemoIntervalFromBpm(90),
   devices: []
 };
 let DEMO_TIMER = null;
+let DEMO_SNAPSHOT = new Map();
+const DEMO_LOCKS = new Map();
+
+function deviceSupportsSpectrum(device) {
+  if (!device || typeof device !== 'object') return true;
+  if (Array.isArray(device.channels)) return device.channels.length >= 4;
+  const channelCount = Number(
+    device.channels ??
+    device.channelCount ??
+    device.channel_count ??
+    device.lightChannels ??
+    device.channelTotal
+  );
+  if (Number.isFinite(channelCount) && channelCount >= 4) return true;
+  const spectrumType = firstNonEmptyString(
+    device.spectrumType,
+    device.spectrum_type,
+    device.type,
+    device.deviceType
+  ).toLowerCase();
+  return /(dynamic|spectrum|rgbw|rg|cw)/.test(spectrumType || '');
+}
+
+function stepHexDynamic(step) {
+  const beat = Number(step) % 8;
+  switch (beat) {
+    case 0: return hex12(5, 5, 0, 45);
+    case 1: return hex12(5, 5, 45, 0);
+    case 2: return hex12(40, 10, 0, 0);
+    case 3: return hex12(10, 40, 0, 0);
+    case 4: return hex12(20, 20, 10, 10);
+    case 5: return hex12(10, 10, 20, 20);
+    case 6: return hex12(0, 0, 0, 45);
+    case 7: default: return hex12(0, 0, 45, 0);
+  }
+}
+
+function snapshotDeviceState(device) {
+  const statusRaw = firstNonEmptyString(
+    device?.status,
+    device?.power,
+    device?.lastState?.status,
+    device?.onOffStatus === true ? 'on' : '',
+    device?.onOffStatus === false ? 'off' : ''
+  ).toLowerCase();
+  const status = statusRaw === 'on' ? 'on' : 'off';
+  const value = firstNonEmptyString(
+    device?.valueHex,
+    device?.hexValue,
+    device?.value,
+    device?.lastValue,
+    device?.lastCommand?.value,
+    device?.command?.value,
+    device?.lastKnownHex
+  );
+  return {
+    status,
+    value: typeof value === 'string' && value.trim() ? value : null
+  };
+}
+
+function refreshDemoSnapshot(devices) {
+  const next = new Map();
+  (devices || []).forEach((device) => {
+    const id = firstNonEmptyString(device?.id, device?.deviceId, device?.device_id);
+    if (!id) return;
+    if (DEMO_SNAPSHOT.has(id)) {
+      next.set(id, DEMO_SNAPSHOT.get(id));
+    } else {
+      next.set(id, snapshotDeviceState(device));
+    }
+  });
+  DEMO_SNAPSHOT = next;
+}
 
 function normalizeIdentifier(value) {
   if (value === undefined || value === null) return '';
@@ -12460,6 +13291,158 @@ function collectZoneIdentifiers(zone) {
     add(zone.meta.scope);
   }
   return identifiers;
+}
+
+function normalizeAiMode(value, fallback = 'advisory') {
+  const raw = firstNonEmptyString(value);
+  if (!raw) return fallback;
+  const normalized = String(raw).trim().toLowerCase();
+  if (/off|disable|manual|pause/.test(normalized)) return 'off';
+  if (/auto|pilot|autonomous|always/.test(normalized)) return 'autopilot';
+  if (/advisory|assist|guide/.test(normalized)) return 'advisory';
+  return fallback;
+}
+
+function detectAiMode(room, zone, fallbackMode = 'advisory') {
+  const identifiers = new Set([...collectRoomIdentifiers(room), ...collectZoneIdentifiers(zone)]);
+  const fallback = normalizeAiMode(fallbackMode, 'advisory');
+  const aiState = STATE.ai || STATE.aiAssist || STATE.aiSettings || STATE.aiConfig || {};
+
+  const explicitMode = normalizeAiMode(
+    firstNonEmptyString(
+      zone?.meta?.aiMode,
+      zone?.meta?.ai?.mode,
+      zone?.aiMode,
+      room?.meta?.aiMode,
+      room?.aiMode,
+      room?.ai?.mode
+    ),
+    ''
+  );
+  if (explicitMode) return explicitMode;
+
+  const matchesIdentifiers = (candidate) => {
+    if (!identifiers.size) return false;
+    return valueMatchesIdentifiers(candidate, identifiers);
+  };
+
+  if (matchesIdentifiers(aiState?.disabledRooms) || matchesIdentifiers(aiState?.offRooms) || matchesIdentifiers(aiState?.off)) {
+    return 'off';
+  }
+  if (matchesIdentifiers(aiState?.autopilotRooms) || matchesIdentifiers(aiState?.autopilot) || matchesIdentifiers(aiState?.roomsAutopilot)) {
+    return 'autopilot';
+  }
+
+  const aiRooms = aiState?.rooms;
+  if (identifiers.size && aiRooms) {
+    const processEntry = (entry, key) => {
+      if (!entry) return null;
+      const mode = normalizeAiMode(entry.mode || entry.status || entry.posture || entry);
+      if (!mode) return null;
+      if (key) {
+        const normalizedKey = normalizeIdentifier(key);
+        if (normalizedKey && identifiers.has(normalizedKey)) return mode;
+      }
+      if (matchesIdentifiers(entry.scope) || matchesIdentifiers(entry.match) || matchesIdentifiers(entry.room) || matchesIdentifiers(entry.zone) || matchesIdentifiers(entry.rooms) || matchesIdentifiers(entry.targets)) {
+        return mode;
+      }
+      return null;
+    };
+
+    if (Array.isArray(aiRooms)) {
+      for (const entry of aiRooms) {
+        const mode = processEntry(entry);
+        if (mode) return mode;
+      }
+    } else if (typeof aiRooms === 'object') {
+      for (const [key, entry] of Object.entries(aiRooms)) {
+        const mode = processEntry(entry, key);
+        if (mode) return mode;
+      }
+    }
+  }
+
+  const globalMode = normalizeAiMode(aiState?.mode || aiState?.status || aiState?.posture || STATE.aiMode, '');
+  if (globalMode) {
+    if (globalMode === 'off') return 'off';
+    if (globalMode === 'autopilot') return 'autopilot';
+    if (globalMode === 'advisory') return 'advisory';
+  }
+
+  return fallback;
+}
+
+function deriveRoomAiStatus(room, zone, fallbackMode = 'advisory', fallbackLabel = 'Advisory') {
+  const mode = detectAiMode(room, zone, fallbackMode);
+  let label = fallbackLabel || 'Advisory';
+  let description = 'AI Copilot providing advisory insights for this room.';
+
+  if (mode === 'autopilot') {
+    label = 'Autopilot';
+    description = 'AI Copilot is actively steering this room in autopilot mode.';
+  } else if (mode === 'off') {
+    label = 'Off';
+    description = 'AI Copilot is paused for this room.';
+  } else if (!fallbackLabel || fallbackLabel.toLowerCase() === 'off') {
+    label = 'Advisory';
+  }
+
+  return { status: mode, label, description, shortLabel: label };
+}
+
+function normalizeMinutesValue(value) {
+  const minutes = Number(value);
+  if (!Number.isFinite(minutes)) return 0;
+  const rounded = Math.round(minutes);
+  return ((rounded % 1440) + 1440) % 1440;
+}
+
+function getMinutesInTimezone(timezone) {
+  const now = new Date();
+  if (typeof Intl !== 'undefined' && Intl.DateTimeFormat) {
+    try {
+      const formatter = new Intl.DateTimeFormat('en-US', { hour12: false, hour: '2-digit', minute: '2-digit', timeZone: timezone || Intl.DateTimeFormat().resolvedOptions().timeZone });
+      const parts = formatter.formatToParts(now);
+      const hour = Number(parts.find((part) => part.type === 'hour')?.value || now.getHours());
+      const minute = Number(parts.find((part) => part.type === 'minute')?.value || now.getMinutes());
+      return normalizeMinutesValue(hour * 60 + minute);
+    } catch (error) {
+      // fall through to local time
+    }
+  }
+  return normalizeMinutesValue(now.getHours() * 60 + now.getMinutes());
+}
+
+function scheduleCycleIncludes(cycle, nowMinutes) {
+  if (!cycle) return false;
+  const startMinutes = normalizeMinutesValue(toMinutes(cycle.on));
+  const endMinutes = normalizeMinutesValue(toMinutes(cycle.off));
+  const rampUp = normalizeMinutesValue(Number(cycle?.ramp?.up ?? cycle?.ramp?.start ?? cycle?.rampUp ?? cycle?.ramp_start ?? 0));
+  const rampDown = normalizeMinutesValue(Number(cycle?.ramp?.down ?? cycle?.ramp?.end ?? cycle?.rampDown ?? cycle?.ramp_end ?? 0));
+  const start = normalizeMinutesValue(startMinutes - rampUp);
+  const end = normalizeMinutesValue(endMinutes + rampDown);
+
+  if (start === end) return true;
+  if (start < end) {
+    return nowMinutes >= start && nowMinutes < end;
+  }
+  return nowMinutes >= start || nowMinutes < end;
+}
+
+function isScheduleActiveNow(schedule) {
+  if (!schedule || typeof schedule !== 'object') return false;
+  const cycles = Array.isArray(schedule.cycles) ? schedule.cycles.filter(Boolean) : [];
+  if (!cycles.length) return false;
+
+  const tz = firstNonEmptyString(
+    schedule.timezone,
+    schedule.timeZone,
+    STATE?.farm?.timezone,
+    STATE?.timezone,
+    STATE?.config?.timezone
+  );
+  const nowMinutes = getMinutesInTimezone(tz);
+  return cycles.some((cycle) => scheduleCycleIncludes(cycle, nowMinutes));
 }
 
 function buildOverviewKey(room, zone, index) {
@@ -12524,17 +13507,20 @@ function findGroupForRoom(room, zone, groups) {
 }
 
 function formatOverviewMetricValue(sensor, meta) {
+  const unit = (meta.unit || '').trim();
   if (!sensor || typeof sensor.current !== 'number' || !Number.isFinite(sensor.current)) {
-    return '—';
+    return { value: '—', unit, full: '—' };
   }
-  const value = meta.precision != null ? sensor.current.toFixed(meta.precision) : String(sensor.current);
-  if (meta.unit.trim() === '%') {
-    return `${value}${meta.unit}`;
+  let valueText;
+  if (unit === 'ppm') {
+    valueText = Number(sensor.current).toLocaleString();
+  } else if (meta.precision != null) {
+    valueText = Number(sensor.current).toFixed(meta.precision);
+  } else {
+    valueText = String(sensor.current);
   }
-  if (meta.unit.trim() === ' ppm') {
-    return `${Number(sensor.current).toLocaleString()}${meta.unit}`;
-  }
-  return `${value}${meta.unit}`;
+  const full = `${valueText}${meta.unit}`;
+  return { value: valueText, unit, full };
 }
 
 function computeOverviewMetricStatus(sensor) {
@@ -12552,10 +13538,13 @@ function computeOverviewMetricStatus(sensor) {
 function buildOverviewMetrics(zone) {
   return OVERVIEW_METRIC_META.map((meta) => {
     const sensor = zone?.sensors?.[meta.key] || null;
+    const formatted = formatOverviewMetricValue(sensor, meta);
     return {
       key: meta.key,
       label: meta.label,
-      value: formatOverviewMetricValue(sensor, meta),
+      value: formatted.value,
+      unit: formatted.unit,
+      full: formatted.full,
       status: computeOverviewMetricStatus(sensor),
       sensor
     };
@@ -12660,18 +13649,48 @@ function deriveAutomationStatus(room, zone, rules, devices) {
   if (governed) detailParts.push('controller');
   if (Array.isArray(devices) && devices.length) detailParts.push(`${devices.length} fixture${devices.length === 1 ? '' : 's'}`);
   const label = active ? `Automation active${detailParts.length ? ` • ${detailParts.join(' + ')}` : ''}` : 'Automation idle';
-  return { status: active ? 'on' : 'off', label, matches };
+  const description = active
+    ? label
+    : matches.length
+      ? `Automation armed with ${matches.length} rule${matches.length === 1 ? '' : 's'}.`
+      : 'Automation is idle for this room.';
+  return {
+    status: active ? 'on' : 'off',
+    label,
+    matches,
+    governed,
+    description,
+    shortLabel: active ? 'On' : 'Off'
+  };
 }
 
 function deriveSpectraStatus(planInfo, scheduleInfo, devices) {
   const hasPlan = Boolean(planInfo?.id);
   const hasSchedule = Boolean(scheduleInfo?.id);
-  const active = hasPlan && hasSchedule;
+  const scheduled = hasPlan && hasSchedule;
   const count = Array.isArray(devices) ? devices.length : 0;
-  const label = active
-    ? `SpectraSync active${count ? ` • ${count} fixture${count === 1 ? '' : 's'}` : ''}`
-    : 'SpectraSync idle';
-  return { status: active ? 'active' : 'idle', label };
+  const activeNow = scheduled && isScheduleActiveNow(scheduleInfo?.schedule);
+  let label;
+  if (!scheduled) {
+    label = 'SpectraSync idle';
+  } else if (activeNow) {
+    label = `SpectraSync active${count ? ` • ${count} fixture${count === 1 ? '' : 's'}` : ''}`;
+  } else {
+    label = 'SpectraSync scheduled • Outside photoperiod';
+  }
+  const description = scheduled
+    ? activeNow
+      ? 'Lights are in an active SpectraSync photoperiod window right now.'
+      : 'SpectraSync has a schedule, but the current time is outside the photoperiod window.'
+    : 'Assign a plan and schedule to enable SpectraSync.';
+  return {
+    status: scheduled && activeNow ? 'active' : 'idle',
+    label,
+    active: scheduled,
+    activeNow,
+    description,
+    shortLabel: scheduled ? (activeNow ? 'Active' : 'Idle') : 'Idle'
+  };
 }
 
 function deriveAiPostureStatus() {
@@ -12694,7 +13713,7 @@ function deriveAiPostureStatus() {
 }
 
 function createOverviewMetricHTML(metric) {
-  const classes = [`overview-metric`, `overview-metric--${metric.status}`];
+  const classes = ['metric', `metric--${metric.status}`];
   const interactive = metric.status !== 'unknown' && metric.sensor;
   const attrs = [`data-metric="${escapeHtml(metric.key)}"`];
   if (interactive) {
@@ -12702,59 +13721,54 @@ function createOverviewMetricHTML(metric) {
   } else {
     attrs.push('aria-disabled="true"');
   }
-  const trend = interactive ? '<canvas class="overview-metric__trend" width="220" height="48" aria-hidden="true"></canvas>' : '';
+  const trend = interactive
+    ? '<canvas class="spark" width="220" height="36" aria-hidden="true"></canvas>'
+    : '';
+  const unitText = metric.value === '—' ? '' : metric.unit;
+  const unit = unitText ? `<div class="unit">${escapeHtml(unitText)}</div>` : '<div class="unit">&nbsp;</div>';
+  const title = metric.full && metric.full !== '—'
+    ? ` title="${escapeHtml(`${metric.label}: ${metric.full}`)}"`
+    : '';
   return `
-    <div ${attrs.join(' ')} class="${classes.join(' ')}">
-      <span class="overview-metric__label">${escapeHtml(metric.label)}</span>
-      <span class="overview-metric__value">${escapeHtml(metric.value)}</span>
+    <div ${attrs.join(' ')} class="${classes.join(' ')}"${title}>
+      <div class="label">${escapeHtml(metric.label)}</div>
+      <div class="val">${escapeHtml(metric.value)}</div>
+      ${unit}
       ${trend}
     </div>
   `;
 }
 
 function createOverviewTile(entry) {
-  const aiClass = `overview-icon overview-icon--ai is-${entry.ai.status}`;
-  const automationClass = `overview-icon overview-icon--automation is-${entry.automation.status}`;
-  const spectraClass = `overview-icon overview-icon--spectra is-${entry.spectra.status}`;
-  const planDetail = entry.planInfo.detail ? `<span class="overview-plan__detail">${escapeHtml(entry.planInfo.detail)}</span>` : '';
-  const scheduleDetail = entry.scheduleInfo.detail ? `<span class="overview-plan__detail">${escapeHtml(entry.scheduleInfo.detail)}</span>` : '';
+  const planDetail = entry.planInfo.detail
+    ? `<span class="detail">${escapeHtml(entry.planInfo.detail)}</span>`
+    : '';
+  const scheduleDetail = entry.scheduleInfo.detail
+    ? `<span class="detail">${escapeHtml(entry.scheduleInfo.detail)}</span>`
+    : '';
   return `
-    <article class="overview-tile" data-room-key="${escapeHtml(entry.key)}">
-      <header class="overview-tile__header">
+    <article class="room-tile" data-room-key="${escapeHtml(entry.key)}">
+      <header class="room-tile__hdr">
         <div>
-          <h2 class="overview-tile__title">${escapeHtml(entry.name)}</h2>
-          ${entry.subtitle ? `<p class="overview-tile__subtitle">${escapeHtml(entry.subtitle)}</p>` : ''}
+          <h2 class="room-name">${escapeHtml(entry.name)}</h2>
+          ${entry.subtitle ? `<p class="room-subtitle">${escapeHtml(entry.subtitle)}</p>` : ''}
         </div>
-        <div class="overview-tile__icons">
-          <span class="${aiClass}" title="AI Copilot: ${escapeHtml(entry.ai.label)}">
-            <span class="overview-icon__dot" aria-hidden="true"></span>
-            <span class="overview-icon__label">AI</span>
-            <span class="sr-only">AI status ${escapeHtml(entry.ai.label)}</span>
-          </span>
-          <span class="${automationClass}" title="${escapeHtml(entry.automation.label)}">
-            <span class="overview-icon__dot" aria-hidden="true"></span>
-            <span class="overview-icon__label">Automation</span>
-            <span class="sr-only">Automation status ${escapeHtml(entry.automation.label)}</span>
-          </span>
-          <span class="${spectraClass}" title="${escapeHtml(entry.spectra.label)}">
-            <span class="overview-icon__dot" aria-hidden="true"></span>
-            <span class="overview-icon__label">SpectraSync</span>
-            <span class="sr-only">SpectraSync status ${escapeHtml(entry.spectra.label)}</span>
-          </span>
-        </div>
+        <div class="room-status" data-role="ai-cluster" aria-live="polite"></div>
       </header>
-      <div class="overview-tile__metrics">
+      <div class="metrics">
         ${entry.metrics.map((metric) => createOverviewMetricHTML(metric)).join('')}
       </div>
-      <div class="overview-tile__plans">
-        <div class="overview-plan">
-          <span class="overview-plan__label">Plan</span>
-          <span class="overview-plan__value">${escapeHtml(entry.planInfo.name)}</span>
+      <div class="plan-row">
+        <span class="label">Plan</span>
+        <div class="plan-row__value">
+          <span class="badge">${escapeHtml(entry.planInfo.name)}</span>
           ${planDetail}
         </div>
-        <div class="overview-plan">
-          <span class="overview-plan__label">Schedule</span>
-          <span class="overview-plan__value">${escapeHtml(entry.scheduleInfo.name)}</span>
+      </div>
+      <div class="plan-row">
+        <span class="label">Schedule</span>
+        <div class="plan-row__value">
+          <span class="badge">${escapeHtml(entry.scheduleInfo.name)}</span>
           ${scheduleDetail}
         </div>
       </div>
@@ -12762,17 +13776,171 @@ function createOverviewTile(entry) {
   `;
 }
 
+function addControlTipHandlers(node) {
+  if (!node) return;
+  const tip = node.getAttribute('data-tip') || node.getAttribute('title');
+  if (!tip) return;
+  node.setAttribute('data-tip', tip);
+  const show = () => {
+    if (typeof showTipFor === 'function') showTipFor(node);
+  };
+  const hide = () => {
+    if (typeof hideTip === 'function') hideTip();
+  };
+  node.addEventListener('mouseenter', show);
+  node.addEventListener('mouseleave', hide);
+  node.addEventListener('focus', show);
+  node.addEventListener('blur', hide);
+}
+
+function handleAiControlClick(entry) {
+  if (!entry || !entry.ai) return;
+  const msg = entry.ai.description || entry.ai.label || 'AI Copilot';
+  if (typeof showToast === 'function') {
+    showToast({
+      title: `${entry.roomLabel} • AI`,
+      msg,
+      kind: entry.ai.status === 'off' ? 'warn' : 'info',
+      icon: '🤖'
+    });
+  }
+  const card = document.getElementById('environmentalAiCard');
+  if (card && typeof card.scrollIntoView === 'function') {
+    card.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    card.classList.add('card--spotlight');
+    setTimeout(() => card.classList.remove('card--spotlight'), 1200);
+  }
+}
+
+function handleAutomationControlClick(entry) {
+  if (!entry || !entry.automation) return;
+  const msg = entry.automation.description || entry.automation.label || 'Automation status';
+  if (typeof showToast === 'function') {
+    showToast({
+      title: `${entry.roomLabel} • Automation`,
+      msg,
+      kind: entry.automation.status === 'on' ? 'success' : entry.automation.paused ? 'warn' : 'info',
+      icon: '⚙️'
+    });
+  }
+}
+
+function handleSpectraControlClick(entry) {
+  if (!entry || !entry.spectra) return;
+  const msg = entry.spectra.description || entry.spectra.label || 'SpectraSync status';
+  if (typeof showToast === 'function') {
+    showToast({
+      title: `${entry.roomLabel} • SpectraSync`,
+      msg,
+      kind: entry.spectra.status === 'active' ? 'success' : entry.spectra.paused ? 'warn' : 'info',
+      icon: '🌈'
+    });
+  }
+  const card = document.getElementById('spectraSyncFeature');
+  if (card && typeof card.scrollIntoView === 'function') {
+    card.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    card.classList.add('card--spotlight');
+    setTimeout(() => card.classList.remove('card--spotlight'), 1200);
+  }
+}
+
+function mountAiAutomationCluster(entry, tile) {
+  const host = tile?.querySelector('[data-role="ai-cluster"]');
+  const template = document.getElementById('aiAutomationClusterTemplate');
+  if (!host || !template) return;
+  host.innerHTML = '';
+  const fragment = template.content.cloneNode(true);
+  host.appendChild(fragment);
+  const cluster = host.querySelector('.ai-automation-cluster');
+  if (!cluster) return;
+  cluster.dataset.roomKey = entry.key || '';
+
+  const aiBtn = cluster.querySelector('[data-control="ai"]');
+  if (aiBtn) {
+    const mode = entry.ai?.status || 'off';
+    aiBtn.dataset.mode = mode;
+    aiBtn.setAttribute('aria-pressed', mode !== 'off' ? 'true' : 'false');
+    aiBtn.setAttribute('aria-label', `AI ${entry.ai?.label || 'status'} for ${entry.roomLabel}`);
+    const labelEl = aiBtn.querySelector('[data-status]');
+    if (labelEl) labelEl.textContent = entry.ai?.shortLabel || entry.ai?.label || 'AI';
+    if (entry.ai?.description || entry.ai?.label) {
+      const tip = entry.ai.description || entry.ai.label;
+      aiBtn.setAttribute('data-tip', tip);
+      aiBtn.title = tip;
+      addControlTipHandlers(aiBtn);
+    }
+    aiBtn.addEventListener('click', () => handleAiControlClick(entry));
+  }
+
+  const automationBtn = cluster.querySelector('[data-control="automation"]');
+  if (automationBtn) {
+    const state = entry.automation?.paused ? 'paused' : entry.automation?.status || 'off';
+    automationBtn.dataset.state = state;
+    automationBtn.setAttribute('aria-pressed', state === 'on' ? 'true' : 'false');
+    automationBtn.setAttribute('aria-label', `Automation ${entry.automation?.label || 'status'} for ${entry.roomLabel}`);
+    const labelEl = automationBtn.querySelector('[data-status]');
+    if (labelEl) labelEl.textContent = entry.automation?.shortLabel || (state === 'on' ? 'On' : state === 'paused' ? 'Paused' : 'Off');
+    if (entry.automation?.description || entry.automation?.label) {
+      const tip = entry.automation.description || entry.automation.label;
+      automationBtn.setAttribute('data-tip', tip);
+      automationBtn.title = tip;
+      addControlTipHandlers(automationBtn);
+    }
+    automationBtn.addEventListener('click', () => handleAutomationControlClick(entry));
+  }
+
+  const spectraBtn = cluster.querySelector('[data-control="spectra"]');
+  if (spectraBtn) {
+    let state = 'idle';
+    if (entry.spectra?.paused) state = 'paused';
+    else if (entry.spectra?.activeNow) state = 'active';
+    spectraBtn.dataset.state = state;
+    spectraBtn.setAttribute('aria-pressed', state === 'active' ? 'true' : 'false');
+    spectraBtn.setAttribute('aria-label', `SpectraSync ${entry.spectra?.label || 'status'} for ${entry.roomLabel}`);
+    const labelEl = spectraBtn.querySelector('[data-status]');
+    if (labelEl) labelEl.textContent = entry.spectra?.shortLabel || (state === 'active' ? 'Active' : state === 'paused' ? 'Paused' : 'Idle');
+    if (entry.spectra?.description || entry.spectra?.label) {
+      const tip = entry.spectra.description || entry.spectra.label;
+      spectraBtn.setAttribute('data-tip', tip);
+      spectraBtn.title = tip;
+      addControlTipHandlers(spectraBtn);
+    }
+    spectraBtn.addEventListener('click', () => handleSpectraControlClick(entry));
+  }
+
+  const lockChip = cluster.querySelector('[data-role="tour-lock"]');
+  if (lockChip) {
+    if (entry.demoLocked) {
+      lockChip.hidden = false;
+      lockChip.setAttribute('data-tip', 'Demo mode active • Automation and SpectraSync are paused.');
+      lockChip.title = 'Demo mode active • Automation and SpectraSync are paused.';
+      lockChip.setAttribute('aria-label', `Tour lock active for ${entry.roomLabel}`);
+      lockChip.setAttribute('role', 'status');
+      lockChip.tabIndex = 0;
+      addControlTipHandlers(lockChip);
+    } else {
+      lockChip.hidden = true;
+      lockChip.removeAttribute('role');
+      lockChip.removeAttribute('tabindex');
+    }
+  }
+}
+
 function hydrateOverviewTile(entry, tile) {
+  mountAiAutomationCluster(entry, tile);
   entry.metrics.forEach((metric) => {
-    const metricEl = tile.querySelector(`[data-metric="${metric.key}"]`);
+    const metricEl = tile.querySelector(`.metric[data-metric="${metric.key}"]`);
     if (!metricEl) return;
-    if (!metric.sensor || !entry.zone) return;
-    const canvas = metricEl.querySelector('canvas');
+    if (!metric.sensor || !entry.zone) {
+      metricEl.setAttribute('aria-disabled', 'true');
+      return;
+    }
+    const canvas = metricEl.querySelector('canvas.spark');
     if (canvas) {
       const values = Array.isArray(metric.sensor.history) ? metric.sensor.history.slice(-144).reverse() : [];
-      const color = metric.status === 'warn' ? '#ef4444' : metric.status === 'ok' ? '#22c55e' : '#facc15';
+      const color = metric.status === 'warn' ? '#ef4444' : metric.status === 'ok' ? '#22c55e' : '#f59e0b';
       canvas.width = canvas.clientWidth || 220;
-      canvas.height = canvas.clientHeight || 48;
+      canvas.height = canvas.clientHeight || 36;
       drawSparkline(canvas, values, { width: canvas.width, height: canvas.height, color });
     }
     const activate = (event) => {
@@ -12795,6 +13963,37 @@ function buildRoomSubtitle(room, zone, group) {
   return parts.join(' • ');
 }
 
+function applyDemoLock(entry) {
+  if (!entry) return;
+  if (!DEMO_LOCKS.has(entry.key)) {
+    entry.demoLocked = false;
+    return;
+  }
+  entry.demoLocked = true;
+  entry.automation = {
+    ...entry.automation,
+    status: 'off',
+    shortLabel: 'Paused',
+    label: 'Automation paused for demo',
+    description: 'Automation paused while demo mode is active.',
+    paused: true
+  };
+  entry.spectra = {
+    ...entry.spectra,
+    status: 'idle',
+    shortLabel: 'Paused',
+    label: 'SpectraSync paused for demo',
+    description: 'SpectraSync paused while demo mode is active.',
+    activeNow: false,
+    paused: true
+  };
+  entry.ai = {
+    ...entry.ai,
+    description: `${entry.ai.description || entry.ai.label || 'AI Copilot'} • Demo mode active.`,
+    shortLabel: entry.ai.shortLabel || entry.ai.label
+  };
+}
+
 function renderGrowRoomOverview() {
   const gridEl = document.getElementById('overviewGrid');
   if (!gridEl) return;
@@ -12810,6 +14009,8 @@ function renderGrowRoomOverview() {
   const groups = Array.isArray(STATE.groups) ? STATE.groups : [];
   const rules = Array.isArray(STATE.preAutomationRules) ? STATE.preAutomationRules : [];
   const aiPosture = deriveAiPostureStatus();
+  const fallbackAiMode = normalizeAiMode(aiPosture?.status || 'advisory', 'advisory');
+  const fallbackAiLabel = aiPosture?.label || (fallbackAiMode === 'autopilot' ? 'Autopilot' : fallbackAiMode === 'off' ? 'Off' : 'Advisory');
 
   const entries = [];
 
@@ -12825,8 +14026,9 @@ function renderGrowRoomOverview() {
       const devices = gatherDevicesForRoom(room, zone);
       const automation = deriveAutomationStatus(room, zone, rules, devices);
       const spectra = deriveSpectraStatus(planInfo, scheduleInfo, devices);
+      const ai = deriveRoomAiStatus(room, zone, fallbackAiMode, fallbackAiLabel);
       const key = buildOverviewKey(room, zone, index);
-      entries.push({
+      const entry = {
         key,
         name: room.name || room.id || `Room ${index + 1}`,
         subtitle: buildRoomSubtitle(room, zone, group),
@@ -12835,13 +14037,15 @@ function renderGrowRoomOverview() {
         scheduleInfo,
         devices,
         automation,
-        ai: aiPosture,
+        ai,
         spectra,
         zone,
         room,
         group,
         roomLabel: room.name || room.id || zone?.name || `Room ${index + 1}`
-      });
+      };
+      applyDemoLock(entry);
+      entries.push(entry);
     });
   } else if (zones.length) {
     zones.forEach((zone, index) => {
@@ -12851,11 +14055,12 @@ function renderGrowRoomOverview() {
       const devices = gatherDevicesForRoom(null, zone);
       const automation = deriveAutomationStatus(null, zone, rules, devices);
       const spectra = deriveSpectraStatus(planInfo, scheduleInfo, devices);
+      const ai = deriveRoomAiStatus(null, zone, fallbackAiMode, fallbackAiLabel);
       const key = buildOverviewKey(null, zone, index);
       const subtitleParts = [];
       if (zone.location) subtitleParts.push(zone.location);
       if (zone.meta?.source) subtitleParts.push(`Source: ${zone.meta.source}`);
-      entries.push({
+      const entry = {
         key,
         name: zone.name || zone.id || `Zone ${index + 1}`,
         subtitle: subtitleParts.join(' • '),
@@ -12864,15 +14069,24 @@ function renderGrowRoomOverview() {
         scheduleInfo,
         devices,
         automation,
-        ai: aiPosture,
+        ai,
         spectra,
         zone,
         room: null,
         group: null,
         roomLabel: zone.name || zone.id || `Zone ${index + 1}`
-      });
+      };
+      applyDemoLock(entry);
+      entries.push(entry);
     });
   }
+
+  const entryKeys = new Set(entries.map((entry) => entry.key));
+  Array.from(DEMO_LOCKS.keys()).forEach((key) => {
+    if (!entryKeys.has(key)) {
+      DEMO_LOCKS.delete(key);
+    }
+  });
 
   OVERVIEW_ROOM_META.clear();
   entries.forEach((entry) => OVERVIEW_ROOM_META.set(entry.key, entry));
@@ -12898,12 +14112,13 @@ function renderGrowRoomOverview() {
 
   if (DEMO_STATE.active) {
     if (!OVERVIEW_ROOM_META.has(DEMO_STATE.roomKey)) {
-      stopDemoMode({ silent: false, flush: false, reason: 'room-missing' });
+      stopDemoMode({ silent: false, flush: false, reason: 'room-missing', refresh: false });
     } else {
       const refreshed = OVERVIEW_ROOM_META.get(DEMO_STATE.roomKey);
       if (refreshed) {
         DEMO_STATE.devices = refreshed.devices;
         DEMO_STATE.roomLabel = refreshed.roomLabel;
+        refreshDemoSnapshot(refreshed.devices);
       }
     }
   }
@@ -12923,8 +14138,7 @@ function renderGrowRoomOverview() {
 }
 
 function controllerPatchDevice(deviceId, payload) {
-  const base = (window.API_BASE || '').replace(/\/+$/, '');
-  const url = `${base}/api/devicedatas/device/${encodeURIComponent(deviceId)}`;
+  const url = resolveApiUrl(`/api/devicedatas/device/${encodeURIComponent(deviceId)}`);
   return fetch(url, {
     method: 'PATCH',
     headers: { 'Content-Type': 'application/json' },
@@ -12943,29 +14157,25 @@ function clampBpm(value) {
 
 function getDemoIntervalFromBpm(bpm) {
   const clamped = clampBpm(bpm);
-  return Math.max(250, Math.round((60 / clamped) * 1000));
-}
-
-function getDemoPayload(step) {
-  if (step % 2 === 1) {
-    return { status: 'off', value: null };
-  }
-  const index = Math.floor(step / 2) % DEMO_COLOR_SEQUENCE.length;
-  return { status: 'on', value: DEMO_COLOR_SEQUENCE[index] };
+  const interval = Math.round((60 / clamped) * 1000);
+  return Math.max(250, Math.min(1000, interval));
 }
 
 async function runDemoTick() {
   if (!DEMO_STATE.active || !Array.isArray(DEMO_STATE.devices) || !DEMO_STATE.devices.length) return;
-  const payload = getDemoPayload(DEMO_STATE.step);
+  const step = DEMO_STATE.step;
   const commands = DEMO_STATE.devices.map((device) => {
     const id = firstNonEmptyString(device.id, device.deviceId, device.device_id);
     if (!id) return Promise.resolve();
+    const payload = deviceSupportsSpectrum(device)
+      ? { status: 'on', value: stepHexDynamic(step) }
+      : (step % 2 === 0 ? { ...DEMO_STATIC_ON } : { ...DEMO_STATIC_OFF });
     return controllerPatchDevice(id, payload).catch((error) => {
       console.warn('Demo patch failed', id, error);
     });
   });
   await Promise.all(commands);
-  DEMO_STATE.step = (DEMO_STATE.step + 1) % (DEMO_COLOR_SEQUENCE.length * 2);
+  DEMO_STATE.step = (step + 1) % 64;
 }
 
 function scheduleDemoTick() {
@@ -12979,13 +14189,25 @@ function scheduleDemoTick() {
   }, DEMO_STATE.interval);
 }
 
-function stopDemoMode({ silent = false, flush = true, reason = '' } = {}) {
+function stopDemoMode({ silent = false, flush = true, reason = '', restore = true, refresh = true } = {}) {
   if (!DEMO_STATE.active && !reason) return;
   clearTimeout(DEMO_TIMER);
   const wasActive = DEMO_STATE.active;
-  const label = DEMO_STATE.roomLabel;
-  const devices = DEMO_STATE.devices || [];
-  DEMO_STATE = { active: false, roomKey: '', roomLabel: '', bpm: 90, step: 0, interval: 667, devices: [] };
+  const label = DEMO_STATE.roomLabel || 'selected room';
+  const devices = Array.isArray(DEMO_STATE.devices) ? [...DEMO_STATE.devices] : [];
+  const snapshotEntries = Array.from(DEMO_SNAPSHOT.entries());
+  const lockedKey = DEMO_STATE.roomKey;
+
+  DEMO_STATE = {
+    active: false,
+    roomKey: '',
+    roomLabel: '',
+    bpm: 90,
+    step: 0,
+    interval: getDemoIntervalFromBpm(90),
+    devices: []
+  };
+  DEMO_SNAPSHOT = new Map();
 
   const roomSelect = document.getElementById('demoRoom');
   const bpmInput = document.getElementById('demoBpm');
@@ -12997,20 +14219,45 @@ function stopDemoMode({ silent = false, flush = true, reason = '' } = {}) {
   if (startBtn) startBtn.disabled = !OVERVIEW_ROOM_META.size;
   if (stopBtn) stopBtn.disabled = true;
 
-  if (flush && devices.length) {
-    Promise.all(devices.map((device) => {
-      const id = firstNonEmptyString(device.id, device.deviceId, device.device_id);
-      if (!id) return Promise.resolve();
-      return controllerPatchDevice(id, { status: 'on', value: DEMO_SAFE_HEX }).catch((error) => {
+  if (flush) {
+    const targetIds = new Set();
+    snapshotEntries.forEach(([id]) => {
+      if (id) targetIds.add(id);
+    });
+    devices.forEach((device) => {
+      const id = firstNonEmptyString(device?.id, device?.deviceId, device?.device_id);
+      if (id) targetIds.add(id);
+    });
+    const commands = Array.from(targetIds).map((id) =>
+      controllerPatchDevice(id, { status: 'off', value: null }).catch((error) => {
         console.warn('Demo reset failed', id, error);
-      });
-    })).catch(() => {});
+      })
+    );
+    if (commands.length) {
+      Promise.all(commands).catch(() => {});
+    }
+  }
+
+  if (lockedKey) {
+    DEMO_LOCKS.delete(lockedKey);
+  }
+  if (refresh) {
+    renderGrowRoomOverview();
   }
 
   if (wasActive && !silent) {
-    const kind = reason === 'room-missing' ? 'warn' : 'info';
-    const icon = reason === 'room-missing' ? '⚠️' : '⏹️';
-    const msg = reason === 'room-missing' ? 'Room is no longer available.' : `Demo ended for ${label}.`;
+    let kind = 'info';
+    let icon = '⏹️';
+    let msg = `Demo ended for ${label}.`;
+    if (reason === 'room-missing') {
+      kind = 'warn';
+      icon = '⚠️';
+      msg = 'Room is no longer available.';
+    } else if (reason === 'panic') {
+      kind = 'warn';
+      icon = '🛑';
+      msg = 'Demo interrupted (panic stop).';
+    }
     showToast({ title: 'Demo stopped', msg, kind, icon });
   }
 }
@@ -13038,6 +14285,9 @@ function startDemoMode() {
 
   stopDemoMode({ silent: true, flush: false });
 
+  DEMO_SNAPSHOT = new Map();
+  refreshDemoSnapshot(devices);
+
   DEMO_STATE = {
     active: true,
     roomKey,
@@ -13047,6 +14297,8 @@ function startDemoMode() {
     interval: getDemoIntervalFromBpm(bpm),
     devices
   };
+
+  DEMO_LOCKS.set(roomKey, { startedAt: Date.now() });
 
   startBtn.disabled = true;
   roomSelect.disabled = true;
@@ -13058,6 +14310,8 @@ function startDemoMode() {
   runDemoTick().finally(() => {
     if (DEMO_STATE.active) scheduleDemoTick();
   });
+
+  renderGrowRoomOverview();
 }
 
 function initOverviewDemoControls() {
@@ -13084,6 +14338,15 @@ function initOverviewDemoControls() {
     roomSelect.addEventListener('change', () => {
       if (DEMO_STATE.active) {
         stopDemoMode({ silent: false });
+      }
+    });
+  }
+
+  if (!window._demoPanicBound) {
+    window._demoPanicBound = true;
+    window.addEventListener('keydown', (event) => {
+      if (event.key === 'Escape') {
+        stopDemoMode({ silent: false, restore: false, reason: 'panic' });
       }
     });
   }

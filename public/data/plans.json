@@ -1,34 +1,40 @@
 {
   "plans": [
     {
-      "id": "lettuce-veg",
-      "name": "Lettuce Vegetative",
-      "description": "Optimized spectrum for leafy greens growth",
-      "spectrum": { "cw": 45, "ww": 35, "bl": 15, "rd": 5 },
-      "ppfd": 200,
-      "dli": 14.4,
-      "crop": "Greens",
-      "stage": "Vegetative"
+      "id": "GR-Propagation-BL55",
+      "photoperiod": "16/8",
+      "ramp": {
+        "sunrise": 10,
+        "sunset": 10
+      },
+      "days": [
+        {
+          "stage": "Static",
+          "cw": 20,
+          "ww": 20,
+          "bl": 55,
+          "rd": 25
+        }
+      ],
+      "name": "GR-Propagation-BL55"
     },
     {
-      "id": "herbs-general",
-      "name": "Herbs General",
-      "description": "Balanced spectrum for herb cultivation",
-      "spectrum": { "cw": 40, "ww": 30, "bl": 20, "rd": 10 },
-      "ppfd": 180,
-      "dli": 12.96,
-      "crop": "Herbs",
-      "stage": "Vegetative"
-    },
-    {
-      "id": "strawberry-flower",
-      "name": "Strawberry Flowering",
-      "description": "Enhanced red spectrum for flowering",
-      "spectrum": { "cw": 30, "ww": 25, "bl": 15, "rd": 30 },
-      "ppfd": 250,
-      "dli": 18.0,
-      "crop": "Strawberries",
-      "stage": "Flowering"
+      "id": "GR-Flower-RD60",
+      "photoperiod": "12/12",
+      "ramp": {
+        "sunrise": 10,
+        "sunset": 10
+      },
+      "days": [
+        {
+          "stage": "Static",
+          "cw": 35,
+          "ww": 35,
+          "bl": 15,
+          "rd": 60
+        }
+      ],
+      "name": "GR-Flower-RD60"
     }
   ]
 }

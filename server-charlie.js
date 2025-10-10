@@ -76,6 +76,8 @@ const DATA_DIR = path.resolve("./public/data");
 const FARM_PATH = path.join(DATA_DIR, 'farm.json');
 const CONTROLLER_PATH = path.join(DATA_DIR, 'controller.json');
 const GROUPS_PATH = path.join(DATA_DIR, 'groups.json');
+const PLANS_PATH = path.join(DATA_DIR, 'plans.json');
+const SCHEDULES_PATH = path.join(DATA_DIR, 'schedules.json');
 const UI_DATA_RESOURCES = new Map([
   ['farm', 'farm.json'],
   ['groups', 'groups.json'],
@@ -120,6 +122,80 @@ function saveGroupsFile(groups) {
   }
 }
 
+function loadPlansFile() {
+  ensureDataDir();
+  try {
+    if (!fs.existsSync(PLANS_PATH)) return [];
+    const raw = JSON.parse(fs.readFileSync(PLANS_PATH, 'utf8'));
+    if (Array.isArray(raw)) return raw;
+    if (raw && Array.isArray(raw.plans)) return raw.plans;
+    return [];
+  } catch (err) {
+    console.warn('[plans] Failed to read plans.json:', err.message);
+    return [];
+  }
+}
+
+function savePlansFile(plans) {
+  ensureDataDir();
+  try {
+    fs.writeFileSync(PLANS_PATH, JSON.stringify({ plans }, null, 2));
+    return true;
+  } catch (err) {
+    console.error('[plans] Failed to write plans.json:', err.message);
+    return false;
+  }
+}
+
+function loadSchedulesFile() {
+  ensureDataDir();
+  try {
+    if (!fs.existsSync(SCHEDULES_PATH)) return [];
+    const raw = JSON.parse(fs.readFileSync(SCHEDULES_PATH, 'utf8'));
+    if (Array.isArray(raw)) return raw;
+    if (raw && Array.isArray(raw.schedules)) return raw.schedules;
+    return [];
+  } catch (err) {
+    console.warn('[sched] Failed to read schedules.json:', err.message);
+    return [];
+  }
+}
+
+function saveSchedulesFile(schedules) {
+  ensureDataDir();
+  try {
+    fs.writeFileSync(SCHEDULES_PATH, JSON.stringify({ schedules }, null, 2));
+    return true;
+  } catch (err) {
+    console.error('[sched] Failed to write schedules.json:', err.message);
+    return false;
+  }
+}
+
+async function fetchKnownDeviceIds() {
+  try {
+    const controller = getController();
+    if (!controller) return new Set();
+    const url = `${controller.replace(/\/$/, '')}/api/devicedatas`;
+    const response = await fetch(url, { method: 'GET', headers: { accept: 'application/json' } }).catch(() => null);
+    if (!response || !response.ok) return new Set();
+    const body = await response.json().catch(() => ({}));
+    const devices = Array.isArray(body?.data) ? body.data : [];
+    const ids = new Set();
+    devices.forEach((device) => {
+      if (!device || typeof device !== 'object') return;
+      const raw = device.id ?? device.deviceId ?? device.device_id ?? device.deviceID;
+      if (raw == null) return;
+      const id = String(raw).trim();
+      if (id) ids.add(id);
+    });
+    return ids;
+  } catch (err) {
+    console.warn('[groups] Unable to fetch controller device ids:', err.message);
+    return new Set();
+  }
+}
+
 function normalizeMemberEntry(entry) {
   if (entry == null) return null;
   if (typeof entry === 'string') {
@@ -145,72 +221,138 @@ function normalizeGroupForResponse(group) {
   if (!group || typeof group !== 'object') return null;
   const id = typeof group.id === 'string' ? group.id.trim() : '';
   const name = typeof group.name === 'string' ? group.name.trim() : '';
+  const label = typeof group.label === 'string' ? group.label.trim() : name;
   const matchRaw = group.match && typeof group.match === 'object' ? group.match : null;
-  const room = matchRaw ? String(matchRaw.room ?? '').trim() : '';
-  const zone = matchRaw ? String(matchRaw.zone ?? '').trim() : '';
-  const hasMatch = !!(room && zone);
+  const room = String(group.room ?? matchRaw?.room ?? '').trim();
+  const zone = String(group.zone ?? matchRaw?.zone ?? '').trim();
   const membersSource = Array.isArray(group.members) ? group.members : Array.isArray(group.lights) ? group.lights : [];
   const members = membersSource.map(normalizeMemberEntry).filter(Boolean);
 
-  const response = { id, name };
+  const response = { id, name: name || label || id };
+  if (label) response.label = label;
+  if (room) response.room = room;
+  if (zone) response.zone = zone;
   if (typeof group.plan === 'string' && group.plan.trim()) response.plan = group.plan.trim();
   if (typeof group.schedule === 'string' && group.schedule.trim()) response.schedule = group.schedule.trim();
   if (group.pendingSpectrum && typeof group.pendingSpectrum === 'object') response.pendingSpectrum = group.pendingSpectrum;
-
-  if (hasMatch) {
-    response.match = { room, zone };
-  }
-  if (members.length > 0) {
-    response.members = members;
+  if (room || zone) response.match = { room, zone };
+  if (members.length > 0) response.members = members;
+  if (!response.members && Array.isArray(group.lights)) {
+    response.members = group.lights.map(normalizeMemberEntry).filter(Boolean);
   }
   return response;
 }
 
-function parseIncomingGroup(raw) {
+function parseIncomingGroup(raw, knownDeviceIds = null) {
   if (!raw || typeof raw !== 'object') throw new Error('Group payload must be an object.');
   const id = String(raw.id ?? raw.groupId ?? '').trim();
   if (!id) throw new Error('Group id is required.');
   const name = typeof raw.name === 'string' ? raw.name.trim() : '';
+  const label = typeof raw.label === 'string' ? raw.label.trim() : '';
 
   const matchRaw = raw.match && typeof raw.match === 'object' ? raw.match : null;
-  const matchRoom = matchRaw ? String(matchRaw.room ?? '').trim() : '';
-  const matchZone = matchRaw ? String(matchRaw.zone ?? '').trim() : '';
-  const hasMatch = !!(matchRoom && matchZone);
+  const room = String(raw.room ?? raw.roomId ?? matchRaw?.room ?? '').trim();
+  if (!room) throw new Error('Group room is required.');
+  const zone = String(raw.zone ?? raw.zoneId ?? matchRaw?.zone ?? '').trim();
 
   const membersSource = Array.isArray(raw.members) ? raw.members : Array.isArray(raw.lights) ? raw.lights : [];
   const members = membersSource.map(normalizeMemberEntry).filter(Boolean);
-  const hasMembers = members.length > 0;
+  if (!members.length) throw new Error('Group requires a non-empty members[] list.');
 
-  if (!hasMatch && !hasMembers) throw new Error('Group requires match.room + match.zone or a non-empty members[] list.');
+  const normalizedMembers = members.map((entry) => ({ id: String(entry.id).trim() })).filter((entry) => !!entry.id);
+  if (!normalizedMembers.length) throw new Error('Group members require valid ids.');
+  if (knownDeviceIds && knownDeviceIds.size) {
+    const unknown = normalizedMembers
+      .map((entry) => entry.id)
+      .filter((entry) => entry && !knownDeviceIds.has(entry));
+    if (unknown.length) {
+      throw new Error(`Unknown device id(s): ${unknown.join(', ')}`);
+    }
+  }
 
-  const stored = { ...raw, id, name };
+  const stored = {
+    ...raw,
+    id,
+    name: name || label || id,
+    label: label || name || id,
+    room,
+    zone,
+    match: { room, zone },
+    lights: normalizedMembers.map((entry) => ({ id: entry.id })),
+    members: normalizedMembers.map((entry) => entry.id),
+  };
   if (typeof stored.plan === 'string') stored.plan = stored.plan.trim();
   if (typeof stored.schedule === 'string') stored.schedule = stored.schedule.trim();
   if (!stored.plan) delete stored.plan;
   if (!stored.schedule) delete stored.schedule;
 
-  if (hasMatch) {
-    stored.match = { room: matchRoom, zone: matchZone };
-  } else {
-    delete stored.match;
-  }
-  stored.lights = members;
-  delete stored.members;
-
-  const response = { id, name };
-  if (stored.plan) response.plan = stored.plan;
-  if (stored.schedule) response.schedule = stored.schedule;
-  if (stored.pendingSpectrum && typeof stored.pendingSpectrum === 'object') {
-    response.pendingSpectrum = stored.pendingSpectrum;
-  }
-  if (hasMatch) {
-    response.match = { room: matchRoom, zone: matchZone };
-  }
-  if (hasMembers) {
-    response.members = members;
-  }
-
+  const response = normalizeGroupForResponse(stored);
   return { stored, response };
+}
+
+function normalizePlanEntry(raw, fallbackId = '') {
+  if (!raw || typeof raw !== 'object') return null;
+  const id = String(raw.id ?? fallbackId ?? '').trim();
+  if (!id) return null;
+  const plan = { ...raw, id };
+  if (!plan.name || typeof plan.name !== 'string' || !plan.name.trim()) {
+    plan.name = id;
+  }
+  if (typeof plan.photoperiod === 'string') plan.photoperiod = plan.photoperiod.trim();
+  return plan;
+}
+
+function parseIncomingPlans(body) {
+  let entries = [];
+  if (!body) throw new Error('Plan payload required.');
+  if (Array.isArray(body)) {
+    entries = body;
+  } else if (Array.isArray(body.plans)) {
+    entries = body.plans;
+  } else if (typeof body === 'object') {
+    entries = Object.entries(body).map(([id, value]) => ({ id, ...(value && typeof value === 'object' ? value : {}) }));
+  }
+  const normalized = entries
+    .map((entry, idx) => normalizePlanEntry(entry, entry?.id ?? `plan-${idx + 1}`))
+    .filter(Boolean);
+  if (!normalized.length) {
+    if (Array.isArray(body?.plans) && body.plans.length === 0) return [];
+    if (Array.isArray(body) && body.length === 0) return [];
+    throw new Error('At least one plan entry is required.');
+  }
+  return normalized;
+}
+
+function normalizeScheduleEntry(raw) {
+  if (!raw || typeof raw !== 'object') return null;
+  const idCandidate = [raw.id, raw.scheduleId, raw.deviceId, raw.device_id, raw.deviceID]
+    .map((value) => (typeof value === 'string' ? value.trim() : ''))
+    .find((value) => !!value);
+  if (!idCandidate) return null;
+  const schedule = { ...raw, id: idCandidate };
+  if (typeof schedule.planKey === 'string') schedule.planKey = schedule.planKey.trim();
+  if (typeof schedule.period === 'string') schedule.period = schedule.period.trim();
+  if (typeof schedule.start === 'string') schedule.start = schedule.start.trim();
+  return schedule;
+}
+
+function parseIncomingSchedules(body) {
+  if (!body) throw new Error('Schedule payload required.');
+  let entries = [];
+  if (Array.isArray(body)) {
+    entries = body;
+  } else if (Array.isArray(body.schedules)) {
+    entries = body.schedules;
+  } else if (typeof body === 'object') {
+    entries = [body];
+  }
+  const normalized = entries.map(normalizeScheduleEntry).filter(Boolean);
+  if (!normalized.length) {
+    if (Array.isArray(body?.schedules) && body.schedules.length === 0) return [];
+    if (Array.isArray(body) && body.length === 0) return [];
+    throw new Error('At least one schedule entry is required.');
+  }
+  return normalized;
 }
 function loadControllerFromDisk(){
   try {
@@ -2953,7 +3095,7 @@ app.get('/groups', (req, res) => {
   }
 });
 
-app.post('/groups', (req, res) => {
+app.post('/groups', async (req, res) => {
   setCors(req, res);
   const body = req.body ?? {};
   const incoming = Array.isArray(body.groups) ? body.groups : (Array.isArray(body) ? body : null);
@@ -2961,14 +3103,8 @@ app.post('/groups', (req, res) => {
     return res.status(400).json({ ok: false, error: 'Expected { groups: [...] } payload.' });
   }
   try {
-    const parsed = incoming.map((g) => {
-      if (g.match && (typeof g.match === 'object')) {
-        const room = String(g.match.room ?? '').trim();
-        const zone = String(g.match.zone ?? '').trim();
-        if (!room || !zone) throw new Error('Group match{} must include both room and zone.');
-      }
-      return parseIncomingGroup(g);
-    });
+    const knownIds = await fetchKnownDeviceIds();
+    const parsed = incoming.map((g) => parseIncomingGroup(g, knownIds));
     const stored = parsed.map((item) => item.stored);
     if (!saveGroupsFile(stored)) {
       return res.status(500).json({ ok: false, error: 'Failed to persist groups.' });
@@ -2979,7 +3115,7 @@ app.post('/groups', (req, res) => {
   }
 });
 
-app.put('/groups/:id', (req, res) => {
+app.put('/groups/:id', async (req, res) => {
   setCors(req, res);
   const id = String(req.params.id || '').trim();
   if (!id) return res.status(400).json({ ok: false, error: 'Group id is required.' });
@@ -2988,12 +3124,8 @@ app.put('/groups/:id', (req, res) => {
   if (idx === -1) return res.status(404).json({ ok: false, error: `Group '${id}' not found.` });
   try {
     const merged = { ...req.body, id };
-    if (merged.match && (typeof merged.match === 'object')) {
-      const room = String(merged.match.room ?? '').trim();
-      const zone = String(merged.match.zone ?? '').trim();
-      if (!room || !zone) throw new Error('Group match{} must include both room and zone.');
-    }
-    const { stored, response } = parseIncomingGroup(merged);
+    const knownIds = await fetchKnownDeviceIds();
+    const { stored, response } = parseIncomingGroup(merged, knownIds);
     existing[idx] = stored;
     if (!saveGroupsFile(existing)) {
       return res.status(500).json({ ok: false, error: 'Failed to persist groups.' });
@@ -3001,6 +3133,82 @@ app.put('/groups/:id', (req, res) => {
     return res.json({ ok: true, group: response });
   } catch (err) {
     return res.status(400).json({ ok: false, error: err.message });
+  }
+});
+
+app.options('/plans', (req, res) => { setCors(req, res); res.status(204).end(); });
+app.get('/plans', (req, res) => {
+  try {
+    setCors(req, res);
+    const plans = loadPlansFile();
+    res.json({ ok: true, plans: plans.map((plan) => normalizePlanEntry(plan, plan?.id)).filter(Boolean) });
+  } catch (err) {
+    res.status(500).json({ ok: false, error: err.message });
+  }
+});
+
+app.post('/plans', (req, res) => {
+  try {
+    setCors(req, res);
+    const plans = parseIncomingPlans(req.body);
+    if (Array.isArray(req.body?.plans) && req.body.plans.length === 0) {
+      if (!savePlansFile([])) {
+        return res.status(500).json({ ok: false, error: 'Failed to persist plans.' });
+      }
+      return res.json({ ok: true, plans: [] });
+    }
+    if (Array.isArray(req.body) && req.body.length === 0) {
+      if (!savePlansFile([])) {
+        return res.status(500).json({ ok: false, error: 'Failed to persist plans.' });
+      }
+      return res.json({ ok: true, plans: [] });
+    }
+    if (!savePlansFile(plans)) {
+      return res.status(500).json({ ok: false, error: 'Failed to persist plans.' });
+    }
+    res.json({ ok: true, plans });
+  } catch (err) {
+    res.status(400).json({ ok: false, error: err.message });
+  }
+});
+
+app.options('/sched', (req, res) => { setCors(req, res); res.status(204).end(); });
+app.get('/sched', (req, res) => {
+  try {
+    setCors(req, res);
+    const schedules = loadSchedulesFile().map(normalizeScheduleEntry).filter(Boolean);
+    res.json({ ok: true, schedules });
+  } catch (err) {
+    res.status(500).json({ ok: false, error: err.message });
+  }
+});
+
+app.post('/sched', (req, res) => {
+  try {
+    setCors(req, res);
+    const incoming = parseIncomingSchedules(req.body);
+    if ((Array.isArray(req.body?.schedules) && req.body.schedules.length === 0) ||
+        (Array.isArray(req.body) && req.body.length === 0)) {
+      if (!saveSchedulesFile([])) {
+        return res.status(500).json({ ok: false, error: 'Failed to persist schedules.' });
+      }
+      return res.json({ ok: true, schedules: [] });
+    }
+    const existing = loadSchedulesFile();
+    const map = new Map(existing.map((entry) => {
+      const normalized = normalizeScheduleEntry(entry);
+      return normalized ? [normalized.id, normalized] : null;
+    }).filter(Boolean));
+    for (const schedule of incoming) {
+      map.set(schedule.id, schedule);
+    }
+    const merged = Array.from(map.values());
+    if (!saveSchedulesFile(merged)) {
+      return res.status(500).json({ ok: false, error: 'Failed to persist schedules.' });
+    }
+    res.json({ ok: true, schedules: merged });
+  } catch (err) {
+    res.status(400).json({ ok: false, error: err.message });
   }
 });
 

@@ -3,14 +3,14 @@
   "location": {},
   "rooms": [
     {
-      "id": "room-prop",
-      "name": "Grow Room 1",
+      "id": "room-ue2cer",
+      "name": "My FArm - Room 1",
       "location": "",
       "hardwareCats": [
-        "fans"
+        "dehumidifier"
       ],
       "hardwareOrder": [
-        "fans"
+        "dehumidifier"
       ],
       "layout": {
         "type": "",
@@ -19,7 +19,7 @@
         "levels": 0
       },
       "zones": [
-        "Testing"
+        "Zone 1"
       ],
       "fixtures": [],
       "controlMethod": null,
@@ -50,11 +50,11 @@
       },
       "seriesCount": 0,
       "category": {
-        "fans": {
-          "count": 0,
-          "manufacturer": "",
+        "dehumidifier": {
+          "selectedEquipment": [],
           "wifi": false,
-          "wired": false
+          "wired": false,
+          "count": 0
         }
       },
       "_categoryProgress": {}
