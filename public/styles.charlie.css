@@ -4051,3 +4051,157 @@ input[type="range"]#grd {
   color: #64748b;
   font-size: 1.1rem;
 }
+
+#groups-setup {
+  margin: 16px 0;
+  padding: 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+#groups-setup header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+}
+
+#groups-setup header h2 {
+  font-size: 18px;
+  margin: 0;
+}
+
+#groups-setup header button {
+  border: none;
+  background: #0ea5e9;
+  color: #fff;
+  border-radius: 6px;
+  padding: 8px 12px;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+#groups-setup header button:hover {
+  background: #0284c7;
+}
+
+#groups-setup .row {
+  display: grid;
+  grid-template-columns: 140px minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 12px;
+}
+
+#groups-setup .row label {
+  font-size: 13px;
+  font-weight: 600;
+  color: #0f172a;
+}
+
+#groups-setup .row input,
+#groups-setup .row select {
+  font: inherit;
+  padding: 8px 10px;
+  border: 1px solid #cbd5f5;
+  border-radius: 6px;
+  background: #fff;
+  min-height: 36px;
+}
+
+#groups-setup .row button {
+  border: none;
+  background: #e2e8f0;
+  color: #0f172a;
+  border-radius: 6px;
+  padding: 8px 12px;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+#groups-setup .row button:hover {
+  background: #cbd5f5;
+}
+
+#grp-zone,
+#grp-label,
+#grp-plan {
+  width: 100%;
+}
+
+#groups-setup .row ul {
+  grid-column: 2 / span 2;
+}
+
+#groups-setup footer {
+  display: flex;
+  gap: 12px;
+  justify-content: flex-end;
+}
+
+#groups-setup footer button {
+  border: none;
+  border-radius: 6px;
+  padding: 10px 14px;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+#btn-save-group {
+  background: #22c55e;
+  color: #fff;
+}
+
+#btn-save-group:hover {
+  background: #16a34a;
+}
+
+#btn-apply-now {
+  background: #0ea5e9;
+  color: #fff;
+}
+
+#btn-apply-now:hover {
+  background: #0284c7;
+}
+
+#btn-clone-group {
+  background: #e2e8f0;
+  color: #0f172a;
+}
+
+#btn-clone-group:hover {
+  background: #cbd5f5;
+}
+
+.checklist {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  gap: 8px;
+}
+
+.checklist li {
+  background: #f8fafc;
+  border: 1px solid #e2e8f0;
+  border-radius: 6px;
+  padding: 8px 12px;
+}
+
+.checklist label {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  font-size: 14px;
+}
+
+.checklist input[type="checkbox"] {
+  width: 18px;
+  height: 18px;
+}
+
+.checklist .empty {
+  color: #64748b;
+  font-style: italic;
+}

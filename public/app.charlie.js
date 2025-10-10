@@ -128,8 +128,18 @@ function _hdrs(extra = {}) {
   };
 }
 // --- DEMO PATCH: Auto-populate STATE.lightSetups from GreenReach Room 1 fixtures ---
-document.addEventListener('DOMContentLoaded', function() {
+document.addEventListener('DOMContentLoaded', async () => {
+  window.GROUPS_ROOM_ONLY = true;
+  window.GROUPS_PLANS = true;
+
   if (!window.STATE) window.STATE = {};
+
+  try {
+    await mountGroupsSetup();
+  } catch (e) {
+    console.error(e);
+  }
+
   if (!Array.isArray(window.STATE.rooms)) return;
   const room = window.STATE.rooms.find(r => r.name === 'GreenReach Room 1' || r.id === 'greenreach-room-1');
   if (!room || !Array.isArray(room.fixtures) || !room.fixtures.length) return;
@@ -155,6 +165,549 @@ document.addEventListener('DOMContentLoaded', function() {
   ];
   window.dispatchEvent(new CustomEvent('lightSetupsChanged'));
 });
+
+async function readJson(response) {
+  const text = await response.text();
+  if (!text) return {};
+  try {
+    return JSON.parse(text);
+  } catch (err) {
+    console.warn('Failed to parse JSON response', err);
+    return {};
+  }
+}
+
+async function jget(path) {
+  const response = await fetch((window.API_BASE || '') + path, {
+    headers: { 'Accept': 'application/json' }
+  });
+  if (!response.ok) {
+    throw new Error(`GET ${path} failed: ${response.status}`);
+  }
+  return readJson(response);
+}
+
+async function jpost(path, body) {
+  const response = await fetch((window.API_BASE || '') + path, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', 'Accept': 'application/json' },
+    body: JSON.stringify(body)
+  });
+  if (!response.ok) {
+    throw new Error(`POST ${path} failed: ${response.status}`);
+  }
+  return readJson(response);
+}
+
+async function jput(path, body) {
+  const response = await fetch((window.API_BASE || '') + path, {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json', 'Accept': 'application/json' },
+    body: JSON.stringify(body)
+  });
+  if (!response.ok) {
+    throw new Error(`PUT ${path} failed: ${response.status}`);
+  }
+  return readJson(response);
+}
+
+async function jpatch(path, body) {
+  const response = await fetch((window.API_BASE || '') + path, {
+    method: 'PATCH',
+    headers: { 'Content-Type': 'application/json', 'Accept': 'application/json' },
+    body: JSON.stringify(body)
+  });
+  if (!response.ok) {
+    throw new Error(`PATCH ${path} failed: ${response.status}`);
+  }
+  return readJson(response);
+}
+
+function pctToHex(p) {
+  const v = Math.round(Math.max(0, Math.min(100, Number(p) || 0)) * 0.64);
+  return v.toString(16).padStart(2, '0');
+}
+
+function mixHEX12(ch) {
+  const { cw = 0, ww = 0, bl = 0, rd = 0 } = ch || {};
+  return `${pctToHex(cw)}${pctToHex(ww)}${pctToHex(bl)}${pctToHex(rd)}0000`;
+}
+
+function normalizePlanMap(plansData) {
+  if (!plansData) return {};
+  if (Array.isArray(plansData)) {
+    return plansData.reduce((acc, plan) => {
+      const key = plan?.id || plan?.name;
+      if (key) acc[key] = plan;
+      return acc;
+    }, {});
+  }
+  if (Array.isArray(plansData?.plans)) {
+    return plansData.plans.reduce((acc, plan) => {
+      const key = plan?.id || plan?.name;
+      if (key) acc[key] = plan;
+      return acc;
+    }, {});
+  }
+  if (plansData && typeof plansData === 'object') {
+    return { ...plansData };
+  }
+  return {};
+}
+
+function parsePhotoperiodHours(photoperiod) {
+  if (!photoperiod) return 16;
+  const first = String(photoperiod).split('/')[0];
+  const hours = Number(first);
+  return Number.isFinite(hours) && hours > 0 ? hours : 16;
+}
+
+async function getPlanMap(force = false) {
+  if (!force && window.GROUP_PLAN_MAP && Object.keys(window.GROUP_PLAN_MAP).length) {
+    return window.GROUP_PLAN_MAP;
+  }
+  try {
+    const raw = await jget('/plans');
+    const map = normalizePlanMap(raw);
+    window.GROUP_PLAN_MAP = map;
+    return map;
+  } catch (err) {
+    console.error('Failed to load plans', err);
+    return {};
+  }
+}
+
+async function mountGroupsSetup() {
+  if (!window.GROUPS_ROOM_ONLY) return;
+
+  const root = document.getElementById('groups-setup');
+  if (!root) return;
+
+  let farm = {};
+  try {
+    farm = await jget('/farm');
+  } catch (err) {
+    console.error('Failed to load farm profile', err);
+    farm = {};
+  }
+
+  const planMap = await getPlanMap();
+
+  let devRaw = {};
+  try {
+    devRaw = await jget('/api/devicedatas');
+  } catch (err) {
+    console.error('Failed to load devices from controller', err);
+    devRaw = {};
+  }
+
+  const devices = Array.isArray(devRaw?.data)
+    ? devRaw.data
+    : (Array.isArray(devRaw) ? devRaw : []);
+
+  const rooms = Array.isArray(farm?.rooms) ? [...farm.rooms] : [];
+  let zones = Array.isArray(farm?.zones) ? [...farm.zones] : [];
+
+  const selRoom = document.getElementById('grp-room');
+  if (selRoom) {
+    selRoom.innerHTML = '';
+    rooms.forEach((room) => {
+      const option = document.createElement('option');
+      option.value = room;
+      option.textContent = room;
+      selRoom.appendChild(option);
+    });
+  }
+
+  const dl = document.getElementById('zones-list');
+  if (dl) {
+    dl.innerHTML = '';
+    zones.forEach((zone) => {
+      const option = document.createElement('option');
+      option.value = zone;
+      dl.appendChild(option);
+    });
+  }
+
+  const selPlan = document.getElementById('grp-plan');
+  if (selPlan) {
+    const existingDefault = selPlan.querySelector('option[value=""]');
+    if (!existingDefault) {
+      const defaultOption = document.createElement('option');
+      defaultOption.value = '';
+      defaultOption.textContent = '(no plan)';
+      selPlan.appendChild(defaultOption);
+    }
+    Object.keys(planMap).forEach((planKey) => {
+      const hasOption = Array.from(selPlan.options || []).some((opt) => opt.value === planKey);
+      if (hasOption) return;
+      const option = document.createElement('option');
+      option.value = planKey;
+      option.textContent = planKey;
+      selPlan.appendChild(option);
+    });
+  }
+
+  if (selRoom) {
+    selRoom.addEventListener('change', () => renderRoomDevices(selRoom.value, devices));
+    if (rooms.length) {
+      selRoom.value = rooms[0];
+      renderRoomDevices(selRoom.value, devices);
+    }
+  }
+
+  const btnSave = document.getElementById('btn-save-group');
+  if (btnSave) btnSave.addEventListener('click', () => saveGroupFromUI());
+
+  const btnApply = document.getElementById('btn-apply-now');
+  if (btnApply) btnApply.addEventListener('click', () => applyNow());
+
+  const btnClone = document.getElementById('btn-clone-group');
+  if (btnClone) btnClone.addEventListener('click', () => cloneGroupUI());
+
+  const btnSeed = document.getElementById('btn-seed-demo');
+  if (btnSeed) btnSeed.addEventListener('click', () => seedDemo(window.GROUP_PLAN_MAP || planMap, devices, farm));
+
+  const btnAddZone = document.getElementById('btn-add-zone');
+  if (btnAddZone) {
+    btnAddZone.addEventListener('click', async () => {
+      const zoneInput = document.getElementById('grp-zone');
+      const z = (zoneInput?.value || '').trim();
+      if (!z) return;
+      const uniqueZones = Array.from(new Set([...zones, z]));
+      try {
+        await jpost('/farm', { ...farm, zones: uniqueZones });
+        zones = uniqueZones;
+        if (dl) {
+          dl.innerHTML = '';
+          zones.forEach((zone) => {
+            const option = document.createElement('option');
+            option.value = zone;
+            dl.appendChild(option);
+          });
+        }
+        farm = { ...farm, zones: uniqueZones };
+        alert(`Zone "${z}" added to farm.`);
+      } catch (err) {
+        console.error('Failed to add zone to farm', err);
+        alert('Could not add zone. Please try again.');
+      }
+    });
+  }
+}
+
+function renderRoomDevices(room, devices) {
+  const list = document.getElementById('grp-members');
+  if (!list) return;
+
+  list.innerHTML = '';
+  const target = (room || '').trim().toLowerCase();
+  if (!target) {
+    const li = document.createElement('li');
+    li.className = 'empty';
+    li.textContent = 'Select a room to view available lights.';
+    list.appendChild(li);
+    return;
+  }
+
+  const matched = (Array.isArray(devices) ? devices : []).filter((device) => {
+    const roomValues = [
+      device?.meta?.room,
+      device?.meta?.roomName,
+      device?.room,
+      device?.roomName,
+      device?.location?.room
+    ].filter(Boolean).map((value) => String(value).trim().toLowerCase());
+    return roomValues.includes(target);
+  });
+
+  if (!matched.length) {
+    const li = document.createElement('li');
+    li.className = 'empty';
+    li.textContent = 'No lights found for this room.';
+    list.appendChild(li);
+    return;
+  }
+
+  matched.forEach((device) => {
+    const id = device?.id;
+    if (!id) return;
+    const li = document.createElement('li');
+    const label = document.createElement('label');
+    const input = document.createElement('input');
+    input.type = 'checkbox';
+    input.value = String(id);
+    const span = document.createElement('span');
+    span.textContent = device?.deviceName || `Device #${id}`;
+    label.appendChild(input);
+    label.appendChild(span);
+    li.appendChild(label);
+    list.appendChild(li);
+  });
+}
+
+async function saveGroupFromUI() {
+  const roomField = document.getElementById('grp-room');
+  const zoneField = document.getElementById('grp-zone');
+  const labelField = document.getElementById('grp-label');
+  const planField = document.getElementById('grp-plan');
+  const list = document.getElementById('grp-members');
+
+  if (!roomField || !labelField || !list) return;
+
+  const room = (roomField.value || '').trim();
+  if (!room) {
+    alert('Choose a room first.');
+    return;
+  }
+
+  const zone = (zoneField?.value || '').trim();
+  const label = (labelField.value || '').trim() || `${room} Group`;
+  const plan = (planField?.value || '').trim();
+
+  const checkboxes = Array.from(list.querySelectorAll('input[type="checkbox"]'));
+  const members = checkboxes.filter((input) => input.checked).map((input) => input.value);
+
+  if (!members.length) {
+    alert('Select at least one light to include in the group.');
+    return;
+  }
+
+  const safe = (value, fallback) => {
+    const v = (value || fallback || '').replace(/[^a-z0-9]+/gi, '');
+    return v || 'Group';
+  };
+
+  const id = `group:${safe(room)}:${safe(zone || 'All')}:${safe(label, 'Group')}`;
+
+  try {
+    await jpost('/groups', { id, label, room, zone, members });
+  } catch (err) {
+    console.error('Failed to save group', err);
+    alert('Could not save group. Please try again.');
+    return;
+  }
+
+  if (plan) {
+    const planMap = await getPlanMap();
+    const planSpec = planMap[plan] || {};
+    const photoperiod = planSpec.photoperiod || '16/8';
+    const durationHours = parsePhotoperiodHours(photoperiod);
+    try {
+      await jpost('/sched', {
+        id,
+        period: '1d',
+        photoperiod: [photoperiod],
+        start: '06:00',
+        durationHours,
+        rampUpMin: planSpec?.ramp?.sunrise || 10,
+        rampDownMin: planSpec?.ramp?.sunset || 10,
+        planKey: plan
+      });
+    } catch (err) {
+      console.error('Failed to attach schedule', err);
+      alert('Group saved but schedule could not be created.');
+      return;
+    }
+    alert('Group saved and scheduled.');
+  } else {
+    alert('Group saved.');
+  }
+}
+
+async function applyNow() {
+  const planField = document.getElementById('grp-plan');
+  const list = document.getElementById('grp-members');
+  if (!planField || !list) return;
+
+  const planKey = (planField.value || '').trim();
+  if (!planKey) {
+    alert('Pick a Plan first (or save without applying).');
+    return;
+  }
+
+  const ids = Array.from(list.querySelectorAll('input[type="checkbox"]:checked')).map((input) => input.value);
+  if (!ids.length) {
+    alert('Select at least one light before applying a plan.');
+    return;
+  }
+
+  const planMap = await getPlanMap();
+  const planSpec = planMap[planKey] || {};
+  const ch = Array.isArray(planSpec?.days)
+    ? planSpec.days[0] || {}
+    : (planSpec?.days ? Object.values(planSpec.days)[0] || {} : {});
+  const hex = mixHEX12({
+    cw: ch.cw ?? 35,
+    ww: ch.ww ?? 35,
+    bl: ch.bl ?? 15,
+    rd: ch.rd ?? 15
+  });
+
+  let success = 0;
+  let failure = 0;
+  for (const id of ids) {
+    try {
+      await jpatch(`/api/devicedatas/device/${id}`, { status: 'on', value: hex });
+      success += 1;
+    } catch (err) {
+      console.error(`Failed to apply plan to device ${id}`, err);
+      failure += 1;
+    }
+  }
+
+  if (failure) {
+    alert(`Applied plan ${planKey} to ${success} light(s). ${failure} failed.`);
+  } else {
+    alert(`Applied plan ${planKey} to ${success} light(s).`);
+  }
+}
+
+function cloneGroupUI() {
+  const labelField = document.getElementById('grp-label');
+  if (!labelField) return;
+  const current = labelField.value || '';
+  const suggestion = current ? `${current} (Clone)` : '';
+  const label = window.prompt('New group name?', suggestion);
+  if (!label) return;
+  labelField.value = label;
+}
+
+async function seedDemo(planMap, devices, farm) {
+  const confirmed = window.confirm('Seed the GreenReach demo groups and schedules?');
+  if (!confirmed) return;
+
+  const seeds = [
+    {
+      room: 'Propagation Bay',
+      zone: 'Propagation North',
+      label: 'Propagation North — Demo',
+      plan: 'GR-Propagation-BL55',
+      start: '06:00'
+    },
+    {
+      room: 'Flower Bay',
+      zone: 'Flower East',
+      label: 'Flower East — Demo',
+      plan: 'GR-Flower-RD60',
+      start: '18:00'
+    }
+  ];
+
+  const planLookup = normalizePlanMap(planMap || window.GROUP_PLAN_MAP || {});
+  const deviceList = Array.isArray(devices) ? devices : [];
+  const zoneSet = new Set(Array.isArray(farm?.zones) ? farm.zones : []);
+  const created = [];
+  const errors = [];
+
+  for (const seed of seeds) {
+    const roomKey = seed.room?.trim().toLowerCase();
+    if (!roomKey) continue;
+    const members = deviceList
+      .filter((device) => {
+        const roomValues = [
+          device?.meta?.room,
+          device?.room,
+          device?.location?.room
+        ].filter(Boolean).map((value) => String(value).trim().toLowerCase());
+        return roomValues.includes(roomKey);
+      })
+      .filter((device) => {
+        if (!seed.zone) return true;
+        const zoneValues = [
+          device?.meta?.zone,
+          device?.zone,
+          device?.location?.zone
+        ].filter(Boolean).map((value) => String(value).trim().toLowerCase());
+        return zoneValues.includes(seed.zone.trim().toLowerCase());
+      })
+      .map((device) => String(device?.id))
+      .filter(Boolean);
+
+    const safe = (value, fallback) => {
+      const v = (value || fallback || '').replace(/[^a-z0-9]+/gi, '');
+      return v || 'Group';
+    };
+
+    const id = `group:${safe(seed.room)}:${safe(seed.zone, 'All')}:${safe('Demo')}`;
+    const payload = {
+      id,
+      label: seed.label,
+      room: seed.room,
+      zone: seed.zone,
+      members
+    };
+
+    try {
+      await jpost('/groups', payload);
+    } catch (err) {
+      try {
+        await jput(`/groups/${encodeURIComponent(id)}`, payload);
+      } catch (errPut) {
+        console.error('Failed to seed group', seed, errPut);
+        errors.push(`Group ${seed.label}`);
+        continue;
+      }
+    }
+
+    const planSpec = planLookup[seed.plan] || {};
+    const photoperiod = planSpec.photoperiod || '16/8';
+    const durationHours = parsePhotoperiodHours(photoperiod);
+    const schedulePayload = {
+      id,
+      period: '1d',
+      photoperiod: [photoperiod],
+      start: seed.start || '06:00',
+      durationHours,
+      rampUpMin: planSpec?.ramp?.sunrise || 10,
+      rampDownMin: planSpec?.ramp?.sunset || 10,
+      planKey: seed.plan
+    };
+
+    try {
+      await jpost('/sched', schedulePayload);
+    } catch (err) {
+      try {
+        await jput(`/sched/${encodeURIComponent(id)}`, schedulePayload);
+      } catch (errPut) {
+        console.error('Failed to seed schedule', seed, errPut);
+        errors.push(`Schedule for ${seed.label}`);
+      }
+    }
+
+    if (seed.zone) {
+      zoneSet.add(seed.zone);
+    }
+    created.push({ label: seed.label, members: members.length, plan: seed.plan });
+  }
+
+  const zoneList = Array.from(zoneSet);
+  if (zoneList.length !== (Array.isArray(farm?.zones) ? farm.zones.length : 0)) {
+    try {
+      await jpost('/farm', { ...farm, zones: zoneList });
+      farm = { ...farm, zones: zoneList };
+      const dl = document.getElementById('zones-list');
+      if (dl) {
+        dl.innerHTML = '';
+        zoneList.forEach((zone) => {
+          const option = document.createElement('option');
+          option.value = zone;
+          dl.appendChild(option);
+        });
+      }
+    } catch (err) {
+      console.error('Failed to update farm zones during seeding', err);
+      errors.push('Farm zones');
+    }
+  }
+
+  if (created.length) {
+    const summary = created.map((item) => `${item.label} (${item.members} lights, ${item.plan})`).join(', ');
+    alert(`Demo seeded: ${summary}.` + (errors.length ? ` Issues: ${errors.join(', ')}.` : ''));
+  } else {
+    alert('No demo groups were created. Check room, zone, and plan availability.');
+  }
+}
 // Fallbacks for device pick state if not defined elsewhere
 if (typeof getDevicePickState !== 'function') {
   window.getDevicePickState = function() {

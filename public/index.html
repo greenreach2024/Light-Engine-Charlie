@@ -540,6 +540,48 @@
               <span id="groupsStatus" class="tiny" aria-live="polite"></span>
             </div>
 
+            <section id="groups-setup" class="card">
+              <header>
+                <h2>Groups Setup</h2>
+                <button id="btn-seed-demo" type="button">Seed GreenReach Demo</button>
+              </header>
+
+              <div class="row">
+                <label>Room</label>
+                <select id="grp-room"></select>
+              </div>
+
+              <div class="row">
+                <label>Zone</label>
+                <input id="grp-zone" list="zones-list" placeholder="Pick or type zone">
+                <datalist id="zones-list"></datalist>
+                <button id="btn-add-zone" type="button">Add Zone</button>
+              </div>
+
+              <div class="row">
+                <label>Group name</label>
+                <input id="grp-label" placeholder="e.g., Propagation North — Bench A">
+              </div>
+
+              <div class="row">
+                <label>Plan (recipe)</label>
+                <select id="grp-plan">
+                  <option value="">(no plan)</option>
+                </select>
+              </div>
+
+              <div class="row">
+                <label>Lights in room</label>
+                <ul id="grp-members" class="checklist"></ul>
+              </div>
+
+              <footer>
+                <button id="btn-save-group" type="button">Save Group</button>
+                <button id="btn-clone-group" type="button">Clone As…</button>
+                <button id="btn-apply-now" type="button">Apply Now</button>
+              </footer>
+            </section>
+
             <!-- Room/Zone dropdowns for group assignment -->
             <div class="row row--gap-sm row--wrap mb-sm">
               <label for="groupRoomDropdown" class="tiny" style="margin-right:8px;">Room</label>
