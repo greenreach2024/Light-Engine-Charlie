@@ -357,10 +357,10 @@ async function mountGroupsSetup() {
   }
 
   const btnSave = document.getElementById('btn-save-group');
-  if (btnSave) btnSave.addEventListener('click', () => saveGroupFromUI());
+  if (btnSave) btnSave.addEventListener('click', () => saveGroupFromUI(devices));
 
   const btnApply = document.getElementById('btn-apply-now');
-  if (btnApply) btnApply.addEventListener('click', () => applyNow());
+  if (btnApply) btnApply.addEventListener('click', () => applyNow(devices));
 
   const btnClone = document.getElementById('btn-clone-group');
   if (btnClone) btnClone.addEventListener('click', () => cloneGroupUI());
@@ -446,7 +446,7 @@ function renderRoomDevices(room, devices) {
   });
 }
 
-async function saveGroupFromUI() {
+async function saveGroupFromUI(_devices) {
   const roomField = document.getElementById('grp-room');
   const zoneField = document.getElementById('grp-zone');
   const labelField = document.getElementById('grp-label');
@@ -473,12 +473,7 @@ async function saveGroupFromUI() {
     return;
   }
 
-  const safe = (value, fallback) => {
-    const v = (value || fallback || '').replace(/[^a-z0-9]+/gi, '');
-    return v || 'Group';
-  };
-
-  const id = `group:${safe(room)}:${safe(zone || 'All')}:${safe(label, 'Group')}`;
+  const id = `group:${room.replace(/\s+/g, '')}:${(zone || 'All').replace(/\s+/g, '')}:${label.replace(/\s+/g, '_')}`;
 
   try {
     await jpost('/groups', { id, label, room, zone, members });
@@ -489,8 +484,7 @@ async function saveGroupFromUI() {
   }
 
   if (plan) {
-    const planMap = await getPlanMap();
-    const planSpec = planMap[plan] || {};
+    const planSpec = (await jget('/plans'))[plan] || {};
     const photoperiod = planSpec.photoperiod || '16/8';
     const durationHours = parsePhotoperiodHours(photoperiod);
     try {
@@ -509,13 +503,11 @@ async function saveGroupFromUI() {
       alert('Group saved but schedule could not be created.');
       return;
     }
-    alert('Group saved and scheduled.');
-  } else {
-    alert('Group saved.');
   }
+  alert('Group saved' + (plan ? ' and scheduled.' : ''));
 }
 
-async function applyNow() {
+async function applyNow(_devices) {
   const planField = document.getElementById('grp-plan');
   const list = document.getElementById('grp-members');
   if (!planField || !list) return;
@@ -532,8 +524,7 @@ async function applyNow() {
     return;
   }
 
-  const planMap = await getPlanMap();
-  const planSpec = planMap[planKey] || {};
+  const planSpec = (await jget('/plans'))[planKey] || {};
   const ch = Array.isArray(planSpec?.days)
     ? planSpec.days[0] || {}
     : (planSpec?.days ? Object.values(planSpec.days)[0] || {} : {});
@@ -573,140 +564,181 @@ function cloneGroupUI() {
   labelField.value = label;
 }
 
-async function seedDemo(planMap, devices, farm) {
+async function seedDemo(plans, devices, farm) {
   const confirmed = window.confirm('Seed the GreenReach demo groups and schedules?');
   if (!confirmed) return;
 
-  const seeds = [
-    {
-      room: 'Propagation Bay',
-      zone: 'Propagation North',
-      label: 'Propagation North — Demo',
-      plan: 'GR-Propagation-BL55',
-      start: '06:00'
+  const DEMO_PLANS = {
+    'GR-Propagation-BL55': {
+      photoperiod: '16/8',
+      ramp: { sunrise: 10, sunset: 10 },
+      days: [{ stage: 'Static', cw: 20, ww: 20, bl: 55, rd: 25 }]
     },
-    {
-      room: 'Flower Bay',
-      zone: 'Flower East',
-      label: 'Flower East — Demo',
-      plan: 'GR-Flower-RD60',
-      start: '18:00'
+    'GR-Flower-RD60': {
+      photoperiod: '12/12',
+      ramp: { sunrise: 10, sunset: 10 },
+      days: [{ stage: 'Static', cw: 35, ww: 35, bl: 15, rd: 60 }]
     }
-  ];
+  };
 
-  const planLookup = normalizePlanMap(planMap || window.GROUP_PLAN_MAP || {});
-  const deviceList = Array.isArray(devices) ? devices : [];
-  const zoneSet = new Set(Array.isArray(farm?.zones) ? farm.zones : []);
-  const created = [];
-  const errors = [];
-
-  for (const seed of seeds) {
-    const roomKey = seed.room?.trim().toLowerCase();
-    if (!roomKey) continue;
-    const members = deviceList
-      .filter((device) => {
-        const roomValues = [
-          device?.meta?.room,
-          device?.room,
-          device?.location?.room
-        ].filter(Boolean).map((value) => String(value).trim().toLowerCase());
-        return roomValues.includes(roomKey);
-      })
-      .filter((device) => {
-        if (!seed.zone) return true;
-        const zoneValues = [
-          device?.meta?.zone,
-          device?.zone,
-          device?.location?.zone
-        ].filter(Boolean).map((value) => String(value).trim().toLowerCase());
-        return zoneValues.includes(seed.zone.trim().toLowerCase());
-      })
-      .map((device) => String(device?.id))
-      .filter(Boolean);
-
-    const safe = (value, fallback) => {
-      const v = (value || fallback || '').replace(/[^a-z0-9]+/gi, '');
-      return v || 'Group';
-    };
-
-    const id = `group:${safe(seed.room)}:${safe(seed.zone, 'All')}:${safe('Demo')}`;
-    const payload = {
-      id,
-      label: seed.label,
-      room: seed.room,
-      zone: seed.zone,
-      members
-    };
-
-    try {
-      await jpost('/groups', payload);
-    } catch (err) {
-      try {
-        await jput(`/groups/${encodeURIComponent(id)}`, payload);
-      } catch (errPut) {
-        console.error('Failed to seed group', seed, errPut);
-        errors.push(`Group ${seed.label}`);
-        continue;
-      }
-    }
-
-    const planSpec = planLookup[seed.plan] || {};
-    const photoperiod = planSpec.photoperiod || '16/8';
-    const durationHours = parsePhotoperiodHours(photoperiod);
-    const schedulePayload = {
-      id,
-      period: '1d',
-      photoperiod: [photoperiod],
-      start: seed.start || '06:00',
-      durationHours,
-      rampUpMin: planSpec?.ramp?.sunrise || 10,
-      rampDownMin: planSpec?.ramp?.sunset || 10,
-      planKey: seed.plan
-    };
-
-    try {
-      await jpost('/sched', schedulePayload);
-    } catch (err) {
-      try {
-        await jput(`/sched/${encodeURIComponent(id)}`, schedulePayload);
-      } catch (errPut) {
-        console.error('Failed to seed schedule', seed, errPut);
-        errors.push(`Schedule for ${seed.label}`);
-      }
-    }
-
-    if (seed.zone) {
-      zoneSet.add(seed.zone);
-    }
-    created.push({ label: seed.label, members: members.length, plan: seed.plan });
+  try {
+    await jpost('/plans', DEMO_PLANS);
+  } catch (err) {
+    console.error('Failed to seed demo plans', err);
   }
 
-  const zoneList = Array.from(zoneSet);
-  if (zoneList.length !== (Array.isArray(farm?.zones) ? farm.zones.length : 0)) {
-    try {
-      await jpost('/farm', { ...farm, zones: zoneList });
-      farm = { ...farm, zones: zoneList };
-      const dl = document.getElementById('zones-list');
-      if (dl) {
-        dl.innerHTML = '';
-        zoneList.forEach((zone) => {
-          const option = document.createElement('option');
-          option.value = zone;
-          dl.appendChild(option);
-        });
+  const existingPlans = (plans && typeof plans === 'object') ? plans : {};
+  window.GROUP_PLAN_MAP = {
+    ...existingPlans,
+    ...(window.GROUP_PLAN_MAP || {}),
+    ...DEMO_PLANS
+  };
+  const planSelect = document.getElementById('grp-plan');
+  if (planSelect) {
+    Object.keys(DEMO_PLANS).forEach((key) => {
+      if (!Array.from(planSelect.options || []).some((opt) => opt.value === key)) {
+        const option = document.createElement('option');
+        option.value = key;
+        option.textContent = key;
+        planSelect.appendChild(option);
       }
+    });
+  }
+
+  const deviceList = Array.isArray(devices) ? devices : [];
+  const findId = (needle) => {
+    if (!needle) return '';
+    const lower = String(needle).toLowerCase();
+    const match = deviceList.find((d) => {
+      const candidates = [
+        d?.deviceName,
+        d?.name,
+        d?.serial,
+        d?.serialNumber,
+        d?.deviceSerial,
+        d?.meta?.serial,
+        d?.meta?.serialNumber
+      ].filter(Boolean).map((value) => String(value).toLowerCase());
+      return candidates.some((value) => value.includes(lower));
+    });
+    return match ? String(match.id) : '';
+  };
+
+  const ID1 = findId('light-001') || findId('22G12-001');
+  const ID2 = findId('light-002') || findId('22G12-002');
+  const ID3 = findId('light-003') || findId('22G12-003');
+  const ID4 = findId('light-004') || findId('22G12-004');
+  const ID5 = findId('light-005') || findId('22G12-005');
+
+  const gProp = {
+    id: 'group:PropagationBay:PropagationNorth:Demo',
+    label: 'Propagation North — Demo',
+    room: 'Propagation Bay',
+    zone: 'Propagation North',
+    members: [ID1, ID2].filter(Boolean)
+  };
+  const gFlow = {
+    id: 'group:FlowerBay:FlowerEast:Demo',
+    label: 'Flower East — Demo',
+    room: 'Flower Bay',
+    zone: 'Flower East',
+    members: [ID3, ID4, ID5].filter(Boolean)
+  };
+
+  try {
+    await jpost('/groups', gProp);
+  } catch (err) {
+    try {
+      await jput(`/groups/${encodeURIComponent(gProp.id)}`, gProp);
+    } catch (errPut) {
+      console.error('Failed to seed propagation group', errPut);
+    }
+  }
+  try {
+    await jpost('/groups', gFlow);
+  } catch (err) {
+    try {
+      await jput(`/groups/${encodeURIComponent(gFlow.id)}`, gFlow);
+    } catch (errPut) {
+      console.error('Failed to seed flower group', errPut);
+    }
+  }
+
+  const propSched = {
+    id: gProp.id,
+    period: '1d',
+    photoperiod: ['16/8'],
+    start: '06:00',
+    durationHours: 16,
+    rampUpMin: 10,
+    rampDownMin: 10,
+    planKey: 'GR-Propagation-BL55'
+  };
+  const flowSched = {
+    id: gFlow.id,
+    period: '1d',
+    photoperiod: ['12/12'],
+    start: '18:00',
+    durationHours: 12,
+    rampUpMin: 10,
+    rampDownMin: 10,
+    planKey: 'GR-Flower-RD60'
+  };
+
+  try {
+    await jpost('/sched', propSched);
+  } catch (err) {
+    try {
+      await jput(`/sched/${encodeURIComponent(gProp.id)}`, propSched);
+    } catch (errPut) {
+      console.error('Failed to seed propagation schedule', errPut);
+    }
+  }
+
+  try {
+    await jpost('/sched', flowSched);
+  } catch (err) {
+    try {
+      await jput(`/sched/${encodeURIComponent(gFlow.id)}`, flowSched);
+    } catch (errPut) {
+      console.error('Failed to seed flower schedule', errPut);
+    }
+  }
+
+  const zoneSet = new Set(Array.isArray(farm?.zones) ? farm.zones : []);
+  ['Propagation North', 'Flower East'].forEach((zone) => {
+    if (zone) zoneSet.add(zone);
+  });
+  const updatedZones = Array.from(zoneSet);
+  if (farm && typeof farm === 'object') {
+    try {
+      await jpost('/farm', { ...farm, zones: updatedZones });
     } catch (err) {
       console.error('Failed to update farm zones during seeding', err);
-      errors.push('Farm zones');
     }
+    farm.zones = updatedZones;
+  }
+  const zoneList = document.getElementById('zones-list');
+  if (zoneList) {
+    zoneList.innerHTML = '';
+    updatedZones.forEach((zone) => {
+      const option = document.createElement('option');
+      option.value = zone;
+      zoneList.appendChild(option);
+    });
   }
 
-  if (created.length) {
-    const summary = created.map((item) => `${item.label} (${item.members} lights, ${item.plan})`).join(', ');
-    alert(`Demo seeded: ${summary}.` + (errors.length ? ` Issues: ${errors.join(', ')}.` : ''));
-  } else {
-    alert('No demo groups were created. Check room, zone, and plan availability.');
+  const hexProp = mixHEX12({ cw: 20, ww: 20, bl: 55, rd: 25 });
+  for (const id of gProp.members) {
+    await jpatch(`/api/devicedatas/device/${id}`, { status: 'on', value: hexProp });
   }
+
+  const hexFlow = mixHEX12({ cw: 35, ww: 35, bl: 15, rd: 60 });
+  for (const id of gFlow.members) {
+    await jpatch(`/api/devicedatas/device/${id}`, { status: 'on', value: hexFlow });
+  }
+
+  alert('GreenReach Demo seeded: groups, plans, schedules and live ON are set.');
 }
 // Fallbacks for device pick state if not defined elsewhere
 if (typeof getDevicePickState !== 'function') {

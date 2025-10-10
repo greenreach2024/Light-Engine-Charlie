@@ -1,17 +1,13 @@
-console.log('Starting server-charlie.cjs...');
-const PORT = process.env.PORT || 8080;
 const express = require("express");
 const { createProxyMiddleware } = require("http-proxy-middleware");
 const fs = require("fs");
 const path = require("path");
+const { fileURLToPath } = require('url');
 const Datastore = require('nedb-promises');
-
 const crypto = require('crypto');
 const AutomationRulesEngine = require('./lib/automation-engine.js');
 const { createPreAutomationLayer } = require('./automation/index.js');
 const { buildSetupWizards, mergeDiscoveryPayload, getWizardDefaultInputs, cloneWizardStep } = require('./server/wizards/index.js');
-
-const app = express();
 
 
 
@@ -5327,30 +5323,8 @@ app.use((req, res) => {
   });
 });
 
-
-// Controller helpers: load persisted value if present; allow runtime updates
-function loadControllerFromDisk(){
-  try {
-    if (fs.existsSync(CONTROLLER_PATH)) {
-      const obj = JSON.parse(fs.readFileSync(CONTROLLER_PATH, 'utf8'));
-      if (obj && typeof obj.url === 'string' && isHttpUrl(obj.url)) {
-        CURRENT_CONTROLLER = obj.url.trim();
-      }
-    }
-  } catch {}
-}
-function persistControllerToDisk(url){
-  ensureDataDir();
-  try { fs.writeFileSync(CONTROLLER_PATH, JSON.stringify({ url }, null, 2)); } catch {}
-}
-function getController(){ return CURRENT_CONTROLLER; }
-function setController(url){ CURRENT_CONTROLLER = url; persistControllerToDisk(url); console.log(`[charlie] controller set → ${url}`); }
-
-// Initialize controller from disk if available
-loadControllerFromDisk();
-
 // Start the server after all routes are defined when executed directly
-if (require.main === module) {
+if (process.argv[1] === __filename) {
   app.listen(PORT, () => {
     console.log(`[charlie] running http://127.0.0.1:${PORT} → ${getController()}`);
     try { setupWeatherPolling(); } catch {}
@@ -5358,7 +5332,6 @@ if (require.main === module) {
 }
 
 module.exports = {
-  app,
   __resetWizardSystemForTests: function() {
     resetWizardSystem();
   }

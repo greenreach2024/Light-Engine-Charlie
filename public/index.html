@@ -106,34 +106,30 @@
 
 
     <main class="dashboard-main">
-
-      <!-- Move overview card below lights status card -->
-
       <section id="topCard" class="card card--hero top-card">
-              <div class="row row--between row--center top-card__content">
-                <!-- Left side: Farm branding -->
-                <div class="row row--center row--gap-md flex-1">
-                  <img id="farmLogo" src="" alt="Farm logo" class="farm-logo" onerror="this.style.display='none'">
-                  <div id="farmBrandingSection" class="farm-branding">
-                    <h1 id="farmName" class="farm-name"></h1>
-                    <div id="farmTagline" class="tiny farm-tagline"></div>
-                  </div>
-                </div>
-
-                <!-- Right side: Light Engine Charlie and controls -->
-                <div class="row row--gap-lg row--center top-card__status">
-                  <div class="text-right">
-                    <h1 id="lightEngineTitle" class="top-card__title">Light Engine Charlie</h1>
-                    <div class="automation-indicator" id="automationIndicator" aria-live="polite">
-                      <span class="automation-indicator__dot" aria-hidden="true"></span>
-                      <span class="automation-indicator__label">Centralized Automation</span>
-                      <span class="automation-indicator__status" id="automationIndicatorStatus">Idle</span>
-                    </div>
-                    <div id="communicationStatus" class="tiny text-muted top-card__status-text">System Online</div>
-                  </div>
-                </div>
+        <div class="row row--between row--center top-card__content">
+          <!-- Left side: Farm branding -->
+          <div class="row row--center row--gap-md flex-1">
+            <img id="farmLogo" src="" alt="Farm logo" class="farm-logo" onerror="this.style.display='none'">
+            <div id="farmBrandingSection" class="farm-branding">
+              <h1 id="farmName" class="farm-name"></h1>
+              <div id="farmTagline" class="tiny farm-tagline"></div>
+            </div>
+          </div>
+          <!-- Right side: Light Engine Charlie and controls -->
+          <div class="row row--gap-lg row--center top-card__status">
+            <div class="text-right">
+              <h1 id="lightEngineTitle" class="top-card__title">Light Engine Charlie</h1>
+              <div class="automation-indicator" id="automationIndicator" aria-live="polite">
+                <span class="automation-indicator__dot" aria-hidden="true"></span>
+                <span class="automation-indicator__label">Centralized Automation</span>
+                <span class="automation-indicator__status" id="automationIndicatorStatus">Idle</span>
               </div>
-            </section>
+              <div id="communicationStatus" class="tiny text-muted top-card__status-text">System Online</div>
+            </div>
+          </div>
+        </div>
+      </section>
       <section id="environmentalAiCard" class="card card--feature">
               <div class="row row--between row--center mb-md">
                 <h2 class="section-title">Environmental & AI Features</h2>
@@ -231,32 +227,7 @@
         </section>
 
   <section id="lightsStatusPanel" class="card card--panel">
-      <!-- Overview hero (moved below lights status) -->
-      <section class="dashboard-panel dashboard-panel--overview is-active" data-panel="overview">
-        <section id="overview" class="overview" aria-labelledby="overviewTitle">
-          <header class="overview__hdr">
-            <div>
-              <h1 id="overviewTitle">Overview</h1>
-              <p class="overview__subtitle">Tour-ready status for every grow room</p>
-            </div>
-            <div class="overview__legend" aria-label="Status legend">
-              <span class="overview__legend-item"><span class="icon ai" aria-hidden="true"></span>AI</span>
-              <span class="overview__legend-item"><span class="icon auto" aria-hidden="true"></span>Automation</span>
-              <span class="overview__legend-item"><span class="icon spectra" aria-hidden="true"></span>SpectraSync</span>
-              <div class="overview__demo" role="group" aria-label="Demo mode controls">
-                <label for="demoRoom">Room</label>
-                <select id="demoRoom" name="demoRoom" aria-label="Demo room"></select>
-                <label for="demoBpm">BPM</label>
-                <input id="demoBpm" type="number" min="60" max="140" step="1" value="90" aria-label="Demo tempo">
-                <button id="demoStart" type="button" class="primary">Start Demo</button>
-                <button id="demoStop" type="button" class="ghost" disabled>Stop</button>
-              </div>
-            </div>
-          </header>
-          <div id="overviewGrid" class="overview__grid" aria-live="polite"></div>
-        </section>
-      </section>
-            <div class="row row--between row--center">
+    <div class="row row--between row--center">
               <h2 class="section-title">
                 Current Lights Status
                 <span class="hint" tabindex="0" data-tip="Aggregates SwitchBot, Kasa, and registered fixtures. Uses cached cloud/device data by default to avoid rate limits.">?</span>
@@ -265,10 +236,34 @@
                 <button id="btnRefreshLights" type="button" class="ghost">Refresh</button>
               </div>
             </div>
-            <p id="lightsStatusSummary" class="tiny text-muted mt-xs mb-xs" aria-live="polite">Loading…</p>
-            <div id="lightsStatusList" class="grid cols-3 gap-sm"></div>
-          </section>
+      <p id="lightsStatusSummary" class="tiny text-muted mt-xs mb-xs" aria-live="polite">Loading…</p>
+      <div id="lightsStatusList" class="grid cols-3 gap-sm"></div>
+    </section>
+    <!-- Overview hero (now below lights status) -->
+    <section class="dashboard-panel dashboard-panel--overview is-active" data-panel="overview">
+      <section id="overview" class="overview" aria-labelledby="overviewTitle">
+        <header class="overview__hdr">
+          <div>
+            <h1 id="overviewTitle">Overview</h1>
+            <p class="overview__subtitle">Tour-ready status for every grow room</p>
+          </div>
+          <div class="overview__legend" aria-label="Status legend">
+            <span class="overview__legend-item"><span class="icon ai" aria-hidden="true"></span>AI</span>
+            <span class="overview__legend-item"><span class="icon auto" aria-hidden="true"></span>Automation</span>
+            <span class="overview__legend-item"><span class="icon spectra" aria-hidden="true"></span>SpectraSync</span>
+            <div class="overview__demo" role="group" aria-label="Demo mode controls">
+              <label for="demoRoom">Room</label>
+              <select id="demoRoom" name="demoRoom" aria-label="Demo room"></select>
+              <label for="demoBpm">BPM</label>
+              <input id="demoBpm" type="number" min="60" max="140" step="1" value="90" aria-label="Demo tempo">
+              <button id="demoStart" type="button" class="primary">Start Demo</button>
+              <button id="demoStop" type="button" class="ghost" disabled>Stop</button>
+            </div>
+          </div>
+        </header>
+        <div id="overviewGrid" class="overview__grid" aria-live="polite"></div>
       </section>
+    </section>
       <section id="farmPanel" class="card card--compact" data-panel="farm-registration">
               <header class="panel-header">
                 <div>
