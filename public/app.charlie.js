@@ -484,7 +484,7 @@ async function saveGroupFromUI(_devices) {
   }
 
   if (plan) {
-    const planSpec = (await jget('/plans'))[plan] || {};
+    const planSpec = (await getPlanMap())[plan] || {};
     const photoperiod = planSpec.photoperiod || '16/8';
     const durationHours = parsePhotoperiodHours(photoperiod);
     try {
@@ -524,7 +524,7 @@ async function applyNow(_devices) {
     return;
   }
 
-  const planSpec = (await jget('/plans'))[planKey] || {};
+  const planSpec = (await getPlanMap())[planKey] || {};
   const ch = Array.isArray(planSpec?.days)
     ? planSpec.days[0] || {}
     : (planSpec?.days ? Object.values(planSpec.days)[0] || {} : {});
@@ -583,6 +583,7 @@ async function seedDemo(plans, devices, farm) {
 
   try {
     await jpost('/plans', DEMO_PLANS);
+    await getPlanMap(true);
   } catch (err) {
     console.error('Failed to seed demo plans', err);
   }
