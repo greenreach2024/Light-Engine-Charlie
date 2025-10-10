@@ -14485,14 +14485,12 @@ function setActivePanel(panelId = 'overview') {
     return;
   }
 
-  // Move the active panel to the top of .dashboard-main
+  // Only scroll to the active panel, do not move its DOM position
   if (activePanel) {
     const dashboardMain = document.querySelector('.dashboard-main');
-    if (dashboardMain && dashboardMain.firstElementChild !== activePanel) {
-      dashboardMain.insertBefore(activePanel, dashboardMain.firstElementChild);
+    if (dashboardMain) {
+      activePanel.scrollIntoView({ behavior: 'smooth', block: 'start' });
     }
-    // Reset scroll position
-    dashboardMain.scrollTop = 0;
   }
 
   document.querySelectorAll('[data-sidebar-link]').forEach((link) => {
