@@ -6,8 +6,11 @@ const groupsSetupState = (window._groupsSetupState = window._groupsSetupState ||
   devices: [],
   planMap: {},
   rooms: [],
+  roomLookup: {},
   zones: [],
   currentRoom: '',
+  currentRoomId: '',
+  currentRoomOption: null,
   currentMembers: new Set(),
   selectedGroupId: null,
   refreshChecklist: null,
@@ -309,7 +312,25 @@ async function mountGroupsSetup() {
     farm = {};
   }
 
-  state.rooms = Array.isArray(farm?.rooms) ? [...farm.rooms] : [];
+  const normalizedRooms = normalizeFarmRooms(farm?.rooms);
+  state.rooms = normalizedRooms;
+  const roomLookup = {};
+  normalizedRooms.forEach((room) => {
+    if (!room) return;
+    const rawId = typeof room.id === 'string' ? room.id.trim() : '';
+    if (rawId && !roomLookup[rawId]) roomLookup[rawId] = room;
+    const labelKey = typeof room.label === 'string' ? room.label.trim() : '';
+    if (labelKey && !roomLookup[labelKey]) roomLookup[labelKey] = room;
+    const normalizedKey = normalizeRoomKey(room);
+    if (normalizedKey && !roomLookup[normalizedKey]) roomLookup[normalizedKey] = room;
+    if (Array.isArray(room.aliases)) {
+      room.aliases.forEach((alias) => {
+        const aliasKey = normalizeRoomKey(alias);
+        if (aliasKey && !roomLookup[aliasKey]) roomLookup[aliasKey] = room;
+      });
+    }
+  });
+  state.roomLookup = roomLookup;
   state.zones = Array.isArray(farm?.zones) ? [...farm.zones] : [];
 
   state.planMap = await getPlanMap();
@@ -352,8 +373,9 @@ async function mountGroupsSetup() {
     state.rooms.forEach((room) => {
       if (!room) return;
       const option = document.createElement('option');
-      option.value = room;
-      option.textContent = room;
+      option.value = String(room.id);
+      option.textContent = room.label || String(room.id);
+      if (room.key) option.setAttribute('data-room-key', room.key);
       roomSelect.appendChild(option);
     });
   }
@@ -387,13 +409,29 @@ async function mountGroupsSetup() {
     });
   }
 
-  const updateGroupNameOptions = (roomValue) => {
+  const updateGroupNameOptions = (roomSelection) => {
     if (!labelList) return;
     labelList.innerHTML = '';
-    const roomKey = normalizeRoomKey(roomValue);
-    if (!roomKey) return;
+    const roomOption = resolveRoomOptionFromState(state, roomSelection);
+    if (!roomOption) return;
+    const aliasSet = new Set([roomOption.key, ...(Array.isArray(roomOption.aliases) ? roomOption.aliases : [])]
+      .map((entry) => normalizeRoomKey(entry))
+      .filter(Boolean));
+    if (!aliasSet.size) return;
     const matches = (state.groups || [])
-      .filter((group) => normalizeRoomKey(group?.room || group?.match?.room || group?.roomId) === roomKey)
+      .filter((group) => {
+        const candidates = [
+          group?.room,
+          group?.match?.room,
+          group?.roomId,
+          group?.match?.roomId,
+          group?.roomName,
+          group?.match?.roomName,
+        ]
+          .map((value) => normalizeRoomKey(value))
+          .filter(Boolean);
+        return candidates.some((candidate) => aliasSet.has(candidate));
+      })
       .slice()
       .sort((a, b) => {
         const nameA = firstNonEmptyString(a?.name, a?.label, a?.id);
@@ -411,11 +449,12 @@ async function mountGroupsSetup() {
   };
 
   const refreshChecklist = () => {
-    renderRoomDevices(state.currentRoom, state.devices, state.currentMembers);
+    renderRoomDevices(state.currentRoomOption || state.currentRoom, state.devices, state.currentMembers);
   };
 
   const evaluateGroupSelection = () => {
-    const roomValue = state.currentRoom;
+    const roomOption = resolveRoomOptionFromState(state, state.currentRoomOption || state.currentRoomId || state.currentRoom);
+    const roomValue = roomOption?.label || state.currentRoom;
     if (!roomValue) {
       state.currentMembers = ensureMembersSet(new Set());
       refreshChecklist();
@@ -423,7 +462,7 @@ async function mountGroupsSetup() {
     }
     const zoneValue = zoneInput ? zoneInput.value : '';
     const labelValue = labelInput ? labelInput.value : '';
-    const match = findGroupForForm(state.groups, roomValue, zoneValue, labelValue);
+    const match = findGroupForForm(state.groups, roomOption || roomValue, zoneValue, labelValue);
     if (match) {
       state.selectedGroupId = match.id;
       state.currentMembers = ensureMembersSet(new Set(extractGroupMemberIds(match)));
@@ -432,18 +471,21 @@ async function mountGroupsSetup() {
       if (planSelect) planSelect.value = match?.plan || '';
     }
     refreshChecklist();
-    updateGroupNameOptions(roomValue);
+    updateGroupNameOptions(roomOption || roomValue);
   };
 
-  const handleRoomChange = () => {
-    const value = roomSelect ? roomSelect.value : '';
-    state.currentRoom = value;
+  const handleRoomChange = (explicitRoom = null) => {
+    const selectValue = explicitRoom ? explicitRoom.id : roomSelect ? roomSelect.value : '';
+    const resolved = explicitRoom || resolveRoomOptionFromState(state, selectValue);
+    state.currentRoomOption = resolved || null;
+    state.currentRoomId = resolved?.id || (selectValue ? String(selectValue) : '');
+    state.currentRoom = resolved?.label || (selectValue ? String(selectValue) : '');
     state.selectedGroupId = null;
     state.currentMembers = ensureMembersSet(new Set());
     if (zoneInput) zoneInput.value = '';
     if (labelInput) labelInput.value = '';
     if (planSelect) planSelect.value = '';
-    updateGroupNameOptions(value);
+    updateGroupNameOptions(resolved || selectValue);
     refreshChecklist();
   };
 
@@ -457,8 +499,9 @@ async function mountGroupsSetup() {
       evaluateGroupSelection();
     });
     if (state.rooms.length) {
-      roomSelect.value = state.rooms[0];
-      handleRoomChange();
+      const initialRoom = state.rooms[0];
+      roomSelect.value = String(initialRoom.id);
+      handleRoomChange(initialRoom);
       evaluateGroupSelection();
     } else {
       refreshChecklist();
@@ -466,7 +509,6 @@ async function mountGroupsSetup() {
   } else {
     refreshChecklist();
   }
-
   zoneInput?.addEventListener('input', evaluateGroupSelection);
   zoneInput?.addEventListener('change', evaluateGroupSelection);
   labelInput?.addEventListener('input', evaluateGroupSelection);
@@ -531,10 +573,25 @@ function renderRoomDevices(room, devices, membersSet = groupsSetupState.currentM
   const normalizedMembers = ensureMembersSet(membersSet);
   groupsSetupState.currentMembers = normalizedMembers;
 
-  const targetKey = normalizeRoomKey(room);
+  const state = groupsSetupState;
+  const resolvedRoom = resolveRoomOptionFromState(state, room);
+  const keySet = new Set();
+  if (resolvedRoom) {
+    if (resolvedRoom.key) keySet.add(resolvedRoom.key);
+    if (Array.isArray(resolvedRoom.aliases)) {
+      resolvedRoom.aliases
+        .map((alias) => normalizeRoomKey(alias))
+        .filter(Boolean)
+        .forEach((aliasKey) => keySet.add(aliasKey));
+    }
+  } else {
+    const fallbackKey = normalizeRoomKey(room);
+    if (fallbackKey) keySet.add(fallbackKey);
+  }
+
   list.innerHTML = '';
 
-  if (!targetKey) {
+  if (!keySet.size) {
     const li = document.createElement('li');
     li.className = 'empty';
     li.textContent = 'Select a room to view available lights.';
@@ -551,8 +608,8 @@ function renderRoomDevices(room, devices, membersSet = groupsSetupState.currentM
     })
     .filter(Boolean);
 
-  const matched = normalizedDevices.filter((device) =>
-    Array.isArray(device.roomKeys) && device.roomKeys.includes(targetKey)
+  const matched = normalizedDevices.filter(
+    (device) => Array.isArray(device.roomKeys) && device.roomKeys.some((value) => keySet.has(value))
   );
 
   if (!matched.length) {
@@ -592,6 +649,7 @@ function renderRoomDevices(room, devices, membersSet = groupsSetupState.currentM
     });
 }
 
+
 async function saveGroupFromUI() {
   const roomField = document.getElementById('grp-room');
   const zoneField = document.getElementById('grp-zone');
@@ -601,7 +659,9 @@ async function saveGroupFromUI() {
   if (!roomField || !labelField) return;
 
   const state = groupsSetupState;
-  const room = (roomField.value || '').trim();
+  const selectedRoomValue = (roomField.value || '').trim();
+  const roomOption = resolveRoomOptionFromState(state, selectedRoomValue || state.currentRoomOption || state.currentRoom);
+  const room = roomOption?.label || selectedRoomValue || state.currentRoom || '';
   if (!room) {
     if (typeof showToast === 'function') {
       showToast({ title: 'Room required', msg: 'Choose a room before saving.', kind: 'warn', icon: '⚠️' });
@@ -611,6 +671,7 @@ async function saveGroupFromUI() {
     return;
   }
 
+  const roomId = roomOption?.id ? String(roomOption.id).trim() : '';
   const zoneRaw = (zoneField?.value || '').trim();
   const labelRaw = (labelField.value || '').trim();
   const planRaw = (planField?.value || '').trim();
@@ -630,13 +691,29 @@ async function saveGroupFromUI() {
   const existingGroups = Array.isArray(state.groups) ? [...state.groups] : [];
   const existing = state.selectedGroupId
     ? existingGroups.find((group) => String(group?.id || '').trim() === state.selectedGroupId)
-    : findGroupForForm(existingGroups, room, zoneRaw, labelRaw, { allowLabelFallback: true });
+    : findGroupForForm(existingGroups, roomOption || room, zoneRaw, labelRaw, { allowLabelFallback: true });
 
   const id = existing
     ? existing.id
     : generateGroupId(room, zoneRaw, groupName, existingGroups.map((group) => group?.id).filter(Boolean));
 
   const zone = zoneRaw;
+  const match = { ...(existing?.match || {}), room, zone };
+  if (roomId) {
+    match.roomId = roomId;
+    match.roomName = room;
+  } else {
+    delete match.roomId;
+    delete match.roomName;
+  }
+  if (zone) {
+    match.zoneId = zone;
+    match.zoneName = zone;
+  } else {
+    delete match.zoneId;
+    delete match.zoneName;
+  }
+
   const nextGroup = {
     ...(existing || {}),
     id,
@@ -644,10 +721,17 @@ async function saveGroupFromUI() {
     label: groupName,
     room,
     zone,
-    match: { room, zone },
+    match,
     members,
     lights: members.map((memberId) => ({ id: memberId })),
   };
+  if (roomId) {
+    nextGroup.roomId = roomId;
+    nextGroup.roomName = room;
+  } else {
+    delete nextGroup.roomId;
+    delete nextGroup.roomName;
+  }
   if (planRaw) {
     nextGroup.plan = planRaw;
   } else if (nextGroup.plan) {
@@ -679,7 +763,7 @@ async function saveGroupFromUI() {
   state.currentMembers = ensureMembersSet(new Set(members));
 
   if (typeof state.refreshNameOptions === 'function') {
-    state.refreshNameOptions(room);
+    state.refreshNameOptions(roomOption || room);
   }
   if (typeof state.syncToGroupSelection === 'function') {
     state.syncToGroupSelection();
@@ -711,6 +795,11 @@ async function saveGroupFromUI() {
         planKey: planRaw,
         name: `${groupName} Schedule`,
       });
+      if (typeof showToast === 'function') {
+        const summary = planSpec.summary || '';
+        const planMsg = summary ? `${planRaw} • ${summary}` : planRaw;
+        showToast({ title: 'Plan linked', msg: `${planMsg} (${photoperiod})`, kind: 'info', icon: '🗓️' });
+      }
     } catch (err) {
       console.error('Failed to attach schedule', err);
       if (typeof showToast === 'function') {
@@ -720,7 +809,9 @@ async function saveGroupFromUI() {
       }
     }
   }
+
 }
+
 
 async function applyNow() {
   const planField = document.getElementById('grp-plan');
@@ -897,7 +988,7 @@ async function seedDemo(plans, devices, farm) {
       const persisted = response && Array.isArray(response.groups) ? response.groups : mergedGroups;
       state.groups = persisted;
       if (typeof state.refreshNameOptions === 'function') {
-        state.refreshNameOptions(state.currentRoom);
+        state.refreshNameOptions(state.currentRoomOption || state.currentRoom);
       }
       if (typeof state.syncToGroupSelection === 'function') {
         state.syncToGroupSelection();
@@ -1833,6 +1924,34 @@ function normalizeTextKey(value) {
 }
 
 function normalizeRoomKey(value) {
+  if (value == null) return '';
+  if (typeof value === 'object') {
+    if (typeof value.key === 'string' && value.key) return value.key;
+    if (Array.isArray(value.aliases) && value.aliases.length) {
+      const alias = value.aliases
+        .map((entry) => normalizeTextKey(entry))
+        .find((candidate) => Boolean(candidate));
+      if (alias) return alias;
+    }
+    const fallback = firstNonEmptyString(
+      value.room,
+      value.roomId,
+      value.room_id,
+      value.roomName,
+      value.name,
+      value.label,
+      value.id,
+      value.slug,
+      value.key,
+      value.displayName,
+      value.raw?.room,
+      value.raw?.roomName,
+      value.raw?.name,
+      value.raw?.label,
+      value.raw?.id
+    );
+    return normalizeTextKey(fallback);
+  }
   return normalizeTextKey(value);
 }
 
@@ -1890,6 +2009,133 @@ function normalizeControllerDeviceForGroups(device) {
   );
   return { ...device, id, deviceName, roomKeys };
 }
+
+function normalizeFarmRoomEntry(room, index = 0) {
+  const fallbackId = `room-${index + 1}`;
+  const fallbackLabel = `Room ${index + 1}`;
+  if (room == null) return null;
+  const addAlias = (collection, value) => {
+    if (value == null) return;
+    if (Array.isArray(value)) {
+      value.forEach((entry) => addAlias(collection, entry));
+      return;
+    }
+    const text = String(value).trim();
+    if (text) collection.add(text);
+  };
+
+  if (typeof room === 'string') {
+    const label = room.trim();
+    if (!label) return null;
+    const alias = normalizeTextKey(label);
+    const aliases = alias ? [alias] : [];
+    return {
+      id: label,
+      label,
+      key: alias,
+      aliases,
+      raw: room,
+    };
+  }
+
+  if (typeof room !== 'object') return null;
+
+  const raw = room;
+  const aliasSource = new Set();
+
+  const idCandidate = firstNonEmptyString(
+    raw.id,
+    raw.roomId,
+    raw.room_id,
+    raw.slug,
+    raw.key,
+    raw.uuid
+  );
+  const labelCandidate = firstNonEmptyString(
+    raw.name,
+    raw.label,
+    raw.roomName,
+    raw.room,
+    raw.title,
+    raw.displayName,
+    raw.description
+  );
+  const label = labelCandidate || idCandidate || fallbackLabel;
+  const id = firstNonEmptyString(idCandidate, label, fallbackId);
+
+  addAlias(aliasSource, id);
+  addAlias(aliasSource, label);
+  addAlias(aliasSource, raw.name);
+  addAlias(aliasSource, raw.label);
+  addAlias(aliasSource, raw.room);
+  addAlias(aliasSource, raw.roomName);
+  addAlias(aliasSource, raw.room_id);
+  addAlias(aliasSource, raw.roomId);
+  addAlias(aliasSource, raw.title);
+  addAlias(aliasSource, raw.displayName);
+  addAlias(aliasSource, raw.match?.room);
+  addAlias(aliasSource, raw.match?.roomName);
+  addAlias(aliasSource, raw.alias);
+  addAlias(aliasSource, raw.aliases);
+  addAlias(aliasSource, raw.key);
+  addAlias(aliasSource, raw.slug);
+
+  const aliasList = Array.from(aliasSource)
+    .map((entry) => normalizeTextKey(entry))
+    .filter(Boolean);
+  const uniqueAliases = Array.from(new Set(aliasList));
+  const key = uniqueAliases[0] || normalizeTextKey(label) || normalizeTextKey(id) || normalizeTextKey(fallbackLabel);
+
+  if (key && !uniqueAliases.includes(key)) {
+    uniqueAliases.unshift(key);
+  }
+
+  return {
+    id: String(id || fallbackId),
+    label: label || id || fallbackLabel,
+    key,
+    aliases: uniqueAliases,
+    raw,
+  };
+}
+
+function normalizeFarmRooms(rooms) {
+  const list = Array.isArray(rooms) ? rooms : [];
+  const normalized = list.map((room, index) => normalizeFarmRoomEntry(room, index)).filter(Boolean);
+  const seenIds = new Set();
+  const seenKeys = new Set();
+  const deduped = [];
+  normalized.forEach((room) => {
+    const idKey = String(room.id || '').trim().toLowerCase();
+    const keyKey = typeof room.key === 'string' ? room.key : '';
+    if (idKey && seenIds.has(idKey)) return;
+    if (keyKey && seenKeys.has(keyKey)) return;
+    if (idKey) seenIds.add(idKey);
+    if (keyKey) seenKeys.add(keyKey);
+    deduped.push(room);
+  });
+  return deduped;
+}
+
+function resolveRoomOptionFromState(state, value) {
+  if (!state) return null;
+  if (value && typeof value === 'object') {
+    if (value.id && state.roomLookup && state.roomLookup[value.id]) {
+      return state.roomLookup[value.id];
+    }
+    return value;
+  }
+  const directKey = typeof value === 'string' ? value : '';
+  if (directKey && state.roomLookup && state.roomLookup[directKey]) {
+    return state.roomLookup[directKey];
+  }
+  const normalizedKey = normalizeRoomKey(value);
+  if (normalizedKey && state.roomLookup && state.roomLookup[normalizedKey]) {
+    return state.roomLookup[normalizedKey];
+  }
+  return null;
+}
+
 
 function extractGroupMemberIds(group) {
   const members = new Set();
