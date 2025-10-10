@@ -128,18 +128,16 @@ function _hdrs(extra = {}) {
   };
 }
 // --- DEMO PATCH: Auto-populate STATE.lightSetups from GreenReach Room 1 fixtures ---
+
 document.addEventListener('DOMContentLoaded', async () => {
   window.GROUPS_ROOM_ONLY = true;
   window.GROUPS_PLANS = true;
-
   if (!window.STATE) window.STATE = {};
-
   try {
     await mountGroupsSetup();
   } catch (e) {
     console.error(e);
   }
-
   if (!Array.isArray(window.STATE.rooms)) return;
   const room = window.STATE.rooms.find(r => r.name === 'GreenReach Room 1' || r.id === 'greenreach-room-1');
   if (!room || !Array.isArray(room.fixtures) || !room.fixtures.length) return;
@@ -164,6 +162,15 @@ document.addEventListener('DOMContentLoaded', async () => {
     }
   ];
   window.dispatchEvent(new CustomEvent('lightSetupsChanged'));
+
+  // --- Smart Plugs sidebar link wiring ---
+  const smartPlugsBtn = document.querySelector('[data-sidebar-link][data-target="smart-plugs"]');
+  if (smartPlugsBtn) {
+    smartPlugsBtn.addEventListener('click', (e) => {
+      e.preventDefault();
+      setActivePanel('smart-plugs');
+    });
+  }
 });
 
 async function readJson(response) {
