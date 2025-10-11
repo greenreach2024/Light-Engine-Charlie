@@ -4629,6 +4629,8 @@ STATE.preAutomationEnv = STATE.preAutomationEnv || { scopes: {} };
 STATE.preAutomationAlert = null;
 STATE.environment = Array.isArray(STATE.environment) ? STATE.environment : [];
 STATE.roomAutomation = STATE.roomAutomation || { rooms: [], meta: {} };
+STATE.aiAdvisory = STATE.aiAdvisory || { summary: '', rooms: [] };
+STATE.envReadings = Array.isArray(STATE.envReadings) ? STATE.envReadings : [];
 
 // ...existing code...
 class FarmWizard {
@@ -11992,6 +11994,102 @@ function onAutomationCardClick(event) {
   }
 }
 
+function findRoomAnalytics(room) {
+  if (!room) return null;
+  if (room.analytics) return room.analytics;
+  const advisoryRooms = Array.isArray(STATE.aiAdvisory?.rooms) ? STATE.aiAdvisory.rooms : [];
+  const fallback = advisoryRooms.find((entry) => entry?.roomId === room.roomId);
+  return fallback?.analytics || null;
+}
+
+function formatRelativeTimeLabel(ts) {
+  if (!ts) return null;
+  const date = new Date(ts);
+  if (!Number.isFinite(date.getTime())) return null;
+  const diffMs = Date.now() - date.getTime();
+  if (diffMs < 0) return 'in progress';
+  const minutes = Math.round(diffMs / 60000);
+  if (minutes < 1) return 'just now';
+  if (minutes < 60) return `${minutes}m ago`;
+  const hours = Math.round(minutes / 60);
+  if (hours < 24) return `${hours}h ago`;
+  const days = Math.round(hours / 24);
+  return `${days}d ago`;
+}
+
+function renderAiAdvisoryCard() {
+  const card = document.getElementById('aiAdvisoryCard');
+  if (!card) return;
+  const summaryEl = card.querySelector('[data-role="ai-summary"]');
+  const listEl = card.querySelector('[data-role="ai-rooms"]');
+  if (summaryEl) {
+    const summary = STATE.aiAdvisory?.summary || '';
+    summaryEl.textContent = summary || 'AI Copilot is gathering advisory telemetry.';
+  }
+  if (!listEl) return;
+
+  const rooms = Array.isArray(STATE.roomAutomation?.rooms) ? STATE.roomAutomation.rooms : [];
+  if (!rooms.length) {
+    listEl.innerHTML = '<p class="tiny text-muted">No rooms enrolled in AI Copilot yet. Enable advisory mode to start building labeled history.</p>';
+    return;
+  }
+
+  const rowsHtml = rooms.map((room) => {
+    const analytics = findRoomAnalytics(room);
+    const daily = analytics?.daily || {};
+    const suggestions = Array.isArray(analytics?.suggestions) ? analytics.suggestions.slice(0, 2) : [];
+    const metrics = [
+      { label: 'Temp', value: Number.isFinite(daily.tempAvg) ? `${daily.tempAvg.toFixed(1)}°C` : '—' },
+      { label: 'RH', value: Number.isFinite(daily.rhAvg) ? `${daily.rhAvg.toFixed(0)}%` : '—' },
+      { label: 'VPD', value: Number.isFinite(daily.vpdAvg) ? `${daily.vpdAvg.toFixed(2)} kPa` : '—' },
+      { label: 'PPFD', value: Number.isFinite(daily.ppfdAvg) ? `${Math.round(daily.ppfdAvg)} µmol` : '—' },
+      { label: 'Energy', value: Number.isFinite(daily.energyKwh) ? `${daily.energyKwh.toFixed(2)} kWh` : '—' }
+    ];
+    const suggestionHtml = suggestions.length
+      ? suggestions.map((item) => `
+          <li>
+            <span class="ai-advisory-room__suggestion-label">${escapeHtml(item.label || 'Advisory action')}</span>
+            ${item.detail ? `<span class="ai-advisory-room__suggestion-detail">${escapeHtml(item.detail)}</span>` : ''}
+          </li>
+        `).join('')
+      : '<li><span class="tiny text-muted">No adjustments recommended.</span></li>';
+
+    const footerParts = [];
+    if (analytics?.planName || analytics?.plan) {
+      footerParts.push(`Plan ${escapeHtml(analytics.planName || analytics.plan)}`);
+    }
+    if (Number.isFinite(daily.samples) && daily.samples > 0) {
+      footerParts.push(`${daily.samples} samples today`);
+    }
+    const relative = formatRelativeTimeLabel(analytics?.lastActionAt);
+    if (relative) footerParts.push(`Last action ${relative}`);
+    if (room.control?.mode === 'autopilot') footerParts.push('Autopilot ready');
+
+    return `
+      <article class="ai-advisory-room" data-room="${escapeHtml(room.roomId || room.name || '')}">
+        <header class="ai-advisory-room__header">
+          <h3 class="ai-advisory-room__title">${escapeHtml(room.name || room.roomId || 'Room')}</h3>
+          <span class="ai-advisory-room__badge">${escapeHtml(room.control?.mode === 'autopilot' ? 'Autopilot' : 'Advisory')}</span>
+        </header>
+        <p class="ai-advisory-room__summary">${escapeHtml(analytics?.summary || 'Within configured guardrails.')}</p>
+        <div class="ai-advisory-room__metrics">
+          ${metrics.map((metric) => `
+            <div class="ai-advisory-room__metric">
+              <span>${metric.label}</span>
+              <span>${escapeHtml(metric.value)}</span>
+            </div>
+          `).join('')}
+        </div>
+        <ul class="ai-advisory-room__suggestions">${suggestionHtml}</ul>
+        <div class="ai-advisory-room__footer">
+          ${footerParts.map((text) => `<span>${escapeHtml(text)}</span>`).join('')}
+        </div>
+      </article>`;
+  }).join('');
+
+  listEl.innerHTML = rowsHtml;
+}
+
 function renderRoomAutomationCard() {
   const card = document.getElementById('roomAutomationCard');
   if (!card) return;
@@ -12208,6 +12306,7 @@ function renderEnvironment() {
     });
   });
 
+  renderAiAdvisoryCard();
   renderRoomAutomationCard();
   renderGrowRoomOverview();
   updateAutomationIndicator();
@@ -12224,6 +12323,11 @@ async function reloadEnvironment() {
       rooms: Array.isArray(payload?.rooms) ? payload.rooms : [],
       meta: payload?.meta || {}
     };
+    STATE.aiAdvisory = {
+      summary: payload?.ai?.summary || '',
+      rooms: Array.isArray(payload?.ai?.rooms) ? payload.ai.rooms : []
+    };
+    STATE.envReadings = Array.isArray(payload?.readings) ? payload.readings : [];
     renderEnvironment();
     $('#envStatus')?.replaceChildren(document.createTextNode(`Updated ${new Date().toLocaleTimeString()}`));
   } catch (e) {

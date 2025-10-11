@@ -466,8 +466,63 @@ function needPin(req, res) {
 const readEnv = () => readJSON(envPath, { rooms: {}, targets: {}, control: {} }) || { rooms: {}, targets: {}, control: {} };
 const writeEnv = (obj) => writeJSON(envPath, obj);
 
-// GET /env → full state
-app.get('/env', (req, res) => res.json(readEnv()));
+const MAX_ENV_READING_HISTORY = 10000;
+const SENSOR_ENTRY_KIND = 'sensor';
+const ACTION_ENTRY_KIND = 'action';
+
+function toNumberOrNull(value) {
+  const num = Number(value);
+  return Number.isFinite(num) ? num : null;
+}
+
+function clampPercentage(value) {
+  if (!Number.isFinite(value)) return null;
+  return Math.min(100, Math.max(0, value));
+}
+
+function computeVpd(tempC, rh) {
+  const temperature = Number(tempC);
+  const humidity = Number(rh);
+  if (!Number.isFinite(temperature) || !Number.isFinite(humidity)) return null;
+  if (humidity <= 0) return Math.round(temperature * 100) / 100;
+  const saturation = 0.6108 * Math.exp((17.27 * temperature) / (temperature + 237.3));
+  const actual = saturation * (humidity / 100);
+  const deficit = Math.max(0, saturation - actual);
+  const rounded = Math.round(deficit * 1000) / 1000;
+  return Number.isFinite(rounded) ? rounded : null;
+}
+
+function ensureRoomContainer(state, roomId) {
+  if (!state || !roomId) return null;
+  if (!state.rooms || typeof state.rooms !== 'object') {
+    state.rooms = {};
+  }
+  if (!state.rooms[roomId] || typeof state.rooms[roomId] !== 'object') {
+    state.rooms[roomId] = { roomId, targets: {}, control: {}, actuators: {} };
+  }
+  const container = state.rooms[roomId];
+  if (!container.telemetry || typeof container.telemetry !== 'object') {
+    container.telemetry = {};
+  }
+  return container;
+}
+
+function recordEnvEntry(state, entry) {
+  if (!state) return;
+  state.readings = Array.isArray(state.readings) ? state.readings : [];
+  state.readings.push(entry);
+  if (state.readings.length > MAX_ENV_READING_HISTORY) {
+    state.readings.splice(0, state.readings.length - MAX_ENV_READING_HISTORY);
+  }
+}
+
+// GET /env → full state (legacy view via ?legacy=1)
+app.get('/env', (req, res, next) => {
+  if (req.query?.legacy === '1') {
+    return res.json(readEnv());
+  }
+  return next();
+});
 
 // POST /env → upsert full or partial (PIN)
 app.post('/env', (req, res) => {
@@ -481,15 +536,53 @@ app.post('/env', (req, res) => {
 // POST /env/readings → append one reading (room, temp, rh, ts)
 app.post('/env/readings', (req, res) => {
   if (needPin(req, res)) return;
-  const { room, temp, rh, ts } = req.body || {};
-  const st = readEnv();
-  st.readings = st.readings || [];
-  st.readings.push({ room, temp, rh, ts: ts || new Date().toISOString() });
-  if (st.readings.length > 10000) {
-    st.readings.splice(0, st.readings.length - 10000);
+  const body = req.body || {};
+  const room = body.room || body.scope || body.zone || null;
+  if (!room) {
+    return res.status(400).json({ ok: false, error: 'room-required' });
   }
+
+  const st = readEnv();
+  const container = ensureRoomContainer(st, room);
+
+  if (typeof body.plan === 'string' && body.plan.trim()) {
+    container.plan = body.plan.trim();
+  }
+
+  const ts = body.ts || body.timestamp || new Date().toISOString();
+  const temp = toNumberOrNull(body.temp ?? body.temperature);
+  const rh = toNumberOrNull(body.rh ?? body.humidity);
+  const vpd = toNumberOrNull(body.vpd) ?? computeVpd(temp, rh);
+  const ppfd = toNumberOrNull(body.ppfd);
+  const kwh = toNumberOrNull(body.kwh ?? body.energyKwh ?? body.energy);
+  let masterPct = toNumberOrNull(body.masterPct ?? body.master);
+  let bluePct = toNumberOrNull(body.bluePct ?? body.blue);
+
+  if (!Number.isFinite(masterPct) && Number.isFinite(container.telemetry?.masterPct)) {
+    masterPct = container.telemetry.masterPct;
+  }
+  if (!Number.isFinite(bluePct) && Number.isFinite(container.telemetry?.bluePct)) {
+    bluePct = container.telemetry.bluePct;
+  }
+
+  const entry = {
+    kind: SENSOR_ENTRY_KIND,
+    room,
+    ts,
+    temp,
+    rh,
+    vpd,
+    ppfd,
+    kwh,
+    plan: container.plan || null,
+    masterPct: clampPercentage(masterPct ?? null),
+    bluePct: clampPercentage(bluePct ?? null),
+    source: body.source || 'ingest'
+  };
+
+  recordEnvEntry(st, entry);
   writeEnv(st);
-  res.json({ ok: true });
+  res.json({ ok: true, reading: entry });
 });
 
 // POST /automation/run → run one policy tick for a room (or all)
@@ -501,6 +594,74 @@ app.post('/automation/run', async (req, res) => {
   writeEnv(out.state);
   res.json({ ok: true, actions: out.actions });
 });
+
+function logAutomationAction(state, roomId, cfg, reading, actionList, mode) {
+  if (!state || !roomId || !Array.isArray(actionList) || !actionList.length) return;
+  const container = ensureRoomContainer(state, roomId);
+  const telemetry = container.telemetry || {};
+  const plan = reading?.plan || container.plan || cfg?.plan || null;
+
+  const prevMaster = Number.isFinite(telemetry.masterPct) ? telemetry.masterPct : 100;
+  const prevBlue = Number.isFinite(telemetry.bluePct) ? telemetry.bluePct : 100;
+  const readingMaster = Number.isFinite(reading?.masterPct) ? clampPercentage(reading.masterPct) : null;
+  const readingBlue = Number.isFinite(reading?.bluePct) ? clampPercentage(reading.bluePct) : null;
+
+  let nextMaster = Number.isFinite(readingMaster) ? readingMaster : prevMaster;
+  let nextBlue = Number.isFinite(readingBlue) ? readingBlue : prevBlue;
+
+  for (const action of actionList) {
+    if (!action || action.type !== 'lights.scale') continue;
+    const deltaMaster = Number(action.masterDelta || 0) * 100;
+    const deltaBlue = Number(action.blueDelta || 0) * 100;
+    const minMasterPct = Number.isFinite(action.minMaster) ? action.minMaster * 100 : null;
+    const minBluePct = Number.isFinite(action.minBlue) ? action.minBlue * 100 : null;
+
+    if (Number.isFinite(deltaMaster)) {
+      nextMaster = clampPercentage(nextMaster + deltaMaster);
+      if (minMasterPct != null) nextMaster = Math.max(nextMaster, minMasterPct);
+    }
+    if (Number.isFinite(deltaBlue)) {
+      nextBlue = clampPercentage(nextBlue + deltaBlue);
+      if (minBluePct != null) nextBlue = Math.max(nextBlue, minBluePct);
+    }
+  }
+
+  const ts = new Date().toISOString();
+  const entry = {
+    kind: ACTION_ENTRY_KIND,
+    room: roomId,
+    ts,
+    temp: Number.isFinite(reading?.temp) ? reading.temp : null,
+    rh: Number.isFinite(reading?.rh) ? reading.rh : null,
+    vpd: Number.isFinite(reading?.vpd) ? reading.vpd : computeVpd(reading?.temp, reading?.rh),
+    ppfd: Number.isFinite(reading?.ppfd) ? reading.ppfd : null,
+    kwh: Number.isFinite(reading?.kwh) ? reading.kwh : null,
+    plan: plan || null,
+    masterPct: clampPercentage(nextMaster),
+    bluePct: clampPercentage(nextBlue),
+    actions: actionList.map((action) => ({ ...action })),
+    mode: mode || 'advisory',
+    result: mode === 'autopilot' ? 'executed' : 'pending',
+    resultAfterDwell: null,
+    dwell: cfg?.control?.dwell ?? null,
+    previousMasterPct: Number.isFinite(prevMaster) ? prevMaster : null,
+    previousBluePct: Number.isFinite(prevBlue) ? prevBlue : null
+  };
+
+  recordEnvEntry(state, entry);
+
+  container.telemetry = {
+    ...(container.telemetry || {}),
+    masterPct: entry.masterPct ?? container.telemetry?.masterPct ?? null,
+    bluePct: entry.bluePct ?? container.telemetry?.bluePct ?? null,
+    lastActionAt: ts,
+    lastResult: entry.result
+  };
+
+  if (plan && !container.plan) {
+    container.plan = plan;
+  }
+}
 
 async function runPolicyOnce(state, onlyRoom = null) {
   const rooms = state.rooms || {};
@@ -531,7 +692,7 @@ async function runPolicyOnce(state, onlyRoom = null) {
     const minM = t.minMaster ?? 0.6;
     const minB = t.minBlue ?? 0.5;
     if (master !== 0 || blue !== 0) {
-      actions.push({
+      const payload = {
         roomId,
         type: 'lights.scale',
         masterDelta: master,
@@ -539,10 +700,12 @@ async function runPolicyOnce(state, onlyRoom = null) {
         minMaster: minM,
         minBlue: minB,
         dwell: c.dwell || 180
-      });
+      };
+      actions.push(payload);
       if (c.mode === 'autopilot') {
         await applyLightScaling(cfg, master, blue, minM, minB);
       }
+      logAutomationAction(state, roomId, cfg, r, [payload], c.mode);
     }
   }
   return { state, actions };
@@ -550,7 +713,11 @@ async function runPolicyOnce(state, onlyRoom = null) {
 
 function latestReading(readings, roomId) {
   for (let i = readings.length - 1; i >= 0; --i) {
-    if (readings[i].room === roomId) return readings[i];
+    const entry = readings[i];
+    if (entry.room !== roomId) continue;
+    if (entry.kind && entry.kind !== SENSOR_ENTRY_KIND && entry.kind !== ACTION_ENTRY_KIND) continue;
+    if (entry.temp == null && entry.rh == null && entry.vpd == null) continue;
+    return entry;
   }
   return null;
 }
@@ -998,6 +1165,273 @@ function evaluateRoomAutomationState(envSnapshot, zones) {
   };
 }
 
+function getPlanIndex() {
+  const plans = loadPlansFile();
+  const map = new Map();
+  plans.forEach((plan) => {
+    if (!plan || !plan.id) return;
+    map.set(plan.id, plan);
+  });
+  return map;
+}
+
+function startOfToday() {
+  const now = new Date();
+  const start = new Date(now);
+  start.setHours(0, 0, 0, 0);
+  return start;
+}
+
+function parseTimestamp(ts) {
+  if (!ts) return null;
+  const date = new Date(ts);
+  return Number.isFinite(date.getTime()) ? date : null;
+}
+
+function computeAverage(entries, key) {
+  let sum = 0;
+  let count = 0;
+  entries.forEach((entry) => {
+    const value = Number(entry?.[key]);
+    if (Number.isFinite(value)) {
+      sum += value;
+      count += 1;
+    }
+  });
+  if (!count) return null;
+  return sum / count;
+}
+
+function computeEnergy(entries) {
+  let total = 0;
+  let count = 0;
+  entries.forEach((entry) => {
+    const value = Number(entry?.kwh ?? entry?.energyKwh ?? entry?.energy);
+    if (Number.isFinite(value)) {
+      total += value;
+      count += 1;
+    }
+  });
+  if (!count) return null;
+  return total;
+}
+
+function selectPlanForRoom(room, legacyRooms, planIndex) {
+  const planKey = [
+    room?.plan,
+    room?.targets?.plan,
+    legacyRooms?.[room?.roomId]?.plan,
+    legacyRooms?.[room?.roomId]?.targets?.plan,
+    room?.meta?.planId,
+    room?.meta?.plan
+  ].find((value) => typeof value === 'string' && value.trim());
+  if (!planKey) return { plan: null, planKey: null };
+  const normalized = planKey.trim();
+  return {
+    plan: planIndex.get(normalized) || null,
+    planKey: normalized
+  };
+}
+
+function describeDelta(value, target, suffix) {
+  if (!Number.isFinite(value) || !Number.isFinite(target)) return null;
+  const delta = value - target;
+  if (Math.abs(delta) < 0.01) return null;
+  const arrow = delta > 0 ? '+' : '−';
+  return `${arrow}${Math.abs(delta).toFixed(1)}${suffix}`;
+}
+
+function buildRoomAnalytics(room, legacyEnv, planIndex) {
+  const readings = Array.isArray(legacyEnv?.readings) ? legacyEnv.readings.filter((entry) => entry?.room === room.roomId) : [];
+  const todayStart = startOfToday();
+  const todaysSensors = readings.filter((entry) => {
+    const ts = parseTimestamp(entry?.ts);
+    if (!ts) return false;
+    return ts >= todayStart;
+  });
+
+  const dailyEntries = todaysSensors.length ? todaysSensors : readings.slice(-24);
+  const daily = {
+    tempAvg: computeAverage(dailyEntries, 'temp'),
+    rhAvg: computeAverage(dailyEntries, 'rh'),
+    vpdAvg: computeAverage(dailyEntries, 'vpd'),
+    ppfdAvg: computeAverage(dailyEntries, 'ppfd'),
+    masterAvg: computeAverage(dailyEntries, 'masterPct'),
+    blueAvg: computeAverage(dailyEntries, 'bluePct'),
+    energyKwh: computeEnergy(dailyEntries),
+    samples: dailyEntries.length,
+    logCount: readings.length
+  };
+
+  const { plan, planKey } = selectPlanForRoom(room, legacyEnv?.rooms || {}, planIndex);
+  const targets = room?.targets || {};
+  const control = room?.control || {};
+  const rhBand = typeof targets.rhBand === 'number' ? Math.max(1, targets.rhBand) : 5;
+  const minRh = Number.isFinite(targets.rh) ? targets.rh - rhBand : null;
+  const maxRh = Number.isFinite(targets.rh) ? targets.rh + rhBand : null;
+  const targetVpd = computeVpd(targets.temp, targets.rh);
+  const suggestions = [];
+  const summaryParts = [];
+  const stepPct = Math.round((control.step ?? 0.05) * 100);
+  const dwell = control.dwell ?? 180;
+
+  if (Number.isFinite(daily.tempAvg) && Number.isFinite(targets.temp)) {
+    const delta = daily.tempAvg - targets.temp;
+    if (delta > 0.8) {
+      suggestions.push({
+        id: `${room.roomId}-ai-temp-high`,
+        type: 'lighting',
+        metric: 'temp',
+        label: `Dim master −${stepPct}%`,
+        detail: `Avg ${daily.tempAvg.toFixed(1)}°C vs target ${targets.temp.toFixed(1)}°C · dwell ${dwell}s`,
+        change: { masterDelta: -(control.step || 0.05), dwell }
+      });
+      summaryParts.push(`temperature running high (+${delta.toFixed(1)}°C)`);
+    } else if (delta < -0.8) {
+      suggestions.push({
+        id: `${room.roomId}-ai-temp-low`,
+        type: 'lighting',
+        metric: 'temp',
+        label: `Boost master +${stepPct}%`,
+        detail: `Avg ${daily.tempAvg.toFixed(1)}°C below target ${targets.temp.toFixed(1)}°C · dwell ${dwell}s`,
+        change: { masterDelta: control.step || 0.05, dwell }
+      });
+      summaryParts.push(`temperature trailing low (${delta.toFixed(1)}°C)`);
+    }
+  }
+
+  if (Number.isFinite(daily.rhAvg) && Number.isFinite(targets.rh)) {
+    if (maxRh != null && daily.rhAvg > maxRh + 1) {
+      suggestions.push({
+        id: `${room.roomId}-ai-rh-high`,
+        type: 'dehumidifier',
+        metric: 'rh',
+        label: `Run dehumidifier ${dwell}s`,
+        detail: `Avg RH ${daily.rhAvg.toFixed(1)}% above ${maxRh.toFixed(1)}% band`,
+        change: { actuator: 'dehu', duration: dwell }
+      });
+      summaryParts.push(`humidity drifting high (+${(daily.rhAvg - maxRh).toFixed(1)}%)`);
+    } else if (minRh != null && daily.rhAvg < minRh - 1) {
+      suggestions.push({
+        id: `${room.roomId}-ai-rh-low`,
+        type: 'circulation',
+        metric: 'rh',
+        label: `Pulse fans ${dwell}s`,
+        detail: `Avg RH ${daily.rhAvg.toFixed(1)}% below ${minRh.toFixed(1)}% band`,
+        change: { actuator: 'fans', duration: dwell }
+      });
+      summaryParts.push(`humidity dipping low (${(daily.rhAvg - minRh).toFixed(1)}%)`);
+    }
+  }
+
+  if (Number.isFinite(daily.vpdAvg) && Number.isFinite(targetVpd)) {
+    const delta = daily.vpdAvg - targetVpd;
+    if (delta > 0.2) {
+      summaryParts.push(`VPD trending high (${delta.toFixed(2)} kPa)`);
+    } else if (delta < -0.2) {
+      summaryParts.push(`VPD trending low (${delta.toFixed(2)} kPa)`);
+    }
+  }
+
+  if (plan && Number.isFinite(plan.ppfd) && Number.isFinite(daily.ppfdAvg)) {
+    const ppfdDelta = daily.ppfdAvg - plan.ppfd;
+    if (ppfdDelta < -30) {
+      suggestions.push({
+        id: `${room.roomId}-ai-ppfd-low`,
+        type: 'lighting',
+        metric: 'ppfd',
+        label: `Raise PPFD +${stepPct}%`,
+        detail: `Avg PPFD ${daily.ppfdAvg.toFixed(0)} vs plan ${plan.ppfd.toFixed(0)} µmol/m²/s`,
+        change: { masterDelta: control.step || 0.05, dwell }
+      });
+      summaryParts.push(`PPFD trailing plan (${Math.abs(ppfdDelta).toFixed(0)} µmol)`);
+    } else if (ppfdDelta > 40) {
+      suggestions.push({
+        id: `${room.roomId}-ai-ppfd-high`,
+        type: 'lighting',
+        metric: 'ppfd',
+        label: `Trim PPFD −${stepPct}%`,
+        detail: `Avg PPFD ${daily.ppfdAvg.toFixed(0)} above plan ${plan.ppfd.toFixed(0)} µmol/m²/s`,
+        change: { masterDelta: -(control.step || 0.05), dwell }
+      });
+      summaryParts.push(`PPFD exceeding plan (${ppfdDelta.toFixed(0)} µmol)`);
+    }
+  }
+
+  if (Number.isFinite(daily.energyKwh) && daily.energyKwh > 0) {
+    summaryParts.push(`lighting draw ${daily.energyKwh.toFixed(2)} kWh`);
+  }
+
+  const summary = summaryParts.length
+    ? `${summaryParts[0][0].toUpperCase()}${summaryParts[0].slice(1)}${summaryParts.length > 1 ? '; ' + summaryParts.slice(1).join('; ') : ''}`
+    : 'Conditions within configured guardrails.';
+
+  const narrativeParts = [summary];
+  const tempDetail = Number.isFinite(daily.tempAvg) && Number.isFinite(targets.temp)
+    ? `Temp ${daily.tempAvg.toFixed(1)}°C (${describeDelta(daily.tempAvg, targets.temp, '°C') || 'on target'})`
+    : null;
+  const rhDetail = Number.isFinite(daily.rhAvg) && Number.isFinite(targets.rh)
+    ? `RH ${daily.rhAvg.toFixed(0)}% (${describeDelta(daily.rhAvg, targets.rh, '%') || 'on target'})`
+    : null;
+  const vpdDetail = Number.isFinite(daily.vpdAvg) && Number.isFinite(targetVpd)
+    ? `VPD ${daily.vpdAvg.toFixed(2)} kPa (${describeDelta(daily.vpdAvg, targetVpd, ' kPa') || 'balanced'})`
+    : null;
+  const ppfdDetail = Number.isFinite(daily.ppfdAvg)
+    ? Number.isFinite(plan?.ppfd)
+      ? `PPFD ${daily.ppfdAvg.toFixed(0)} µmol (plan ${plan.ppfd.toFixed(0)})`
+      : `PPFD ${daily.ppfdAvg.toFixed(0)} µmol`
+    : null;
+
+  const climateDetails = [tempDetail, rhDetail, vpdDetail, ppfdDetail].filter(Boolean);
+  if (climateDetails.length) {
+    narrativeParts.push(climateDetails.join(' · '));
+  }
+  if (plan) {
+    const photoperiod = Number.isFinite(plan.photoperiod) ? `${plan.photoperiod}h` : '—';
+    const planPpfd = Number.isFinite(plan.ppfd) ? `${plan.ppfd.toFixed(0)} µmol` : `${plan.ppfd || '—'} µmol`;
+    narrativeParts.push(`Plan ${plan.name || planKey} targets ${planPpfd} for ${photoperiod}.`);
+  }
+  if (Number.isFinite(daily.energyKwh)) {
+    narrativeParts.push(`Lighting energy ${daily.energyKwh.toFixed(2)} kWh today.`);
+  }
+
+  const lastAction = readings.slice().reverse().find((entry) => entry?.kind === ACTION_ENTRY_KIND) || null;
+
+  return {
+    summary,
+    narrative: narrativeParts.join(' '),
+    daily,
+    suggestions,
+    plan: planKey || null,
+    planName: plan?.name || null,
+    lastActionAt: lastAction?.ts || null,
+    lastResult: lastAction?.result || null
+  };
+}
+
+function buildAiAdvisory(rooms, legacyEnv) {
+  const planIndex = getPlanIndex();
+  const analyticsByRoom = new Map();
+  const summaries = [];
+
+  rooms.forEach((room) => {
+    const analytics = buildRoomAnalytics(room, legacyEnv, planIndex);
+    analyticsByRoom.set(room.roomId, analytics);
+    if (analytics?.summary) {
+      summaries.push(`${room.name || room.roomId}: ${analytics.summary}`);
+    }
+  });
+
+  const summary = summaries.length
+    ? summaries.join(' ')
+    : 'AI Copilot is monitoring environmental guardrails.';
+
+  return {
+    summary,
+    analyticsByRoom
+  };
+}
+
 function applyCorsHeaders(req, res, methods = 'GET,POST,PATCH,DELETE,OPTIONS') {
   const origin = req.headers?.origin;
   if (origin) {
@@ -1088,12 +1522,36 @@ app.get('/env', async (req, res) => {
 
     const zones = Array.isArray(zonesPayload.zones) && zonesPayload.zones.length ? zonesPayload.zones : zonesFromScopes;
     const automationState = evaluateRoomAutomationState(snapshot, zones);
+    const legacyEnvState = readEnv();
+    const aiBundle = buildAiAdvisory(automationState.rooms, legacyEnvState);
+    const roomsWithAnalytics = automationState.rooms.map((room) => ({
+      ...room,
+      analytics: aiBundle.analyticsByRoom.get(room.roomId) || null
+    }));
 
     res.json({
       ok: true,
       env: snapshot,
       zones,
-      rooms: automationState.rooms,
+      rooms: roomsWithAnalytics,
+      readings: legacyEnvState.readings || [],
+      targets: legacyEnvState.targets || {},
+      control: legacyEnvState.control || {},
+      roomsMap: legacyEnvState.rooms || {},
+      legacy: {
+        rooms: legacyEnvState.rooms || {},
+        targets: legacyEnvState.targets || {},
+        control: legacyEnvState.control || {},
+        readings: legacyEnvState.readings || []
+      },
+      ai: {
+        summary: aiBundle.summary,
+        rooms: roomsWithAnalytics.map((room) => ({
+          roomId: room.roomId,
+          name: room.name,
+          analytics: room.analytics
+        }))
+      },
       meta: {
         envSource: zonesPayload.source,
         evaluatedAt: automationState.evaluatedAt,
