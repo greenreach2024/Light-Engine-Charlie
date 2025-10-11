@@ -35,6 +35,26 @@ We will adopt a robust, scalable separation of concerns by introducing two disti
 - Telemetry should capture group references to aid debugging.
 - UI navigation should emphasize the linkage between the zone and its associated groups while enforcing device type membership rules.
 
+## Two-Paths Framing
+- **Option A – Direct/Fast**
+  - Maintain a single "Zone Group" that mixes lights and equipment behind tabbed navigation.
+  - Intended for one operator managing a small number of devices when the priority is a quick demo or rapid iteration.
+- **Option B – Robust/Systemic**
+  - Keep typed LightGroup and EquipGroup resources with a Zone wrapper to preserve API contracts and audit trails.
+  - Recommended baseline because it respects Charlie's guardrails, scales to many rooms, and keeps domain boundaries explicit.
+
+Default to Option B unless time-boxed validation requires the lighter-weight approach. When Option A is selected, document the rationale and capture follow-up tasks to migrate to Option B before expanding beyond the initial scope.
+
+## Quick Bring-Up Checklist
+Follow this sequence when activating a new zone on the farm:
+
+1. **Farm setup:** Save updated Rooms and Zones in Farm Setup so downstream pickers stay in sync.
+2. **Sensors:** In SwitchBot Manager assign each sensor to the correct Room and Zone, then mark the primary sensor for the zone.
+3. **Plugs:** Assign Room/Zone metadata plus the correct `controlledType`. For any light controlled via an API, force its plug to `ON` and remove it from EquipGroup membership to avoid contention.
+4. **Groups:** Create `…-Lights` and `…-Equip` groups per zone and add the appropriate members.
+5. **Lights:** Push lighting recipes and schedules through the Recipe Bridge tooling (Excel) so `/plans` and `/sched` stay aligned.
+6. **Environment:** Configure relative humidity (`rh`), allowable band (`rhBand` at 5%), and dwell time (10 minutes) for the zone, then persist the payload to `/env`.
+
 ## UI Behavior
 - **SwitchBot Manager cards**
   - The header row surfaces the device name alongside battery state, RSSI, and a relative "last seen" timestamp so operators can audit health at a glance.
