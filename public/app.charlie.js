@@ -256,9 +256,8 @@ function renderLightInfoCard(light) {
 
 // Show light info card when a light is highlighted in the unassigned lights field
 document.addEventListener('DOMContentLoaded', () => {
-// Populate Assigned Lights select beside Unassigned Lights
-document.addEventListener('DOMContentLoaded', () => {
-  function renderAssignedLights() {
+  // Populate Assigned Lights select beside Unassigned Lights
+  const renderAssignedLights = () => {
     const select = document.getElementById('assignedLightsSelect');
     if (!select) return;
     select.innerHTML = '';
@@ -282,19 +281,21 @@ document.addEventListener('DOMContentLoaded', () => {
       opt.textContent = label;
       select.appendChild(opt);
     });
-  }
+  };
+
   document.addEventListener('groups-updated', renderAssignedLights);
   document.addEventListener('lights-updated', renderAssignedLights);
-  // Initial render
+  // Initial render once DOM is ready
+  renderAssignedLights();
+  // Ensure any late async updates still populate the list
   setTimeout(renderAssignedLights, 200);
-});
-  const select = document.getElementById('groupsV2UnassignedLightsSelect');
+  const unassignedSelect = document.getElementById('groupsV2UnassignedLightsSelect');
   const card = document.getElementById('lightInfoCard');
   const cardBody = document.getElementById('lightInfoCardBody');
-  if (!select || !card || !cardBody) return;
+  if (!unassignedSelect || !card || !cardBody) return;
   function updateCard() {
     const lights = (window.STATE && Array.isArray(window.STATE.lights)) ? window.STATE.lights : [];
-    const selectedId = select.value;
+    const selectedId = unassignedSelect.value;
     const light = lights.find(l => l.id === selectedId || l.serial === selectedId);
     if (light) {
       cardBody.innerHTML = renderLightInfoCard(light);
@@ -304,9 +305,9 @@ document.addEventListener('DOMContentLoaded', () => {
       card.style.display = 'none';
     }
   }
-  select.addEventListener('change', updateCard);
-  select.addEventListener('focus', updateCard);
-  select.addEventListener('click', updateCard);
+  unassignedSelect.addEventListener('change', updateCard);
+  unassignedSelect.addEventListener('focus', updateCard);
+  unassignedSelect.addEventListener('click', updateCard);
   // Show info for first light if present
   setTimeout(updateCard, 100);
 });
