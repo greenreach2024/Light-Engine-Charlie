@@ -1,6 +1,294 @@
 import React, { useCallback, useEffect, useMemo, useState } from "react";
 import { Device, DeviceAssignment, useDevices } from "../store/devices";
 
+const DEVICE_METRIC_STYLE_ID = "device-manager-metrics";
+const DEVICE_METRIC_STYLES = `
+  .device-card__metrics {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+    margin: 12px 0 8px;
+  }
+
+  .device-card__metric {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    padding: 4px 10px;
+    border-radius: 999px;
+    background: var(--gr-bg, #f1f5f9);
+    border: 1px solid var(--gr-border, #e2e8f0);
+    font-size: 0.8rem;
+  }
+
+  .device-card__metric-label {
+    font-size: 0.7rem;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+    color: var(--dark, #0f172a);
+  }
+
+  .device-card__metric-value {
+    display: inline-flex;
+    align-items: baseline;
+    gap: 4px;
+    font-weight: 600;
+    color: var(--dark, #0f172a);
+  }
+
+  .device-card__metric-unit {
+    font-size: 0.7rem;
+    color: var(--medium, #64748b);
+  }
+
+  .device-card__metric-hint {
+    margin-left: 2px;
+  }
+`;
+
+const isRecord = (value: unknown): value is Record<string, unknown> =>
+  value !== null && typeof value === "object" && !Array.isArray(value);
+
+const coerceNumber = (value: unknown): number | null => {
+  if (typeof value === "number") {
+    return Number.isFinite(value) ? value : null;
+  }
+  if (typeof value === "string") {
+    const trimmed = value.trim();
+    if (!trimmed) {
+      return null;
+    }
+    const slashIndex = trimmed.indexOf("/");
+    if (slashIndex > 0) {
+      const first = trimmed.slice(0, slashIndex).trim();
+      const parsedFirst = Number.parseFloat(first);
+      if (Number.isFinite(parsedFirst)) {
+        return parsedFirst;
+      }
+    }
+    const match = trimmed.match(/-?\d+(?:\.\d+)?/);
+    if (match) {
+      const parsed = Number.parseFloat(match[0]);
+      return Number.isFinite(parsed) ? parsed : null;
+    }
+    return null;
+  }
+  if (Array.isArray(value)) {
+    for (const entry of value) {
+      const parsed = coerceNumber(entry);
+      if (parsed !== null) {
+        return parsed;
+      }
+    }
+  }
+  return null;
+};
+
+const parsePhotoperiodHours = (value: unknown): number | null => {
+  const parsed = coerceNumber(value);
+  if (parsed === null) {
+    return null;
+  }
+  return parsed >= 0 ? parsed : null;
+};
+
+const getValueByPath = (source: Record<string, unknown>, path: string): unknown => {
+  return path.split(".").reduce<unknown>((acc, key) => {
+    if (!isRecord(acc)) {
+      return undefined;
+    }
+    return acc[key];
+  }, source);
+};
+
+const getNumberFromDetails = (
+  details: Record<string, unknown>,
+  paths: string[],
+  parser: (value: unknown) => number | null = coerceNumber
+): { value: number | null; path: string | null } => {
+  for (const path of paths) {
+    const raw = getValueByPath(details, path);
+    const parsed = parser(raw);
+    if (parsed !== null) {
+      return { value: parsed, path };
+    }
+  }
+  return { value: null, path: null };
+};
+
+const computeDliValue = (ppfd: number | null, hours: number | null): number | null => {
+  if (ppfd === null || hours === null) {
+    return null;
+  }
+  if (ppfd < 0 || hours < 0) {
+    return null;
+  }
+  const dli = (ppfd * hours * 3600) / 1e6;
+  return Number.isFinite(dli) ? dli : null;
+};
+
+interface MetricInfo {
+  value: number | null;
+  tooltip: string;
+}
+
+interface RoomOption {
+  id: string;
+  name: string;
+  targetPpfd: number | null;
+  photoperiodHours: number | null;
+  energyHours: number | null;
+}
+
+const deriveDeviceMetrics = (device: Device, room?: RoomOption): { dli: MetricInfo; energy: MetricInfo } => {
+  const details = isRecord(device.details) ? device.details : {};
+
+  const ppfdCandidates = [
+    "ppfd",
+    "targetPpfd",
+    "plan.ppfd",
+    "lighting.ppfd",
+    "targets.ppfd",
+    "derived.ppfd",
+    "telemetry.ppfd",
+  ];
+  const hoursCandidates = [
+    "photoperiodHours",
+    "hours",
+    "photoperiod",
+    "plan.photoperiodHours",
+    "plan.photoperiod",
+    "lighting.photoperiodHours",
+    "lighting.photoperiod",
+    "schedule.photoperiodHours",
+    "schedule.photoperiod",
+    "runtimeHours",
+  ];
+  const energyCandidates = [
+    "energyForecastKwh",
+    "energyKwh",
+    "energy.forecastKwh",
+    "plan.energyKwh",
+    "telemetry.energyKwh",
+  ];
+  const wattCandidates = [
+    "watts",
+    "wattage",
+    "powerWatts",
+    "nominalW",
+    "ratedWatts",
+    "lighting.watts",
+    "specs.watts",
+    "telemetry.watts",
+  ];
+  const energyHoursCandidates = [
+    "energyHours",
+    "lighting.energyHours",
+    "schedule.energyHours",
+    "expectedHours",
+    "dailyHours",
+  ];
+
+  const { value: devicePpfd, path: ppfdPath } = getNumberFromDetails(details, ppfdCandidates);
+  const { value: deviceHours, path: hoursPath } = getNumberFromDetails(details, hoursCandidates, parsePhotoperiodHours);
+  const { value: deviceEnergyHours, path: energyHoursPath } = getNumberFromDetails(details, energyHoursCandidates);
+
+  const ppfdValue = devicePpfd ?? room?.targetPpfd ?? null;
+  const ppfdSource = devicePpfd !== null ? `device ${ppfdPath?.replace(/\./g, " → ") ?? "target"}` : room ? `${room.name} target` : null;
+
+  let hoursValue = deviceHours;
+  let hoursSource = hoursPath ? `device ${hoursPath.replace(/\./g, " → ")}` : null;
+  if (hoursValue === null && deviceEnergyHours !== null) {
+    hoursValue = deviceEnergyHours;
+    hoursSource = energyHoursPath ? `device ${energyHoursPath.replace(/\./g, " → ")}` : "device energy hours";
+  }
+  if (hoursValue === null && room) {
+    if (room.photoperiodHours !== null) {
+      hoursValue = room.photoperiodHours;
+      hoursSource = `${room.name} photoperiod`;
+    } else if (room.energyHours !== null) {
+      hoursValue = room.energyHours;
+      hoursSource = `${room.name} energy hours`;
+    }
+  }
+
+  const dliValue = computeDliValue(ppfdValue, hoursValue);
+  const dliTooltipParts = ["Daily light integral = PPFD × hours × 3600 ÷ 1e6."];
+  if (ppfdValue !== null) {
+    const ppfdLabel = `${ppfdValue.toFixed(0)} µmol·m⁻²·s⁻¹`;
+    dliTooltipParts.push(`PPFD ${ppfdLabel}${ppfdSource ? ` (${ppfdSource})` : ""}.`);
+  } else {
+    dliTooltipParts.push("PPFD value unavailable.");
+  }
+  if (hoursValue !== null) {
+    const hoursLabel = `${hoursValue.toFixed(1)} h`;
+    dliTooltipParts.push(`Photoperiod ${hoursLabel}${hoursSource ? ` (${hoursSource})` : ""}.`);
+  } else {
+    dliTooltipParts.push("Photoperiod hours unavailable.");
+  }
+  if (dliValue !== null) {
+    dliTooltipParts.push(`Result ≈ ${dliValue.toFixed(2)} mol·m⁻²·d⁻¹.`);
+  }
+
+  const { value: directEnergy, path: energyPath } = getNumberFromDetails(details, energyCandidates);
+  const { value: wattsValue, path: wattsPath } = getNumberFromDetails(details, wattCandidates);
+
+  let energyValue = directEnergy;
+  let energyTooltipParts: string[];
+
+  if (energyValue !== null) {
+    const energySource = energyPath ? energyPath.replace(/\./g, " → ") : "device telemetry";
+    energyTooltipParts = [
+      `Energy forecast provided by device telemetry (${energySource}).`,
+      `Reported ≈ ${energyValue.toFixed(2)} kWh per day.`,
+    ];
+  } else {
+    const hoursForEnergy =
+      deviceEnergyHours ?? hoursValue ?? (room?.energyHours ?? room?.photoperiodHours ?? null);
+    const hoursEnergySource =
+      deviceEnergyHours !== null
+        ? energyHoursPath
+          ? `device ${energyHoursPath.replace(/\./g, " → ")}`
+          : "device energy hours"
+        : hoursValue !== null
+        ? hoursSource
+        : room
+        ? `${room.name}${room.energyHours !== null ? " energy hours" : " photoperiod"}`
+        : null;
+
+    if (
+      wattsValue !== null &&
+      hoursForEnergy !== null &&
+      wattsValue >= 0 &&
+      hoursForEnergy >= 0
+    ) {
+      energyValue = (wattsValue * hoursForEnergy) / 1000;
+      energyTooltipParts = [
+        "Energy forecast = watts × hours ÷ 1000.",
+        `Watts ${wattsValue.toFixed(0)} W${wattsPath ? ` (device ${wattsPath.replace(/\./g, " → ")})` : ""}.`,
+        `Hours ${hoursForEnergy.toFixed(1)} h${hoursEnergySource ? ` (${hoursEnergySource})` : ""}.`,
+        `Result ≈ ${energyValue.toFixed(2)} kWh.`,
+      ];
+    } else {
+      energyTooltipParts = [
+        "Energy forecast = watts × hours ÷ 1000.",
+        wattsValue === null || wattsValue < 0
+          ? "Watts value unavailable."
+          : `Watts ${wattsValue.toFixed(0)} W available.`,
+        hoursForEnergy === null || hoursForEnergy < 0
+          ? "Runtime hours unavailable."
+          : `Hours ${hoursForEnergy.toFixed(1)} h${hoursEnergySource ? ` (${hoursEnergySource})` : ""}.`,
+      ];
+    }
+  }
+
+  return {
+    dli: { value: dliValue, tooltip: dliTooltipParts.join(" ") },
+    energy: { value: energyValue, tooltip: energyTooltipParts.join(" ") },
+  };
+};
+
 const PROTOCOL_ORDER = ["kasa", "mqtt", "switchbot", "other"] as const;
 
 const protocolLabel = (protocol: string): string => {
@@ -51,11 +339,6 @@ const emitToast = (options: ToastOptions, ttlMs?: number) => {
   }
 };
 
-interface RoomOption {
-  id: string;
-  name: string;
-}
-
 interface EquipmentOption {
   id: string;
   label: string;
@@ -63,16 +346,42 @@ interface EquipmentOption {
 }
 
 const normalizeRoom = (room: unknown, index: number): RoomOption => {
-  if (!room || typeof room !== "object") {
-    return { id: `room-${index + 1}`, name: `Room ${index + 1}` };
+  if (!isRecord(room)) {
+    const fallbackId = `room-${index + 1}`;
+    return {
+      id: fallbackId,
+      name: `Room ${index + 1}`,
+      targetPpfd: null,
+      photoperiodHours: null,
+      energyHours: null,
+    };
   }
-  const source = room as Record<string, unknown>;
+  const source = room;
   const idRaw = typeof source.id === "string" && source.id.trim().length > 0 ? source.id.trim() : null;
   const nameRaw = typeof source.name === "string" && source.name.trim().length > 0 ? source.name.trim() : null;
   const fallback = `room-${index + 1}`;
+  const lighting = isRecord(source.lighting) ? source.lighting : undefined;
+  const targetPpfdRaw =
+    source["targetPpfd"] ?? source["ppfd"] ?? (lighting ? lighting["targetPpfd"] ?? lighting["ppfd"] : undefined);
+  const photoperiodRaw =
+    source["photoperiodHours"] ??
+    source["photoperiod"] ??
+    (lighting ? lighting["photoperiodHours"] ?? lighting["photoperiod"] : undefined);
+  const energyHoursRaw = source["energyHours"] ?? (lighting ? lighting["energyHours"] : undefined);
+  const targetPpfd = coerceNumber(targetPpfdRaw);
+  const photoperiodHours = parsePhotoperiodHours(photoperiodRaw);
+  const energyHours = coerceNumber(energyHoursRaw);
   return {
     id: idRaw || fallback,
     name: nameRaw || idRaw || fallback,
+    targetPpfd: targetPpfd !== null ? targetPpfd : null,
+    photoperiodHours: photoperiodHours !== null ? photoperiodHours : null,
+    energyHours:
+      energyHours !== null
+        ? energyHours
+        : photoperiodHours !== null
+        ? photoperiodHours
+        : null,
   };
 };
 
@@ -101,6 +410,19 @@ export const DeviceManager: React.FC = () => {
   const [expanded, setExpanded] = useState<string[]>([]);
   const [assignmentDrafts, setAssignmentDrafts] = useState<Record<string, DeviceAssignment>>({});
   const [pending, setPending] = useState<Set<string>>(new Set());
+
+  useEffect(() => {
+    if (typeof document === "undefined") {
+      return;
+    }
+    if (document.getElementById(DEVICE_METRIC_STYLE_ID)) {
+      return;
+    }
+    const style = document.createElement("style");
+    style.id = DEVICE_METRIC_STYLE_ID;
+    style.textContent = DEVICE_METRIC_STYLES;
+    document.head.appendChild(style);
+  }, []);
 
   useEffect(() => {
     setAssignmentDrafts(() => {
@@ -338,6 +660,8 @@ export const DeviceManager: React.FC = () => {
           const assignedEquipmentName = device.assignedEquipment?.equipmentId
             ? equipmentLookup[device.assignedEquipment.equipmentId]?.label || device.assignedEquipment.equipmentId
             : null;
+          const selectedRoom = assignment.roomId ? roomLookup[assignment.roomId] : undefined;
+          const metrics = deriveDeviceMetrics(device, selectedRoom);
           const assignmentSummary = (() => {
             if (assignedRoomName && assignedEquipmentName) {
               return `Assigned to ${assignedEquipmentName} in ${assignedRoomName}`;
@@ -398,6 +722,28 @@ export const DeviceManager: React.FC = () => {
                   <dd>{device.device_id}</dd>
                 </div>
               </dl>
+              <div className="device-card__metrics" role="list" aria-label="Lighting forecast">
+                <div className="device-card__metric" role="listitem">
+                  <span className="device-card__metric-label">DLI</span>
+                  <span className="device-card__metric-value">
+                    {metrics.dli.value !== null ? metrics.dli.value.toFixed(2) : "—"}
+                    <span className="device-card__metric-unit">mol·m⁻²·d⁻¹</span>
+                  </span>
+                  <span className="hint device-card__metric-hint" title={metrics.dli.tooltip} data-tip={metrics.dli.tooltip}>
+                    ?
+                  </span>
+                </div>
+                <div className="device-card__metric" role="listitem">
+                  <span className="device-card__metric-label">Energy</span>
+                  <span className="device-card__metric-value">
+                    {metrics.energy.value !== null ? metrics.energy.value.toFixed(2) : "—"}
+                    <span className="device-card__metric-unit">kWh</span>
+                  </span>
+                  <span className="hint device-card__metric-hint" title={metrics.energy.tooltip} data-tip={metrics.energy.tooltip}>
+                    ?
+                  </span>
+                </div>
+              </div>
               {Object.keys(device.capabilities).length > 0 && (
                 <div className="device-card__capabilities">
                   <h4>Capabilities</h4>
