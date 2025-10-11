@@ -944,7 +944,99 @@ function findZoneByAny(zones, identifiers = []) {
   }) || null;
 }
 
-function resolveSensorReading(sensorConfig, fallbackIdentifier, metric, envSnapshot, zones) {
+function toLegacyMetricKeys(metricKey) {
+  switch (metricKey) {
+    case 'tempC':
+      return ['tempC', 'temp', 'temperature'];
+    case 'rh':
+      return ['rh', 'humidity'];
+    case 'vpd':
+      return ['vpd'];
+    case 'co2':
+      return ['co2'];
+    default:
+      return [metricKey];
+  }
+}
+
+function isFiniteNumber(value) {
+  return typeof value === 'number' && Number.isFinite(value);
+}
+
+function computeMedian(values) {
+  if (!Array.isArray(values) || !values.length) return null;
+  const sorted = [...values].sort((a, b) => a - b);
+  const mid = Math.floor(sorted.length / 2);
+  if (sorted.length % 2 === 0) {
+    return (sorted[mid - 1] + sorted[mid]) / 2;
+  }
+  return sorted[mid];
+}
+
+function computeLegacyRoomMetric(legacyEnv, roomId, metricKey) {
+  if (!legacyEnv || !Array.isArray(legacyEnv.readings) || !roomId) return null;
+  const normalizedRoom = String(roomId).toLowerCase();
+  const metricKeys = toLegacyMetricKeys(metricKey);
+
+  const samples = [];
+  let latestTs = null;
+
+  for (const entry of legacyEnv.readings) {
+    if (!entry) continue;
+    const entryRoom = entry.room || entry.roomId || entry.scope;
+    if (!entryRoom || String(entryRoom).toLowerCase() !== normalizedRoom) continue;
+    for (const key of metricKeys) {
+      if (!Object.prototype.hasOwnProperty.call(entry, key)) continue;
+      const value = Number(entry[key]);
+      if (Number.isFinite(value)) {
+        samples.push(value);
+      }
+    }
+    const tsCandidate = entry.ts || entry.timestamp || entry.observedAt || entry.recordedAt;
+    if (tsCandidate) {
+      const parsed = Date.parse(tsCandidate);
+      if (Number.isFinite(parsed) && (!latestTs || parsed > latestTs)) {
+        latestTs = parsed;
+      }
+    }
+  }
+
+  if (!samples.length) return null;
+  return {
+    value: computeMedian(samples),
+    observedAt: latestTs ? new Date(latestTs).toISOString() : null,
+    sampleCount: samples.length,
+    source: 'room-median'
+  };
+}
+
+function buildReadingQuality(meta = null, fallback = null) {
+  const quality = {
+    liveSources: 0,
+    totalSources: 0,
+    fallback: null,
+    source: null,
+    lastSampleAt: null
+  };
+  if (meta && typeof meta === 'object') {
+    if (Number.isFinite(meta.liveSources)) quality.liveSources = meta.liveSources;
+    if (Number.isFinite(meta.liveSampleCount)) quality.liveSources = meta.liveSampleCount;
+    if (Number.isFinite(meta.totalSources)) quality.totalSources = meta.totalSources;
+    if (Number.isFinite(meta.totalSampleCount)) quality.totalSources = meta.totalSampleCount;
+    if (meta.fallback) quality.fallback = meta.fallback;
+    if (meta.source) quality.source = meta.source;
+    if (meta.lastSampleAt) quality.lastSampleAt = meta.lastSampleAt;
+    if (!quality.totalSources && meta.sources && typeof meta.sources === 'object') {
+      quality.totalSources = Object.keys(meta.sources).length;
+    }
+  }
+  if (fallback) {
+    quality.fallback = fallback;
+  }
+  return quality;
+}
+
+function resolveSensorReading(sensorConfig, fallbackIdentifier, metric, envSnapshot, zones, legacyEnv, roomId) {
   const scopes = envSnapshot?.scopes || {};
   const metricKey = resolveMetricKey(metric);
   let scopeId = fallbackIdentifier || null;
@@ -976,6 +1068,7 @@ function resolveSensorReading(sensorConfig, fallbackIdentifier, metric, envSnaps
   let unit = null;
   let observedAt = null;
   let source = null;
+  let quality = buildReadingQuality(scopeSensor?.meta || null);
 
   if (scopeSensor != null) {
     if (typeof scopeSensor === 'object') {
@@ -996,6 +1089,7 @@ function resolveSensorReading(sensorConfig, fallbackIdentifier, metric, envSnaps
         value = zoneSensor.current ?? zoneSensor.value ?? null;
         unit = zoneSensor.unit || unit || null;
         observedAt = zoneSensor.observedAt || zoneMatch.meta?.lastUpdated || observedAt || null;
+        quality = buildReadingQuality(zoneSensor.meta || null, quality.fallback);
       } else {
         value = zoneSensor;
       }
@@ -1003,7 +1097,25 @@ function resolveSensorReading(sensorConfig, fallbackIdentifier, metric, envSnaps
     }
   }
 
+  if ((value == null || Number.isNaN(value)) && legacyEnv && (roomId || scopeId || fallbackIdentifier)) {
+    const legacyRoomId = roomId || scopeId || fallbackIdentifier;
+    const legacyMetric = computeLegacyRoomMetric(legacyEnv, legacyRoomId, sensorKey);
+    if (legacyMetric) {
+      value = legacyMetric.value;
+      observedAt = legacyMetric.observedAt || observedAt;
+      source = source || legacyMetric.source;
+      quality = buildReadingQuality(scopeSensor?.meta || null, 'room-median');
+      quality.totalSources = Math.max(quality.totalSources, legacyMetric.sampleCount || 0);
+    }
+  }
+
   const numericValue = typeof value === 'number' && !Number.isNaN(value) ? value : null;
+  if (!quality.source && source) {
+    quality.source = source;
+  }
+  if (numericValue == null) {
+    quality.liveSources = 0;
+  }
 
   return {
     scopeId,
@@ -1011,17 +1123,19 @@ function resolveSensorReading(sensorConfig, fallbackIdentifier, metric, envSnaps
     value: numericValue,
     unit,
     observedAt,
-    source
+    source,
+    quality
   };
 }
 
-function evaluateRoomAutomationConfig(roomConfig, envSnapshot, zones) {
+function evaluateRoomAutomationConfig(roomConfig, envSnapshot, zones, legacyEnv) {
   const evaluatedAt = new Date().toISOString();
   const control = {
     enable: Boolean(roomConfig?.control?.enable),
     mode: roomConfig?.control?.mode || 'advisory',
     step: typeof roomConfig?.control?.step === 'number' ? roomConfig.control.step : 0.05,
-    dwell: typeof roomConfig?.control?.dwell === 'number' ? roomConfig.control.dwell : 180
+    dwell: typeof roomConfig?.control?.dwell === 'number' ? roomConfig.control.dwell : 180,
+    paused: false
   };
   const targets = roomConfig?.targets || {};
   const sensors = roomConfig?.sensors || {};
@@ -1030,12 +1144,12 @@ function evaluateRoomAutomationConfig(roomConfig, envSnapshot, zones) {
 
   const summaryAlerts = [];
 
-  const tempReading = resolveSensorReading(sensors.temp || sensors.temperature, sensors.temp || sensors.temperature, 'temp', envSnapshot, zones);
+  const tempReading = resolveSensorReading(sensors.temp || sensors.temperature, sensors.temp || sensors.temperature, 'temp', envSnapshot, zones, legacyEnv, roomConfig?.roomId);
   if (tempReading.value != null) {
     readings.temp = tempReading;
   }
 
-  const rhReading = resolveSensorReading(sensors.rh || sensors.humidity, sensors.rh || sensors.humidity, 'rh', envSnapshot, zones);
+  const rhReading = resolveSensorReading(sensors.rh || sensors.humidity, sensors.rh || sensors.humidity, 'rh', envSnapshot, zones, legacyEnv, roomConfig?.roomId);
   if (rhReading.value != null) {
     readings.rh = rhReading;
   }
@@ -1073,10 +1187,20 @@ function evaluateRoomAutomationConfig(roomConfig, envSnapshot, zones) {
     }
   }
 
+  const humidityQuality = rhReading?.quality || {};
+  const humidityLiveSources = Number.isFinite(humidityQuality.liveSources) ? humidityQuality.liveSources : 0;
+  const humidityFallback = humidityQuality.fallback;
+  const humidityUsingRoomMedian = humidityFallback === 'room-median';
+  const plugDwell = Math.max(control.dwell ?? 600, 600);
+
   if (typeof targets.rh === 'number' && rhReading.value != null) {
     const band = typeof targets.rhBand === 'number' ? Math.max(1, targets.rhBand) : 5;
     const minRh = targets.rh - band;
     const maxRh = targets.rh + band;
+    const detailSuffix = !humidityLiveSources && humidityUsingRoomMedian
+      ? ' Using room-level median until sensors recover.'
+      : '';
+
     if (rhReading.value > maxRh) {
       const severity = rhReading.value - maxRh >= 5 ? 'moderate' : 'minor';
       suggestions.push({
@@ -1084,51 +1208,87 @@ function evaluateRoomAutomationConfig(roomConfig, envSnapshot, zones) {
         type: 'dehumidifier',
         metric: 'rh',
         severity,
-        label: `Run dehumidifier for ${control.dwell}s`,
-        detail: `Humidity ${rhReading.value.toFixed(1)}% exceeds band (${minRh.toFixed(1)}–${maxRh.toFixed(1)}%).`,
+        label: `Dehumidifier ON (${Math.round(plugDwell / 60)}m dwell)`,
+        detail: `Humidity ${rhReading.value.toFixed(1)}% exceeds band (${minRh.toFixed(1)}–${maxRh.toFixed(1)}%).${detailSuffix}`,
         action: {
           actuator: 'dehu',
-          duration: control.dwell,
+          dwell: plugDwell,
           mode: 'on'
-        }
+        },
+        disabled: !humidityLiveSources
       });
       summaryAlerts.push('humidity high');
     } else if (rhReading.value < minRh) {
       const severity = minRh - rhReading.value >= 5 ? 'moderate' : 'minor';
       suggestions.push({
         id: `${roomConfig.roomId || slugify(roomConfig.name)}-rh-low`,
-        type: 'circulation',
+        type: 'dehumidifier',
         metric: 'rh',
         severity,
-        label: `Cycle fans for ${control.dwell}s`,
-        detail: `Humidity ${rhReading.value.toFixed(1)}% below band (${minRh.toFixed(1)}–${maxRh.toFixed(1)}%).`,
+        label: `Dehumidifier OFF (${Math.round(plugDwell / 60)}m dwell)`,
+        detail: `Humidity ${rhReading.value.toFixed(1)}% below band (${minRh.toFixed(1)}–${maxRh.toFixed(1)}%).${detailSuffix}`,
         action: {
-          actuator: 'fans',
-          duration: control.dwell,
-          mode: 'pulse'
-        }
+          actuator: 'dehu',
+          dwell: plugDwell,
+          mode: 'off'
+        },
+        disabled: !humidityLiveSources
       });
       summaryAlerts.push('humidity low');
     }
   }
 
-  const statusLevel = suggestions.length
+  const missingMetrics = [];
+  if (typeof targets.temp === 'number' && tempReading.value == null) missingMetrics.push('temperature');
+  if (typeof targets.rh === 'number' && rhReading.value == null) missingMetrics.push('humidity');
+  const sensorsMissing = missingMetrics.length > 0;
+  if (sensorsMissing) {
+    control.paused = true;
+  }
+
+  let statusLevel = null;
+  let statusSummary = null;
+  const statusDetails = [];
+
+  if (sensorsMissing) {
+    statusLevel = 'alert';
+    statusSummary = 'Automation paused — sensors unavailable';
+    const missingText = missingMetrics.join(' and ');
+    statusDetails.push(`No live ${missingText} readings. Guardrails are paused until sensors recover.`);
+    suggestions.length = 0;
+  } else if (!humidityLiveSources && humidityUsingRoomMedian && typeof targets.rh === 'number') {
+    statusLevel = 'alert';
+    statusSummary = 'Using room median until humidity sensors recover';
+    statusDetails.push('No live humidity sensors detected. Using last recorded room median for guardrails.');
+  }
+
+  const defaultLevel = suggestions.length
     ? (suggestions.some((s) => s.severity === 'critical') ? 'critical' : 'alert')
     : control.enable && control.mode === 'autopilot'
       ? 'active'
       : 'idle';
+  if (!statusLevel || defaultLevel === 'critical') {
+    statusLevel = defaultLevel;
+  }
 
-  const statusSummary = suggestions.length
+  const defaultSummary = suggestions.length
     ? `Advisories ready (${suggestions.length})`
     : control.enable && control.mode === 'autopilot'
       ? 'Autopilot engaged'
       : 'Within guardrails';
+  if (!statusSummary) {
+    statusSummary = defaultSummary;
+  }
 
-  const statusDetail = summaryAlerts.length
-    ? summaryAlerts.join(', ')
-    : suggestions.length
-      ? suggestions.map((s) => s.detail).join(' | ')
-      : 'No adjustments recommended at this time.';
+  if (summaryAlerts.length) {
+    statusDetails.push(summaryAlerts.join(', '));
+  } else if (suggestions.length) {
+    statusDetails.push(suggestions.map((s) => s.detail).join(' | '));
+  } else if (!statusDetails.length) {
+    statusDetails.push('No adjustments recommended at this time.');
+  }
+
+  const statusDetail = statusDetails.filter(Boolean).join(' | ');
 
   return {
     roomId: roomConfig.roomId,
@@ -1154,9 +1314,9 @@ function evaluateRoomAutomationConfig(roomConfig, envSnapshot, zones) {
   };
 }
 
-function evaluateRoomAutomationState(envSnapshot, zones) {
+function evaluateRoomAutomationState(envSnapshot, zones, legacyEnv) {
   const rooms = preEnvStore.listRooms();
-  const results = rooms.map((room) => evaluateRoomAutomationConfig(room, envSnapshot, zones));
+  const results = rooms.map((room) => evaluateRoomAutomationConfig(room, envSnapshot, zones, legacyEnv));
   const totalSuggestions = results.reduce((acc, room) => acc + (room.suggestions?.length || 0), 0);
   return {
     rooms: results,
@@ -1521,8 +1681,8 @@ app.get('/env', async (req, res) => {
     }
 
     const zones = Array.isArray(zonesPayload.zones) && zonesPayload.zones.length ? zonesPayload.zones : zonesFromScopes;
-    const automationState = evaluateRoomAutomationState(snapshot, zones);
     const legacyEnvState = readEnv();
+    const automationState = evaluateRoomAutomationState(snapshot, zones, legacyEnvState);
     const aiBundle = buildAiAdvisory(automationState.rooms, legacyEnvState);
     const roomsWithAnalytics = automationState.rooms.map((room) => ({
       ...room,
@@ -1612,7 +1772,8 @@ app.patch('/env/rooms/:roomId', async (req, res) => {
     } catch (error) {
       zonesPayload = { zones: [] };
     }
-    const evaluated = evaluateRoomAutomationConfig(updated, preEnvStore.getSnapshot(), zonesPayload.zones || []);
+    const legacyEnvState = readEnv();
+    const evaluated = evaluateRoomAutomationConfig(updated, preEnvStore.getSnapshot(), zonesPayload.zones || [], legacyEnvState);
     res.json({ ok: true, room: evaluated });
   } catch (error) {
     res.status(500).json({ ok: false, error: error.message });
@@ -1635,7 +1796,8 @@ app.post('/env/rooms/:roomId/actions', async (req, res) => {
     }
 
     const snapshot = preEnvStore.getSnapshot();
-    const evaluated = evaluateRoomAutomationConfig(roomConfig, snapshot, zonesPayload.zones || []);
+    const legacyEnvState = readEnv();
+    const evaluated = evaluateRoomAutomationConfig(roomConfig, snapshot, zonesPayload.zones || [], legacyEnvState);
     const suggestionId = req.body?.suggestionId;
     const suggestion = evaluated.suggestions.find((item) => !suggestionId || item.id === suggestionId);
     if (!suggestion) {
@@ -3998,6 +4160,65 @@ const pushHist = (key, val, max = 100) => {
   azureHist.set(key, arr);
 };
 
+const ZONE_SENSOR_FRESH_MS = 10 * 60 * 1000; // 10 minutes
+
+function weightedMedianSamples(samples) {
+  if (!Array.isArray(samples) || !samples.length) return null;
+  const normalized = samples
+    .filter((sample) => isFiniteNumber(sample.value))
+    .map((sample) => ({
+      value: sample.value,
+      weight: isFiniteNumber(sample.weight) && sample.weight > 0 ? sample.weight : 1
+    }))
+    .sort((a, b) => a.value - b.value);
+  if (!normalized.length) return null;
+  const totalWeight = normalized.reduce((acc, sample) => acc + sample.weight, 0);
+  const half = totalWeight / 2;
+  let running = 0;
+  for (const sample of normalized) {
+    running += sample.weight;
+    if (running >= half) {
+      return sample.value;
+    }
+  }
+  return normalized[normalized.length - 1].value;
+}
+
+function aggregateZoneSources(sourceEntries) {
+  const entries = Object.values(sourceEntries || {})
+    .filter((entry) => entry && isFiniteNumber(entry.value))
+    .map((entry) => ({
+      ...entry,
+      observedAtTs: Date.parse(entry.observedAt || '') || Date.now()
+    }));
+
+  if (!entries.length) {
+    return {
+      value: null,
+      observedAt: null,
+      liveSources: 0,
+      totalSources: 0,
+      fallback: null,
+      lastSampleAt: null
+    };
+  }
+
+  const now = Date.now();
+  const live = entries.filter((entry) => now - entry.observedAtTs <= ZONE_SENSOR_FRESH_MS);
+  const samples = live.length ? live : entries;
+  const aggregate = weightedMedianSamples(samples);
+  const latest = samples.reduce((acc, entry) => (entry.observedAtTs > acc ? entry.observedAtTs : acc), 0);
+
+  return {
+    value: aggregate,
+    observedAt: latest ? new Date(latest).toISOString() : null,
+    liveSources: live.length,
+    totalSources: entries.length,
+    fallback: live.length ? null : 'stale-sources',
+    lastSampleAt: latest ? new Date(latest).toISOString() : null
+  };
+}
+
 async function loadEnvZonesPayload(query = {}) {
   if (ENV_SOURCE === 'azure' && AZURE_LATEST_URL) {
     const params = new URLSearchParams();
@@ -4024,12 +4245,29 @@ async function loadEnvZonesPayload(query = {}) {
         if (entry.timestamp) zone.meta.lastUpdated = entry.timestamp;
 
         const ensureSensor = (key, value) => {
-          zone.sensors[key] = zone.sensors[key] || { current: null, setpoint: { min: null, max: null }, history: [] };
+          if (!zone.sensors[key]) {
+            zone.sensors[key] = { current: null, setpoint: { min: null, max: null }, history: [], sources: {} };
+          }
           if (typeof value === 'number' && !Number.isNaN(value)) {
-            zone.sensors[key].current = value;
             const histKey = `${zoneId}:${key}`;
             pushHist(histKey, value);
             zone.sensors[key].history = azureHist.get(histKey) || [];
+
+            const sources = zone.sensors[key].sources || (zone.sensors[key].sources = {});
+            const sensorId = entry.sensorId || entry.deviceId || entry.mac || entry.serial || entry.id || `${zoneId}:${key}`;
+            const observedAt = entry.timestamp || entry.observedAt || entry.recordedAt || entry.lastSeen || new Date().toISOString();
+            const weight = Number(entry.weight ?? entry.confidence ?? entry.priority);
+            const sample = {
+              value,
+              weight: Number.isFinite(weight) && weight > 0 ? weight : undefined,
+              observedAt
+            };
+            const existingSample = sources[sensorId];
+            const existingTs = existingSample ? Date.parse(existingSample.observedAt || '') || 0 : 0;
+            const nextTs = Date.parse(sample.observedAt || '') || Date.now();
+            if (!existingSample || nextTs >= existingTs) {
+              sources[sensorId] = sample;
+            }
           }
         };
 
@@ -4041,8 +4279,27 @@ async function loadEnvZonesPayload(query = {}) {
         zonesMap.set(zoneId, zone);
       }
 
+      const zonesList = Array.from(zonesMap.values()).map((zone) => {
+        const sensors = zone.sensors || {};
+        for (const sensor of Object.values(sensors)) {
+          const aggregate = aggregateZoneSources(sensor.sources || {});
+          if (aggregate.value != null) {
+            sensor.current = aggregate.value;
+            sensor.observedAt = aggregate.observedAt || sensor.observedAt || zone.meta?.lastUpdated || null;
+          }
+          sensor.meta = {
+            ...(sensor.meta || {}),
+            liveSources: aggregate.liveSources,
+            totalSources: aggregate.totalSources,
+            fallback: aggregate.fallback,
+            lastSampleAt: aggregate.lastSampleAt
+          };
+        }
+        return zone;
+      });
+
       return {
-        zones: Array.from(zonesMap.values()),
+        zones: zonesList,
         source: 'azure',
         meta: { provider: 'azure', cached: false }
       };
