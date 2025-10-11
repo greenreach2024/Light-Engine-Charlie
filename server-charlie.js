@@ -432,6 +432,141 @@ function asyncHandler(fn) {
 app.use(express.json({ limit: "1mb" }));
 app.use(buyerRouter);
 
+// --- ENV store helpers
+const envPath = path.join(DATA_DIR, 'env.json');
+
+function readJSON(fileName, fallback = null) {
+  const target = path.isAbsolute(fileName) ? fileName : path.join(DATA_DIR, fileName);
+  return readJsonSafe(target, fallback);
+}
+
+function writeJSON(fileName, value) {
+  const target = path.isAbsolute(fileName) ? fileName : path.join(DATA_DIR, fileName);
+  ensureDataDir();
+  try {
+    fs.writeFileSync(target, JSON.stringify(value ?? {}, null, 2));
+    return true;
+  } catch (error) {
+    console.warn('[env] Failed to persist JSON:', error?.message || error);
+    return false;
+  }
+}
+
+function needPin(req, res) {
+  const configuredPin = process.env.FARM_PIN || process.env.CTRL_PIN || '';
+  if (!configuredPin) return false;
+  const provided = (req.body && (req.body.pin || req.body.PIN))
+    || req.headers['x-farm-pin']
+    || req.query.pin;
+  if (provided && String(provided) === configuredPin) return false;
+  res.status(403).json({ ok: false, error: 'pin-required' });
+  return true;
+}
+
+const readEnv = () => readJSON(envPath, { rooms: {}, targets: {}, control: {} }) || { rooms: {}, targets: {}, control: {} };
+const writeEnv = (obj) => writeJSON(envPath, obj);
+
+// GET /env → full state
+app.get('/env', (req, res) => res.json(readEnv()));
+
+// POST /env → upsert full or partial (PIN)
+app.post('/env', (req, res) => {
+  if (needPin(req, res)) return;
+  const cur = readEnv();
+  const nxt = { ...cur, ...req.body };
+  writeEnv(nxt);
+  res.json({ ok: true });
+});
+
+// POST /env/readings → append one reading (room, temp, rh, ts)
+app.post('/env/readings', (req, res) => {
+  if (needPin(req, res)) return;
+  const { room, temp, rh, ts } = req.body || {};
+  const st = readEnv();
+  st.readings = st.readings || [];
+  st.readings.push({ room, temp, rh, ts: ts || new Date().toISOString() });
+  if (st.readings.length > 10000) {
+    st.readings.splice(0, st.readings.length - 10000);
+  }
+  writeEnv(st);
+  res.json({ ok: true });
+});
+
+// POST /automation/run → run one policy tick for a room (or all)
+app.post('/automation/run', async (req, res) => {
+  if (needPin(req, res)) return;
+  const room = (req.body || {}).room || null;
+  const st = readEnv();
+  const out = await runPolicyOnce(st, room);
+  writeEnv(out.state);
+  res.json({ ok: true, actions: out.actions });
+});
+
+async function runPolicyOnce(state, onlyRoom = null) {
+  const rooms = state.rooms || {};
+  const actions = [];
+  for (const [roomId, cfg] of Object.entries(rooms)) {
+    if (onlyRoom && roomId !== onlyRoom) continue;
+    const t = cfg.targets || {};
+    const c = cfg.control || {};
+    if (!c.enable) continue;
+    const r = latestReading(state.readings || [], roomId);
+    if (!r) continue;
+
+    const dT = (r.temp ?? NaN) - (t.temp ?? NaN);
+    const dRH = (r.rh ?? NaN) - (t.rh ?? NaN);
+
+    let master = 0;
+    let blue = 0;
+    if (!Number.isNaN(dT) && dT > 0) {
+      master -= Math.min(c.step || 0.05, dT * 0.03);
+    }
+    if (!Number.isNaN(dRH) && dRH > (t.rhBand || 5)) {
+      master -= Math.min(c.step || 0.05, (dRH / (t.rhBand || 5)) * 0.05);
+    }
+    if (!Number.isNaN(dT) && dT > 0 && !Number.isNaN(dRH) && dRH > 0) {
+      blue -= Math.min((c.step || 0.05) / 2, 0.03);
+    }
+
+    const minM = t.minMaster ?? 0.6;
+    const minB = t.minBlue ?? 0.5;
+    if (master !== 0 || blue !== 0) {
+      actions.push({
+        roomId,
+        type: 'lights.scale',
+        masterDelta: master,
+        blueDelta: blue,
+        minMaster: minM,
+        minBlue: minB,
+        dwell: c.dwell || 180
+      });
+      if (c.mode === 'autopilot') {
+        await applyLightScaling(cfg, master, blue, minM, minB);
+      }
+    }
+  }
+  return { state, actions };
+}
+
+function latestReading(readings, roomId) {
+  for (let i = readings.length - 1; i >= 0; --i) {
+    if (readings[i].room === roomId) return readings[i];
+  }
+  return null;
+}
+
+async function applyLightScaling(cfg, masterDelta, blueDelta, minMaster, minBlue) {
+  const lightIds = cfg?.actuators?.lights || [];
+  if (!Array.isArray(lightIds) || !lightIds.length) return;
+  for (const id of lightIds) {
+    try {
+      console.debug('[automation] would apply light scaling', { id, masterDelta, blueDelta, minMaster, minBlue });
+    } catch (error) {
+      console.warn('[automation] Failed to apply light scaling:', error?.message || error);
+    }
+  }
+}
+
 // --- Automation Rules Engine ---
 const automationEngine = new AutomationRulesEngine();
 console.log('[automation] Rules engine initialized with default farm automation rules');
