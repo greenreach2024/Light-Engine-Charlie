@@ -3085,10 +3085,10 @@ function clearCanvas(canvas) {
   }
 }
 
-// --- IoT System Setup Card Show/Hide Logic ---
+// --- Smart Controller Setup Card Show/Hide Logic ---
 document.addEventListener('DOMContentLoaded', function() {
-  const btn = document.getElementById('btnShowIotSetup');
-  const card = document.getElementById('iotEcosystemCard');
+  const btn = document.getElementById('btnShowSmartControllersSetup');
+  const card = document.getElementById('smartControllersSetupCard');
   if (btn && card) {
     btn.onclick = function() {
       card.style.display = card.style.display === 'none' || !card.style.display ? 'block' : 'none';
@@ -3106,11 +3106,11 @@ document.addEventListener('DOMContentLoaded', function() {
     });
   }
 });
-// --- IoT Ecosystem Device Manager Buttons & Modal ---
+// --- Smart Controller Ecosystem Device Manager Buttons & Modal ---
 document.addEventListener('DOMContentLoaded', function() {
-  const modal = document.getElementById('iotEcosystemModal');
-  const modalBody = document.getElementById('iotEcosystemModalBody');
-  const closeBtn = document.getElementById('closeIotEcosystemModal');
+  const modal = document.getElementById('smartControllersModal');
+  const modalBody = document.getElementById('smartControllersModalBody');
+  const closeBtn = document.getElementById('closeSmartControllersModal');
   if (closeBtn && modal) closeBtn.onclick = () => { modal.style.display = 'none'; };
   function showModal(html) {
     if (modalBody) modalBody.innerHTML = html;
@@ -3177,8 +3177,8 @@ document.addEventListener('DOMContentLoaded', function() {
     showModal(html);
 // --- Kasa Setup Wizard Modal ---
 function showKasaWizard() {
-  const modal = document.getElementById('iotEcosystemModal');
-  const modalBody = document.getElementById('iotEcosystemModalBody');
+  const modal = document.getElementById('smartControllersModal');
+  const modalBody = document.getElementById('smartControllersModalBody');
   if (!modal || !modalBody) return;
   let step = 1;
   let discoveryResults = [];
@@ -3283,8 +3283,8 @@ function showKasaWizard() {
   // --- SwitchBot Setup Wizard Modal ---
   function showSwitchBotWizard() {
     let step = 1;
-    const modal = document.getElementById('iotEcosystemModal');
-    const modalBody = document.getElementById('iotEcosystemModalBody');
+    const modal = document.getElementById('smartControllersModal');
+    const modalBody = document.getElementById('smartControllersModalBody');
     if (!modal || !modalBody) return;
     function renderStep1() {
       modalBody.innerHTML = `
@@ -3357,7 +3357,7 @@ function showKasaWizard() {
 // Save handler stub (extend as needed)
 window.saveEcosystemSetup = function(ecosystem) {
   // Collect field values and show a toast (replace with real logic as needed)
-  const modal = document.getElementById('iotEcosystemModal');
+  const modal = document.getElementById('smartControllersModal');
   const fields = Array.from((modal && modal.querySelectorAll('input,select')) || []);
   const values = {};
   fields.forEach(f => { values[f.id] = f.value; });
@@ -3493,9 +3493,9 @@ function groupBy(arr, key) {
     return acc;
   }, {});
 }
-// --- IoT Device Manager Modular UI ---
-function renderIoTDeviceCards(devices) {
-  const list = document.getElementById('iotDevicesList');
+// --- Smart Controller Device Manager Modular UI ---
+function renderSmartControllerCards(devices) {
+  const list = document.getElementById('smartControllersList');
   if (!list) return;
   list.innerHTML = '';
   if (!Array.isArray(devices) || !devices.length) {
@@ -3542,25 +3542,25 @@ function renderIoTDeviceCards(devices) {
         const name = row.querySelector('.iot-unknown-name').value.trim();
         const loc = row.querySelector('.iot-unknown-loc').value.trim();
         const trust = row.querySelector('.iot-unknown-trust').value;
-        // Update in window.LAST_IOT_SCAN
-        const dev = window.LAST_IOT_SCAN.find(d => (d.address||d.id||'') === addr);
+        // Update in window.LAST_SMART_CONTROLLER_SCAN
+        const dev = window.LAST_SMART_CONTROLLER_SCAN.find(d => (d.address||d.id||'') === addr);
         if (dev) {
           dev.type = type; dev.vendor = vendor; dev.name = name; dev.location = loc; dev.trust = trust;
         }
         showToast({ title: 'Device assigned', msg: `${addr} updated.`, kind: 'success', icon: '✅' });
-        renderIoTDeviceCards(window.LAST_IOT_SCAN);
+        renderSmartControllerCards(window.LAST_SMART_CONTROLLER_SCAN);
       };
     });
     Array.from(list.querySelectorAll('.iot-unknown-quarantine')).forEach(btn => {
       btn.onclick = function(e) {
         const row = e.target.closest('tr');
         const addr = row.getAttribute('data-addr');
-        const dev = window.LAST_IOT_SCAN.find(d => (d.address||d.id||'') === addr);
+        const dev = window.LAST_SMART_CONTROLLER_SCAN.find(d => (d.address||d.id||'') === addr);
         if (dev) {
           dev.trust = 'quarantine';
         }
         showToast({ title: 'Device quarantined', msg: `${addr} moved to quarantine.`, kind: 'warn', icon: '🚫' });
-        renderIoTDeviceCards(window.LAST_IOT_SCAN);
+        renderSmartControllerCards(window.LAST_SMART_CONTROLLER_SCAN);
       };
     });
   }
@@ -3608,15 +3608,15 @@ document.addEventListener('DOMContentLoaded', function() {
   }
 });
 
-// Demo: global for last IoT scan results
-window.LAST_IOT_SCAN = [];
+// Demo: global for last Smart Controller scan results
+window.LAST_SMART_CONTROLLER_SCAN = [];
 
-// Scan for devices and update UI
-window.scanIoTDevices = async function() {
-  const btn = document.getElementById('btnScanIoTDevices');
-  const barContainer = document.getElementById('iotScanBarContainer');
-  const barFill = document.getElementById('iotScanBarFill');
-  const barPercent = document.getElementById('iotScanBarPercent');
+// Scan for controllers and update UI
+window.scanSmartControllers = async function() {
+  const btn = document.getElementById('btnScanSmartControllers');
+  const barContainer = document.getElementById('smartControllersScanBarContainer');
+  const barFill = document.getElementById('smartControllersScanBarFill');
+  const barPercent = document.getElementById('smartControllersScanBarPercent');
   let percent = 0;
   let animFrame;
   let running = true;
@@ -3646,9 +3646,9 @@ window.scanIoTDevices = async function() {
     if (!resp.ok) throw new Error('Discovery failed');
     const data = await resp.json();
     const devices = Array.isArray(data.devices) ? data.devices : [];
-    window.LAST_IOT_SCAN = devices;
-    renderIoTDeviceCards(devices);
-    showToast({ title: 'Scan complete', msg: `Found ${devices.length} devices`, kind: 'success', icon: '🔍' });
+    window.LAST_SMART_CONTROLLER_SCAN = devices;
+    renderSmartControllerCards(devices);
+    showToast({ title: 'Scan complete', msg: `Found ${devices.length} controllers`, kind: 'success', icon: '🔍' });
     if (data.analysis && data.analysis.suggestedWizards) {
       console.info('Suggested wizards:', data.analysis.suggestedWizards);
     }
@@ -3660,8 +3660,8 @@ window.scanIoTDevices = async function() {
     }
     await new Promise(res => setTimeout(res, 500));
   } catch (e) {
-    renderIoTDeviceCards([]);
-    showToast({ title: 'Scan failed', msg: e.message || 'Could not scan for devices.', kind: 'error', icon: '❌' });
+    renderSmartControllerCards([]);
+    showToast({ title: 'Scan failed', msg: e.message || 'Could not scan for controllers.', kind: 'error', icon: '❌' });
     // Fill bar to 100% on error
     percent = 100;
     if (barFill && barPercent) {
@@ -3672,7 +3672,7 @@ window.scanIoTDevices = async function() {
   } finally {
     running = false;
     if (animFrame) cancelAnimationFrame(animFrame);
-    if (btn) { btn.disabled = false; btn.textContent = 'Scan for Devices'; }
+    if (btn) { btn.disabled = false; btn.textContent = 'Scan for Controllers'; }
     // Hide bar after short delay
     setTimeout(() => {
       if (barContainer) barContainer.style.display = 'none';
@@ -17131,11 +17131,11 @@ document.addEventListener('DOMContentLoaded', async () => {
     });
   } catch (e) { console.warn('Plans panel wiring failed', e); }
   try {
-    document.getElementById('btnScanIoTDevices')?.addEventListener('click', window.scanIoTDevices);
+    document.getElementById('btnScanSmartControllers')?.addEventListener('click', window.scanSmartControllers);
     document.getElementById('btnOpenSwitchBotManager')?.addEventListener('click', window.openSwitchBotManager);
   } catch (e) { console.warn('SwitchBot panel wiring failed', e); }
-  if (document.getElementById('iotDevicesList')) {
-    renderIoTDeviceCards(window.LAST_IOT_SCAN);
+  if (document.getElementById('smartControllersList')) {
+    renderSmartControllerCards(window.LAST_SMART_CONTROLLER_SCAN);
   }
   await loadDeviceManufacturers();
   try {
