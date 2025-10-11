@@ -1544,11 +1544,11 @@ h3 { font-size: 1.125rem; }
   max-width: min(100%, 720px);
 }
 
-.iot-devices-list {
+.smart-controllers-list {
   margin-top: 12px;
 }
 
-.iot-action-group {
+.smart-controller-action-group {
   display: flex;
   flex-direction: column;
   gap: 4px;
