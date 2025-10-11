@@ -232,6 +232,26 @@
           </div>
         </section>
 
+        <section id="roomAutomationCard" class="card hud-shell std automation-card" aria-labelledby="automationCardTitle">
+          <header class="automation-card__header">
+            <div>
+              <h2 id="automationCardTitle" class="section-title hud-shell__title">Grow Room Automation</h2>
+              <p class="tiny text-muted">Advisory guardrails for climate, spectrum, and air handling.</p>
+            </div>
+            <div class="automation-card__mode" role="group" aria-label="Automation mode">
+              <span class="automation-card__mode-label" data-role="automation-mode-label">Advisory</span>
+              <div class="automation-card__mode-toggle">
+                <button type="button" class="automation-mode-btn is-active" data-mode="advisory">Advisory</button>
+                <button type="button" class="automation-mode-btn" data-mode="autopilot" aria-disabled="true" data-tip="Autopilot coming soon">Autopilot</button>
+              </div>
+            </div>
+          </header>
+          <div class="automation-card__body" data-role="automation-body"></div>
+          <footer class="automation-card__footer">
+            <span class="tiny text-muted" data-role="automation-status">Loading…</span>
+          </footer>
+        </section>
+
   <!-- Current Lights Status card removed -->
     <!-- Overview hero (now below lights status) -->
     <section class="dashboard-panel dashboard-panel--overview is-active" data-panel="overview">

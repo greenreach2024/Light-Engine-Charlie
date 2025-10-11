@@ -22,6 +22,9 @@ const app = express();
 const parsedPort = Number.parseInt(process.env.PORT ?? '', 10);
 const hasExplicitPort = Number.isFinite(parsedPort);
 let PORT = hasExplicitPort ? parsedPort : 8091;
+const RUNNING_UNDER_NODE_TEST = process.argv.some((arg) =>
+  arg === '--test' || arg.startsWith('--test=')
+);
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
@@ -78,6 +81,7 @@ const CONTROLLER_PATH = path.join(DATA_DIR, 'controller.json');
 const GROUPS_PATH = path.join(DATA_DIR, 'groups.json');
 const PLANS_PATH = path.join(DATA_DIR, 'plans.json');
 const SCHEDULES_PATH = path.join(DATA_DIR, 'schedules.json');
+const ROOMS_PATH = path.join(DATA_DIR, 'rooms.json');
 const UI_DATA_RESOURCES = new Map([
   ['farm', 'farm.json'],
   ['groups', 'groups.json'],
@@ -437,9 +441,427 @@ const {
   envStore: preEnvStore,
   rulesStore: preRulesStore,
   registry: prePlugRegistry,
-  plugManager: prePlugManager
-} = createPreAutomationLayer({ dataDir: path.resolve('./data/automation') });
+  plugManager: prePlugManager,
+  logger: preAutomationLogger
+} = createPreAutomationLayer({
+  dataDir: path.resolve('./data/automation'),
+  autoStart: !RUNNING_UNDER_NODE_TEST
+});
 console.log('[automation] Pre-AI automation layer initialized (sensors + smart plugs)');
+
+if (!app.__automationListenPatched) {
+  const originalListen = app.listen.bind(app);
+  app.listen = function automationAwareListen(...args) {
+    const server = originalListen(...args);
+    server.on('close', () => {
+      try {
+        preAutomationEngine.stop();
+      } catch (error) {
+        console.warn('[automation] Failed to stop engine during shutdown:', error?.message || error);
+      }
+    });
+
+    if (!RUNNING_UNDER_NODE_TEST) {
+      try {
+        preAutomationEngine.start();
+      } catch (error) {
+        console.warn('[automation] Failed to start engine after listen:', error?.message || error);
+      }
+    }
+
+    return server;
+  };
+  app.__automationListenPatched = true;
+}
+
+function slugify(value) {
+  return String(value || '')
+    .toLowerCase()
+    .trim()
+    .replace(/[^a-z0-9]+/g, '-')
+    .replace(/^-+|-+$/g, '')
+    || 'room';
+}
+
+function readJsonSafe(filePath, fallback = null) {
+  try {
+    if (!fs.existsSync(filePath)) return fallback;
+    const raw = fs.readFileSync(filePath, 'utf8');
+    if (!raw.trim()) return fallback;
+    return JSON.parse(raw);
+  } catch (error) {
+    console.warn(`[automation] Failed to read ${filePath}:`, error.message);
+    return fallback;
+  }
+}
+
+function findZoneMatch(zones, identifier) {
+  if (!identifier) return null;
+  const normalized = String(identifier).toLowerCase();
+  return zones.find((zone) => {
+    const zoneId = String(zone.id || '').toLowerCase();
+    const zoneName = String(zone.name || '').toLowerCase();
+    return zoneId === normalized || zoneName === normalized;
+  }) || null;
+}
+
+function averageSetpoint(setpoint) {
+  if (!setpoint || typeof setpoint !== 'object') return null;
+  const min = Number(setpoint.min);
+  const max = Number(setpoint.max);
+  if (!Number.isFinite(min) || !Number.isFinite(max)) return null;
+  return Math.round(((min + max) / 2) * 10) / 10;
+}
+
+function seedRoomAutomationDefaults() {
+  try {
+    const existing = preEnvStore.listRooms();
+    if (existing.length) return;
+
+    const roomsDoc = readJsonSafe(ROOMS_PATH, null);
+    if (!roomsDoc || !Array.isArray(roomsDoc.rooms) || !roomsDoc.rooms.length) return;
+
+    const envDoc = readJsonSafe(ENV_PATH, { zones: [] }) || { zones: [] };
+    const zones = Array.isArray(envDoc.zones) ? envDoc.zones : [];
+
+    let seeded = 0;
+
+    roomsDoc.rooms.forEach((room) => {
+      if (!room) return;
+      const roomId = room.id || slugify(room.name);
+      const primaryZoneLabel = Array.isArray(room.zones) && room.zones.length
+        ? room.zones[0]
+        : room.name || roomId;
+      const zoneMatch = findZoneMatch(zones, primaryZoneLabel) || findZoneMatch(zones, roomId) || null;
+      const zoneId = zoneMatch?.id || slugify(primaryZoneLabel);
+      const tempTarget = averageSetpoint(zoneMatch?.sensors?.tempC?.setpoint) || zoneMatch?.sensors?.tempC?.current;
+      const rhTarget = averageSetpoint(zoneMatch?.sensors?.rh?.setpoint) || zoneMatch?.sensors?.rh?.current;
+      const rhSetpoint = zoneMatch?.sensors?.rh?.setpoint;
+      let rhBand = 5;
+      if (rhSetpoint && Number.isFinite(rhSetpoint.max) && Number.isFinite(rhSetpoint.min)) {
+        rhBand = Math.max(2, Math.round(Math.abs(rhSetpoint.max - rhSetpoint.min) / 2));
+      }
+
+      const lights = (Array.isArray(room.devices) ? room.devices : [])
+        .filter((device) => String(device?.type || '').toLowerCase() === 'light')
+        .map((device) => device.id)
+        .filter(Boolean);
+
+      const fans = (Array.isArray(room.devices) ? room.devices : [])
+        .filter((device) => {
+          const type = String(device?.type || '').toLowerCase();
+          return type.includes('fan') || type.includes('hvac');
+        })
+        .map((device) => device.id)
+        .filter(Boolean);
+
+      const dehuDevices = (Array.isArray(room.devices) ? room.devices : [])
+        .filter((device) => String(device?.type || '').toLowerCase().includes('dehu'))
+        .map((device) => device.id)
+        .filter(Boolean);
+
+      if (!fans.length && room.hardwareCats?.includes('hvac')) {
+        fans.push(`fan:${roomId}`);
+      }
+
+      if (!dehuDevices.length && room.hardwareCats?.includes('dehumidifier')) {
+        dehuDevices.push(`plug:dehu:${roomId}`);
+      }
+
+      const config = {
+        roomId,
+        name: room.name || roomId,
+        targets: {
+          temp: Number.isFinite(tempTarget) ? tempTarget : 24,
+          rh: Number.isFinite(rhTarget) ? rhTarget : 65,
+          rhBand,
+          minBlue: 0.5,
+          minMaster: 0.6
+        },
+        control: {
+          enable: false,
+          mode: 'advisory',
+          step: 0.05,
+          dwell: 180
+        },
+        sensors: {
+          temp: zoneId,
+          rh: zoneId
+        },
+        actuators: {
+          lights,
+          fans,
+          dehu: dehuDevices
+        },
+        meta: {
+          seededFrom: 'rooms.json',
+          zoneId,
+          zoneLabel: primaryZoneLabel
+        }
+      };
+
+      preEnvStore.upsertRoom(roomId, config);
+      seeded += 1;
+    });
+
+    if (seeded) {
+      console.log(`[automation] Seeded ${seeded} room automation profile${seeded === 1 ? '' : 's'} from rooms.json`);
+    }
+  } catch (error) {
+    console.warn('[automation] Failed to seed room automation defaults:', error.message);
+  }
+}
+
+seedRoomAutomationDefaults();
+
+const SENSOR_METRIC_ALIASES = new Map([
+  ['temp', 'tempC'],
+  ['temperature', 'tempC'],
+  ['tempC', 'tempC'],
+  ['rh', 'rh'],
+  ['humidity', 'rh'],
+  ['vpd', 'vpd'],
+  ['co2', 'co2']
+]);
+
+function resolveMetricKey(metric) {
+  const key = String(metric || '').toLowerCase();
+  return SENSOR_METRIC_ALIASES.get(key) || metric || 'tempC';
+}
+
+function findZoneByAny(zones, identifiers = []) {
+  const normalized = identifiers
+    .filter(Boolean)
+    .map((value) => String(value).toLowerCase());
+  if (!normalized.length) return null;
+  return zones.find((zone) => {
+    const zoneId = String(zone.id || '').toLowerCase();
+    const zoneName = String(zone.name || '').toLowerCase();
+    const zoneLocation = String(zone.location || '').toLowerCase();
+    return normalized.some((value) => value === zoneId || value === zoneName || value === zoneLocation);
+  }) || null;
+}
+
+function resolveSensorReading(sensorConfig, fallbackIdentifier, metric, envSnapshot, zones) {
+  const scopes = envSnapshot?.scopes || {};
+  const metricKey = resolveMetricKey(metric);
+  let scopeId = fallbackIdentifier || null;
+  let explicitMetric = null;
+
+  if (typeof sensorConfig === 'string') {
+    const trimmed = sensorConfig.trim();
+    if (trimmed.includes('/')) {
+      const parts = trimmed.split('/').filter(Boolean);
+      if (parts.length >= 2) {
+        scopeId = parts[parts.length - 2];
+        explicitMetric = parts[parts.length - 1];
+      } else if (parts.length === 1) {
+        scopeId = parts[0];
+      }
+    } else {
+      scopeId = trimmed;
+    }
+  } else if (sensorConfig && typeof sensorConfig === 'object') {
+    scopeId = sensorConfig.scope || sensorConfig.zone || sensorConfig.id || scopeId;
+    explicitMetric = sensorConfig.metric || sensorConfig.key || sensorConfig.type || explicitMetric;
+  }
+
+  const sensorKey = resolveMetricKey(explicitMetric || metricKey);
+  const scopeEntry = scopeId ? scopes[scopeId] : null;
+  const scopeSensor = scopeEntry?.sensors?.[sensorKey];
+
+  let value = null;
+  let unit = null;
+  let observedAt = null;
+  let source = null;
+
+  if (scopeSensor != null) {
+    if (typeof scopeSensor === 'object') {
+      value = scopeSensor.value ?? scopeSensor.current ?? null;
+      unit = scopeSensor.unit || null;
+      observedAt = scopeSensor.observedAt || scopeEntry?.updatedAt || null;
+    } else {
+      value = scopeSensor;
+    }
+    source = 'scope';
+  }
+
+  if ((value == null || Number.isNaN(value)) && zones?.length) {
+    const zoneMatch = findZoneByAny(zones, [scopeId, fallbackIdentifier]);
+    const zoneSensor = zoneMatch?.sensors?.[sensorKey];
+    if (zoneSensor != null) {
+      if (typeof zoneSensor === 'object') {
+        value = zoneSensor.current ?? zoneSensor.value ?? null;
+        unit = zoneSensor.unit || unit || null;
+        observedAt = zoneSensor.observedAt || zoneMatch.meta?.lastUpdated || observedAt || null;
+      } else {
+        value = zoneSensor;
+      }
+      source = source || 'zone';
+    }
+  }
+
+  const numericValue = typeof value === 'number' && !Number.isNaN(value) ? value : null;
+
+  return {
+    scopeId,
+    metric: sensorKey,
+    value: numericValue,
+    unit,
+    observedAt,
+    source
+  };
+}
+
+function evaluateRoomAutomationConfig(roomConfig, envSnapshot, zones) {
+  const evaluatedAt = new Date().toISOString();
+  const control = {
+    enable: Boolean(roomConfig?.control?.enable),
+    mode: roomConfig?.control?.mode || 'advisory',
+    step: typeof roomConfig?.control?.step === 'number' ? roomConfig.control.step : 0.05,
+    dwell: typeof roomConfig?.control?.dwell === 'number' ? roomConfig.control.dwell : 180
+  };
+  const targets = roomConfig?.targets || {};
+  const sensors = roomConfig?.sensors || {};
+  const readings = {};
+  const suggestions = [];
+
+  const summaryAlerts = [];
+
+  const tempReading = resolveSensorReading(sensors.temp || sensors.temperature, sensors.temp || sensors.temperature, 'temp', envSnapshot, zones);
+  if (tempReading.value != null) {
+    readings.temp = tempReading;
+  }
+
+  const rhReading = resolveSensorReading(sensors.rh || sensors.humidity, sensors.rh || sensors.humidity, 'rh', envSnapshot, zones);
+  if (rhReading.value != null) {
+    readings.rh = rhReading;
+  }
+
+  const minBlue = typeof targets.minBlue === 'number' ? targets.minBlue : null;
+  const minMaster = typeof targets.minMaster === 'number' ? targets.minMaster : null;
+
+  const stepPercent = Math.round(control.step * 100);
+
+  if (typeof targets.temp === 'number' && tempReading.value != null) {
+    const delta = tempReading.value - targets.temp;
+    const absDelta = Math.abs(delta);
+    if (absDelta >= 0.5) {
+      const severity = absDelta >= 3 ? 'critical' : absDelta >= 1.5 ? 'moderate' : 'minor';
+      const direction = delta > 0 ? 'down' : 'up';
+      const actionLabel = direction === 'down'
+        ? `Dim master −${stepPercent}% for ${control.dwell}s`
+        : `Increase master +${stepPercent}% for ${control.dwell}s`;
+      suggestions.push({
+        id: `${roomConfig.roomId || slugify(roomConfig.name)}-temp-${direction}`,
+        type: 'lighting',
+        metric: 'temp',
+        severity,
+        label: actionLabel,
+        detail: `Current ${tempReading.value.toFixed(1)}°C vs target ${targets.temp.toFixed(1)}°C.`,
+        delta,
+        action: {
+          actuator: 'lights',
+          change: direction === 'down' ? -control.step : control.step,
+          dwell: control.dwell,
+          guardrails: { minMaster, minBlue }
+        }
+      });
+      summaryAlerts.push(delta > 0 ? 'temperature high' : 'temperature low');
+    }
+  }
+
+  if (typeof targets.rh === 'number' && rhReading.value != null) {
+    const band = typeof targets.rhBand === 'number' ? Math.max(1, targets.rhBand) : 5;
+    const minRh = targets.rh - band;
+    const maxRh = targets.rh + band;
+    if (rhReading.value > maxRh) {
+      const severity = rhReading.value - maxRh >= 5 ? 'moderate' : 'minor';
+      suggestions.push({
+        id: `${roomConfig.roomId || slugify(roomConfig.name)}-rh-high`,
+        type: 'dehumidifier',
+        metric: 'rh',
+        severity,
+        label: `Run dehumidifier for ${control.dwell}s`,
+        detail: `Humidity ${rhReading.value.toFixed(1)}% exceeds band (${minRh.toFixed(1)}–${maxRh.toFixed(1)}%).`,
+        action: {
+          actuator: 'dehu',
+          duration: control.dwell,
+          mode: 'on'
+        }
+      });
+      summaryAlerts.push('humidity high');
+    } else if (rhReading.value < minRh) {
+      const severity = minRh - rhReading.value >= 5 ? 'moderate' : 'minor';
+      suggestions.push({
+        id: `${roomConfig.roomId || slugify(roomConfig.name)}-rh-low`,
+        type: 'circulation',
+        metric: 'rh',
+        severity,
+        label: `Cycle fans for ${control.dwell}s`,
+        detail: `Humidity ${rhReading.value.toFixed(1)}% below band (${minRh.toFixed(1)}–${maxRh.toFixed(1)}%).`,
+        action: {
+          actuator: 'fans',
+          duration: control.dwell,
+          mode: 'pulse'
+        }
+      });
+      summaryAlerts.push('humidity low');
+    }
+  }
+
+  const statusLevel = suggestions.length
+    ? (suggestions.some((s) => s.severity === 'critical') ? 'critical' : 'alert')
+    : control.enable && control.mode === 'autopilot'
+      ? 'active'
+      : 'idle';
+
+  const statusSummary = suggestions.length
+    ? `Advisories ready (${suggestions.length})`
+    : control.enable && control.mode === 'autopilot'
+      ? 'Autopilot engaged'
+      : 'Within guardrails';
+
+  const statusDetail = summaryAlerts.length
+    ? summaryAlerts.join(', ')
+    : suggestions.length
+      ? suggestions.map((s) => s.detail).join(' | ')
+      : 'No adjustments recommended at this time.';
+
+  return {
+    roomId: roomConfig.roomId,
+    name: roomConfig.name || roomConfig.roomId,
+    targets: {
+      ...targets,
+      minBlue,
+      minMaster
+    },
+    control,
+    sensors,
+    actuators: roomConfig.actuators || {},
+    readings,
+    suggestions,
+    status: {
+      level: statusLevel,
+      summary: statusSummary,
+      detail: statusDetail,
+      evaluatedAt
+    },
+    evaluatedAt,
+    meta: roomConfig.meta || {}
+  };
+}
+
+function evaluateRoomAutomationState(envSnapshot, zones) {
+  const rooms = preEnvStore.listRooms();
+  const results = rooms.map((room) => evaluateRoomAutomationConfig(room, envSnapshot, zones));
+  const totalSuggestions = results.reduce((acc, room) => acc + (room.suggestions?.length || 0), 0);
+  return {
+    rooms: results,
+    evaluatedAt: new Date().toISOString(),
+    totalSuggestions
+  };
+}
 
 function applyCorsHeaders(req, res, methods = 'GET,POST,PATCH,DELETE,OPTIONS') {
   const origin = req.headers?.origin;
@@ -482,16 +904,19 @@ function proxyCorsMiddleware(req, res, next) {
 // --- Pre-AI Automation API ---
 
 app.options('/env', (req, res) => { setPreAutomationCors(req, res); res.status(204).end(); });
+app.options('/env/rooms', (req, res) => { setPreAutomationCors(req, res); res.status(204).end(); });
+app.options('/env/rooms/:roomId', (req, res) => { setPreAutomationCors(req, res); res.status(204).end(); });
+app.options('/env/rooms/:roomId/actions', (req, res) => { setPreAutomationCors(req, res); res.status(204).end(); });
 app.options('/plugs', (req, res) => { setPreAutomationCors(req, res); res.status(204).end(); });
 app.options('/plugs/*', (req, res) => { setPreAutomationCors(req, res); res.status(204).end(); });
 app.options('/rules', (req, res) => { setPreAutomationCors(req, res); res.status(204).end(); });
 app.options('/rules/*', (req, res) => { setPreAutomationCors(req, res); res.status(204).end(); });
 
-app.get('/env', (req, res) => {
+app.get('/env', async (req, res) => {
   try {
     setPreAutomationCors(req, res);
     const snapshot = preEnvStore.getSnapshot();
-    const zones = Object.entries(snapshot.scopes || {}).map(([scopeId, scopeData]) => {
+    const zonesFromScopes = Object.entries(snapshot.scopes || {}).map(([scopeId, scopeData]) => {
       const sensors = Object.entries(scopeData.sensors || {}).reduce((acc, [sensorKey, sensorData]) => {
         acc[sensorKey] = {
           current: sensorData.value,
@@ -519,7 +944,31 @@ app.get('/env', (req, res) => {
       };
     });
 
-    res.json({ ok: true, env: snapshot, zones });
+    let zonesPayload;
+    try {
+      zonesPayload = await loadEnvZonesPayload(req.query || {});
+    } catch (error) {
+      zonesPayload = { zones: zonesFromScopes, source: 'scopes', meta: { error: error.message } };
+    }
+
+    const zones = Array.isArray(zonesPayload.zones) && zonesPayload.zones.length ? zonesPayload.zones : zonesFromScopes;
+    const automationState = evaluateRoomAutomationState(snapshot, zones);
+
+    res.json({
+      ok: true,
+      env: snapshot,
+      zones,
+      rooms: automationState.rooms,
+      meta: {
+        envSource: zonesPayload.source,
+        evaluatedAt: automationState.evaluatedAt,
+        totalSuggestions: automationState.totalSuggestions,
+        provider: zonesPayload.meta?.provider || null,
+        cache: Boolean(zonesPayload.meta?.cached),
+        updatedAt: zonesPayload.meta?.updatedAt || null,
+        error: zonesPayload.meta?.error || null
+      }
+    });
   } catch (error) {
     res.status(500).json({ ok: false, error: error.message });
   }
@@ -552,6 +1001,65 @@ app.post('/env', (req, res) => {
     const env = preEnvStore.getScope(scope);
     const targets = preEnvStore.getTargets(scope);
     res.json({ ok: true, scope, env, targets });
+  } catch (error) {
+    res.status(500).json({ ok: false, error: error.message });
+  }
+});
+
+app.patch('/env/rooms/:roomId', async (req, res) => {
+  try {
+    setPreAutomationCors(req, res);
+    const roomId = req.params.roomId;
+    if (!roomId) return res.status(400).json({ ok: false, error: 'roomId required' });
+    const payload = req.body || {};
+    const updated = preEnvStore.upsertRoom(roomId, payload);
+    let zonesPayload;
+    try {
+      zonesPayload = await loadEnvZonesPayload({});
+    } catch (error) {
+      zonesPayload = { zones: [] };
+    }
+    const evaluated = evaluateRoomAutomationConfig(updated, preEnvStore.getSnapshot(), zonesPayload.zones || []);
+    res.json({ ok: true, room: evaluated });
+  } catch (error) {
+    res.status(500).json({ ok: false, error: error.message });
+  }
+});
+
+app.post('/env/rooms/:roomId/actions', async (req, res) => {
+  try {
+    setPreAutomationCors(req, res);
+    const roomId = req.params.roomId;
+    if (!roomId) return res.status(400).json({ ok: false, error: 'roomId required' });
+    const roomConfig = preEnvStore.getRoom(roomId);
+    if (!roomConfig) return res.status(404).json({ ok: false, error: 'Room not found' });
+
+    let zonesPayload;
+    try {
+      zonesPayload = await loadEnvZonesPayload({});
+    } catch (error) {
+      zonesPayload = { zones: [] };
+    }
+
+    const snapshot = preEnvStore.getSnapshot();
+    const evaluated = evaluateRoomAutomationConfig(roomConfig, snapshot, zonesPayload.zones || []);
+    const suggestionId = req.body?.suggestionId;
+    const suggestion = evaluated.suggestions.find((item) => !suggestionId || item.id === suggestionId);
+    if (!suggestion) {
+      return res.status(400).json({ ok: false, error: 'Suggestion not available' });
+    }
+
+    preAutomationLogger?.log({
+      type: 'room-automation-action',
+      roomId,
+      suggestionId: suggestion.id,
+      action: suggestion.action || null,
+      label: suggestion.label,
+      detail: suggestion.detail,
+      mode: evaluated.control?.mode || 'advisory'
+    });
+
+    res.json({ ok: true, room: evaluated, appliedSuggestion: suggestion });
   } catch (error) {
     res.status(500).json({ ok: false, error: error.message });
   }
@@ -2897,80 +3405,80 @@ const pushHist = (key, val, max = 100) => {
   azureHist.set(key, arr);
 };
 
-// GET: return current environment zones
-app.get("/env", async (req, res) => {
+async function loadEnvZonesPayload(query = {}) {
   if (ENV_SOURCE === 'azure' && AZURE_LATEST_URL) {
+    const params = new URLSearchParams();
+    if (query.zone) params.set('zone', query.zone);
+    if (query.deviceId) params.set('deviceId', query.deviceId);
+    const url = params.toString() ? `${AZURE_LATEST_URL}?${params.toString()}` : AZURE_LATEST_URL;
+
     try {
-      const params = new URLSearchParams();
-      if (req.query.zone) params.set('zone', req.query.zone);
-      if (req.query.deviceId) params.set('deviceId', req.query.deviceId);
-      const url = params.toString() ? `${AZURE_LATEST_URL}?${params.toString()}` : AZURE_LATEST_URL;
-      const r = await fetch(url, { method: 'GET', headers: { 'accept': 'application/json' } });
-      if (!r.ok) throw new Error(`Azure endpoint ${r.status}`);
-      const list = await r.json(); // [{ zone, deviceId, temperature, humidity, co2, battery, rssi, timestamp }]
+      const response = await fetch(url, { method: 'GET', headers: { accept: 'application/json' } });
+      if (!response.ok) throw new Error(`Azure endpoint ${response.status}`);
+      const list = await response.json();
 
       const zonesMap = new Map();
-      for (const e of Array.isArray(list) ? list : []) {
-        const zoneId = e.zone || 'DefaultZone';
-        const z = zonesMap.get(zoneId) || { id: zoneId, name: zoneId, location: zoneId, sensors: {}, meta: {} };
-        const t = Number(e.temperature);
-        const h = Number(e.humidity);
-        const c = Number(e.co2);
-        const vpd = computeVPDkPa(t, h);
+      for (const entry of Array.isArray(list) ? list : []) {
+        const zoneId = entry.zone || 'DefaultZone';
+        const zone = zonesMap.get(zoneId) || { id: zoneId, name: zoneId, location: zoneId, sensors: {}, meta: {} };
+        const temp = Number(entry.temperature);
+        const humidity = Number(entry.humidity);
+        const co2 = Number(entry.co2);
+        const vpd = computeVPDkPa(temp, humidity);
 
-        // meta
-        if (typeof e.battery === 'number') z.meta.battery = e.battery;
-        if (typeof e.rssi === 'number') z.meta.rssi = e.rssi;
-        if (e.timestamp) z.meta.lastUpdated = e.timestamp;
+        if (typeof entry.battery === 'number') zone.meta.battery = entry.battery;
+        if (typeof entry.rssi === 'number') zone.meta.rssi = entry.rssi;
+        if (entry.timestamp) zone.meta.lastUpdated = entry.timestamp;
 
-        // sensors
-        const ensure = (k, val) => {
-          z.sensors[k] = z.sensors[k] || { current: null, setpoint: { min: null, max: null }, history: [] };
-          if (typeof val === 'number' && !Number.isNaN(val)) {
-            z.sensors[k].current = val;
-            // update history cache
-            const histKey = `${zoneId}:${k}`;
-            pushHist(histKey, val);
-            z.sensors[k].history = azureHist.get(histKey) || [];
+        const ensureSensor = (key, value) => {
+          zone.sensors[key] = zone.sensors[key] || { current: null, setpoint: { min: null, max: null }, history: [] };
+          if (typeof value === 'number' && !Number.isNaN(value)) {
+            zone.sensors[key].current = value;
+            const histKey = `${zoneId}:${key}`;
+            pushHist(histKey, value);
+            zone.sensors[key].history = azureHist.get(histKey) || [];
           }
         };
-        ensure('tempC', t);
-        ensure('rh', h);
-        ensure('co2', c);
-        if (vpd != null) ensure('vpd', vpd);
 
-        zonesMap.set(zoneId, z);
+        ensureSensor('tempC', temp);
+        ensureSensor('rh', humidity);
+        ensureSensor('co2', co2);
+        if (vpd != null) ensureSensor('vpd', vpd);
+
+        zonesMap.set(zoneId, zone);
       }
 
-      const payload = { zones: Array.from(zonesMap.values()) };
-      res.setHeader('Content-Type', 'application/json');
-      return res.status(200).json(payload);
-    } catch (e) {
-      // Fallback to last known cache if available
+      return {
+        zones: Array.from(zonesMap.values()),
+        source: 'azure',
+        meta: { provider: 'azure', cached: false }
+      };
+    } catch (error) {
       if (azureHist.size > 0) {
-        const byZone = {};
-        for (const [key, arr] of azureHist.entries()) {
+        const zones = {};
+        for (const [key, history] of azureHist.entries()) {
           const [zoneId, metric] = key.split(':');
-          byZone[zoneId] = byZone[zoneId] || { id: zoneId, name: zoneId, location: zoneId, sensors: {} };
-          byZone[zoneId].sensors[metric] = { current: arr[0] ?? null, setpoint: { min: null, max: null }, history: arr };
+          zones[zoneId] = zones[zoneId] || { id: zoneId, name: zoneId, location: zoneId, sensors: {} };
+          zones[zoneId].sensors[metric] = { current: history[0] ?? null, setpoint: { min: null, max: null }, history };
         }
-        const payload = { zones: Object.values(byZone) };
-        res.setHeader('Content-Type', 'application/json');
-        return res.status(200).json(payload);
+        return {
+          zones: Object.values(zones),
+          source: 'azure-cache',
+          meta: { provider: 'azure', cached: true, error: error.message }
+        };
       }
-      return res.status(502).json({ ok: false, error: `Azure fetch failed: ${e.message}` });
+      throw error;
     }
   }
 
-  // Local file mode (default)
-  try {
-    const raw = fs.readFileSync(ENV_PATH, "utf8");
-    res.setHeader("Content-Type", "application/json");
-    return res.status(200).send(raw);
-  } catch (e) {
-    return res.status(500).json({ ok: false, error: e.message });
-  }
-});
+  const data = readJsonSafe(ENV_PATH, { zones: [] }) || { zones: [] };
+  const zones = Array.isArray(data.zones) ? data.zones : [];
+  return {
+    zones,
+    source: 'local',
+    meta: { provider: 'local', updatedAt: data.updatedAt || null }
+  };
+}
 
 // POST: ingest a telemetry message and upsert into env.json
 // Expected body: { zoneId, name, temperature, humidity, vpd, co2, battery, rssi, source }
