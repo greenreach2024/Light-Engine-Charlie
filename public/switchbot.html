@@ -573,6 +573,455 @@
       return `${prefix}-${fallbackCounters[prefix]}`;
     }
 
+    const CONTROLLED_TYPE_OPTIONS = ['dehumidifier', 'fan', 'light', 'heater', 'misc'];
+    const CRITICALITY_OPTIONS = ['safety', 'comfort', 'optional'];
+    const ENERGY_TELEMETRY_OPTIONS = ['plug_builtin', 'branch_meter', 'none'];
+    const SENSOR_METRIC_ORDER = ['temp', 'rh', 'co2', 'vpd'];
+
+    function toNumeric(value) {
+      if (value === undefined || value === null) return null;
+      if (typeof value === 'number') {
+        return Number.isFinite(value) ? value : null;
+      }
+      if (typeof value === 'string') {
+        const match = value.match(/-?\d+(?:\.\d+)?/);
+        if (match) {
+          const parsed = Number(match[0]);
+          return Number.isFinite(parsed) ? parsed : null;
+        }
+      }
+      return null;
+    }
+
+    function coalesceNumeric(...values) {
+      for (const candidate of values) {
+        const numeric = toNumeric(candidate);
+        if (numeric !== null) {
+          return numeric;
+        }
+      }
+      return null;
+    }
+
+    function clampWeight(value, fallback = null) {
+      const numeric = toNumeric(value);
+      if (numeric !== null) {
+        return Math.max(0, Math.min(1, numeric));
+      }
+      if (fallback === null || fallback === undefined) {
+        return null;
+      }
+      const fallbackNumeric = toNumeric(fallback);
+      return fallbackNumeric === null ? null : Math.max(0, Math.min(1, fallbackNumeric));
+    }
+
+    function normalizeSensorMetric(metric) {
+      if (!metric && metric !== 0) return null;
+      const normalized = String(metric).trim().toLowerCase();
+      if (!normalized) return null;
+      if (['temp', 'temperature', 'temp_c', 'tempc', 'tempf', 'temp_f'].includes(normalized)) return 'temp';
+      if (['humidity', 'rh', 'relative_humidity', 'relative-humidity'].includes(normalized)) return 'rh';
+      if (['co2', 'co₂', 'co2ppm', 'co2_ppm', 'carbon_dioxide', 'carbon-dioxide'].includes(normalized)) return 'co2';
+      if (['vpd', 'vapour_pressure_deficit', 'vapor_pressure_deficit', 'vapour-pressure-deficit'].includes(normalized)) return 'vpd';
+      return null;
+    }
+
+    function deriveSensorMetrics(device, metadata) {
+      const metrics = new Set();
+      const existingMetrics = Array.isArray(device?.metrics) ? device.metrics : [];
+      existingMetrics.forEach(metric => {
+        const normalized = normalizeSensorMetric(metric);
+        if (normalized) metrics.add(normalized);
+      });
+
+      const metaDetails = metadata?.details || {};
+      const metaMetrics = Array.isArray(metadata?.metrics)
+        ? metadata.metrics
+        : Array.isArray(metaDetails.metrics)
+        ? metaDetails.metrics
+        : [];
+      metaMetrics.forEach(metric => {
+        const normalized = normalizeSensorMetric(metric);
+        if (normalized) metrics.add(normalized);
+      });
+
+      const reading = device?.lastReading || {};
+      const sensorCandidates = [
+        reading,
+        reading.readings,
+        reading.latest,
+        reading.metrics,
+        reading.sensors
+      ];
+      sensorCandidates.forEach(source => {
+        if (!source || typeof source !== 'object') return;
+        const normalizedSource = source;
+        if (normalizedSource.temperature !== undefined || normalizedSource.temp !== undefined || normalizedSource.tempC !== undefined) {
+          metrics.add('temp');
+        }
+        if (normalizedSource.humidity !== undefined || normalizedSource.rh !== undefined) {
+          metrics.add('rh');
+        }
+        if (
+          normalizedSource.co2 !== undefined ||
+          normalizedSource.co2ppm !== undefined ||
+          normalizedSource.co2Ppm !== undefined ||
+          normalizedSource.co₂ !== undefined
+        ) {
+          metrics.add('co2');
+        }
+        if (normalizedSource.vpd !== undefined) {
+          metrics.add('vpd');
+        }
+        if (normalizedSource.tempC && (normalizedSource.tempC.current !== undefined || normalizedSource.tempC.value !== undefined)) {
+          metrics.add('temp');
+        }
+        if (normalizedSource.rh && (normalizedSource.rh.current !== undefined || normalizedSource.rh.value !== undefined)) {
+          metrics.add('rh');
+        }
+        if (normalizedSource.co2 && (normalizedSource.co2.current !== undefined || normalizedSource.co2.value !== undefined)) {
+          metrics.add('co2');
+        }
+        if (normalizedSource.vpd && (normalizedSource.vpd.current !== undefined || normalizedSource.vpd.value !== undefined)) {
+          metrics.add('vpd');
+        }
+      });
+
+      return SENSOR_METRIC_ORDER.filter(metric => metrics.has(metric));
+    }
+
+    function normalizeControlledType(value) {
+      if (!value && value !== 0) return null;
+      const normalized = String(value).trim().toLowerCase();
+      if (!normalized) return null;
+      if (CONTROLLED_TYPE_OPTIONS.includes(normalized)) return normalized;
+      if (normalized.includes('dehum')) return 'dehumidifier';
+      if (normalized.includes('fan')) return 'fan';
+      if (normalized.includes('light') || normalized.includes('lamp') || normalized.includes('grow')) return 'light';
+      if (normalized.includes('heat')) return 'heater';
+      return null;
+    }
+
+    function normalizeCriticality(value) {
+      if (!value && value !== 0) return null;
+      const normalized = String(value).trim().toLowerCase();
+      if (!normalized) return null;
+      if (CRITICALITY_OPTIONS.includes(normalized)) return normalized;
+      if (normalized.includes('safety') || normalized.includes('critical')) return 'safety';
+      if (normalized.includes('comfort') || normalized.includes('climate')) return 'comfort';
+      return null;
+    }
+
+    function normalizeEnergyTelemetry(value) {
+      if (!value && value !== 0) return null;
+      const normalized = String(value).trim().toLowerCase();
+      if (!normalized) return null;
+      if (ENERGY_TELEMETRY_OPTIONS.includes(normalized)) return normalized;
+      if (normalized.includes('branch')) return 'branch_meter';
+      if (normalized.includes('builtin') || normalized.includes('built-in') || normalized.includes('plug')) return 'plug_builtin';
+      if (normalized.includes('none') || normalized.includes('n/a') || normalized.includes('na')) return 'none';
+      return null;
+    }
+
+    function guessPlugControlledType(device, metadata) {
+      const metaDetails = metadata?.details || {};
+      const fromMeta = normalizeControlledType(
+        metadata?.controlledType ||
+          metaDetails.controlledType ||
+          metaDetails.equipmentCategory ||
+          metadata?.equipmentCategory
+      );
+      if (fromMeta) return fromMeta;
+      const context = [
+        device?.managedEquipment,
+        metaDetails.managedEquipment,
+        metaDetails.equipment,
+        metadata?.managedEquipment,
+        device?.displayName,
+        device?.deviceName,
+        device?.deviceType
+      ]
+        .filter(Boolean)
+        .join(' ')
+        .toLowerCase();
+      if (context.includes('dehum')) return 'dehumidifier';
+      if (context.includes('fan')) return 'fan';
+      if (context.includes('light') || context.includes('lamp') || context.includes('grow')) return 'light';
+      if (context.includes('heat') || context.includes('heater')) return 'heater';
+      return 'misc';
+    }
+
+    function guessPlugCriticality(device, controlledType, metadata) {
+      const metaDetails = metadata?.details || {};
+      const fromMeta = normalizeCriticality(metadata?.criticality || metaDetails.criticality);
+      if (fromMeta) return fromMeta;
+      const context = [
+        device?.managedEquipment,
+        metaDetails.managedEquipment,
+        metadata?.managedEquipment,
+        device?.displayName,
+        device?.deviceName,
+        device?.deviceType
+      ]
+        .filter(Boolean)
+        .join(' ')
+        .toLowerCase();
+      if (
+        context.includes('alarm') ||
+        context.includes('security') ||
+        context.includes('safety') ||
+        context.includes('pump') ||
+        context.includes('irrigation')
+      ) {
+        return 'safety';
+      }
+      if (controlledType === 'dehumidifier' || controlledType === 'fan' || controlledType === 'heater') {
+        return 'comfort';
+      }
+      return 'optional';
+    }
+
+    function guessEnergyTelemetry(device, metadata) {
+      const metaDetails = metadata?.details || {};
+      const fromMeta = normalizeEnergyTelemetry(
+        metadata?.energyTelemetry ||
+          metaDetails.energyTelemetry ||
+          metaDetails.energySource ||
+          metadata?.energySource
+      );
+      if (fromMeta) return fromMeta;
+      const reading = device?.lastReading || {};
+      if (
+        reading.wattage !== undefined ||
+        reading.weight !== undefined ||
+        reading.power !== undefined ||
+        reading.electricityOfDay !== undefined ||
+        reading.voltage !== undefined ||
+        reading.electricCurrent !== undefined
+      ) {
+        return 'plug_builtin';
+      }
+      return 'none';
+    }
+
+    function buildPlacementEntry(option, fallbackLabel) {
+      if (option) {
+        return {
+          id: option.id || null,
+          name: option.name,
+          value: option.value || option.id || null,
+          source: 'farm'
+        };
+      }
+      if (fallbackLabel) {
+        return {
+          id: null,
+          name: fallbackLabel,
+          value: null,
+          source: 'unmapped'
+        };
+      }
+      return null;
+    }
+
+    function buildPlacement(device, metadata) {
+      const metaDetails = metadata?.details || {};
+      const zoneCandidates = [
+        device?.zoneId,
+        metadata?.zoneId,
+        metaDetails.zoneId,
+        metadata?.zoneSlug,
+        metaDetails.zoneSlug
+      ];
+      let zoneOption = null;
+      for (const candidate of zoneCandidates) {
+        zoneOption = findZoneOption(candidate);
+        if (zoneOption) break;
+      }
+      const zoneLabelCandidates = [
+        device?.zoneName,
+        metadata?.zoneName,
+        metadata?.zone,
+        metaDetails.zoneName,
+        metaDetails.zone,
+        device?.lastReading?.zone,
+        device?.lastReading?.name
+      ];
+      const zoneLabel = zoneLabelCandidates.find(label => typeof label === 'string' && label.trim());
+      const zonePlacement = buildPlacementEntry(zoneOption, zoneLabel);
+
+      const roomCandidates = [
+        device?.farmLocationId,
+        metadata?.roomId,
+        metaDetails.roomId,
+        metadata?.roomSlug,
+        metaDetails.roomSlug
+      ];
+      let roomOption = null;
+      for (const candidate of roomCandidates) {
+        roomOption = findRoomOption(candidate);
+        if (roomOption) break;
+      }
+      const roomLabelCandidates = [
+        device?.farmLocation,
+        metadata?.roomName,
+        metadata?.room,
+        metadata?.location,
+        metaDetails.roomName,
+        metaDetails.room,
+        device?.lastReading?.location
+      ];
+      const roomLabel = roomLabelCandidates.find(label => typeof label === 'string' && label.trim());
+      const roomPlacement = buildPlacementEntry(roomOption, roomLabel);
+
+      const level = metaDetails.level || metaDetails.rackLevel || metaDetails.tier || metaDetails.shelf || metadata?.level || device?.placement?.level || null;
+      const side = metaDetails.side || metaDetails.orientation || metaDetails.aisle || metadata?.side || device?.placement?.side || null;
+
+      return {
+        zone: zonePlacement,
+        room: roomPlacement,
+        level: level || null,
+        side: side || null
+      };
+    }
+
+    function deriveRole(device, metadata) {
+      const metaDetails = metadata?.details || {};
+      const candidate = (metadata?.role || metaDetails.role || '').toLowerCase();
+      if (candidate === 'sensor') return 'sensor';
+      if (candidate === 'plug' || candidate === 'actuator' || candidate === 'switch') return 'plug';
+      return isSensorDevice(device?.deviceType) ? 'sensor' : 'plug';
+    }
+
+    function syncDeviceCardSchema(device, metadata) {
+      if (!device) return;
+      const canonicalId = getCanonicalDeviceId(device) || device.deviceId || device.device_id || '';
+      if (!device.deviceId) {
+        device.deviceId = canonicalId;
+      }
+      const reading = device.lastReading || {};
+      const metaDetails = metadata?.details || {};
+      const batteryLevel = coalesceNumeric(
+        reading.battery,
+        reading.meta?.battery,
+        reading.version?.battery,
+        device.battery,
+        metaDetails.battery,
+        device.identity?.battery
+      );
+      const signalLevel = coalesceNumeric(
+        reading.rssi,
+        reading.meta?.rssi,
+        reading.signal,
+        reading.version?.rssi,
+        device.rssi,
+        metaDetails.signal,
+        device.identity?.signal
+      );
+      const displayName =
+        device.displayName ||
+        metadata?.name ||
+        metadata?.deviceName ||
+        metaDetails.displayName ||
+        device.deviceName ||
+        device.name ||
+        canonicalId;
+
+      device.identity = {
+        deviceId: canonicalId,
+        name: displayName,
+        battery: batteryLevel,
+        signal: signalLevel
+      };
+
+      device.placement = buildPlacement(device, metadata);
+
+      const role = deriveRole(device, metadata);
+      device.role = role;
+
+      if (role === 'sensor') {
+        device.metrics = deriveSensorMetrics(device, metadata);
+        const weightFromMeta = clampWeight(metaDetails.weight ?? metadata?.weight, null);
+        const existingWeight = clampWeight(device.weight, null);
+        device.weight = weightFromMeta ?? existingWeight ?? null;
+        if (metaDetails.primary !== undefined || metadata?.primary !== undefined) {
+          device.primary = Boolean(metaDetails.primary ?? metadata?.primary);
+        } else if (device.primary === undefined) {
+          device.primary = false;
+        } else {
+          device.primary = Boolean(device.primary);
+        }
+        delete device.controlledType;
+        delete device.criticality;
+        delete device.controlMethod;
+        delete device.energyTelemetry;
+      } else {
+        delete device.metrics;
+        delete device.weight;
+        delete device.primary;
+        const controlledType = guessPlugControlledType(device, metadata);
+        device.controlledType = controlledType;
+        device.criticality = guessPlugCriticality(device, controlledType, metadata);
+        device.controlMethod = 'plug_onoff';
+        device.energyTelemetry = guessEnergyTelemetry(device, metadata);
+      }
+    }
+
+    function recalculateSensorWeights() {
+      const sensorsByZone = new Map();
+      devices.forEach(device => {
+        if (!device || device.role !== 'sensor') return;
+        const zoneKey =
+          (device.placement && device.placement.zone && device.placement.zone.value) ||
+          device.zoneId ||
+          (device.placement && device.placement.zone && device.placement.zone.name) ||
+          '__unassigned__';
+        if (!sensorsByZone.has(zoneKey)) {
+          sensorsByZone.set(zoneKey, []);
+        }
+        sensorsByZone.get(zoneKey).push(device);
+      });
+
+      sensorsByZone.forEach(devicesInZone => {
+        if (!devicesInZone.length) return;
+        const explicitPrimary = devicesInZone.filter(device => device.primary === true);
+        if (explicitPrimary.length === 0) {
+          let chosen = devicesInZone[0];
+          let highestBattery = -Infinity;
+          devicesInZone.forEach(device => {
+            const battery = toNumeric(device.identity?.battery ?? device.lastReading?.battery);
+            if (battery !== null && battery > highestBattery) {
+              highestBattery = battery;
+              chosen = device;
+            }
+          });
+          devicesInZone.forEach(device => {
+            device.primary = device === chosen;
+          });
+        } else {
+          devicesInZone.forEach(device => {
+            device.primary = explicitPrimary.includes(device);
+          });
+        }
+
+        const explicitWeights = devicesInZone.filter(device => device.weight !== null && device.weight !== undefined);
+        if (explicitWeights.length === devicesInZone.length) {
+          devicesInZone.forEach(device => {
+            device.weight = clampWeight(device.weight, 0);
+          });
+        } else {
+          const defaultWeight = devicesInZone.length > 0 ? clampWeight(1 / devicesInZone.length, 0) : 0;
+          devicesInZone.forEach(device => {
+            if (device.weight === null || device.weight === undefined) {
+              device.weight = defaultWeight;
+            } else {
+              device.weight = clampWeight(device.weight, defaultWeight);
+            }
+          });
+        }
+      });
+    }
+
     function createOption(id, name, prefix) {
       const trimmedName = typeof name === 'string' ? name.trim() : '';
       const trimmedId = typeof id === 'string' ? id.trim() : '';
@@ -933,7 +1382,7 @@
       }
     }
 
-    function applyMetadataToDevice(device, metadataOverride) {
+    function applyMetadataToDevice(device, metadataOverride, options = {}) {
       if (!device) return;
       const metadata = metadataOverride || getDeviceMetadata(getCanonicalDeviceId(device));
       enrichDeviceReading(device);
@@ -962,14 +1411,18 @@
         if (!device.displayName) {
           device.displayName = device.deviceName || device.device_id || device.deviceId;
         }
-        enrichDeviceReading(device);
+      }
+      syncDeviceCardSchema(device, metadata);
+      if (!options.skipRecalculate) {
+        recalculateSensorWeights();
       }
     }
 
     function applyMetadataToAllDevices() {
       devices.forEach(device => {
-        applyMetadataToDevice(device);
+        applyMetadataToDevice(device, undefined, { skipRecalculate: true });
       });
+      recalculateSensorWeights();
     }
 
     function renderSelectOptions(options, selectedValue, selectedLabel, placeholder) {
@@ -2174,6 +2627,7 @@
                   message: "Click refresh to get current readings"
                 }
               }));
+              applyMetadataToAllDevices();
               renderDevicesFromAPI();
               showInfo(`<strong>Polling active</strong><br>Last update: ${new Date().toLocaleTimeString()}<br>Device list refreshed. Click refresh on cards for live data.`);
             }
@@ -2354,6 +2808,9 @@
           applyMetadataToDevice(device, metadata);
         } else {
           device.farmLocation = locationName;
+          device.farmLocationId = option ? option.value : '';
+          syncDeviceCardSchema(device);
+          recalculateSensorWeights();
         }
         renderDevicesFromAPI();
         const safeDeviceName = escapeHtml(device.displayName || device.deviceName || deviceId);
@@ -2389,6 +2846,8 @@
         } else {
           device.zoneName = zoneName;
           device.zoneId = option ? option.value : '';
+          syncDeviceCardSchema(device);
+          recalculateSensorWeights();
         }
         renderDevicesFromAPI();
         const safeDeviceName = escapeHtml(device.displayName || device.deviceName || deviceId);
@@ -2420,6 +2879,7 @@
           applyMetadataToDevice(device, metadata);
         } else {
           device.managedEquipment = trimmed;
+          syncDeviceCardSchema(device);
         }
         renderDevicesFromAPI();
         const safeDeviceName = escapeHtml(device.displayName || device.deviceName || deviceId);
