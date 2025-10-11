@@ -6,21 +6,32 @@ import asyncio
 import contextlib
 import logging
 import os
-from typing import List, Optional, Dict, Any
+from datetime import date, datetime, time
+from typing import Any, Dict, List, Optional
 
-from fastapi import Depends, FastAPI, HTTPException, Query, status
+from fastapi import Depends, FastAPI, Header, HTTPException, Query, status
 from fastapi.middleware.cors import CORSMiddleware
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, validator
 
+from .ai_assist import SetupAssistError, SetupAssistService
 from .automation import AutomationEngine, lux_balancing_rule, occupancy_rule
 from .config import EnvironmentConfig, build_environment_config
 from .device_discovery import fetch_switchbot_status, full_discovery_cycle
-from .device_models import Schedule as ScheduleModel
-from .device_models import UserContext
+from .device_models import (
+    GroupSchedule,
+    PhotoperiodScheduleConfig,
+    Schedule as ScheduleModel,
+    UserContext,
+)
 from .lighting import LightingController
 from .logging_config import configure_logging
-from .state import DeviceRegistry, LightingState, ScheduleStore, SensorEventBuffer
-from .ai_assist import SetupAssistService, SetupAssistError
+from .state import (
+    DeviceRegistry,
+    GroupScheduleStore,
+    LightingState,
+    ScheduleStore,
+    SensorEventBuffer,
+)
 
 LOGGER = logging.getLogger(__name__)
 
@@ -34,60 +45,6 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
-
-CONFIG: EnvironmentConfig = build_environment_config()
-REGISTRY = DeviceRegistry()
-BUFFER = SensorEventBuffer()
-LIGHTING_STATE = LightingState(CONFIG.lighting_inventory or [])
-CONTROLLER = LightingController(CONFIG.lighting_inventory or [], LIGHTING_STATE)
-
-@app.get("/")
-def root():
-    return {"message": "Light Engine Charlie API is running. See /docs for API documentation."}
-"""FastAPI server wiring together discovery, automation, and RBAC."""
-
-import asyncio
-import contextlib
-import logging
-import os
-from typing import List, Optional
-
-from fastapi import Depends, FastAPI, HTTPException, Query, status
-from fastapi.middleware.cors import CORSMiddleware
-from pydantic import BaseModel, Field
-
-from .automation import AutomationEngine, lux_balancing_rule, occupancy_rule
-from .config import EnvironmentConfig, build_environment_config
-from .device_discovery import fetch_switchbot_status, full_discovery_cycle
-from .device_models import Schedule as ScheduleModel
-from .device_models import UserContext
-from .lighting import LightingController
-from .logging_config import configure_logging
-from .state import DeviceRegistry, LightingState, ScheduleStore, SensorEventBuffer
-
-LOGGER = logging.getLogger(__name__)
-
-configure_logging()
-
-app = FastAPI(title="Light Engine Charlie", version="1.0.0")
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=["*"],
-    allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
-)
-
-CONFIG: EnvironmentConfig = build_environment_config()
-REGISTRY = DeviceRegistry()
-BUFFER = SensorEventBuffer()
-LIGHTING_STATE = LightingState(CONFIG.lighting_inventory or [])
-CONTROLLER = LightingController(CONFIG.lighting_inventory or [], LIGHTING_STATE)
-
-@app.get("/")
-def root():
-
-    return {"message": "Light Engine Charlie API is running. See /docs for API documentation."}
 
 CONFIG: EnvironmentConfig = build_environment_config()
 REGISTRY = DeviceRegistry()
@@ -95,6 +52,7 @@ BUFFER = SensorEventBuffer()
 LIGHTING_STATE = LightingState(CONFIG.lighting_inventory or [])
 CONTROLLER = LightingController(CONFIG.lighting_inventory or [], LIGHTING_STATE)
 SCHEDULES = ScheduleStore()
+GROUP_SCHEDULES = GroupScheduleStore()
 AUTOMATION = AutomationEngine(CONTROLLER, SCHEDULES)
 AI_ASSIST_SERVICE: Optional[SetupAssistService] = None
 
@@ -115,6 +73,11 @@ if ZONE_MAP:
 
 _AUTOMATION_TASK: Optional[asyncio.Task] = None
 _DISCOVERY_TASK: Optional[asyncio.Task] = None
+
+
+@app.get("/")
+def root() -> Dict[str, str]:
+    return {"message": "Light Engine Charlie API is running. See /docs for API documentation."}
 
 
 class DeviceResponse(BaseModel):
@@ -148,9 +111,213 @@ class LightingFixtureResponse(BaseModel):
     spectrum_max: int
 
 
+class ScheduleOverridePayload(BaseModel):
+    mode: str
+    value: Optional[Any] = None
+
+    class Config:
+        extra = "allow"
+
+    @validator("mode")
+    def _validate_mode(cls, value: str) -> str:
+        if not isinstance(value, str) or not value.strip():
+            raise ValueError("override mode must be a non-empty string")
+        return value.strip()
+
+    def to_dict(self) -> Dict[str, Any]:
+        return self.dict(exclude_unset=True)
+
+
+class PhotoperiodSchedulePayload(BaseModel):
+    type: str
+    start: time
+    duration_hours: int = Field(..., alias="durationHours")
+    ramp_up_min: int = Field(..., alias="rampUpMin")
+    ramp_down_min: int = Field(..., alias="rampDownMin")
+
+    class Config:
+        allow_population_by_field_name = True
+
+    @validator("type")
+    def _enforce_photoperiod(cls, value: str) -> str:
+        if value != "photoperiod":
+            raise ValueError("only photoperiod schedules are supported")
+        return value
+
+    @validator("start", pre=True)
+    def _validate_start(cls, value: Any) -> time:
+        if isinstance(value, time):
+            if value.second or value.microsecond:
+                raise ValueError("start time must not include seconds")
+            return value
+        if isinstance(value, str):
+            try:
+                parsed = datetime.strptime(value.strip(), "%H:%M").time()
+            except ValueError as exc:  # pragma: no cover - defensive guard
+                raise ValueError("start must use HH:MM format") from exc
+            return parsed
+        raise TypeError("start must be a HH:MM string")
+
+    @validator("duration_hours")
+    def _validate_duration(cls, value: int) -> int:
+        if not isinstance(value, int):
+            raise TypeError("durationHours must be an integer")
+        if value < 0 or value > 24:
+            raise ValueError("durationHours must be between 0 and 24")
+        return value
+
+    @validator("ramp_up_min", "ramp_down_min")
+    def _validate_ramps(cls, value: int) -> int:
+        if not isinstance(value, int):
+            raise TypeError("ramp durations must be integers")
+        if value < 0:
+            raise ValueError("ramp durations must be non-negative")
+        return value
+
+    def to_config(self) -> PhotoperiodScheduleConfig:
+        return PhotoperiodScheduleConfig(
+            start=self.start,
+            duration_hours=self.duration_hours,
+            ramp_up_minutes=self.ramp_up_min,
+            ramp_down_minutes=self.ramp_down_min,
+        )
+
+
+class GroupScheduleRequest(BaseModel):
+    device_id: str = Field(..., alias="deviceId")
+    plan_key: Optional[str] = Field(None, alias="planKey")
+    seed_date: date = Field(..., alias="seedDate")
+    override: Optional[ScheduleOverridePayload] = None
+    schedule: PhotoperiodSchedulePayload
+    offsets: Dict[str, int] = Field(default_factory=dict)
+    metadata: Dict[str, Any] = Field(default_factory=dict)
+
+    class Config:
+        allow_population_by_field_name = True
+        extra = "forbid"
+
+    @validator("device_id")
+    def _validate_device(cls, value: str) -> str:
+        if not isinstance(value, str) or not value.strip():
+            raise ValueError("deviceId must be a non-empty string")
+        return value.strip()
+
+    @validator("plan_key")
+    def _normalize_plan_key(cls, value: Optional[str]) -> Optional[str]:
+        if value is None:
+            return None
+        trimmed = value.strip()
+        return trimmed or None
+
+    @validator("metadata", pre=True)
+    def _validate_metadata(cls, value: Any) -> Dict[str, Any]:
+        if value is None:
+            return {}
+        if not isinstance(value, dict):
+            raise TypeError("metadata must be an object")
+        return value
+
+    @validator("offsets", pre=True)
+    def _validate_offsets(cls, value: Any) -> Dict[str, int]:
+        if value is None:
+            return {}
+        if not isinstance(value, dict):
+            raise TypeError("offsets must be an object of integer adjustments")
+        normalized: Dict[str, int] = {}
+        for key, raw in value.items():
+            if raw is None:
+                continue
+            if isinstance(raw, bool):
+                raise TypeError(f"offset {key} must be an integer value")
+            if isinstance(raw, int):
+                normalized[str(key)] = raw
+                continue
+            if isinstance(raw, float) and raw.is_integer():
+                normalized[str(key)] = int(raw)
+                continue
+            raise TypeError(f"offset {key} must be an integer value")
+        return normalized
+
+    def to_group_schedule(self) -> GroupSchedule:
+        schedule_config = self.schedule.to_config()
+        override_payload = self.override.to_dict() if self.override else None
+        return GroupSchedule(
+            device_id=self.device_id,
+            plan_key=self.plan_key,
+            seed_date=self.seed_date,
+            schedule=schedule_config,
+            override=override_payload,
+            offsets=dict(self.offsets),
+            metadata=dict(self.metadata),
+        )
+
+
+def _extract_group(device_id: str) -> Optional[str]:
+    if device_id.startswith("group:"):
+        group = device_id.split(":", 1)[1].strip()
+        return group or None
+    return None
+
+
+def _serialize_group_schedule(schedule: GroupSchedule) -> Dict[str, Any]:
+    return schedule.to_response_payload()
+
+
+def get_user_context(
+    x_user_id: str = Header("system", alias="X-User-Id"),
+    x_user_groups: str = Header("", alias="X-User-Groups"),
+) -> UserContext:
+    groups = [group.strip() for group in x_user_groups.split(",") if group.strip()]
+    if not groups:
+        groups = ["default"]
+    return UserContext(user_id=x_user_id or "system", groups=groups)
+
+
 # Live device discovery endpoint: orchestrates all protocol-specific discovery functions
 from fastapi.responses import JSONResponse
 from .device_discovery import discover_kasa_devices, discover_ble_devices, discover_mdns_devices
+
+
+@app.get("/sched")
+async def list_group_schedules(
+    device_id: Optional[str] = Query(None, alias="deviceId"),
+    group: Optional[str] = None,
+    user: UserContext = Depends(get_user_context),
+) -> Dict[str, Any]:
+    if group and not user.can_access_group(group):
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Access denied for group")
+
+    schedules: List[GroupSchedule] = []
+    if device_id:
+        schedule = GROUP_SCHEDULES.get(device_id)
+        if schedule is not None:
+            target_group = schedule.target_group()
+            if target_group and not user.can_access_group(target_group):
+                raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Access denied for group")
+            schedules = [schedule]
+    else:
+        candidate_schedules = GROUP_SCHEDULES.list(group=group)
+        for entry in candidate_schedules:
+            target_group = entry.target_group()
+            if target_group and not user.can_access_group(target_group):
+                continue
+            schedules.append(entry)
+
+    return {"status": "ok", "schedules": [_serialize_group_schedule(entry) for entry in schedules]}
+
+
+@app.post("/sched", status_code=status.HTTP_201_CREATED)
+async def save_group_schedule(
+    request: GroupScheduleRequest, user: UserContext = Depends(get_user_context)
+) -> Dict[str, Any]:
+    target_group = _extract_group(request.device_id)
+    LOGGER.debug("Received schedule save for %s (user groups=%s)", request.device_id, user.groups)
+    if target_group and not user.can_access_group(target_group):
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="User cannot access target group")
+
+    schedule = request.to_group_schedule()
+    saved = GROUP_SCHEDULES.upsert(schedule)
+    return {"status": "ok", "schedule": _serialize_group_schedule(saved)}
 
 @app.get("/discovery/devices", response_class=JSONResponse)
 async def discovery_devices() -> dict:
@@ -208,13 +375,6 @@ def _schedule_from_request(request: ScheduleRequest) -> ScheduleModel:
         brightness=request.brightness,
         spectrum=request.spectrum,
     )
-
-
-def get_user_context(x_user_id: str = Query("system", alias="X-User-Id"), x_user_groups: str = Query("", alias="X-User-Groups")) -> UserContext:
-    groups = [group.strip() for group in x_user_groups.split(",") if group.strip()]
-    if not groups:
-        groups = ["default"]
-    return UserContext(user_id=x_user_id or "system", groups=groups)
 
 
 async def _discovery_loop() -> None:
