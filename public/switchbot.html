@@ -504,6 +504,28 @@
           <strong>Management:</strong> Zone Assignment, Farm Location, Equipment Control
         </div>
       </details>
+      <details>
+        <summary>Control Guardrails</summary>
+        <div>
+          <strong>North Star:</strong>
+          <ul>
+            <li>Manage rooms and zones in Farm Setup; device and group cards provide progressively narrower context.</li>
+            <li>Typed groups with guardrails prevent lighting plans from colliding with environmental automation.</li>
+          </ul>
+          <strong>Control Contracts:</strong>
+          <ul>
+            <li>SwitchBot sensors feed zone targets and control intent via the <code>/env</code> contract.</li>
+            <li>Lights follow spectrum plans and schedules from <code>/plans</code> and <code>/sched</code>; avoid mixing plug automation with those payloads.</li>
+          </ul>
+          <strong>Golden Rules for Plugs:</strong>
+          <ol>
+            <li>When a light has a direct API, run it through <code>/sched</code> HEX12 payloads and force its plug ON—reserve the plug for emergency kills.</li>
+            <li>Gate only non-dimmable or API-less lights with plugs and exclude them from schedule applications.</li>
+            <li>Drive dehumidifiers, fans, and heaters through plug or relay automation tied to <code>/env</code> targets, never lighting schedules.</li>
+            <li>Set plug-controlled lights to <code>controlPriority: "plug_only"</code> so schedules stay off that circuit.</li>
+          </ol>
+        </div>
+      </details>
     </div>
 
     <div class="sync-status" id="syncStatus">
@@ -542,6 +564,7 @@
     let deviceMetadataLoaded = false;
     let deviceMetadataPromise = null;
     let baseZoneOptions = [];
+    let zoneOptionsLocked = false;
     let baseRoomOptions = [];
     let availableZones = [];
     let availableRooms = [];
@@ -955,15 +978,20 @@
         delete device.criticality;
         delete device.controlMethod;
         delete device.energyTelemetry;
+        delete device.controlPriority;
       } else {
         delete device.metrics;
         delete device.weight;
         delete device.primary;
+        delete device.controlPriority;
         const controlledType = guessPlugControlledType(device, metadata);
         device.controlledType = controlledType;
         device.criticality = guessPlugCriticality(device, controlledType, metadata);
         device.controlMethod = 'plug_onoff';
         device.energyTelemetry = guessEnergyTelemetry(device, metadata);
+        if (controlledType === 'light') {
+          device.controlPriority = 'plug_only';
+        }
       }
     }
 
@@ -1097,8 +1125,22 @@
       ) || null;
     }
 
-    function setBaseZoneOptions(options) {
-      baseZoneOptions = dedupeAndSortOptions(options || []);
+    function setBaseZoneOptions(options, { lock = false, merge = false } = {}) {
+      const normalized = dedupeAndSortOptions(options || []);
+      if (merge && baseZoneOptions.length > 0) {
+        baseZoneOptions = dedupeAndSortOptions([...baseZoneOptions, ...normalized]);
+      } else if (zoneOptionsLocked && !lock) {
+        if (merge) {
+          baseZoneOptions = dedupeAndSortOptions([...baseZoneOptions, ...normalized]);
+        } else if (baseZoneOptions.length === 0) {
+          baseZoneOptions = normalized;
+        }
+      } else {
+        baseZoneOptions = normalized;
+      }
+      if (lock && normalized.length > 0) {
+        zoneOptionsLocked = true;
+      }
       rebuildZoneOptions();
     }
 
@@ -1548,7 +1590,7 @@
         const zoneOptions = normalized
           .map((zone, index) => normalizeZoneOption(zone, index))
           .filter(Boolean);
-        setBaseZoneOptions(zoneOptions);
+        setBaseZoneOptions(zoneOptions, { merge: true });
         return environmentData;
       } catch (error) {
         if (!hadData) {
@@ -1559,45 +1601,94 @@
       }
     }
 
-    async function fetchFarmRooms() {
-      const collected = [];
-
-      try {
-        const response = await fetch('/farm');
-        if (response.ok) {
-          const data = await response.json();
-          const rawRooms = Array.isArray(data?.rooms)
-            ? data.rooms
-            : Array.isArray(data?.farm?.rooms)
-            ? data.farm.rooms
-            : [];
-          rawRooms.forEach((room, index) => {
-            const option = normalizeRoomOption(room, index);
-            if (option) collected.push(option);
-          });
-        }
-      } catch (error) {
-        console.warn('Failed to load rooms from /farm:', error);
+    function collectFarmLayoutEntities(payload, rooms = [], zones = []) {
+      if (!payload) return;
+      if (Array.isArray(payload)) {
+        payload.forEach(item => collectFarmLayoutEntities(item, rooms, zones));
+        return;
+      }
+      if (typeof payload !== 'object') {
+        return;
       }
 
-      if (collected.length === 0) {
+      const roomCandidates = [];
+      if (Array.isArray(payload.rooms)) roomCandidates.push(...payload.rooms);
+      else if (payload.rooms && typeof payload.rooms === 'object') roomCandidates.push(payload.rooms);
+      if (typeof payload.room === 'string' || typeof payload.room === 'object') {
+        roomCandidates.push(payload.room);
+      }
+
+      roomCandidates.forEach(room => {
+        const roomOption = normalizeRoomOption(room, rooms.length);
+        if (roomOption) {
+          rooms.push(roomOption);
+        }
+        if (room && typeof room === 'object') {
+          const nestedZones = Array.isArray(room.zones) ? room.zones : [];
+          nestedZones.forEach(zone => {
+            const zoneOption = normalizeZoneOption(zone, zones.length);
+            if (zoneOption) zones.push(zoneOption);
+          });
+          if (Array.isArray(room.children)) {
+            room.children.forEach(child => collectFarmLayoutEntities(child, rooms, zones));
+          }
+        }
+      });
+
+      const zoneCandidates = [];
+      if (Array.isArray(payload.zones)) zoneCandidates.push(...payload.zones);
+      else if (payload.zones && typeof payload.zones === 'object') zoneCandidates.push(payload.zones);
+      if (typeof payload.zone === 'string' || typeof payload.zone === 'object') {
+        zoneCandidates.push(payload.zone);
+      }
+
+      zoneCandidates.forEach(zone => {
+        const zoneOption = normalizeZoneOption(zone, zones.length);
+        if (zoneOption) {
+          zones.push(zoneOption);
+        }
+      });
+
+      const nestedLayouts = [payload.layout, payload.farm, payload.greenhouse, payload.facility]
+        .filter(section => section && typeof section === 'object');
+      nestedLayouts.forEach(section => collectFarmLayoutEntities(section, rooms, zones));
+    }
+
+    async function fetchFarmLayout() {
+      const rooms = [];
+      const zones = [];
+      const sources = ['/farm', '/data/farm.json', '/data/rooms.json'];
+
+      for (const source of sources) {
         try {
-          const response = await fetch('/data/rooms.json');
-          if (response.ok) {
-            const data = await response.json();
+          const response = await fetch(source);
+          if (!response.ok) continue;
+          const data = await response.json();
+          if (!data) continue;
+          if (source.endsWith('rooms.json')) {
             const rawRooms = Array.isArray(data?.rooms) ? data.rooms : [];
-            rawRooms.forEach((room, index) => {
-              const option = normalizeRoomOption(room, index);
-              if (option) collected.push(option);
+            rawRooms.forEach(room => {
+              const option = normalizeRoomOption(room, rooms.length);
+              if (option) rooms.push(option);
             });
+          } else if (Array.isArray(data)) {
+            data.forEach(entry => collectFarmLayoutEntities(entry, rooms, zones));
+          } else {
+            collectFarmLayoutEntities(data, rooms, zones);
           }
         } catch (error) {
-          console.warn('Failed to load fallback room list:', error);
+          console.warn(`Failed to load farm layout from ${source}:`, error);
         }
       }
 
-      setBaseRoomOptions(collected);
-      return collected;
+      if (rooms.length > 0) {
+        setBaseRoomOptions(rooms);
+      }
+      if (zones.length > 0) {
+        setBaseZoneOptions(zones, { lock: true });
+      }
+
+      return { rooms, zones };
     }
 
     async function fetchDeviceMetadata() {
@@ -1648,9 +1739,9 @@
           console.warn('Environment data unavailable:', error);
           return [];
         }),
-        fetchFarmRooms().catch(error => {
-          console.warn('Room catalogue unavailable:', error);
-          return [];
+        fetchFarmLayout().catch(error => {
+          console.warn('Farm layout unavailable:', error);
+          return { rooms: [], zones: [] };
         }),
         (async () => {
           try {
