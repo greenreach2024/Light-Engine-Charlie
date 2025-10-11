@@ -350,17 +350,69 @@ app.post('/env', (req, res) => {
     const scope = body.scope || body.room || 'default';
     const sensors = body.sensors || body.readings || {};
     const sensorArray = Array.isArray(sensors) ? sensors : Object.entries(sensors).map(([type, value]) => ({ type, value }));
+    const ingestStructuredReading = (reading, defaultScope) => {
+      const readingScope = reading.scope || reading.room || reading.zone || defaultScope;
+      if (!readingScope) return;
+
+      const observedAt = reading.observedAt
+        || reading.timestamp
+        || reading.ts
+        || new Date().toISOString();
+
+      const baseMeta = {
+        ...(reading.meta || reading.metadata || {}),
+        sensorId: reading.sensorId
+          || reading.id
+          || reading.deviceId
+          || reading.mac
+          || reading.sourceId
+          || reading.serial
+          || undefined,
+        vendor: reading.vendor || reading.brand || undefined
+      };
+
+      const metricCandidates = [
+        { key: 'temp', aliases: ['temp', 'temperature'], unit: reading.tempUnit || reading.temperatureUnit || 'celsius' },
+        { key: 'rh', aliases: ['rh', 'humidity'], unit: reading.rhUnit || reading.humidityUnit || 'percent' },
+        { key: 'co2', aliases: ['co2'], unit: reading.co2Unit || 'ppm' },
+        { key: 'vpd', aliases: ['vpd'], unit: reading.vpdUnit || 'kpa' },
+        { key: 'ppfd', aliases: ['ppfd'], unit: reading.ppfdUnit || 'umol/m2/s' },
+        { key: 'kwh', aliases: ['kwh', 'energyKwh', 'energy'], unit: reading.energyUnit || 'kwh' },
+        { key: 'battery', aliases: ['battery'], unit: reading.batteryUnit || 'percent' },
+        { key: 'rssi', aliases: ['rssi'], unit: reading.rssiUnit || 'dBm' }
+      ];
+
+      for (const metric of metricCandidates) {
+        const value = metric.aliases
+          .map((alias) => reading[alias])
+          .find((candidate) => candidate !== undefined && candidate !== null);
+        if (value === undefined || value === null) continue;
+
+        preAutomationEngine.ingestSensor(readingScope, metric.key, {
+          value,
+          unit: reading.unit || metric.unit || null,
+          observedAt,
+          meta: baseMeta
+        });
+      }
+    };
+
     sensorArray.forEach((reading) => {
       if (!reading) return;
       const sensorType = reading.type || reading.sensor || reading.metric;
-      if (!sensorType) return;
       const readingScope = reading.scope || reading.room || scope;
-      preAutomationEngine.ingestSensor(readingScope, sensorType, {
-        value: reading.value ?? reading.reading ?? null,
-        unit: reading.unit,
-        observedAt: reading.observedAt || reading.timestamp || new Date().toISOString(),
-        meta: reading.meta || reading.metadata || null
-      });
+
+      if (sensorType) {
+        preAutomationEngine.ingestSensor(readingScope, sensorType, {
+          value: reading.value ?? reading.reading ?? null,
+          unit: reading.unit,
+          observedAt: reading.observedAt || reading.timestamp || new Date().toISOString(),
+          meta: reading.meta || reading.metadata || null
+        });
+        return;
+      }
+
+      ingestStructuredReading(reading, scope);
     });
 
     if (body.targets) {
