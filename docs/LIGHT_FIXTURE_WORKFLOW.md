@@ -34,3 +34,25 @@
 
 * When the Groups card renders, it first runs the **Controller Light Confirmation** gate (Section 5.5). The light selection bar is then seeded from the **normalized** `public/data/farm.devices.json` for the active room/zone (per-fixture or banked as confirmed), not directly from the raw wizard state.【F:public/app.charlie.js†L6634-L6667】
 * Plan changes automatically synchronize the spectrum preview and slider controls, keeping the group recipe in step with the fixtures that were staged through the light wizard.【F:public/app.charlie.js†L6610-L6629】
+
+## 7. Farm Setup → Groups workflow
+
+* **Farm Setup** is the starting point for spatial structure. Operators define `rooms[]`, `zones[]`, `levels[]`, and `sides[]`, then persist the composite configuration under `/farm` for downstream features.
+* **SwitchBot Manager** bridges the spatial data to real hardware:
+  * Assign every SwitchBot sensor to its room/zone. Exactly one sensor per zone must be marked **Primary**; others receive weight sliders so zone medians can be tuned.
+  * Assign each managed plug to the appropriate room/zone and capture its `controlledType` so automation can filter by equipment role.
+* **Groups** inherit the curated device placements:
+  * Create a **LightGroup** for each zone and add only lighting fixtures.
+  * Create an **EquipGroup** for the same zone and add only plugs or environmental equipment.
+* **Plans & Schedules (Lights)** flow through the Recipe Bridge: publish lighting recipes to `/plans` and time-based schedules to `/sched` via the Excel integration.
+* **Environment Targets (Equipment)** are authored per zone through `/env`, setting `temp`, `rh`, `rhBand`, `control.step`, and `control.dwell` to guide plug automation.
+* **Verification** relies on the playbook curls: `/healthz` returns `OK`, device inventories load, group JSON documents exist, PATCH calls against lights succeed, and `/sched` plus `/env` echo the saved configurations.
+
+## 8. Naming and conventions
+
+* **Zones:** `ROOM-Zn` (example: `LeafyGreens-Z2`).
+* **LightGroup IDs:** `ROOM · Zn · Lights` (UI label) and `LG-Z2-Lights` (identifier).
+* **EquipGroup IDs:** `ROOM · Zn · Equip` (UI label) and `LG-Z2-Equip` (identifier).
+* **Plugs:** `ROOM-Zn-<type>-##` (example: `LG-Z2-dehu-01`).
+
+Consistently applying the patterns above keeps the Farm, Group, and Environment schemas aligned so operators can navigate quickly without deciphering aliases.
