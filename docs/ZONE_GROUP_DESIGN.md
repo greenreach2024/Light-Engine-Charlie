@@ -12,20 +12,21 @@ We will adopt a robust, scalable separation of concerns by introducing two disti
 ### Group Types
 - **LightGroup**
   - Membership: light fixtures only.
-  - Responsibilities: maintain lighting plans and schedules.
-  - Integrations: consumes `/plans` for recipes and owns `/sched` CRUD.
+  - Responsibilities: orchestrate the full lighting program for a zone — photoperiod blocks, sunrise/sunset ramps, spectrum curves, and DLI targets.
+  - Integrations: consumes `/plans` for recipe spectra and publishes schedules through `/sched`, keeping lighting orchestration isolated from plug automation.
 - **EquipGroup**
   - Membership: environmental control equipment (dehumidifiers, fans, etc.).
-  - Responsibilities: manage temperature, relative humidity, and VPD targets along with control parameters such as `control.step` and `control.dwell`.
-  - Integrations: owns `/env` targets and equipment control actions.
+  - Responsibilities: manage temperature, relative humidity, and VPD targets along with control parameters such as hysteresis bands (`rhBand`/`tempBand`), `control.step`, and `control.dwell` so the rules engine can pace plug actions.
+  - Integrations: owns `/env` targets and equipment control actions, including persistence of dwell timers and hysteresis tuning.
 
 ### Zone Card
 - Represents a specific room/zone.
 - References exactly one LightGroup and one EquipGroup.
+- Wraps the typed groups in a single summary card so operators always see the lighting and environmental pair for the active room/zone before drilling into edits.
 - Editing a zone opens the relevant group view (lighting or environment) while keeping Farm Setup as the source of truth for spatial context.
 
 ## Benefits
-- **Clear contracts:** `/sched` and `/env` concerns remain isolated, reducing the chance of conflicting writes.
+- **Clear contracts:** `/sched` and `/env` concerns remain isolated, reducing the chance of conflicting writes such as a light schedule trying to fight a plug cutoff rule.
 - **Operational safety:** UI naturally separates lighting versus equipment updates, lowering the risk of accidental cross-updates.
 - **Telemetry and auditing:** Typed groups make it easier to track changes and gather metrics for each domain.
 - **Scalability:** Mirrors handbook guidance, enabling future automation and analytics enhancements without schema churn.

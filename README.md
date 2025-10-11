@@ -39,7 +39,7 @@ Light Engine Charlie is a comprehensive platform for indoor farming automation, 
 - Launch: Start the local server and confirm /healthz returns ok.
 - Environment: Ensure /env returns zones with sensors; click a metric to view the 24h trend.
 - Devices: Use device cards to view PPFD/DLI/energy. Research Mode reveals more controls.
-- Groups: Select a group to view roster, schedule preview, and apply spectrum safely.
+- Groups: Use the zone summary card to see the paired LightGroup (photoperiod, ramps, spectrum, DLI via `/plans` + `/sched`) and EquipGroup (temperature/RH targets, hysteresis, dwell via `/env`) before editing rosters or applying changes.
 - Guardrails: Offline devices are skipped with a toast. Payloads cap to 100% per channel.
 - Persistence: UI saves to `/ui/<resource>` (backed by `public/data`) instead of the raw `/data/:name` helper to avoid collisions with controller endpoints.
 
