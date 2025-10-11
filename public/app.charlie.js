@@ -3396,6 +3396,90 @@ document.addEventListener('DOMContentLoaded', function() {
 });
 // Sidebar panel state (fixes ReferenceError in strict mode)
 let ACTIVE_PANEL = 'overview';
+const PANEL_PLACEMENTS = new WeakMap();
+let PANEL_STAGE_ELEMENT = null;
+
+function getPanelStageElement() {
+  if (PANEL_STAGE_ELEMENT && PANEL_STAGE_ELEMENT.isConnected) {
+    return PANEL_STAGE_ELEMENT;
+  }
+  PANEL_STAGE_ELEMENT = document.querySelector('[data-role="panel-stage"]');
+  return PANEL_STAGE_ELEMENT;
+}
+
+function registerPanelPlacement(panel) {
+  if (!(panel instanceof HTMLElement)) {
+    return;
+  }
+  if (PANEL_PLACEMENTS.has(panel)) {
+    return;
+  }
+  const placeholder = document.createComment(`panel-placeholder:${panel.getAttribute('data-panel') || ''}`);
+  const parent = panel.parentNode;
+  if (!parent) {
+    return;
+  }
+  parent.insertBefore(placeholder, panel);
+  PANEL_PLACEMENTS.set(panel, { placeholder });
+}
+
+function registerAllPanelPlacements() {
+  document.querySelectorAll('[data-panel]').forEach((panel) => registerPanelPlacement(panel));
+}
+
+function restorePanelPlacement(panel) {
+  const record = PANEL_PLACEMENTS.get(panel);
+  if (!record || !record.placeholder) {
+    return;
+  }
+  const { placeholder } = record;
+  const parent = placeholder.parentNode;
+  if (!parent) {
+    return;
+  }
+  if (placeholder.nextSibling === panel) {
+    return;
+  }
+  parent.insertBefore(panel, placeholder.nextSibling);
+}
+
+function clearPanelStage() {
+  const stage = getPanelStageElement();
+  if (!stage) {
+    return;
+  }
+  Array.from(stage.children).forEach((child) => {
+    if (child instanceof HTMLElement && child.hasAttribute('data-panel')) {
+      restorePanelPlacement(child);
+    } else {
+      stage.removeChild(child);
+    }
+  });
+  stage.classList.remove('is-active');
+  stage.setAttribute('hidden', 'hidden');
+  stage.removeAttribute('data-active-panel');
+}
+
+function movePanelToStage(panel) {
+  const stage = getPanelStageElement();
+  if (!stage || !(panel instanceof HTMLElement)) {
+    return;
+  }
+  if (!PANEL_PLACEMENTS.has(panel)) {
+    registerPanelPlacement(panel);
+  }
+  Array.from(stage.children).forEach((child) => {
+    if (child instanceof HTMLElement && child.hasAttribute('data-panel')) {
+      restorePanelPlacement(child);
+    } else {
+      stage.removeChild(child);
+    }
+  });
+  stage.appendChild(panel);
+  stage.classList.add('is-active');
+  stage.removeAttribute('hidden');
+  stage.setAttribute('data-active-panel', panel.getAttribute('data-panel') || '');
+}
 
 // --- Grow Room Modal Show/Hide Logic ---
 
@@ -16651,6 +16735,7 @@ function initializePanelShells() {
 
 function setActivePanel(panelId = 'overview') {
   console.log('[DEBUG] setActivePanel called with:', panelId);
+  registerAllPanelPlacements();
   ACTIVE_PANEL = panelId;
   const panels = document.querySelectorAll('[data-panel]');
   let matched = false;
@@ -16663,6 +16748,8 @@ function setActivePanel(panelId = 'overview') {
     if (isMatch) {
       matched = true;
       activePanel = panel;
+    } else {
+      restorePanelPlacement(panel);
     }
   });
 
@@ -16671,7 +16758,13 @@ function setActivePanel(panelId = 'overview') {
     return;
   }
 
-  // Only scroll to the active panel, do not move its DOM position
+  if (panelId === 'overview') {
+    clearPanelStage();
+  } else if (activePanel) {
+    movePanelToStage(activePanel);
+  }
+
+  // Ensure the active panel is visible within the main column
   if (activePanel) {
     const dashboardMain = document.querySelector('.dashboard-main');
     if (dashboardMain) {
@@ -16699,6 +16792,8 @@ function setActivePanel(panelId = 'overview') {
 
 function initializeSidebarNavigation() {
   console.log('[DEBUG] initializeSidebarNavigation called');
+  registerAllPanelPlacements();
+  clearPanelStage();
   // Robust event delegation for sidebar-group__trigger
   document.querySelectorAll('.sidebar-group').forEach((group) => {
     const items = group.querySelector('.sidebar-group__items');
