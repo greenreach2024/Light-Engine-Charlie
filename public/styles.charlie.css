@@ -4224,3 +4224,130 @@ input[type="range"]#grd {
   color: #166534;
   border-color: #bbf7d0;
 }
+
+.plan-card--structured {
+  padding-bottom: 16px;
+}
+
+.plan-structured__grid {
+  gap: 16px;
+}
+
+.plan-structured__main {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.plan-structured__aside {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.plan-structured__chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.plan-structured__section {
+  margin-top: 8px;
+  padding: 10px 12px;
+  border-radius: 10px;
+  border: 1px solid #e2e8f0;
+  background: #f8fafc;
+}
+
+.plan-structured__section-title {
+  margin: 0 0 6px;
+  font-size: 11px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: #1e293b;
+}
+
+.plan-structured__notes {
+  margin: 0;
+  padding-left: 18px;
+  color: #334155;
+  font-size: 12px;
+}
+
+.plan-structured__notes li {
+  margin: 2px 0;
+}
+
+.plan-structured__table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 12px;
+  color: #1f2937;
+}
+
+.plan-structured__table th {
+  text-align: left;
+  padding: 4px 6px;
+  border-bottom: 1px solid #e2e8f0;
+  font-weight: 600;
+  color: #475569;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  font-size: 11px;
+}
+
+.plan-structured__table td {
+  padding: 4px 6px;
+  border-bottom: 1px solid #e2e8f0;
+  vertical-align: top;
+}
+
+.plan-structured__table tbody tr:last-child td {
+  border-bottom: none;
+}
+
+.plan-structured__metrics {
+  margin: 10px 0 0;
+  font-size: 12px;
+  color: #1f2937;
+}
+
+.plan-structured__metrics--vertical div {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 4px 0;
+  border-bottom: 1px solid #e2e8f0;
+}
+
+.plan-structured__metrics--vertical div:last-child {
+  border-bottom: none;
+}
+
+.plan-structured__metrics--vertical dt {
+  font-weight: 600;
+}
+
+.plan-structured__metrics--vertical dd {
+  margin: 0;
+  font-variant-numeric: tabular-nums;
+}
+
+.plan-structured__hint {
+  font-size: 12px;
+  color: #475569;
+  background: #f1f5f9;
+  border: 1px dashed #cbd5f5;
+  border-radius: 8px;
+  padding: 8px 10px;
+}
+
+.plan-structured__control {
+  font-size: 12px;
+  color: #1f2937;
+}
+
+.plan-structured__used {
+  font-size: 12px;
+  color: #475569;
+}
