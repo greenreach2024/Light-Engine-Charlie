@@ -1719,6 +1719,298 @@ function computeEnergy(entries) {
   return total;
 }
 
+function readDutyCycleValue(entry) {
+  if (!entry || typeof entry !== 'object') return null;
+  const candidates = [
+    entry.duty,
+    entry.dutyCycle,
+    entry.dutyPct,
+    entry.dutyPercent,
+    entry.plugDuty,
+    entry.masterPct,
+    entry.blueDuty,
+  ];
+  for (const candidate of candidates) {
+    const value = toNumberOrNull(candidate);
+    if (Number.isFinite(value)) return value;
+  }
+  return null;
+}
+
+function computeCorrelation(entries, accessorA, accessorB) {
+  if (!Array.isArray(entries) || entries.length < 3) return null;
+  const samples = [];
+  entries.forEach((entry) => {
+    try {
+      const a = accessorA(entry);
+      const b = accessorB(entry);
+      if (Number.isFinite(a) && Number.isFinite(b)) {
+        samples.push({ a, b });
+      }
+    } catch (error) {
+      // Ignore malformed samples
+    }
+  });
+  if (samples.length < 3) return null;
+
+  const sumA = samples.reduce((acc, sample) => acc + sample.a, 0);
+  const sumB = samples.reduce((acc, sample) => acc + sample.b, 0);
+  const meanA = sumA / samples.length;
+  const meanB = sumB / samples.length;
+
+  let numerator = 0;
+  let denomA = 0;
+  let denomB = 0;
+  samples.forEach((sample) => {
+    const diffA = sample.a - meanA;
+    const diffB = sample.b - meanB;
+    numerator += diffA * diffB;
+    denomA += diffA ** 2;
+    denomB += diffB ** 2;
+  });
+
+  if (denomA === 0 || denomB === 0) return null;
+  const coefficient = numerator / Math.sqrt(denomA * denomB);
+  if (!Number.isFinite(coefficient)) return null;
+  return { coefficient: Math.max(-1, Math.min(1, coefficient)), samples: samples.length };
+}
+
+function sanitizeTempBin(bin) {
+  if (bin == null) return '';
+  return String(bin)
+    .replace(/[°\s]*(?:c|f)/gi, '')
+    .replace(/[–—]/g, '-')
+    .replace(/\s+to\s+/gi, '-')
+    .replace(/\s+/g, '')
+    .trim();
+}
+
+function parseTempBinRange(bin) {
+  const raw = typeof bin === 'string' ? bin : '';
+  const normalized = sanitizeTempBin(raw);
+  if (!normalized) {
+    return {
+      label: raw || '',
+      min: null,
+      max: null,
+      includeMin: false,
+      includeMax: false,
+    };
+  }
+
+  const numbers = normalized.match(/-?\d+(?:\.\d+)?/g) || [];
+  const parseValue = (value) => {
+    if (value == null) return null;
+    const num = Number(value);
+    return Number.isFinite(num) ? num : null;
+  };
+
+  const range = {
+    label: raw || normalized,
+    min: null,
+    max: null,
+    includeMin: false,
+    includeMax: false,
+  };
+
+  if (/^(>=|=>|≥)/.test(normalized)) {
+    range.min = parseValue(numbers[0]);
+    range.includeMin = true;
+    return range;
+  }
+  if (/^>/.test(normalized)) {
+    range.min = parseValue(numbers[0]);
+    range.includeMin = false;
+    return range;
+  }
+  if (/^(<=|=<|≤)/.test(normalized)) {
+    range.max = parseValue(numbers[0]);
+    range.includeMax = true;
+    return range;
+  }
+  if (/^</.test(normalized)) {
+    range.max = parseValue(numbers[0]);
+    range.includeMax = false;
+    return range;
+  }
+
+  if (numbers.length >= 2 && normalized.includes('-')) {
+    const first = parseValue(numbers[0]);
+    const second = parseValue(numbers[1]);
+    if (first != null && second != null) {
+      range.min = Math.min(first, second);
+      range.max = Math.max(first, second);
+      range.includeMin = true;
+      range.includeMax = true;
+      return range;
+    }
+  }
+
+  if (numbers.length >= 1) {
+    const value = parseValue(numbers[0]);
+    if (value != null) {
+      range.min = value;
+      range.max = value;
+      range.includeMin = true;
+      range.includeMax = true;
+    }
+  }
+
+  return range;
+}
+
+function tempBinMatches(value, binRange) {
+  if (!Number.isFinite(value) || !binRange) return false;
+  const { min, max, includeMin, includeMax } = binRange;
+  if (min != null) {
+    if (includeMin) {
+      if (value < min) return false;
+    } else if (value <= min) {
+      return false;
+    }
+  }
+  if (max != null) {
+    if (includeMax) {
+      if (value > max) return false;
+    } else if (value >= max) {
+      return false;
+    }
+  }
+  return true;
+}
+
+function describeCorrelationStrength(coefficient) {
+  const magnitude = Math.abs(coefficient);
+  if (magnitude >= 0.85) return 'very strong';
+  if (magnitude >= 0.7) return 'strong';
+  if (magnitude >= 0.5) return 'moderate';
+  if (magnitude >= 0.3) return 'weak';
+  return 'minimal';
+}
+
+const learningCorrelationCache = new Map();
+
+function logLearningCorrelations(roomId, correlations, daily) {
+  if (!roomId || !preAutomationLogger) return;
+  if (!correlations || typeof correlations !== 'object') return;
+  const payload = {};
+  Object.entries(correlations).forEach(([key, entry]) => {
+    if (!entry || typeof entry !== 'object') return;
+    if (!Number.isFinite(entry.coefficient)) return;
+    payload[key] = {
+      coefficient: Math.round(entry.coefficient * 1000) / 1000,
+      samples: entry.samples || 0,
+    };
+  });
+  if (!Object.keys(payload).length) return;
+
+  const today = new Date();
+  today.setHours(0, 0, 0, 0);
+  const dateKey = today.toISOString().slice(0, 10);
+  const cacheEntry = learningCorrelationCache.get(roomId);
+  const signature = JSON.stringify(payload);
+  if (cacheEntry && cacheEntry.date === dateKey && cacheEntry.signature === signature) {
+    return;
+  }
+
+  preAutomationLogger.log({
+    type: 'learning-correlation',
+    mode: 'advisory',
+    roomId,
+    date: dateKey,
+    correlations: payload,
+    daily: {
+      tempAvg: Number.isFinite(daily?.tempAvg) ? daily.tempAvg : null,
+      rhAvg: Number.isFinite(daily?.rhAvg) ? daily.rhAvg : null,
+      ppfdAvg: Number.isFinite(daily?.ppfdAvg) ? daily.ppfdAvg : null,
+      masterAvg: Number.isFinite(daily?.masterAvg) ? daily.masterAvg : null,
+      energyKwh: Number.isFinite(daily?.energyKwh) ? daily.energyKwh : null,
+      samples: Number.isFinite(daily?.samples) ? daily.samples : null,
+    },
+  });
+  learningCorrelationCache.set(roomId, { date: dateKey, signature });
+}
+
+function buildAdaptiveRecommendation(room, plan, planKey, daily, targets) {
+  if (!room || !plan) return null;
+  const curve = Array.isArray(plan?.adapt?.tempCurve) ? plan.adapt.tempCurve : [];
+  if (!curve.length) return null;
+  const temp = Number.isFinite(daily?.tempAvg) ? daily.tempAvg : null;
+  if (temp == null) return null;
+
+  let matched = null;
+  for (const entry of curve) {
+    if (!entry || typeof entry !== 'object') continue;
+    const binRange = parseTempBinRange(entry.bin || entry.label || entry.range || entry.zone || '');
+    if (tempBinMatches(temp, binRange)) {
+      matched = { entry, binRange };
+      break;
+    }
+  }
+  if (!matched) return null;
+
+  const ppfdScale = entryValue(matched.entry, 'ppfdScale');
+  const blueDelta = entryValue(matched.entry, 'blueDelta');
+  const redDelta = entryValue(matched.entry, 'redDelta');
+
+  const meaningfulScale = Number.isFinite(ppfdScale) && Math.abs(ppfdScale - 1) >= 0.01;
+  const meaningfulBlue = Number.isFinite(blueDelta) && Math.abs(blueDelta) >= 0.005;
+  const meaningfulRed = Number.isFinite(redDelta) && Math.abs(redDelta) >= 0.005;
+  if (!meaningfulScale && !meaningfulBlue && !meaningfulRed) return null;
+
+  const ppfdDeltaPct = meaningfulScale ? Math.round((ppfdScale - 1) * 1000) / 10 : 0;
+  const blueDeltaPct = meaningfulBlue ? Math.round(blueDelta * 1000) / 10 : 0;
+  const redDeltaPct = meaningfulRed ? Math.round(redDelta * 1000) / 10 : 0;
+
+  const ppfdText = meaningfulScale
+    ? `${ppfdDeltaPct > 0 ? '+' : ''}${ppfdDeltaPct.toFixed(Math.abs(ppfdDeltaPct) < 1 ? 1 : 0)}% PPFD`
+    : null;
+  const blueText = meaningfulBlue
+    ? `${blueDeltaPct >= 0 ? '+' : ''}${Math.abs(blueDeltaPct).toFixed(Math.abs(blueDeltaPct) < 1 ? 1 : 0)}% blue`
+    : null;
+  const redText = meaningfulRed
+    ? `${redDeltaPct >= 0 ? '+' : ''}${Math.abs(redDeltaPct).toFixed(Math.abs(redDeltaPct) < 1 ? 1 : 0)}% red`
+    : null;
+
+  const planName = plan.name || planKey || 'plan';
+  const binLabel = matched.binRange?.label || matched.entry.bin || 'current bin';
+  const actions = [ppfdText, blueText, redText].filter(Boolean);
+  if (!actions.length) return null;
+
+  const label = `Learning: ${actions.join(' & ')}`;
+  const detail = `Plan ${planName} adaptive curve (${binLabel}) suggests ${actions.join(' and ')} when canopy temp averages ${temp.toFixed(1)}°C. Advisory only.`;
+
+  const idSuffix = slugify(`${room.roomId || room.name || 'room'}-${binLabel || 'bin'}`);
+  const suggestion = {
+    id: `${room.roomId}-learning-${idSuffix}`,
+    type: 'learning',
+    metric: 'temp',
+    label,
+    detail,
+    advisory: true,
+    source: 'plan.adapt.tempCurve',
+    bin: binLabel,
+    recommendation: {
+      ppfdScale: meaningfulScale ? ppfdScale : null,
+      blueDelta: meaningfulBlue ? blueDelta : null,
+      redDelta: meaningfulRed ? redDelta : null,
+      plan: planName,
+    },
+  };
+
+  const summary = `Learning curve recommends ${actions.join(' & ')} for ${temp.toFixed(1)}°C canopy.`;
+  const narrative = `Adaptive guidance (${binLabel}) proposes ${actions.join(' & ')}. Targets remain advisory until approved.`;
+
+  return { suggestion, summary, narrative };
+}
+
+function entryValue(entry, key) {
+  if (!entry || typeof entry !== 'object') return null;
+  const value = entry[key];
+  const numeric = toNumberOrNull(value);
+  return Number.isFinite(numeric) ? numeric : null;
+}
+
 function selectPlanForRoom(room, legacyRooms, planIndex) {
   const planKey = [
     room?.plan,
@@ -1766,6 +2058,53 @@ function buildRoomAnalytics(room, legacyEnv, planIndex) {
     logCount: readings.length
   };
 
+  const suggestions = [];
+  const summaryParts = [];
+  const learningNarrative = [];
+
+  const correlations = {
+    ppfdBlue: computeCorrelation(
+      dailyEntries,
+      (entry) => toNumberOrNull(entry?.ppfd),
+      (entry) => toNumberOrNull(entry?.bluePct)
+    ),
+    tempRh: computeCorrelation(
+      dailyEntries,
+      (entry) => toNumberOrNull(entry?.temp),
+      (entry) => toNumberOrNull(entry?.rh)
+    ),
+    dutyEnergy: computeCorrelation(
+      dailyEntries,
+      (entry) => readDutyCycleValue(entry),
+      (entry) => {
+        const value = entry?.kwh ?? entry?.energyKwh ?? entry?.energy;
+        return toNumberOrNull(value);
+      }
+    ),
+  };
+  daily.correlations = correlations;
+
+  const learning = { correlations };
+  const correlationLabels = {
+    ppfdBlue: 'PPFD↔Blue',
+    tempRh: 'Temp↔RH',
+    dutyEnergy: 'Duty↔Energy',
+  };
+  const correlationSummary = [];
+  Object.entries(correlations).forEach(([key, info]) => {
+    if (!info || !Number.isFinite(info.coefficient)) return;
+    if (info.samples < 3) return;
+    const descriptor = describeCorrelationStrength(info.coefficient);
+    const direction = info.coefficient >= 0 ? 'direct' : 'inverse';
+    const label = correlationLabels[key] || key;
+    const summaryText = `${label} ${descriptor} ${direction} correlation (${info.coefficient.toFixed(2)}, ${info.samples} samples)`;
+    correlationSummary.push(summaryText);
+  });
+  if (correlationSummary.length) {
+    learning.correlationSummary = correlationSummary;
+    learningNarrative.push(correlationSummary.join('; '));
+  }
+
   const { plan, planKey } = selectPlanForRoom(room, legacyEnv?.rooms || {}, planIndex);
   const targets = room?.targets || {};
   const control = room?.control || {};
@@ -1773,8 +2112,6 @@ function buildRoomAnalytics(room, legacyEnv, planIndex) {
   const minRh = Number.isFinite(targets.rh) ? targets.rh - rhBand : null;
   const maxRh = Number.isFinite(targets.rh) ? targets.rh + rhBand : null;
   const targetVpd = computeVpd(targets.temp, targets.rh);
-  const suggestions = [];
-  const summaryParts = [];
   const stepPct = Math.round((control.step ?? 0.05) * 100);
   const dwell = control.dwell ?? 180;
 
@@ -1865,6 +2202,24 @@ function buildRoomAnalytics(room, legacyEnv, planIndex) {
     summaryParts.push(`lighting draw ${daily.energyKwh.toFixed(2)} kWh`);
   }
 
+  const adaptive = buildAdaptiveRecommendation(room, plan, planKey, daily, targets);
+  if (adaptive) {
+    suggestions.unshift(adaptive.suggestion);
+    if (adaptive.summary && !summaryParts.includes(adaptive.summary)) {
+      summaryParts.push(adaptive.summary);
+    }
+    if (adaptive.narrative) {
+      learningNarrative.push(adaptive.narrative);
+    }
+    learning.adaptive = {
+      bin: adaptive.suggestion?.bin || null,
+      summary: adaptive.summary,
+      narrative: adaptive.narrative,
+      recommendation: adaptive.suggestion?.recommendation || null,
+    };
+    learning.suggestions = [adaptive.suggestion];
+  }
+
   const summary = summaryParts.length
     ? `${summaryParts[0][0].toUpperCase()}${summaryParts[0].slice(1)}${summaryParts.length > 1 ? '; ' + summaryParts.slice(1).join('; ') : ''}`
     : 'Conditions within configured guardrails.';
@@ -1898,6 +2253,12 @@ function buildRoomAnalytics(room, legacyEnv, planIndex) {
     narrativeParts.push(`Lighting energy ${daily.energyKwh.toFixed(2)} kWh today.`);
   }
 
+  if (learningNarrative.length) {
+    narrativeParts.push(`Learning insights: ${learningNarrative.join(' ')}`);
+  }
+
+  logLearningCorrelations(room.roomId, correlations, daily);
+
   const lastAction = readings.slice().reverse().find((entry) => entry?.kind === ACTION_ENTRY_KIND) || null;
 
   return {
@@ -1908,7 +2269,8 @@ function buildRoomAnalytics(room, legacyEnv, planIndex) {
     plan: planKey || null,
     planName: plan?.name || null,
     lastActionAt: lastAction?.ts || null,
-    lastResult: lastAction?.result || null
+    lastResult: lastAction?.result || null,
+    learning
   };
 }
 

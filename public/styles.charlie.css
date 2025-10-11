@@ -1347,6 +1347,40 @@ h3 { font-size: 1.125rem; }
   border: 1px solid #e2e8f0;
 }
 
+.card.std.ai-advisory-card .ai-advisory-room__learning {
+  margin-top: 8px;
+  padding: 8px;
+  border-radius: 8px;
+  border: 1px solid #e2e8f0;
+  background: #f8fafc;
+}
+
+.card.std.ai-advisory-card .ai-advisory-room__learning-title {
+  margin: 0 0 4px;
+  font-size: 0.75rem;
+  font-weight: 600;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  color: #334155;
+}
+
+.card.std.ai-advisory-card .ai-advisory-room__learning-list {
+  margin: 0;
+  padding-left: 18px;
+  font-size: 0.82rem;
+  color: #1f2937;
+}
+
+.card.std.ai-advisory-card .ai-advisory-room__learning-list li + li {
+  margin-top: 2px;
+}
+
+.card.std.ai-advisory-card .ai-advisory-room__learning-note {
+  margin: 2px 0;
+  font-size: 0.78rem;
+  color: #475569;
+}
+
 .card.std.ai-advisory-card .ai-advisory-room__suggestion-label {
   font-weight: 600;
   color: #0f172a;

@@ -12808,6 +12808,82 @@ function formatRelativeTimeLabel(ts) {
   return `${days}d ago`;
 }
 
+function describeCorrelationStrengthClient(value) {
+  const magnitude = Math.abs(value);
+  if (magnitude >= 0.85) return 'very strong';
+  if (magnitude >= 0.7) return 'strong';
+  if (magnitude >= 0.5) return 'moderate';
+  if (magnitude >= 0.3) return 'weak';
+  return 'minimal';
+}
+
+function buildLearningInsights(analytics, daily) {
+  const learning = analytics?.learning || {};
+  const correlationLabels = {
+    ppfdBlue: 'PPFD↔Blue',
+    tempRh: 'Temp↔RH',
+    dutyEnergy: 'Duty↔Energy'
+  };
+  let correlationItems = [];
+  if (Array.isArray(learning.correlationSummary) && learning.correlationSummary.length) {
+    correlationItems = learning.correlationSummary.filter(Boolean);
+  } else {
+    const source = learning.correlations || daily?.correlations || {};
+    correlationItems = Object.entries(source || {}).reduce((acc, [key, info]) => {
+      if (!info || !Number.isFinite(info.coefficient)) return acc;
+      const label = correlationLabels[key] || key;
+      const descriptor = describeCorrelationStrengthClient(info.coefficient);
+      const direction = info.coefficient >= 0 ? 'direct' : 'inverse';
+      const magnitude = info.coefficient.toFixed(2);
+      const samples = Number.isFinite(info.samples) ? `${info.samples} sample${info.samples === 1 ? '' : 's'}` : 'samples';
+      acc.push(`${label}: ${descriptor} ${direction} (${magnitude}) · ${samples}`);
+      return acc;
+    }, []);
+  }
+
+  const adaptive = learning.adaptive || {};
+  const recommendation = adaptive.recommendation || {};
+  const notes = Array.isArray(learning.suggestions)
+    ? learning.suggestions.map((entry) => entry?.detail || entry?.label).filter(Boolean)
+    : [];
+  if (adaptive.summary && !notes.includes(adaptive.summary)) {
+    notes.unshift(adaptive.summary);
+  }
+
+  const adjustments = [];
+  const formatPercentDelta = (value, scale = 100) => {
+    if (!Number.isFinite(value)) return null;
+    const pct = value * scale;
+    if (!Number.isFinite(pct)) return null;
+    const abs = Math.abs(pct);
+    const decimals = abs > 0 && abs < 1 ? 1 : 0;
+    const sign = pct >= 0 ? '+' : '−';
+    return `${sign}${abs.toFixed(decimals)}%`;
+  };
+
+  const ppfdDelta = formatPercentDelta((recommendation.ppfdScale ?? null) != null ? (recommendation.ppfdScale - 1) : null, 100);
+  if (ppfdDelta) adjustments.push(`PPFD ${ppfdDelta}`);
+  const blueDelta = formatPercentDelta(recommendation.blueDelta ?? null, 100);
+  if (blueDelta) adjustments.push(`Blue ${blueDelta}`);
+  const redDelta = formatPercentDelta(recommendation.redDelta ?? null, 100);
+  if (redDelta) adjustments.push(`Red ${redDelta}`);
+
+  const adjustmentSummary = adjustments.length ? `Advisory: ${adjustments.join(' & ')}` : '';
+  if (adjustmentSummary) notes.push(adjustmentSummary);
+
+  const planRef = recommendation.plan || adaptive.plan || '';
+  if (planRef) {
+    notes.push(`Source plan: ${planRef}`);
+  }
+
+  const hasLearning = correlationItems.length > 0 || notes.length > 0;
+  return {
+    hasLearning,
+    correlationItems,
+    notes
+  };
+}
+
 function renderAiAdvisoryCard() {
   const card = document.getElementById('aiAdvisoryCard');
   if (!card) return;
@@ -12845,6 +12921,16 @@ function renderAiAdvisoryCard() {
         `).join('')
       : '<li><span class="tiny text-muted">No adjustments recommended.</span></li>';
 
+    const learningInfo = buildLearningInsights(analytics, daily);
+    const learningHtml = learningInfo.hasLearning
+      ? `
+        <div class="ai-advisory-room__learning">
+          <h4 class="ai-advisory-room__learning-title">Learning mode</h4>
+          ${learningInfo.correlationItems.length ? `<ul class="ai-advisory-room__learning-list">${learningInfo.correlationItems.map((text) => `<li>${escapeHtml(text)}</li>`).join('')}</ul>` : ''}
+          ${learningInfo.notes.map((text) => `<p class="ai-advisory-room__learning-note">${escapeHtml(text)}</p>`).join('')}
+        </div>`
+      : '';
+
     const footerParts = [];
     if (analytics?.planName || analytics?.plan) {
       footerParts.push(`Plan ${escapeHtml(analytics.planName || analytics.plan)}`);
@@ -12872,6 +12958,7 @@ function renderAiAdvisoryCard() {
           `).join('')}
         </div>
         <ul class="ai-advisory-room__suggestions">${suggestionHtml}</ul>
+        ${learningHtml}
         <div class="ai-advisory-room__footer">
           ${footerParts.map((text) => `<span>${escapeHtml(text)}</span>`).join('')}
         </div>
