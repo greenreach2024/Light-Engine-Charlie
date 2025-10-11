@@ -42,8 +42,9 @@
   * Assign every SwitchBot sensor to its room/zone. Exactly one sensor per zone must be marked **Primary**; others receive weight sliders so zone medians can be tuned.
   * Assign each managed plug to the appropriate room/zone and capture its `controlledType` so automation can filter by equipment role.
 * **Groups** inherit the curated device placements:
-  * Create a **LightGroup** for each zone and add only lighting fixtures.
-  * Create an **EquipGroup** for the same zone and add only plugs or environmental equipment.
+  * Create a **LightGroup** for each zone and add only lighting fixtures; this group owns photoperiod blocks, sunrise/sunset ramps, spectrum choices, and DLI math via `/plans` + `/sched`.
+  * Create an **EquipGroup** for the same zone and add only plugs or environmental equipment; this group steers `/env` targets, hysteresis ranges, and dwell timers so automation rules have clear guardrails.
+  * Present both groups together inside a **Zone summary card** for the room/zone so operators see the paired lighting and environmental context before drilling into edits.
 * **Plans & Schedules (Lights)** flow through the Recipe Bridge: publish lighting recipes to `/plans` and time-based schedules to `/sched` via the Excel integration.
 * **Environment Targets (Equipment)** are authored per zone through `/env`, setting `temp`, `rh`, `rhBand`, `control.step`, and `control.dwell` to guide plug automation.
 * **Verification** relies on the playbook curls: `/healthz` returns `OK`, device inventories load, group JSON documents exist, PATCH calls against lights succeed, and `/sched` plus `/env` echo the saved configurations.
