@@ -35,6 +35,133 @@
         }
       ],
       "name": "GR-Flower-RD60"
+    },
+    {
+      "id": "ScheduleA.CompactLeafy.v1",
+      "key": "ScheduleA.CompactLeafy.v1",
+      "kind": "cropPlan",
+      "meta": {
+        "label": "Schedule A \u2014 Compact/Standard Leafy Greens",
+        "appliesTo": {
+          "category": [
+            "Leafy Greens"
+          ],
+          "varieties": []
+        },
+        "channels": [
+          "cw",
+          "ww",
+          "bl",
+          "rd"
+        ],
+        "notes": [
+          "PPFD ramps by day; compact morphology track"
+        ]
+      },
+      "defaults": {
+        "photoperiod": 16,
+        "ramp": {
+          "sunrise": 10,
+          "sunset": 10
+        }
+      },
+      "light": {
+        "days": [
+          {
+            "d": 1,
+            "stage": "Seedling",
+            "ppfd": 200,
+            "photoperiod": 16,
+            "mix": {
+              "bl": 45,
+              "rd": 45,
+              "cw": 2.5,
+              "ww": 2.5
+            }
+          },
+          {
+            "d": 6,
+            "stage": "Juvenile",
+            "ppfd": 260,
+            "mix": {
+              "bl": 40,
+              "rd": 45,
+              "cw": 5,
+              "ww": 5
+            }
+          },
+          {
+            "d": 14,
+            "stage": "Vegetative",
+            "ppfd": 320,
+            "mix": {
+              "bl": 38,
+              "rd": 47,
+              "cw": 7.5,
+              "ww": 7.5
+            }
+          }
+        ],
+        "unsupported": {
+          "farRedPct": [
+            0,
+            5
+          ],
+          "uvPct": [
+            0
+          ]
+        }
+      },
+      "env": {
+        "days": [
+          {
+            "d": 1,
+            "tempC": 20,
+            "rh": 65,
+            "rhBand": 5
+          },
+          {
+            "d": 6,
+            "tempC": 20,
+            "rh": 60,
+            "rhBand": 5
+          },
+          {
+            "d": 14,
+            "tempC": 20,
+            "rh": 55,
+            "rhBand": 5
+          }
+        ],
+        "control": {
+          "enable": true,
+          "step": 5,
+          "dwell": 10
+        }
+      },
+      "adapt": {
+        "tempCurve": [
+          {
+            "bin": "<20",
+            "ppfdScale": 1.0,
+            "blueDelta": 0.0,
+            "redDelta": 0.0
+          },
+          {
+            "bin": "25\u201327",
+            "ppfdScale": 0.9,
+            "blueDelta": 0.02,
+            "redDelta": -0.02
+          },
+          {
+            "bin": ">28",
+            "ppfdScale": 0.85,
+            "blueDelta": 0.05,
+            "redDelta": -0.05
+          }
+        ]
+      },
+      "version": 1
     }
   ]
 }

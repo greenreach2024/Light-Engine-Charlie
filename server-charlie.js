@@ -296,12 +296,34 @@ function parseIncomingGroup(raw, knownDeviceIds = null) {
 
 function normalizePlanEntry(raw, fallbackId = '') {
   if (!raw || typeof raw !== 'object') return null;
-  const id = String(raw.id ?? fallbackId ?? '').trim();
+  const idSource = raw.id ?? raw.planId ?? raw.plan_id ?? raw.key ?? fallbackId ?? '';
+  const id = typeof idSource === 'string' ? idSource.trim() : String(idSource || '').trim();
   if (!id) return null;
   const plan = { ...raw, id };
-  if (!plan.name || typeof plan.name !== 'string' || !plan.name.trim()) {
+  if (!plan.key) plan.key = id;
+
+  const meta = plan.meta && typeof plan.meta === 'object' ? plan.meta : null;
+  const nameCandidate = [plan.name, plan.label, meta?.label, plan.key, id]
+    .map((value) => (typeof value === 'string' ? value.trim() : ''))
+    .find((value) => !!value);
+  if (nameCandidate) {
+    plan.name = nameCandidate;
+  } else {
     plan.name = id;
   }
+
+  if (!plan.description) {
+    if (typeof meta?.description === 'string' && meta.description.trim()) {
+      plan.description = meta.description.trim();
+    } else if (Array.isArray(meta?.notes)) {
+      const joined = meta.notes
+        .map((note) => (typeof note === 'string' ? note.trim() : ''))
+        .filter(Boolean)
+        .join(' • ');
+      if (joined) plan.description = joined;
+    }
+  }
+
   if (typeof plan.photoperiod === 'string') plan.photoperiod = plan.photoperiod.trim();
   return plan;
 }

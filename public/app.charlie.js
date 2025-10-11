@@ -594,24 +594,31 @@ function renderGroupsV2PlanCard(plan) {
     return;
   }
   // Prepare spectrum, DLI, PPFD
-  const spectrum = plan.spectrum || { cw: 45, ww: 45, bl: 0, rd: 0 };
-  const photoperiod = Number(plan.photoperiod || 12);
-  const ppfd = Number(plan.ppfd || 0);
-  const dli = plan.dli != null ? Number(plan.dli) : (ppfd > 0 ? (ppfd * 3600 * photoperiod) / 1e6 : 0);
+  const derived = plan._derived || derivePlanRuntime(plan);
+  const spectrum = plan.spectrum || derived?.spectrum || { cw: 45, ww: 45, bl: 0, rd: 0 };
+  const ppfd = getPlanPPFD(plan);
+  const photoperiod = getPlanPhotoperiodHours(plan);
+  const dli = getPlanDli(plan);
+  const hasPpfd = Number.isFinite(ppfd) && ppfd > 0;
+  const hasDli = Number.isFinite(dli) && dli > 0;
+  const ppfdLabel = hasPpfd ? `${ppfd.toFixed(0)} µmol·m⁻²·s⁻¹` : '—';
+  const dliLabel = hasDli ? `${dli.toFixed(2)} mol·m⁻²·d⁻¹` : '—';
+  const photoperiodLabel = Number.isFinite(photoperiod) && photoperiod > 0 ? `${photoperiod.toFixed(1)} h` : formatPlanPhotoperiodDisplay(firstNonEmpty(plan.photoperiod, derived?.photoperiod, plan.defaults?.photoperiod));
+  const description = plan.description || (derived?.notes?.length ? derived.notes.join(' • ') : 'Spectrum and targets for this plan.');
   // Card HTML
   card.innerHTML = `
     <header class="group-info-card__header">
       <div>
         <h3>Plan: ${escapeHtml(plan.name || 'Untitled')}</h3>
-        <p class="tiny text-muted">${escapeHtml(plan.description || 'Spectrum and targets for this plan.')}</p>
+        <p class="tiny text-muted">${escapeHtml(description)}</p>
       </div>
     </header>
     <div class="group-info-card__body">
       <canvas id="groupsV2PlanSpectrumCanvas" class="group-info-card__canvas" width="320" height="100" role="img" aria-label="Plan spectrum preview"></canvas>
       <dl class="group-info-card__metrics">
-        <dt>PPFD</dt><dd>${ppfd ? ppfd.toFixed(0) + ' µmol·m⁻²·s⁻¹' : '—'}</dd>
-        <dt>DLI</dt><dd>${dli ? dli.toFixed(2) + ' mol·m⁻²·d⁻¹' : '—'}</dd>
-        <dt>Photoperiod</dt><dd>${photoperiod ? photoperiod.toFixed(1) + ' h' : '—'}</dd>
+        <dt>PPFD</dt><dd>${ppfdLabel}</dd>
+        <dt>DLI</dt><dd>${dliLabel}</dd>
+        <dt>Photoperiod</dt><dd>${photoperiodLabel && photoperiodLabel !== '—' ? escapeHtml(photoperiodLabel) : '—'}</dd>
       </dl>
     </div>
   `;
@@ -934,16 +941,18 @@ function mixHEX12(ch) {
 function normalizePlanMap(plansData) {
   if (!plansData) return {};
   if (Array.isArray(plansData)) {
-    return plansData.reduce((acc, plan) => {
-      const key = plan?.id || plan?.name;
-      if (key) acc[key] = plan;
+    return plansData.reduce((acc, plan, index) => {
+      const hydrated = hydratePlan(plan, index);
+      const key = hydrated?.id || hydrated?.name;
+      if (key) acc[key] = hydrated;
       return acc;
     }, {});
   }
   if (Array.isArray(plansData?.plans)) {
-    return plansData.plans.reduce((acc, plan) => {
-      const key = plan?.id || plan?.name;
-      if (key) acc[key] = plan;
+    return plansData.plans.reduce((acc, plan, index) => {
+      const hydrated = hydratePlan(plan, index);
+      const key = hydrated?.id || hydrated?.name;
+      if (key) acc[key] = hydrated;
       return acc;
     }, {});
   }
@@ -958,6 +967,196 @@ function parsePhotoperiodHours(photoperiod) {
   const first = String(photoperiod).split('/')[0];
   const hours = Number(first);
   return Number.isFinite(hours) && hours > 0 ? hours : 16;
+}
+
+function firstNonEmpty(...values) {
+  for (const value of values) {
+    if (value === undefined || value === null) continue;
+    if (typeof value === 'string') {
+      if (!value.trim()) continue;
+      return value;
+    }
+    return value;
+  }
+  return undefined;
+}
+
+function toNumberOrNull(value) {
+  if (value === undefined || value === null || value === '') return null;
+  const num = Number(value);
+  return Number.isFinite(num) ? num : null;
+}
+
+function readPhotoperiodHours(value) {
+  if (value === undefined || value === null) return null;
+  if (typeof value === 'number') {
+    return Number.isFinite(value) ? value : null;
+  }
+  if (typeof value === 'string') {
+    const trimmed = value.trim();
+    if (!trimmed) return null;
+    const first = trimmed.split('/')[0];
+    const num = Number(first);
+    return Number.isFinite(num) ? num : null;
+  }
+  return null;
+}
+
+function normalizePlanLightDay(entry) {
+  if (!entry || typeof entry !== 'object') return null;
+  const mixSource = entry.mix && typeof entry.mix === 'object' ? entry.mix : entry;
+  const cw = toNumberOrNull(mixSource?.cw ?? mixSource?.coolWhite);
+  const ww = toNumberOrNull(mixSource?.ww ?? mixSource?.warmWhite);
+  const bl = toNumberOrNull(mixSource?.bl ?? mixSource?.blue);
+  const rd = toNumberOrNull(mixSource?.rd ?? mixSource?.red);
+  return {
+    raw: entry,
+    day: entry.d ?? entry.day ?? entry.dayStart ?? null,
+    stage: entry.stage ?? entry.label ?? '',
+    ppfd: toNumberOrNull(entry.ppfd),
+    photoperiod: firstNonEmpty(entry.photoperiod, entry.hours, entry.photoperiodHours),
+    mix: {
+      cw: cw ?? 0,
+      ww: ww ?? 0,
+      bl: bl ?? 0,
+      rd: rd ?? 0,
+    },
+  };
+}
+
+function normalizePlanEnvDay(entry) {
+  if (!entry || typeof entry !== 'object') return null;
+  return {
+    raw: entry,
+    day: entry.d ?? entry.day ?? entry.dayStart ?? null,
+    tempC: toNumberOrNull(entry.tempC ?? entry.temp ?? entry.temperature),
+    rh: toNumberOrNull(entry.rh ?? entry.humidity ?? entry.rhPct),
+    rhBand: toNumberOrNull(entry.rhBand ?? entry.humidityBand ?? entry.rhDelta),
+  };
+}
+
+function derivePlanRuntime(plan) {
+  const lightV2 = Array.isArray(plan?.light?.days) ? plan.light.days : [];
+  const legacyDays = Array.isArray(plan?.days) ? plan.days : [];
+  const normalizedLight = lightV2.map(normalizePlanLightDay).filter(Boolean);
+  const normalizedLegacy = legacyDays.map(normalizePlanLightDay).filter(Boolean);
+  const lightDays = normalizedLight.length ? normalizedLight : normalizedLegacy;
+  const firstDay = lightDays.length ? lightDays[0] : null;
+  const envDays = Array.isArray(plan?.env?.days) ? plan.env.days.map(normalizePlanEnvDay).filter(Boolean) : [];
+  const spectrum = firstDay?.mix ? { ...firstDay.mix } : null;
+  const ppfd = toNumberOrNull(firstNonEmpty(plan?.ppfd, firstDay?.ppfd));
+  const photoperiodRaw = firstNonEmpty(plan?.photoperiod, firstDay?.photoperiod, plan?.defaults?.photoperiod);
+  const photoperiodHours = photoperiodRaw != null ? readPhotoperiodHours(photoperiodRaw) : null;
+  const dliProvided = toNumberOrNull(plan?.dli);
+  const dli = dliProvided != null
+    ? dliProvided
+    : (ppfd != null && photoperiodHours != null ? (ppfd * 3600 * photoperiodHours) / 1e6 : null);
+  const notes = Array.isArray(plan?.meta?.notes)
+    ? plan.meta.notes.map((note) => (typeof note === 'string' ? note.trim() : '')).filter(Boolean)
+    : [];
+  const appliesRaw = plan?.meta?.appliesTo && typeof plan.meta.appliesTo === 'object' ? plan.meta.appliesTo : {};
+  const appliesTo = {
+    category: Array.isArray(appliesRaw.category)
+      ? appliesRaw.category.map((entry) => (typeof entry === 'string' ? entry : '')).filter(Boolean)
+      : [],
+    varieties: Array.isArray(appliesRaw.varieties)
+      ? appliesRaw.varieties.map((entry) => (typeof entry === 'string' ? entry : '')).filter(Boolean)
+      : [],
+  };
+  const structured = normalizedLight.length > 0 || envDays.length > 0 || !!plan?.defaults || !!plan?.meta;
+  return {
+    structured,
+    lightDays,
+    envDays,
+    firstDay,
+    spectrum,
+    ppfd,
+    photoperiod: photoperiodRaw,
+    photoperiodHours,
+    dli,
+    notes,
+    appliesTo,
+  };
+}
+
+function hydratePlan(plan, index = 0) {
+  if (!plan || typeof plan !== 'object') return plan;
+  const normalized = { ...plan };
+  const fallbackId = `plan-${index + 1}`;
+  const idCandidate = firstNonEmpty(normalized.id, normalized.planId, normalized.plan_id, normalized.key, fallbackId);
+  if (idCandidate) normalized.id = String(idCandidate).trim();
+  if (!normalized.key && normalized.id) normalized.key = normalized.id;
+  const derived = derivePlanRuntime(normalized);
+  const nameCandidate = firstNonEmpty(normalized.name, normalized.label, normalized.meta?.label, normalized.key, normalized.id);
+  if (nameCandidate) normalized.name = String(nameCandidate).trim();
+  Object.defineProperty(normalized, '_derived', { value: derived, enumerable: false, configurable: true, writable: true });
+  Object.defineProperty(normalized, '_structured', { value: !!derived.structured, enumerable: false, configurable: true, writable: true });
+  return normalized;
+}
+
+function getPlanPPFD(plan) {
+  if (!plan || typeof plan !== 'object') return 0;
+  const candidate = firstNonEmpty(plan.ppfd, plan._derived?.ppfd);
+  const num = toNumberOrNull(candidate);
+  return num ?? 0;
+}
+
+function getPlanPhotoperiodHours(plan) {
+  if (!plan || typeof plan !== 'object') return 12;
+  const priorities = [
+    plan.photoperiod,
+    plan._derived?.photoperiod,
+    plan._derived?.firstDay?.photoperiod,
+    plan.defaults?.photoperiod
+  ];
+  for (const candidate of priorities) {
+    const hours = readPhotoperiodHours(candidate);
+    if (hours != null) return hours;
+  }
+  if (plan._derived?.photoperiodHours != null) return plan._derived.photoperiodHours;
+  return 12;
+}
+
+function getPlanDli(plan) {
+  if (!plan || typeof plan !== 'object') return 0;
+  const direct = toNumberOrNull(plan.dli);
+  if (direct != null) return direct;
+  const ppfd = getPlanPPFD(plan);
+  const photoperiod = getPlanPhotoperiodHours(plan);
+  if (ppfd && photoperiod) {
+    return (ppfd * 3600 * photoperiod) / 1e6;
+  }
+  const derived = toNumberOrNull(plan._derived?.dli);
+  return derived != null ? derived : 0;
+}
+
+function formatPlanPhotoperiodDisplay(value) {
+  if (value === undefined || value === null || value === '') return '—';
+  if (typeof value === 'number') {
+    const digits = Math.abs(value % 1) < 0.01 ? 0 : 1;
+    return `${value.toFixed(digits)} h`;
+  }
+  const text = String(value).trim();
+  if (!text) return '—';
+  const hours = readPhotoperiodHours(text);
+  if (hours != null) {
+    const digits = Math.abs(hours % 1) < 0.01 ? 0 : 1;
+    return text.includes('/') ? `${text} (${hours.toFixed(digits)} h)` : `${hours.toFixed(digits)} h`;
+  }
+  return text;
+}
+
+function formatPlanMix(mix = {}) {
+  const labels = { cw: 'CW', ww: 'WW', bl: 'BL', rd: 'RD' };
+  return ['cw', 'ww', 'bl', 'rd']
+    .map((key) => {
+      const raw = mix[key];
+      const num = toNumberOrNull(raw);
+      const digits = num != null && Math.abs(num % 1) >= 0.01 ? 1 : 0;
+      const value = num != null ? num.toFixed(digits) : '0';
+      return `${labels[key]} ${value}%`;
+    })
+    .join(' · ');
 }
 
 async function getPlanMap(force = false) {
@@ -10204,7 +10403,7 @@ async function loadAllData() {
     };
   });
   STATE.schedules = schedules?.schedules || [];
-  STATE.plans = plans?.plans || [];
+  STATE.plans = (plans?.plans || []).map((plan, idx) => hydratePlan(plan, idx));
   document.dispatchEvent(new Event('plans-updated'));
   document.dispatchEvent(new Event('schedules-updated'));
   STATE.environment = environment?.zones || [];
@@ -12545,15 +12744,124 @@ function renderPlansPanel() {
     if (g.plan) { (acc[g.plan] = acc[g.plan] || []).push(g); }
     return acc;
   }, {});
+  const formatMaybeNumber = (value, suffix = '', minDigits = 0) => {
+    const num = toNumberOrNull(value);
+    if (num == null) return '—';
+    let digits = minDigits;
+    if (digits === 0 && Math.abs(num % 1) >= 0.01) digits = 1;
+    return `${num.toFixed(digits)}${suffix}`;
+  };
   const toRow = (plan, idx) => {
-    const spectrum = plan.spectrum || { cw:45, ww:45, bl:0, rd:0 };
-    const ppfd = Number(plan.ppfd || 0);
-    const photoperiod = Number(plan.photoperiod || 12);
-    const dli = ppfd > 0 ? (ppfd * 3600 * photoperiod) / 1e6 : (Number(plan.dli || 0));
-    const usedIn = (groupsByPlan[plan.id] || []).map(g=>g.name).join(', ');
-    const idSafe = `plan-${idx}`;
-    return `
-      <div class="card" data-plan-id="${plan.id}">
+    const derived = plan._derived || derivePlanRuntime(plan);
+    const isStructured = !!plan._structured;
+    const spectrum = plan.spectrum || derived?.spectrum || { cw:45, ww:45, bl:0, rd:0 };
+    const ppfd = getPlanPPFD(plan);
+    const photoperiodHours = getPlanPhotoperiodHours(plan);
+    const dli = getPlanDli(plan);
+    const photoperiodLabelSource = firstNonEmpty(plan.photoperiod, derived?.photoperiod, plan.defaults?.photoperiod);
+    const photoperiodLabel = formatPlanPhotoperiodDisplay(photoperiodLabelSource);
+    const usedInNames = (groupsByPlan[plan.id] || []).map((g) => g.name).filter(Boolean);
+    const usedIn = usedInNames.join(', ');
+    const description = plan.description || (derived.notes && derived.notes.length ? derived.notes.join(' • ') : '');
+    const descriptionHtml = description ? `<div class="tiny" style="color:#475569;margin:-2px 0 6px">${escapeHtml(description)}</div>` : '';
+    const planIdAttr = escapeHtml(plan.id || `plan-${idx}`);
+    if (isStructured) {
+      const chips = [];
+      if (plan.key) chips.push(`Key: ${plan.key}`);
+      if (plan.kind) chips.push(`Kind: ${plan.kind}`);
+      if (plan.version !== undefined && plan.version !== null) chips.push(`v${plan.version}`);
+      if (Array.isArray(plan.meta?.channels) && plan.meta.channels.length) {
+        chips.push(`Channels: ${plan.meta.channels.map((ch) => String(ch).toUpperCase()).join(' / ')}`);
+      }
+      const chipsHtml = chips.length
+        ? `<div class="plan-structured__chips">${chips.map((text) => `<span class="chip plan-structured__chip">${escapeHtml(text)}</span>`).join('')}</div>`
+        : '';
+      const appliesParts = [];
+      if (derived.appliesTo?.category?.length) appliesParts.push(`Categories: ${derived.appliesTo.category.join(', ')}`);
+      if (derived.appliesTo?.varieties?.length) appliesParts.push(`Varieties: ${derived.appliesTo.varieties.join(', ')}`);
+      const appliesHtml = appliesParts.length
+        ? `<div class="tiny plan-structured__applies">Applies to: ${escapeHtml(appliesParts.join(' • '))}</div>`
+        : '';
+      const defaultsParts = [];
+      if (plan.defaults && plan.defaults.photoperiod !== undefined && plan.defaults.photoperiod !== null && plan.defaults.photoperiod !== '') {
+        defaultsParts.push(`Photoperiod ${formatPlanPhotoperiodDisplay(plan.defaults.photoperiod)}`);
+      }
+      if (plan.defaults && plan.defaults.ramp && (plan.defaults.ramp.sunrise != null || plan.defaults.ramp.sunset != null)) {
+        const rampPieces = [];
+        const sunrise = toNumberOrNull(plan.defaults.ramp.sunrise);
+        const sunset = toNumberOrNull(plan.defaults.ramp.sunset);
+        if (sunrise != null) rampPieces.push(`Sunrise ${formatMaybeNumber(sunrise, ' min')}`);
+        if (sunset != null) rampPieces.push(`Sunset ${formatMaybeNumber(sunset, ' min')}`);
+        if (rampPieces.length) defaultsParts.push(`Ramp ${rampPieces.join(' • ')}`);
+      }
+      const defaultsHtml = defaultsParts.length
+        ? `<div class="tiny plan-structured__defaults">${escapeHtml(defaultsParts.join(' • '))}</div>`
+        : '';
+      const notesHtml = derived.notes && derived.notes.length
+        ? `<div class="plan-structured__section"><h4 class="plan-structured__section-title">Notes</h4><ul class="plan-structured__notes">${derived.notes.map((note) => `<li>${escapeHtml(note)}</li>`).join('')}</ul></div>`
+        : '';
+      const lightRows = (derived.lightDays || []).map((day) => {
+        const dayLabel = day.day != null ? escapeHtml(String(day.day)) : '—';
+        const stageLabel = day.stage ? escapeHtml(day.stage) : '—';
+        const ppfdCell = day.ppfd != null ? escapeHtml(formatMaybeNumber(day.ppfd, ' µmol·m⁻²·s⁻¹')) : '—';
+        const dayPhotoperiod = formatPlanPhotoperiodDisplay(firstNonEmpty(day.photoperiod, plan.defaults?.photoperiod));
+        const photoperiodCell = escapeHtml(dayPhotoperiod);
+        const mixCell = escapeHtml(formatPlanMix(day.mix));
+        return `<tr><td>${dayLabel}</td><td>${stageLabel}</td><td>${ppfdCell}</td><td>${photoperiodCell}</td><td>${mixCell}</td></tr>`;
+      }).join('');
+      const lightSection = lightRows
+        ? `<div class="plan-structured__section"><h4 class="plan-structured__section-title">Light targets</h4><table class="plan-structured__table"><thead><tr><th>Day</th><th>Stage</th><th>PPFD</th><th>Photoperiod</th><th>Mix</th></tr></thead><tbody>${lightRows}</tbody></table></div>`
+        : '';
+      const envRows = (derived.envDays || []).map((day) => {
+        const dayLabel = day.day != null ? escapeHtml(String(day.day)) : '—';
+        const tempCell = escapeHtml(formatMaybeNumber(day.tempC, '°C'));
+        const rhCell = escapeHtml(formatMaybeNumber(day.rh, '%'));
+        const rhBandVal = toNumberOrNull(day.rhBand);
+        const rhBandCell = rhBandVal != null
+          ? escapeHtml(`±${(Math.abs(rhBandVal % 1) >= 0.01 ? rhBandVal.toFixed(1) : rhBandVal.toFixed(0))}%`)
+          : '—';
+        return `<tr><td>${dayLabel}</td><td>${tempCell}</td><td>${rhCell}</td><td>${rhBandCell}</td></tr>`;
+      }).join('');
+      const envSection = envRows
+        ? `<div class="plan-structured__section"><h4 class="plan-structured__section-title">Environment targets</h4><table class="plan-structured__table"><thead><tr><th>Day</th><th>Temp</th><th>RH</th><th>RH band</th></tr></thead><tbody>${envRows}</tbody></table></div>`
+        : '';
+      let controlBlock = '';
+      if (plan.env && plan.env.control && typeof plan.env.control === 'object') {
+        const ctrl = plan.env.control;
+        const controlParts = [];
+        if (typeof ctrl.enable === 'boolean') controlParts.push(ctrl.enable ? 'Enabled' : 'Disabled');
+        if (typeof ctrl.mode === 'string' && ctrl.mode.trim()) controlParts.push(`Mode ${ctrl.mode}`);
+        const stepVal = toNumberOrNull(ctrl.step);
+        if (stepVal != null) controlParts.push(`Step ${formatMaybeNumber(stepVal, ' min')}`);
+        const dwellVal = toNumberOrNull(ctrl.dwell);
+        if (dwellVal != null) controlParts.push(`Dwell ${formatMaybeNumber(dwellVal, ' min')}`);
+        const controlText = controlParts.length ? controlParts.join(' • ') : '—';
+        controlBlock = `<div class="plan-structured__section"><h4 class="plan-structured__section-title">Env control</h4><div class="tiny plan-structured__control">${escapeHtml(controlText)}</div></div>`;
+      }
+      let adaptSection = '';
+      const curve = Array.isArray(plan.adapt?.tempCurve) ? plan.adapt.tempCurve : [];
+      if (curve.length) {
+        const adaptRows = curve.map((row) => {
+          const bin = row?.bin ? escapeHtml(String(row.bin)) : '—';
+          const scaleVal = toNumberOrNull(row?.ppfdScale);
+          const scaleText = scaleVal != null ? scaleVal.toFixed(2) : '—';
+          const blueVal = toNumberOrNull(row?.blueDelta);
+          const blueText = blueVal != null ? `${blueVal >= 0 ? '+' : ''}${blueVal.toFixed(2)}` : '—';
+          const redVal = toNumberOrNull(row?.redDelta);
+          const redText = redVal != null ? `${redVal >= 0 ? '+' : ''}${redVal.toFixed(2)}` : '—';
+          return `<tr><td>${bin}</td><td>${scaleText}</td><td>${blueText}</td><td>${redText}</td></tr>`;
+        }).join('');
+        adaptSection = `<div class="plan-structured__section"><h4 class="plan-structured__section-title">Adaptive responses</h4><table class="plan-structured__table"><thead><tr><th>Temp bin</th><th>PPFD scale</th><th>Blue Δ</th><th>Red Δ</th></tr></thead><tbody>${adaptRows}</tbody></table></div>`;
+      }
+      const usedInHtml = `<div class="tiny plan-structured__used">Used in: ${escapeHtml(usedIn || '—')}</div>`;
+      const hasPpfd = Number.isFinite(ppfd) && ppfd > 0;
+      const hasDli = Number.isFinite(dli) && dli > 0;
+      const dliSummary = hasDli ? `${dli.toFixed(2)} mol·m⁻²·d⁻¹` : '—';
+      const ppfdSummary = hasPpfd ? `${ppfd.toFixed(0)} µmol·m⁻²·s⁻¹` : '—';
+      const photoperiodSummary = photoperiodLabel && photoperiodLabel !== '—' ? photoperiodLabel : '—';
+      const hint = `<div class="plan-structured__hint">Structured plan with day-by-day light and environment targets. Update via recipe bridge or /plans API.</div>`;
+      return `
+      <div class="card plan-card plan-card--structured" data-plan-id="${planIdAttr}">
         <div class="row" style="justify-content:space-between;align-items:center;margin-bottom:6px">
           <h3 style="margin:0">${escapeHtml(plan.name || 'Untitled plan')}</h3>
           <div class="row" style="gap:6px">
@@ -12561,15 +12869,55 @@ function renderPlansPanel() {
             <button type="button" class="ghost" data-action="del">Delete</button>
           </div>
         </div>
-        <div class="tiny" style="color:#475569;margin:-2px 0 6px">${escapeHtml(plan.description || '')}</div>
+        ${descriptionHtml || ''}
+        <div class="grid cols-2 plan-structured__grid" style="align-items:start">
+          <div class="plan-structured__main">
+            ${chipsHtml || ''}
+            ${usedInHtml}
+            ${appliesHtml || ''}
+            ${defaultsHtml || ''}
+            ${notesHtml || ''}
+            ${lightSection || ''}
+            ${envSection || ''}
+            ${controlBlock || ''}
+            ${adaptSection || ''}
+            ${hint}
+          </div>
+          <div class="plan-structured__aside">
+            <div class="tiny" style="margin-bottom:4px">Spectrum preview (CW/WW/BL/RD)</div>
+            <canvas class="plan-spd" width="300" height="36" data-idx="${idx}"></canvas>
+            <dl class="plan-structured__metrics plan-structured__metrics--vertical">
+              <div><dt>PPFD</dt><dd data-role="plan-ppfd" data-format="summary">${ppfdSummary}</dd></div>
+              <div><dt>DLI</dt><dd data-role="plan-dli" data-format="summary">${dliSummary}</dd></div>
+              <div><dt>Photoperiod</dt><dd data-role="plan-photoperiod" data-format="summary">${escapeHtml(photoperiodSummary)}</dd></div>
+            </dl>
+          </div>
+        </div>
+      </div>`;
+    }
+    const ppfdValue = Number.isFinite(ppfd) ? ppfd : 0;
+    const photoperiodValue = Number.isFinite(photoperiodHours) ? photoperiodHours : 12;
+    const dliValue = Number.isFinite(dli) ? dli : ((ppfdValue && photoperiodValue) ? (ppfdValue * 3600 * photoperiodValue) / 1e6 : 0);
+    const dliLabel = Number.isFinite(dliValue) ? dliValue.toFixed(2) : '0.00';
+    const usedInHtml = `<div class="tiny" style="color:#475569;margin-top:6px">Used in: ${escapeHtml(usedIn || '—')}</div>`;
+    return `
+      <div class="card" data-plan-id="${planIdAttr}">
+        <div class="row" style="justify-content:space-between;align-items:center;margin-bottom:6px">
+          <h3 style="margin:0">${escapeHtml(plan.name || 'Untitled plan')}</h3>
+          <div class="row" style="gap:6px">
+            <button type="button" class="ghost" data-action="dup">Duplicate</button>
+            <button type="button" class="ghost" data-action="del">Delete</button>
+          </div>
+        </div>
+        ${descriptionHtml || ''}
         <div class="grid cols-2" style="align-items:start">
           <div>
             <label class="tiny">Name <input data-field="name" type="text" value="${escapeHtml(plan.name||'')}" placeholder="Plan name"></label>
             <label class="tiny">Description <input data-field="description" type="text" value="${escapeHtml(plan.description||'')}" placeholder="Short description"></label>
             <div class="row tiny" style="gap:8px;align-items:center;margin-top:6px">
-              <label>PPFD <input data-field="ppfd" type="number" min="0" step="1" value="${ppfd}" style="width:90px"></label>
-              <label>Photoperiod (h) <input data-field="photoperiod" type="number" min="0" max="24" step="0.5" value="${photoperiod}" style="width:90px"></label>
-              <span class="chip" title="DLI = PPFD × 3600 × h ÷ 1e6">DLI ≈ ${(dli||0).toFixed(2)}</span>
+              <label>PPFD <input data-field="ppfd" type="number" min="0" step="1" value="${ppfdValue}" style="width:90px"></label>
+              <label>Photoperiod (h) <input data-field="photoperiod" type="number" min="0" max="24" step="0.5" value="${photoperiodValue}" style="width:90px"></label>
+              <span class="chip plan-card__dli" data-role="plan-dli" data-format="chip" title="DLI = PPFD × 3600 × h ÷ 1e6">DLI ≈ ${dliLabel}</span>
             </div>
             <div class="row tiny" style="gap:8px;align-items:center;margin-top:6px">
               <label>CW <input data-field="cw" type="number" min="0" max="100" step="1" value="${spectrum.cw||0}" style="width:70px"></label>
@@ -12577,7 +12925,7 @@ function renderPlansPanel() {
               <label>Blue <input data-field="bl" type="number" min="0" max="100" step="1" value="${spectrum.bl||0}" style="width:70px"></label>
               <label>Red <input data-field="rd" type="number" min="0" max="100" step="1" value="${spectrum.rd||0}" style="width:70px"></label>
             </div>
-            <div class="tiny" style="color:#475569;margin-top:6px">Used in: ${usedIn || '—'}</div>
+            ${usedInHtml}
           </div>
           <div>
             <div class="tiny" style="margin-bottom:4px">Spectrum preview (400–700 nm)</div>
@@ -12616,10 +12964,15 @@ function renderPlansPanel() {
           if (cv) renderSpectrumCanvas(cv, computeWeightedSPD(plan.spectrum), { width:300, height:36 });
         }
         // live DLI chip update
-        const ppfd = Number(plan.ppfd || 0);
-        const photoperiod = Number(plan.photoperiod || 12);
-        const chip = card.querySelector('.chip');
-        if (chip) chip.textContent = `DLI ≈ ${((ppfd*3600*photoperiod)/1e6 || 0).toFixed(2)}`;
+        const dliNode = card.querySelector('[data-role=plan-dli]');
+        if (dliNode) {
+          const nextDli = getPlanDli(plan);
+          if (dliNode.dataset.format === 'chip') {
+            dliNode.textContent = `DLI ≈ ${(nextDli || 0).toFixed(2)}`;
+          } else {
+            dliNode.textContent = nextDli ? `${nextDli.toFixed(2)} mol·m⁻²·d⁻¹` : '—';
+          }
+        }
       });
     };
     const bindText = (selector, path) => {
@@ -12653,7 +13006,7 @@ function renderPlansPanel() {
       const clone = JSON.parse(JSON.stringify(plan));
       clone.id = `plan-${Math.random().toString(36).slice(2,8)}`;
       clone.name = `${plan.name || 'Untitled'} (copy)`;
-      STATE.plans.push(clone);
+      STATE.plans.push(hydratePlan(clone, STATE.plans.length));
       renderPlansPanel(); renderPlans();
     });
   });
@@ -12926,15 +13279,22 @@ function wireGlobalEvents() {
     }
     card.classList.remove('is-empty');
     if (title) title.textContent = `Plan: ${plan.name || 'Untitled'}`;
+    const derived = plan._derived || derivePlanRuntime(plan);
     const cropStage = [plan.crop, plan.stage].filter(Boolean).join(' • ');
     if (subtitle) {
-      subtitle.textContent = cropStage || plan.description || 'Spectrum targets from the selected plan.';
+      const desc = plan.description || (derived?.notes?.length ? derived.notes.join(' • ') : 'Spectrum targets from the selected plan.');
+      subtitle.textContent = cropStage || desc;
     }
-    const spectrum = plan.spectrum || { cw: 45, ww: 45, bl: 0, rd: 0 };
+    const spectrum = plan.spectrum || derived?.spectrum || { cw: 45, ww: 45, bl: 0, rd: 0 };
     const { percentages } = computeChannelPercentages(spectrum);
-    const photoperiod = Number(plan.photoperiod || 12);
-    const ppfd = Number(plan.ppfd || 0);
-    const dli = plan.dli != null ? Number(plan.dli) : (ppfd > 0 ? (ppfd * 3600 * photoperiod) / 1e6 : 0);
+    const ppfd = getPlanPPFD(plan);
+    const photoperiodHours = getPlanPhotoperiodHours(plan);
+    const dli = getPlanDli(plan);
+    const hasPpfd = Number.isFinite(ppfd) && ppfd > 0;
+    const hasDli = Number.isFinite(dli) && dli > 0;
+    const photoperiodLabel = Number.isFinite(photoperiodHours) && photoperiodHours > 0
+      ? `${photoperiodHours.toFixed(1)} h`
+      : formatPlanPhotoperiodDisplay(firstNonEmpty(plan.photoperiod, derived?.photoperiod, plan.defaults?.photoperiod));
     const roomSel = document.getElementById('groupRoomDropdown');
     const zoneSel = document.getElementById('groupZoneDropdown');
     const targets = resolveEnvironmentTargets(roomSel?.value || '', zoneSel?.value || '');
@@ -12944,9 +13304,9 @@ function wireGlobalEvents() {
         { label: 'Warm white', value: `${percentages.ww.toFixed(0)}%` },
         { label: 'Blue', value: `${percentages.bl.toFixed(0)}%` },
         { label: 'Red', value: `${percentages.rd.toFixed(0)}%` },
-        { label: 'PPFD', value: ppfd ? `${ppfd.toFixed(0)} µmol·m⁻²·s⁻¹` : '—' },
-        { label: 'Photoperiod', value: photoperiod ? `${photoperiod.toFixed(1)} h` : '—' },
-        { label: 'DLI', value: dli ? `${dli.toFixed(2)} mol·m⁻²·d⁻¹` : '—' },
+        { label: 'PPFD', value: hasPpfd ? `${ppfd.toFixed(0)} µmol·m⁻²·s⁻¹` : '—' },
+        { label: 'Photoperiod', value: photoperiodLabel && photoperiodLabel !== '—' ? photoperiodLabel : '—' },
+        { label: 'DLI', value: hasDli ? `${dli.toFixed(2)} mol·m⁻²·d⁻¹` : '—' },
       ];
       if (targets?.temp) {
         items.push({ label: 'Temp target', value: formatSetpointRange(targets.temp, '°C') });
@@ -13024,20 +13384,17 @@ function wireGlobalEvents() {
     const mixInfo = computeMixAndHex(group);
     const { percentages } = computeChannelPercentages(mixInfo.mix);
     const plan = group ? STATE.plans.find((p) => p.id === group.plan) : null;
-    const planSpectrum = plan?.spectrum || { cw: 45, ww: 45, bl: 0, rd: 0 };
+    const planDerived = plan?._derived || (plan ? derivePlanRuntime(plan) : null);
+    const planSpectrum = plan?.spectrum || planDerived?.spectrum || { cw: 45, ww: 45, bl: 0, rd: 0 };
     const { percentages: planPercentages } = computeChannelPercentages(planSpectrum);
     const hud = readHUD();
     const masterValue = Number.isFinite(Number(hud.master)) ? Number(hud.master) : 100;
     const masterPct = Math.max(0, Math.min(100, masterValue));
     const intensityScale = plan ? (hud.lock ? masterPct / 100 : 1) : 1;
-    const planPhotoperiod = Number(plan?.photoperiod || 12);
-    const planPpfd = Number(plan?.ppfd || 0);
-    const planDliValue = plan
-      ? (plan.dli != null
-          ? Number(plan.dli)
-          : (planPpfd > 0 ? (planPpfd * 3600 * planPhotoperiod) / 1e6 : 0))
-      : null;
-    const activePhotoperiod = planPhotoperiod;
+    const planPhotoperiod = plan ? getPlanPhotoperiodHours(plan) : 12;
+    const planPpfd = plan ? getPlanPPFD(plan) : 0;
+    const planDliValue = plan ? getPlanDli(plan) : 0;
+    const activePhotoperiod = Number.isFinite(planPhotoperiod) ? planPhotoperiod : 0;
     const actualPpfd = planPpfd ? planPpfd * intensityScale : 0;
     const actualDli = actualPpfd > 0 && activePhotoperiod > 0 ? (actualPpfd * 3600 * activePhotoperiod) / 1e6 : 0;
     card.classList.remove('is-empty');
@@ -13091,7 +13448,7 @@ function wireGlobalEvents() {
         {
           label: 'DLI',
           value: actualDli ? `${actualDli.toFixed(2)} mol·m⁻²·d⁻¹` : '—',
-          delta: hasPlan ? formatDelta(actualDli - (planDliValue ?? 0), ' mol·m⁻²·d⁻¹', 2) : null
+          delta: hasPlan ? formatDelta(actualDli - (planDliValue || 0), ' mol·m⁻²·d⁻¹', 2) : null
         },
         { label: 'Dynamic fixtures', value: dynamicCount ? `${dynamicCount}` : '0', delta: null },
         { label: 'Static fixtures', value: staticCount ? `${staticCount}` : '0', delta: null }
@@ -13318,20 +13675,27 @@ function wireGlobalEvents() {
     if (groupSchedule) groupSchedule.value = group.schedule || '';
     if (groupName) groupName.value = group.name || '';
     // Chip
-    if (chipsHost) {
-      chipsHost.querySelectorAll('.chip[data-kind]').forEach(n=>n.remove());
-      // Plan chip with PPFD/DLI
-      const plan = STATE.plans.find(p => p.id === group.plan);
-      if (plan) {
-        const photoperiod = (()=>{ const s = STATE.schedules.find(x=>x.id===group.schedule); return s ? getDailyOnHours(s) : (Number(plan.photoperiod)||12); })();
-        const dli = (Number(plan.ppfd||0) * 3600 * photoperiod) / 1e6;
+      if (chipsHost) {
+        chipsHost.querySelectorAll('.chip[data-kind]').forEach(n=>n.remove());
+        // Plan chip with PPFD/DLI
+        const plan = STATE.plans.find(p => p.id === group.plan);
+        if (plan) {
+        const scheduleHours = (()=>{ const s = STATE.schedules.find(x=>x.id===group.schedule); return s ? getDailyOnHours(s) : null; })();
+        const planPpfd = getPlanPPFD(plan);
+        const planPhotoperiod = scheduleHours != null ? scheduleHours : getPlanPhotoperiodHours(plan);
+        const planDli = getPlanDli(plan);
+        const dliValue = Number.isFinite(planDli) && planDli > 0
+          ? planDli
+          : (planPpfd > 0 && Number.isFinite(planPhotoperiod) && planPhotoperiod > 0
+              ? (planPpfd * 3600 * planPhotoperiod) / 1e6
+              : 0);
         const pchip = document.createElement('span');
         pchip.className = 'chip';
         pchip.dataset.kind = 'plan';
-        pchip.textContent = `${plan.name} • PPFD ${Math.round(Number(plan.ppfd||0))} • DLI ${dli.toFixed(2)}`;
+        pchip.textContent = `${plan.name} • PPFD ${Math.round(planPpfd || 0)} • DLI ${dliValue.toFixed(2)}`;
         pchip.title = 'Assigned plan';
         chipsHost.appendChild(pchip);
-      }
+        }
       const sched = STATE.schedules.find(s => s.id === group.schedule);
       const chip = document.createElement('span');
       chip.className = 'chip';
@@ -14062,7 +14426,7 @@ function wireGlobalEvents() {
         const id = `plan-${Math.random().toString(36).slice(2,8)}`;
         const name = `${STATE.currentGroup.name || 'Group'} — Manual`;
         const plan = { id, name, description: 'Saved from Group HUD', spectrum: { cw: hud.cw, ww: hud.ww, bl: hud.bl, rd: hud.rd }, ppfd, photoperiod };
-        STATE.plans.push(plan);
+        STATE.plans.push(hydratePlan(plan, STATE.plans.length));
         // Assign to group and persist
         STATE.currentGroup.plan = id;
         await Promise.all([
@@ -15744,8 +16108,10 @@ function resolvePlanInfo(planId) {
   const parts = [];
   if (plan.stage) parts.push(plan.stage);
   if (plan.crop) parts.push(plan.crop);
-  if (typeof plan.ppfd === 'number') parts.push(`${plan.ppfd} µmol`);
-  if (typeof plan.dli === 'number') parts.push(`${plan.dli.toFixed(1)} DLI`);
+  const ppfd = getPlanPPFD(plan);
+  const dli = getPlanDli(plan);
+  if (Number.isFinite(ppfd) && ppfd > 0) parts.push(`${ppfd.toFixed(0)} µmol`);
+  if (Number.isFinite(dli) && dli > 0) parts.push(`${dli.toFixed(1)} DLI`);
   return { id: plan.id, name: plan.name || plan.id, detail: parts.join(' • '), plan };
 }
 
@@ -17084,7 +17450,7 @@ document.addEventListener('DOMContentLoaded', async () => {
   try {
     document.getElementById('btnAddPlan')?.addEventListener('click', () => {
       const id = `plan-${Math.random().toString(36).slice(2,8)}`;
-      STATE.plans.push({ id, name: 'New plan', description: '', spectrum: { cw:45, ww:45, bl:0, rd:10 }, ppfd: 200, photoperiod: 12 });
+      STATE.plans.push(hydratePlan({ id, name: 'New plan', description: '', spectrum: { cw:45, ww:45, bl:0, rd:10 }, ppfd: 200, photoperiod: 12 }, STATE.plans.length));
       renderPlans();
       renderPlansPanel();
       const status = document.getElementById('plansStatus'); if (status) status.textContent = 'Draft plan added';
@@ -17119,10 +17485,14 @@ document.addEventListener('DOMContentLoaded', async () => {
         const incoming = Array.isArray(data) ? data : (data.plans || []);
         if (!Array.isArray(incoming)) throw new Error('Invalid format');
         // merge by id or append
-        const map = new Map(STATE.plans.map(p => [p.id, p]));
-        for (const p of incoming) {
-          const id = p.id || `plan-${Math.random().toString(36).slice(2,8)}`;
-          map.set(id, { ...map.get(p.id), ...p, id });
+        const map = new Map(STATE.plans.map((p, index) => [p.id, hydratePlan(p, index)]));
+        let counter = map.size;
+        for (const entry of incoming) {
+          if (!entry || typeof entry !== 'object') continue;
+          const candidateId = entry.id || entry.key || `plan-${Math.random().toString(36).slice(2,8)}`;
+          const base = map.get(candidateId) || {};
+          const merged = { ...base, ...entry, id: candidateId };
+          map.set(candidateId, hydratePlan(merged, counter++));
         }
         STATE.plans = Array.from(map.values());
         renderPlans();
