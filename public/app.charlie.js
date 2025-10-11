@@ -2491,7 +2491,11 @@ window.openGrow3Manager = async function() {
   }
   // Show controller info at the top
   const cfg = getGrow3ControllerConfig();
-  const apiBase = `http://${cfg.address}:${cfg.port}`;
+  const runtimeBase = typeof window.API_BASE === 'string' ? window.API_BASE : '';
+  const normalizedRuntimeBase = runtimeBase.replace(/\/+$/, '');
+  const fallbackBase = `http://${cfg.address}:${cfg.port}`;
+  const apiBase = normalizedRuntimeBase || fallbackBase;
+  const controllerLabel = normalizedRuntimeBase || fallbackBase;
   const SAFE_ON_HEX = '737373730000';
   body.innerHTML = `
     <h2 style="margin-top:0">Grow3 Manager</h2>
@@ -2502,7 +2506,7 @@ window.openGrow3Manager = async function() {
       <button type="submit" class="primary" style="margin-top:18px;">Save</button>
     </form>
     <div class="tiny" style="color:#475569;margin-bottom:12px;">
-      Proxy summary: <code>${apiBase}/healthz</code> → Code3 controller <code>http://192.168.2.80:3000</code>. HEX format <code>[CW][WW][BL][RD][00][00]</code> (00–64).
+      Proxy summary: <code>${controllerLabel}/healthz</code> → Code3 controller <code>http://192.168.2.80:3000</code>. HEX format <code>[CW][WW][BL][RD][00][00]</code> (00–64).
     </div>
     <div id="grow3DevicesLoading" style="text-align:center;padding:32px;">Loading Grow3 devices…</div>
   `;
@@ -2522,7 +2526,8 @@ window.openGrow3Manager = async function() {
   // Fetch device list from controller API using config
   let devices = [];
   try {
-    const resp = await fetch(`${apiBase}/api/devicedatas`);
+    const listBase = apiBase.replace(/\/+$/, '');
+    const resp = await fetch(`${listBase}/api/devicedatas`);
     if (!resp.ok) throw new Error('Controller not reachable');
     const data = await resp.json();
     devices = Array.isArray(data) ? data : (data.devices || []);
@@ -2558,7 +2563,7 @@ window.openGrow3Manager = async function() {
         </tbody>
       </table>
     </div>
-    <div class="tiny" style="margin-top:16px;color:#64748b">Controller API: <code>${apiBase}/api/devicedatas</code> (GET), <code>${apiBase}/api/devicedatas/device/:id</code> (PATCH)</div>
+    <div class="tiny" style="margin-top:16px;color:#64748b">Controller API: <code>${apiBase.replace(/\/+$/, '')}/api/devicedatas</code> (GET), <code>${apiBase.replace(/\/+$/, '')}/api/devicedatas/device/:id</code> (PATCH)</div>
   `;
   // Wire up actions
   Array.from(body.querySelectorAll('.grow3-on')).forEach(btn => {
@@ -2572,32 +2577,55 @@ window.openGrow3Manager = async function() {
     btn.onclick = async function() {
       const row = btn.closest('tr');
       const id = row.getAttribute('data-id');
-      await sendGrow3Command(id, { status: 'off', value: null }, row, apiBase);
+      await sendGrow3Command(id, { status: 'off' }, row, apiBase);
     };
   });
   Array.from(body.querySelectorAll('.grow3-send')).forEach(btn => {
     btn.onclick = async function() {
       const row = btn.closest('tr');
       const id = row.getAttribute('data-id');
-      const hex = row.querySelector('.grow3-hex').value.trim();
-      if (!hex) { window.showToast?.({ title: 'HEX required', msg: 'Enter a HEX payload.', kind: 'warn', icon: '⚠️' }); return; }
-      await sendGrow3Command(id, { status: 'on', value: hex }, row, apiBase);
+      const hexInput = row.querySelector('.grow3-hex');
+      const rawHex = hexInput ? hexInput.value.trim().toUpperCase() : '';
+      if (!/^[0-9A-F]{12}$/.test(rawHex)) {
+        window.showToast?.({ title: 'HEX required', msg: 'Enter a 12-character HEX12 payload.', kind: 'warn', icon: '⚠️' });
+        if (hexInput) hexInput.focus();
+        return;
+      }
+      if (hexInput) hexInput.value = rawHex;
+      await sendGrow3Command(id, { status: 'on', value: rawHex }, row, apiBase);
     };
   });
 };
 
 async function sendGrow3Command(id, payload, row, apiBase) {
   try {
-    const resp = await fetch(`${apiBase}/api/devicedatas/device/${encodeURIComponent(id)}`, {
+    const base = (typeof apiBase === 'string' ? apiBase : '').trim().replace(/\/+$/, '');
+    if (!base) throw new Error('Controller base URL not configured');
+    const status = payload && payload.status === 'on' ? 'on' : 'off';
+    let bodyPayload = { status };
+    if (status === 'on') {
+      const hex = typeof payload?.value === 'string' ? payload.value.trim().toUpperCase() : '';
+      if (hex) {
+        if (!/^[0-9A-F]{12}$/.test(hex)) {
+          throw new Error('HEX payload must be 12 hex characters');
+        }
+        bodyPayload = { status: 'on', value: hex };
+      }
+    }
+    const resp = await fetch(`${base}/api/devicedatas/device/${encodeURIComponent(id)}`, {
       method: 'PATCH',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(payload)
+      body: JSON.stringify(bodyPayload)
     });
     if (!resp.ok) throw new Error('Controller error');
-    const data = await resp.json();
-    row.querySelector('.grow3-status').textContent = data.status || payload.status || 'OK';
-    row.querySelector('.grow3-hex').value = typeof data.value === 'string' ? data.value : (payload.value || '');
-    window.showToast?.({ title: 'Grow3 Updated', msg: `Device ${id} → ${row.querySelector('.grow3-status').textContent}`, kind: 'success', icon: '✅' });
+    const data = await resp.json().catch(() => ({}));
+    const statusCell = row?.querySelector?.('.grow3-status');
+    const hexInput = row?.querySelector?.('.grow3-hex');
+    const controllerStatus = typeof data.status === 'string' ? data.status : bodyPayload.status;
+    if (statusCell) statusCell.textContent = controllerStatus || 'OK';
+    const controllerHex = typeof data.value === 'string' ? data.value.trim().toUpperCase() : (bodyPayload.value || '');
+    if (hexInput) hexInput.value = controllerHex || '';
+    window.showToast?.({ title: 'Grow3 Updated', msg: `Device ${id} → ${controllerStatus || 'OK'}`, kind: 'success', icon: '✅' });
   } catch (e) {
     window.showToast?.({ title: 'Grow3 Error', msg: e.message, kind: 'error', icon: '❌' });
   }
