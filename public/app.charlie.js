@@ -15809,6 +15809,53 @@ function updateFeatureStatus(card, status) {
                         status === 'dev' ? 'DEV' : status.toUpperCase();
 }
 
+function applyHudShell(root) {
+  if (!root) {
+    return;
+  }
+
+  let panels = [];
+
+  if (root instanceof HTMLElement) {
+    panels = root.matches('[data-panel].card')
+      ? [root]
+      : Array.from(root.querySelectorAll('[data-panel].card'));
+  } else if (root instanceof Document || root instanceof DocumentFragment) {
+    panels = Array.from(root.querySelectorAll('[data-panel].card'));
+  }
+
+  panels.forEach((panel) => {
+    panel.classList.add('hud-shell');
+  });
+}
+
+function initializePanelShells() {
+  const dashboardMain = document.querySelector('.dashboard-main');
+  if (!dashboardMain) {
+    return;
+  }
+
+  applyHudShell(dashboardMain);
+
+  if (dashboardMain.dataset.hudShellObserverBound === 'true') {
+    return;
+  }
+
+  const observer = new MutationObserver((mutations) => {
+    mutations.forEach(({ addedNodes }) => {
+      addedNodes.forEach((node) => {
+        if (!(node instanceof HTMLElement)) {
+          return;
+        }
+        applyHudShell(node);
+      });
+    });
+  });
+
+  observer.observe(dashboardMain, { childList: true, subtree: true });
+  dashboardMain.dataset.hudShellObserverBound = 'true';
+}
+
 function setActivePanel(panelId = 'overview') {
   console.log('[DEBUG] setActivePanel called with:', panelId);
   ACTIVE_PANEL = panelId;
@@ -15977,6 +16024,7 @@ document.addEventListener('DOMContentLoaded', async () => {
 
     if (typeof wireHints === 'function') wireHints();
     if (typeof wireGlobalEvents === 'function') wireGlobalEvents();
+    initializePanelShells();
     if (typeof initializeSidebarNavigation === 'function') initializeSidebarNavigation();
     initOverviewDemoControls();
 

@@ -1,7 +1,7 @@
 /* IoT Scan Progress Bar */
 #iotScanBarContainer {
   width: 100%;
-  margin-bottom: 8px;
+  margin: 12px 0 8px;
 }
 #iotScanBar {
   width: 100%;
@@ -117,6 +117,13 @@
   --gr-shadow: 0 1px 3px 0 rgb(0 0 0 / 0.1), 0 1px 2px -1px rgb(0 0 0 / 0.1);
   --gr-shadow-lg: 0 10px 15px -3px rgb(0 0 0 / 0.1), 0 4px 6px -4px rgb(0 0 0 / 0.1);
   --gr-font: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+  --hud-canvas-max: 1440px;
+  --hud-shell-max-width: 960px;
+  --hud-shell-min-width: 320px;
+  --hud-shell-min-height: 420px;
+  --hud-shell-padding: clamp(20px, 1.8vw + 12px, 28px);
+  --hud-shell-gap: clamp(16px, 1.6vw, 24px);
+  --dashboard-sidebar-width: clamp(260px, 22vw, 320px);
 
   /* Brand Colors (mapped to gr- tokens) */
   --primary-green: var(--gr-primary, #16A34A);
@@ -274,14 +281,18 @@ h3 { font-size: 1.125rem; }
 .mb-lg { margin-bottom: 20px; }
 .gap-sm { gap: 8px; }
 .gap-md { gap: 12px; }
+.row--align-start { align-items: flex-start; }
 
 /* Dashboard shell */
 .dashboard-shell {
   display: grid;
-  grid-template-columns: minmax(280px, 320px) 1fr;
-  gap: var(--gap);
-  padding: var(--gap);
+  grid-template-columns: var(--dashboard-sidebar-width, 280px) minmax(0, 1fr);
+  column-gap: var(--hud-shell-gap, 24px);
+  row-gap: var(--gap, 12px);
+  padding: 0;
   align-items: start;
+  width: min(100%, var(--hud-canvas-max, 1440px));
+  margin: 0 auto;
 }
 
 .dashboard-sidebar {
@@ -293,6 +304,8 @@ h3 { font-size: 1.125rem; }
   max-height: calc(100vh - 2 * var(--gap));
   overflow-y: auto;
   padding-right: 4px;
+  width: var(--dashboard-sidebar-width, 280px);
+  max-width: var(--dashboard-sidebar-width, 280px);
 }
 
 .sidebar-header {
@@ -407,10 +420,28 @@ h3 { font-size: 1.125rem; }
   gap: 8px;
 }
 
+.dashboard-header {
+  width: min(100%, var(--hud-canvas-max, 1440px));
+  margin: 0 auto;
+  padding: 0;
+}
+
+.top-card {
+  width: min(100%, var(--hud-shell-max-width, 960px));
+  margin: 0 auto 24px;
+  border-radius: 18px;
+}
+
+.top-card__content {
+  width: 100%;
+}
+
 .dashboard-main {
-  display: flex;
-  flex-direction: column;
-  gap: var(--gap);
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  justify-items: start;
+  align-content: start;
+  gap: var(--hud-shell-gap, 24px);
 }
 
 [data-panel] {
@@ -427,8 +458,12 @@ h3 { font-size: 1.125rem; }
 
 .dashboard-panel.is-active {
   display: grid;
-  gap: var(--gap);
+  gap: var(--hud-shell-gap, 24px);
   grid-auto-rows: min-content;
+}
+
+.dashboard-panel--overview {
+  grid-column: 1 / -1;
 }
 
 .overview {
@@ -1054,6 +1089,66 @@ h3 { font-size: 1.125rem; }
   color: #7f1d1d;
 }
 
+.dashboard-main .card.hud-shell {
+  width: min(100%, var(--hud-shell-max-width, 960px));
+  min-width: min(100%, var(--hud-shell-min-width, 320px));
+  min-height: var(--hud-shell-min-height, 420px);
+  padding: var(--hud-shell-padding, 24px);
+  display: flex;
+  flex-direction: column;
+  gap: var(--hud-shell-gap, 24px);
+  margin: 0;
+  justify-self: start;
+  box-sizing: border-box;
+}
+
+.dashboard-main .card.hud-shell > *:first-child {
+  margin-top: 0;
+}
+
+.dashboard-main .hud-shell__header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: var(--hud-shell-gap, 24px);
+  flex-wrap: wrap;
+}
+
+.dashboard-main .hud-shell__title {
+  margin: 0;
+}
+
+.dashboard-main .hud-shell__supporting-text {
+  margin: 8px 0 16px;
+  color: var(--medium, #475569);
+  max-width: min(100%, var(--hud-shell-max-width, 960px));
+}
+
+.dashboard-main .hud-shell__supporting-text[data-width="wide"] {
+  max-width: min(100%, 720px);
+}
+
+.iot-devices-list {
+  margin-top: 12px;
+}
+
+.iot-action-group {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 160px;
+}
+
+.profile-form {
+  gap: 12px;
+  align-items: end;
+  max-width: min(100%, 640px);
+}
+
+.profile-form__actions {
+  grid-column: 1 / -1;
+}
+
 .top-card__title {
   font-size: 1.25rem;
   font-weight: 300;
@@ -1120,6 +1215,7 @@ h3 { font-size: 1.125rem; }
 
   .dashboard-main {
     padding-top: 0;
+    justify-items: stretch;
   }
 }
 
@@ -1134,6 +1230,11 @@ h3 { font-size: 1.125rem; }
 
   .card--feature {
     padding: 16px;
+  }
+
+  .dashboard-main .card.hud-shell {
+    min-height: auto;
+    padding: clamp(18px, 5vw, 24px);
   }
 }
 
