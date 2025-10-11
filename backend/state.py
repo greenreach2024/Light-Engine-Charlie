@@ -6,7 +6,7 @@ from datetime import datetime
 from typing import Dict, Iterable, List, Optional
 
 from .config import LightingFixture
-from .device_models import Device, Schedule, SensorEvent
+from .device_models import Device, GroupSchedule, Schedule, SensorEvent
 
 
 class DeviceRegistry:
@@ -101,9 +101,42 @@ class ScheduleStore:
             return [schedule for schedule in self._schedules.values() if schedule.group == group]
 
 
+class GroupScheduleStore:
+    """Thread-safe storage for group or device scoped schedules."""
+
+    def __init__(self) -> None:
+        self._entries: Dict[str, GroupSchedule] = {}
+        self._lock = threading.RLock()
+
+    def upsert(self, schedule: GroupSchedule) -> GroupSchedule:
+        with self._lock:
+            self._entries[schedule.device_id] = schedule
+            return schedule
+
+    def get(self, device_id: str) -> Optional[GroupSchedule]:
+        with self._lock:
+            return self._entries.get(device_id)
+
+    def list(self, group: Optional[str] = None) -> List[GroupSchedule]:
+        with self._lock:
+            values = list(self._entries.values())
+            if group is None:
+                return values
+            return [entry for entry in values if entry.target_group() == group]
+
+    def delete(self, device_id: str) -> None:
+        with self._lock:
+            self._entries.pop(device_id, None)
+
+    def clear(self) -> None:
+        with self._lock:
+            self._entries.clear()
+
+
 __all__ = [
     "DeviceRegistry",
     "SensorEventBuffer",
     "LightingState",
     "ScheduleStore",
+    "GroupScheduleStore",
 ]
