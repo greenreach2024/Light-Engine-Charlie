@@ -1520,9 +1520,139 @@ function evaluateRoomAutomationConfig(roomConfig, envSnapshot, zones, legacyEnv)
   };
 }
 
-function evaluateRoomAutomationState(envSnapshot, zones, legacyEnv) {
+function buildBindingIndex(bindingSummary) {
+  const bindings = (bindingSummary && bindingSummary.bindings) || [];
+  const byZone = new Map();
+  const byRoom = new Map();
+
+  bindings.forEach((binding) => {
+    if (!binding) return;
+    const zoneCandidates = [binding.scopeId, binding.zoneId, binding.zoneName, binding.zoneKey];
+    zoneCandidates
+      .map((value) => normalizeString(value).toLowerCase())
+      .filter(Boolean)
+      .forEach((key) => {
+        if (!byZone.has(key)) {
+          byZone.set(key, binding);
+        }
+      });
+
+    const roomCandidates = [binding.roomId, binding.roomName];
+    roomCandidates
+      .map((value) => normalizeString(value).toLowerCase())
+      .filter(Boolean)
+      .forEach((key) => {
+        if (!byRoom.has(key)) {
+          byRoom.set(key, binding);
+        }
+      });
+  });
+
+  return { byZone, byRoom };
+}
+
+function findBindingForRoom(roomConfig, bindingIndex) {
+  if (!roomConfig || !bindingIndex) return null;
+  const { byZone, byRoom } = bindingIndex;
+  const zoneCandidates = [
+    roomConfig?.meta?.scopeId,
+    roomConfig?.meta?.zoneId,
+    roomConfig?.meta?.zoneName,
+    roomConfig?.sensors?.temp,
+    roomConfig?.sensors?.rh,
+    roomConfig?.roomId,
+  ];
+
+  for (const candidate of zoneCandidates) {
+    const key = normalizeString(candidate).toLowerCase();
+    if (!key) continue;
+    if (byZone.has(key)) return byZone.get(key);
+  }
+
+  const roomCandidates = [roomConfig.roomId, roomConfig.meta?.roomId, roomConfig.meta?.roomName, roomConfig.name];
+  for (const candidate of roomCandidates) {
+    const key = normalizeString(candidate).toLowerCase();
+    if (!key) continue;
+    if (byRoom.has(key)) return byRoom.get(key);
+  }
+
+  return null;
+}
+
+function mergeRoomWithBinding(roomConfig, binding) {
+  if (!binding) return roomConfig;
+  const scopeId = binding.scopeId || binding.zoneId || binding.zoneKey;
+
+  const merged = {
+    ...roomConfig,
+    sensors: {
+      ...(roomConfig.sensors || {}),
+    },
+    actuators: {
+      ...(roomConfig.actuators || {}),
+    },
+    meta: {
+      ...(roomConfig.meta || {}),
+    },
+  };
+
+  if (scopeId) {
+    merged.sensors.temp = scopeId;
+    merged.sensors.rh = scopeId;
+  }
+
+  if (Array.isArray(binding.actuators?.fans) && binding.actuators.fans.length) {
+    merged.actuators.fans = binding.actuators.fans
+      .map((entry) => normalizeString(entry.plugId || entry.deviceId))
+      .filter(Boolean);
+  }
+
+  if (Array.isArray(binding.actuators?.dehu) && binding.actuators.dehu.length) {
+    merged.actuators.dehu = binding.actuators.dehu
+      .map((entry) => normalizeString(entry.plugId || entry.deviceId))
+      .filter(Boolean);
+  }
+
+  merged.meta = {
+    ...merged.meta,
+    zoneId: binding.zoneId || merged.meta.zoneId,
+    zoneName: binding.zoneName || merged.meta.zoneName,
+    scopeId: scopeId || merged.meta.scopeId,
+    binding: {
+      zoneId: binding.zoneId,
+      zoneName: binding.zoneName,
+      scopeId,
+      roomId: binding.roomId,
+      roomName: binding.roomName,
+      primarySensorId: binding.primarySensorId || null,
+      sensors: (binding.sensors || []).map((sensor) => ({
+        deviceId: sensor.deviceId,
+        name: sensor.name,
+        primary: Boolean(sensor.primary),
+        weight: sensor.weight,
+        weightPercent: sensor.weightPercent,
+        rawWeight: sensor.rawWeight,
+        battery: sensor.battery,
+        vendor: sensor.vendor,
+        updatedAt: sensor.updatedAt || null,
+      })),
+      actuators: binding.actuators,
+      counts: binding.counts,
+      updatedAt: binding.updatedAt || null,
+    },
+  };
+
+  return merged;
+}
+
+function evaluateRoomAutomationState(envSnapshot, zones, legacyEnv, bindingSummary = null) {
+  const bindingIndex = buildBindingIndex(bindingSummary);
   const rooms = preEnvStore.listRooms();
-  const results = rooms.map((room) => evaluateRoomAutomationConfig(room, envSnapshot, zones, legacyEnv));
+  const results = rooms.map((room) => {
+    const binding = findBindingForRoom(room, bindingIndex);
+    const hydrated = mergeRoomWithBinding(room, binding);
+    return evaluateRoomAutomationConfig(hydrated, envSnapshot, zones, legacyEnv);
+  });
   const totalSuggestions = results.reduce((acc, room) => acc + (room.suggestions?.length || 0), 0);
   return {
     rooms: results,
@@ -2617,6 +2747,7 @@ app.options('/rules/*', (req, res) => { setPreAutomationCors(req, res); res.stat
 app.get('/env', async (req, res) => {
   try {
     setPreAutomationCors(req, res);
+    const zoneBindingSummary = await buildZoneBindingsFromDevices();
     const snapshot = preEnvStore.getSnapshot();
     const zonesFromScopes = Object.entries(snapshot.scopes || {}).map(([scopeId, scopeData]) => {
       const sensors = Object.entries(scopeData.sensors || {}).reduce((acc, [sensorKey, sensorData]) => {
@@ -2655,7 +2786,7 @@ app.get('/env', async (req, res) => {
 
     const zones = Array.isArray(zonesPayload.zones) && zonesPayload.zones.length ? zonesPayload.zones : zonesFromScopes;
     const legacyEnvState = readEnv();
-    const automationState = evaluateRoomAutomationState(snapshot, zones, legacyEnvState);
+    const automationState = evaluateRoomAutomationState(snapshot, zones, legacyEnvState, zoneBindingSummary);
     const aiBundle = buildAiAdvisory(automationState.rooms, legacyEnvState);
     const roomsWithAnalytics = automationState.rooms.map((room) => ({
       ...room,
@@ -2667,6 +2798,7 @@ app.get('/env', async (req, res) => {
       env: snapshot,
       zones,
       rooms: roomsWithAnalytics,
+      zoneBindings: zoneBindingSummary.bindings,
       readings: legacyEnvState.readings || [],
       targets: legacyEnvState.targets || {},
       control: legacyEnvState.control || {},
@@ -2692,7 +2824,10 @@ app.get('/env', async (req, res) => {
         provider: zonesPayload.meta?.provider || null,
         cache: Boolean(zonesPayload.meta?.cached),
         updatedAt: zonesPayload.meta?.updatedAt || null,
-        error: zonesPayload.meta?.error || null
+        error: zonesPayload.meta?.error || null,
+        zoneBindingsUpdatedAt: zoneBindingSummary.meta?.updatedAt || null,
+        zoneBindingsSource: zoneBindingSummary.meta?.source || null,
+        zoneBindingsError: zoneBindingSummary.meta?.error || null
       }
     });
   } catch (error) {
@@ -3253,6 +3388,357 @@ const devicesStore = createDeviceStore();
     console.warn('[charlie] Device seeding failed:', error.message);
   }
 })();
+
+function toTimestamp(value) {
+  if (!value) return null;
+  if (value instanceof Date) {
+    const ts = value.getTime();
+    return Number.isFinite(ts) ? ts : null;
+  }
+  if (typeof value === 'number' && Number.isFinite(value)) {
+    return value;
+  }
+  const parsed = Date.parse(value);
+  return Number.isFinite(parsed) ? parsed : null;
+}
+
+function toBoolean(value) {
+  if (typeof value === 'boolean') return value;
+  if (typeof value === 'number') return value !== 0;
+  if (typeof value === 'string') {
+    const normalized = value.trim().toLowerCase();
+    if (!normalized) return false;
+    return ['true', '1', 'yes', 'y', 'primary', 'on'].includes(normalized);
+  }
+  return false;
+}
+
+function toWeight(value) {
+  if (value === undefined || value === null) return null;
+  const num = Number(value);
+  if (!Number.isFinite(num)) return null;
+  if (num < 0) return null;
+  return num;
+}
+
+function normalizeString(value) {
+  if (value === undefined || value === null) return '';
+  if (typeof value === 'string') return value.trim();
+  return String(value || '').trim();
+}
+
+function collectTextTokens(...values) {
+  const tokens = new Set();
+  values
+    .flat()
+    .filter((entry) => entry !== undefined && entry !== null)
+    .forEach((entry) => {
+      const text = normalizeString(entry).toLowerCase();
+      if (!text) return;
+      text
+        .split(/[^a-z0-9]+/)
+        .map((token) => token.trim())
+        .filter(Boolean)
+        .forEach((token) => tokens.add(token));
+    });
+  return tokens;
+}
+
+function classifyDeviceKind(doc) {
+  if (!doc || typeof doc !== 'object') return null;
+  const details = doc.details || {};
+  const tokens = collectTextTokens(
+    doc.deviceType,
+    doc.type,
+    doc.category,
+    doc.model,
+    doc.protocol,
+    doc.name,
+    details.deviceType,
+    details.category,
+    details.model,
+    details.kind
+  );
+
+  if (
+    ['sensor', 'sensors', 'meter', 'thermometer', 'hygrometer', 'monitor', 'air', 'climate'].some((keyword) =>
+      tokens.has(keyword)
+    )
+  ) {
+    return 'sensor';
+  }
+
+  if (
+    ['plug', 'plugs', 'outlet', 'switch', 'relay', 'socket'].some((keyword) =>
+      tokens.has(keyword)
+    )
+  ) {
+    return 'plug';
+  }
+
+  if (doc.controlledType || details.controlledType) {
+    return 'plug';
+  }
+
+  return null;
+}
+
+function classifyControlledCategory(doc) {
+  const details = (doc && doc.details) || {};
+  const controlledRaw = normalizeString(
+    firstNonEmpty(
+      doc.controlledType,
+      doc.controlType,
+      details.controlledType,
+      details.controlType,
+      details.controlled_type,
+      details.control_type
+    )
+  ).toLowerCase();
+
+  const tokens = collectTextTokens(controlledRaw, doc.deviceType, doc.type, details.deviceType, details.type);
+
+  if (controlledRaw) {
+    if (controlledRaw.includes('dehu') || controlledRaw.includes('dehumid')) return 'dehu';
+    if (controlledRaw.includes('fan') || controlledRaw.includes('exhaust')) return 'fans';
+    if (controlledRaw.includes('heater') || controlledRaw.includes('heat')) return 'heaters';
+    if (controlledRaw.includes('light') || controlledRaw.includes('lamp')) return 'lights';
+  }
+
+  if (tokens.has('dehu') || tokens.has('dehumidifier')) return 'dehu';
+  if (tokens.has('fan') || tokens.has('fans') || tokens.has('blower')) return 'fans';
+  if (tokens.has('heater') || tokens.has('heat')) return 'heaters';
+  if (tokens.has('light') || tokens.has('lamp')) return 'lights';
+
+  return 'misc';
+}
+
+function normalizeZoneContext(doc) {
+  if (!doc || typeof doc !== 'object') return null;
+  const details = doc.details || {};
+
+  const zoneName = normalizeString(
+    firstNonEmpty(doc.zoneName, details.zoneName, doc.zone, details.zone, doc.location, details.location)
+  );
+  const zoneIdRaw = normalizeString(
+    firstNonEmpty(doc.zoneId, details.zoneId, doc.zoneSlug, details.zoneSlug, doc.zone, details.zone, zoneName)
+  );
+  const zoneId = zoneIdRaw || (zoneName ? slugify(zoneName) : '');
+  const zoneKey = zoneId ? zoneId.toLowerCase() : zoneName.toLowerCase();
+  if (!zoneKey) return null;
+
+  const roomName = normalizeString(
+    firstNonEmpty(doc.roomName, details.roomName, doc.room, details.room, doc.locationName, details.location, doc.location)
+  );
+  const roomIdRaw = normalizeString(
+    firstNonEmpty(doc.roomId, details.roomId, doc.roomSlug, details.roomSlug, roomName)
+  );
+  const roomId = roomIdRaw || (roomName ? slugify(roomName) : '');
+  const roomKey = roomId ? roomId.toLowerCase() : roomName.toLowerCase();
+
+  const scopeId = slugify(zoneId || zoneName || roomId || roomName || zoneKey || 'zone');
+
+  return {
+    zoneId: zoneId || null,
+    zoneName: zoneName || (zoneId || '').toUpperCase(),
+    zoneKey,
+    roomId: roomId || null,
+    roomName: roomName || null,
+    roomKey,
+    scopeId,
+  };
+}
+
+function buildSensorEntry(doc, context) {
+  const details = doc.details || {};
+  const updatedAt = normalizeString(firstNonEmpty(doc.updatedAt, details.updatedAt));
+  const updatedAtTs = toTimestamp(updatedAt);
+  const rawWeight = toWeight(firstNonEmpty(doc.weight, details.weight));
+  const battery = toNumberOrNull(firstNonEmpty(doc.battery, details.battery));
+  return {
+    deviceId: normalizeString(firstNonEmpty(doc.device_id, doc.deviceId, doc.id)),
+    name: normalizeString(firstNonEmpty(doc.deviceName, doc.name, details.displayName, details.name)),
+    vendor: normalizeString(firstNonEmpty(doc.manufacturer, details.manufacturer, doc.protocol)),
+    primary: toBoolean(firstNonEmpty(doc.primary, details.primary)),
+    rawWeight,
+    weight: null,
+    weightPercent: null,
+    weightSource: rawWeight !== null ? 'explicit' : 'default',
+    battery,
+    updatedAt: updatedAtTs ? new Date(updatedAtTs).toISOString() : null,
+    updatedAtTs,
+    zoneId: context.zoneId,
+    zoneName: context.zoneName,
+  };
+}
+
+function buildActuatorEntry(doc, context) {
+  const details = doc.details || {};
+  const updatedAt = normalizeString(firstNonEmpty(doc.updatedAt, details.updatedAt));
+  const updatedAtTs = toTimestamp(updatedAt);
+  return {
+    deviceId: normalizeString(firstNonEmpty(doc.device_id, doc.deviceId, doc.id)),
+    plugId: normalizeString(firstNonEmpty(details.plugId, details.deviceId, doc.plugId, doc.id)),
+    name: normalizeString(firstNonEmpty(doc.deviceName, doc.name, details.displayName, details.name)),
+    vendor: normalizeString(firstNonEmpty(doc.manufacturer, details.manufacturer, doc.protocol)),
+    controlledType: normalizeString(firstNonEmpty(doc.controlledType, details.controlledType)),
+    energyTelemetry: normalizeString(firstNonEmpty(doc.energyTelemetry, details.energyTelemetry)),
+    managedEquipment: normalizeString(firstNonEmpty(doc.managedEquipment, details.managedEquipment)),
+    updatedAt: updatedAtTs ? new Date(updatedAtTs).toISOString() : null,
+    updatedAtTs,
+    zoneId: context.zoneId,
+    zoneName: context.zoneName,
+  };
+}
+
+function finalizeZoneBinding(binding) {
+  const sensors = binding.sensors || [];
+  if (sensors.length) {
+    sensors.sort((a, b) => {
+      if (a.primary && !b.primary) return -1;
+      if (!a.primary && b.primary) return 1;
+      const weightA = a.rawWeight ?? 0;
+      const weightB = b.rawWeight ?? 0;
+      if (weightA !== weightB) return weightB - weightA;
+      return a.deviceId.localeCompare(b.deviceId);
+    });
+
+    let primary = sensors.find((sensor) => sensor.primary);
+    if (!primary) {
+      primary = sensors[0];
+      if (primary) primary.primary = true;
+    } else {
+      sensors.forEach((sensor) => {
+        sensor.primary = sensor === primary;
+      });
+    }
+
+    const explicitCount = sensors.filter((sensor) => sensor.rawWeight !== null).length;
+    if (explicitCount !== sensors.length) {
+      const defaultWeight = sensors.length ? 1 / sensors.length : 0;
+      sensors.forEach((sensor) => {
+        if (sensor.rawWeight === null) {
+          sensor.rawWeight = defaultWeight;
+          sensor.weightSource = 'default';
+        }
+      });
+    }
+
+    const totalWeight = sensors.reduce((sum, sensor) => sum + (sensor.rawWeight || 0), 0);
+    const divisor = totalWeight > 0 ? totalWeight : sensors.length || 1;
+    sensors.forEach((sensor) => {
+      const normalized = divisor ? (sensor.rawWeight || 0) / divisor : 0;
+      const rounded = Math.max(0, Math.round(normalized * 1000) / 1000);
+      sensor.weight = rounded;
+      sensor.weightPercent = Math.round(rounded * 10000) / 100;
+    });
+    binding.primarySensorId = primary ? primary.deviceId : null;
+  } else {
+    binding.primarySensorId = null;
+  }
+
+  binding.counts = {
+    sensors: sensors.length,
+    fans: binding.actuators.fans.length,
+    dehu: binding.actuators.dehu.length,
+    heaters: binding.actuators.heaters.length,
+    lights: binding.actuators.lights.length,
+    misc: binding.actuators.misc.length,
+  };
+
+  binding.updatedAtTs = Math.max(
+    binding.updatedAtTs || 0,
+    ...sensors.map((sensor) => sensor.updatedAtTs || 0),
+    ...binding.actuators.fans.map((act) => act.updatedAtTs || 0),
+    ...binding.actuators.dehu.map((act) => act.updatedAtTs || 0),
+    ...binding.actuators.heaters.map((act) => act.updatedAtTs || 0),
+    ...binding.actuators.lights.map((act) => act.updatedAtTs || 0),
+    ...binding.actuators.misc.map((act) => act.updatedAtTs || 0)
+  );
+  binding.updatedAt = binding.updatedAtTs ? new Date(binding.updatedAtTs).toISOString() : null;
+  delete binding.updatedAtTs;
+
+  // Remove temporary timestamp fields from child entries for cleaner JSON payloads
+  sensors.forEach((sensor) => delete sensor.updatedAtTs);
+  Object.values(binding.actuators).forEach((list) =>
+    list.forEach((entry) => delete entry.updatedAtTs)
+  );
+
+  return binding;
+}
+
+async function buildZoneBindingsFromDevices() {
+  try {
+    const rows = await devicesStore.find({});
+    const zoneMap = new Map();
+
+    for (const doc of rows) {
+      const kind = classifyDeviceKind(doc);
+      if (!kind) continue;
+      const context = normalizeZoneContext(doc);
+      if (!context) continue;
+
+      const zoneKey = context.zoneKey;
+      if (!zoneMap.has(zoneKey)) {
+        zoneMap.set(zoneKey, {
+          zoneId: context.zoneId,
+          zoneName: context.zoneName || context.zoneId,
+          zoneKey,
+          scopeId: context.scopeId,
+          roomId: context.roomId,
+          roomName: context.roomName,
+          sensors: [],
+          actuators: {
+            fans: [],
+            dehu: [],
+            heaters: [],
+            lights: [],
+            misc: [],
+          },
+          updatedAt: null,
+          updatedAtTs: null,
+        });
+      }
+
+      const binding = zoneMap.get(zoneKey);
+      if (!binding.roomId && context.roomId) binding.roomId = context.roomId;
+      if (!binding.roomName && context.roomName) binding.roomName = context.roomName;
+      if (!binding.zoneId && context.zoneId) binding.zoneId = context.zoneId;
+      if (!binding.zoneName && context.zoneName) binding.zoneName = context.zoneName;
+
+      if (kind === 'sensor') {
+        binding.sensors.push(buildSensorEntry(doc, context));
+      } else if (kind === 'plug') {
+        const category = classifyControlledCategory(doc);
+        if (category && binding.actuators[category]) {
+          const entry = buildActuatorEntry(doc, context);
+          if (!binding.actuators[category].some((existing) => existing.deviceId === entry.deviceId)) {
+            binding.actuators[category].push(entry);
+          }
+        }
+      }
+    }
+
+    const bindings = Array.from(zoneMap.values()).map(finalizeZoneBinding);
+    bindings.sort((a, b) => a.zoneName.localeCompare(b.zoneName, undefined, { sensitivity: 'base' }));
+
+    const meta = {
+      source: 'devices-store',
+      bindings: bindings.length,
+      updatedAt:
+        bindings.reduce((latest, binding) => {
+          if (!binding.updatedAt) return latest;
+          if (!latest) return binding.updatedAt;
+          return Date.parse(binding.updatedAt) > Date.parse(latest) ? binding.updatedAt : latest;
+        }, null) || null,
+    };
+
+    return { bindings, meta };
+  } catch (error) {
+    console.warn('[automation] Failed to build zone bindings:', error.message);
+    return { bindings: [], meta: { source: 'devices-store', error: error.message } };
+  }
+}
 
 // Devices API (NeDB)
 function setApiCors(res){
