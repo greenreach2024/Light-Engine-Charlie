@@ -1,6 +1,6 @@
 {
-  "scale": "00-FF",
-  "maxByte": 255,
+  "scale": "00-64",
+  "maxByte": 64,
   "updatedAt": null,
   "source": "default",
   "deviceId": null,

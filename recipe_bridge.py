@@ -18,6 +18,7 @@ Key behaviours:
 
 from __future__ import annotations
 
+import datetime as dt
 import json
 import logging
 import os
@@ -73,6 +74,7 @@ HEADER_ALIASES: Dict[str, Tuple[str, ...]] = {
     "override_mode": ("override", "override mode"),
     "override_val": ("override val", "override value"),
     "recipe_ref": ("recipe", "plan", "plan key", "plan id"),
+    "seed_date": ("seed date", "seeddate", "seed", "seeded"),
 }
 
 
@@ -170,23 +172,131 @@ def split_green_into_whites(cw: Optional[float], ww: Optional[float], green: Opt
     return cw_val, ww_val
 
 
+def clamp_percent(value: Optional[float]) -> Optional[float]:
+    if value is None:
+        return None
+    clipped = max(0.0, min(100.0, float(value)))
+    return round(clipped, 4)
+
+
+def clamp_minutes(value: Optional[int]) -> Optional[int]:
+    if value is None:
+        return None
+    return max(0, min(120, int(value)))
+
+
+def parse_duration_hours(value: Any) -> Optional[int]:
+    if value is None:
+        return None
+    if isinstance(value, (int, float)) and not isinstance(value, bool):
+        return max(0, min(24, int(round(float(value)))))
+    text = coerce_str(value)
+    if not text:
+        return None
+    candidate = text.replace("hours", " ").replace("hrs", " ")
+    if "/" in candidate:
+        candidate = candidate.split("/", 1)[0]
+    match = re.search(r"-?\d+(?:\.\d+)?", candidate)
+    if not match:
+        return None
+    try:
+        number = float(match.group(0))
+    except ValueError:
+        return None
+    return max(0, min(24, int(round(number))))
+
+
+def parse_time_of_day(value: Any) -> Optional[str]:
+    if value is None:
+        return None
+    if isinstance(value, dt.datetime):
+        return parse_time_of_day(value.time())
+    if isinstance(value, dt.time):
+        base = value.replace(second=0, microsecond=0)
+        return base.strftime("%H:%M")
+    text = coerce_str(value)
+    if not text:
+        return None
+    normalized = re.sub(r"\s+", " ", text.strip())
+    upper = normalized.upper()
+    formats = ["%H:%M", "%H%M", "%I:%M%p", "%I:%M %p", "%I%p", "%I %p"]
+    for fmt in formats:
+        try:
+            parsed = dt.datetime.strptime(upper, fmt)
+            return parsed.time().strftime("%H:%M")
+        except ValueError:
+            continue
+    digits = re.sub(r"[^0-9]", "", normalized)
+    if digits:
+        if len(digits) == 3:
+            digits = f"0{digits}"
+        if len(digits) == 4:
+            try:
+                parsed = dt.datetime.strptime(digits, "%H%M")
+                return parsed.time().strftime("%H:%M")
+            except ValueError:
+                pass
+    if isinstance(value, (int, float)) and not isinstance(value, bool):
+        hours = int(value)
+        minutes = int(round((float(value) - hours) * 60))
+        while minutes >= 60:
+            minutes -= 60
+            hours += 1
+        hours %= 24
+        return f"{hours:02d}:{minutes:02d}"
+    return None
+
+
+def normalize_seed_date(value: Any) -> Optional[str]:
+    if value is None:
+        return None
+    if isinstance(value, dt.datetime):
+        return value.date().isoformat()
+    if isinstance(value, dt.date):
+        return value.isoformat()
+    text = coerce_str(value)
+    if not text:
+        return None
+    normalized = text.strip()
+    candidates = [
+        "%Y-%m-%d",
+        "%Y/%m/%d",
+        "%m/%d/%Y",
+        "%m/%d/%y",
+        "%d/%m/%Y",
+        "%d/%m/%y",
+        "%d-%m-%Y",
+        "%d-%m-%y",
+    ]
+    for fmt in candidates:
+        try:
+            parsed = dt.datetime.strptime(normalized, fmt)
+            return parsed.date().isoformat()
+        except ValueError:
+            continue
+    digits = re.sub(r"[^0-9]", "", normalized)
+    if len(digits) == 8:
+        try:
+            parsed = dt.datetime.strptime(digits, "%Y%m%d")
+            return parsed.date().isoformat()
+        except ValueError:
+            pass
+    if len(digits) == 6:
+        try:
+            parsed = dt.datetime.strptime(digits, "%y%m%d")
+            return parsed.date().isoformat()
+        except ValueError:
+            pass
+    return None
+
+
 def make_plan_id(name: str) -> str:
     slug = re.sub(r"[^A-Za-z0-9]+", "-", name.strip()).strip("-")
     return slug or "Plan"
 
 
-def parse_photoperiod(value: Any) -> Optional[Any]:
-    if value is None:
-        return None
-    if isinstance(value, (int, float)) and not isinstance(value, bool):
-        num = float(value)
-        if num.is_integer():
-            return int(num)
-        return round(num, 2)
-    text = coerce_str(value)
-    if not text:
-        return None
-    return text
+def parse_photoperiod(value: Any) -> Optional[int]:
+    return parse_duration_hours(value)
 
 
 def parse_recipes_sheet(sheet: Worksheet) -> Tuple[List[Dict[str, Any]], Dict[str, Dict[str, Any]]]:
@@ -211,15 +321,17 @@ def parse_recipes_sheet(sheet: Worksheet) -> Tuple[List[Dict[str, Any]], Dict[st
         name = coerce_str(raw_name)
         if not name:
             continue
-        blue = coerce_number(row[blue_col]) if blue_col is not None else None
-        red = coerce_number(row[red_col]) if red_col is not None else None
-        cw = coerce_number(row[cw_col]) if cw_col is not None else None
-        ww = coerce_number(row[ww_col]) if ww_col is not None else None
+        blue = clamp_percent(coerce_number(row[blue_col]) if blue_col is not None else None)
+        red = clamp_percent(coerce_number(row[red_col]) if red_col is not None else None)
+        cw_raw = coerce_number(row[cw_col]) if cw_col is not None else None
+        ww_raw = coerce_number(row[ww_col]) if ww_col is not None else None
         green = coerce_number(row[green_col]) if green_col is not None else None
-        cw, ww = split_green_into_whites(cw, ww, green)
+        cw_split, ww_split = split_green_into_whites(cw_raw, ww_raw, green)
+        cw = clamp_percent(cw_split)
+        ww = clamp_percent(ww_split)
         photoperiod = parse_photoperiod(row[photoperiod_col]) if photoperiod_col is not None else None
-        sunrise = coerce_int(row[sunrise_col]) if sunrise_col is not None else None
-        sunset = coerce_int(row[sunset_col]) if sunset_col is not None else None
+        sunrise = clamp_minutes(coerce_int(row[sunrise_col]) if sunrise_col is not None else None)
+        sunset = clamp_minutes(coerce_int(row[sunset_col]) if sunset_col is not None else None)
 
         plan_id = make_plan_id(name)
         plan = {
@@ -239,13 +351,13 @@ def parse_recipes_sheet(sheet: Worksheet) -> Tuple[List[Dict[str, Any]], Dict[st
 
         day_entry: Dict[str, Any] = {"stage": "Static"}
         if blue is not None:
-            day_entry["bl"] = round(blue, 4)
+            day_entry["bl"] = blue
         if red is not None:
-            day_entry["rd"] = round(red, 4)
+            day_entry["rd"] = red
         if cw is not None:
-            day_entry["cw"] = round(cw, 4)
+            day_entry["cw"] = cw
         if ww is not None:
-            day_entry["ww"] = round(ww, 4)
+            day_entry["ww"] = ww
         plan["days"] = [day_entry]
         plan["meta"] = {"source": "excel"}
 
@@ -300,6 +412,7 @@ def parse_schedules_sheet(sheet: Worksheet, plan_lookup: Dict[str, Dict[str, Any
     override_mode_col = find_column(header_map, "override_mode")
     override_val_col = find_column(header_map, "override_val")
     recipe_col = find_column(header_map, "recipe_ref")
+    seed_col = find_column(header_map, "seed_date")
 
     schedules: List[Dict[str, Any]] = []
     for row in sheet.iter_rows(min_row=2, values_only=True):
@@ -308,19 +421,19 @@ def parse_schedules_sheet(sheet: Worksheet, plan_lookup: Dict[str, Dict[str, Any
             continue
         schedule: Dict[str, Any] = {"id": identifier}
         if start_col is not None:
-            start_value = coerce_str(row[start_col])
+            start_value = parse_time_of_day(row[start_col])
             if start_value:
                 schedule["start"] = start_value
         if duration_col is not None:
-            duration = coerce_number(row[duration_col])
+            duration = parse_duration_hours(row[duration_col])
             if duration is not None:
                 schedule["durationHours"] = duration
         if ramp_up_col is not None:
-            value = coerce_int(row[ramp_up_col])
+            value = clamp_minutes(coerce_int(row[ramp_up_col]))
             if value is not None:
                 schedule["rampUpMin"] = value
         if ramp_down_col is not None:
-            value = coerce_int(row[ramp_down_col])
+            value = clamp_minutes(coerce_int(row[ramp_down_col]))
             if value is not None:
                 schedule["rampDownMin"] = value
         if override_mode_col is not None:
@@ -343,6 +456,10 @@ def parse_schedules_sheet(sheet: Worksheet, plan_lookup: Dict[str, Dict[str, Any
                     schedule["planKey"] = plan["id"]
                 else:
                     schedule["planKey"] = recipe_name
+        if seed_col is not None:
+            seed = normalize_seed_date(row[seed_col])
+            if seed:
+                schedule["seedDate"] = seed
         schedules.append(schedule)
     return schedules
 
@@ -373,12 +490,14 @@ def parse_daily_sheet(sheet: Worksheet) -> Tuple[List[Dict[str, Any]], List[Dict
         stage = coerce_str(row[stage_col]) if stage_col is not None else None
         ppfd = coerce_number(row[ppfd_col]) if ppfd_col is not None else None
         photoperiod = parse_photoperiod(row[photoperiod_col]) if photoperiod_col is not None else None
-        blue = coerce_number(row[blue_col]) if blue_col is not None else None
-        red = coerce_number(row[red_col]) if red_col is not None else None
-        cw = coerce_number(row[cw_col]) if cw_col is not None else None
-        ww = coerce_number(row[ww_col]) if ww_col is not None else None
+        blue = clamp_percent(coerce_number(row[blue_col]) if blue_col is not None else None)
+        red = clamp_percent(coerce_number(row[red_col]) if red_col is not None else None)
+        cw_raw = coerce_number(row[cw_col]) if cw_col is not None else None
+        ww_raw = coerce_number(row[ww_col]) if ww_col is not None else None
         green = coerce_number(row[green_col]) if green_col is not None else None
-        cw, ww = split_green_into_whites(cw, ww, green)
+        cw_split, ww_split = split_green_into_whites(cw_raw, ww_raw, green)
+        cw = clamp_percent(cw_split)
+        ww = clamp_percent(ww_split)
 
         temp_c = coerce_number(row[temp_col]) if temp_col is not None else None
         rh = coerce_number(row[rh_col]) if rh_col is not None else None
@@ -420,9 +539,13 @@ def parse_daily_sheet(sheet: Worksheet) -> Tuple[List[Dict[str, Any]], List[Dict
             if temp_c is not None:
                 env_entry["tempC"] = temp_c
             if rh is not None:
-                env_entry["rh"] = rh
+                clipped_rh = clamp_percent(rh)
+                if clipped_rh is not None:
+                    env_entry["rh"] = clipped_rh
             if rh_band is not None:
-                env_entry["rhBand"] = rh_band
+                band = clamp_percent(abs(rh_band))
+                if band is not None:
+                    env_entry["rhBand"] = band
             if co2 is not None:
                 env_entry["co2"] = co2
             env_days.append(env_entry)
