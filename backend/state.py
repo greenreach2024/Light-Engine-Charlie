@@ -2,8 +2,9 @@
 from __future__ import annotations
 
 import threading
-from datetime import datetime
-from typing import Dict, Iterable, List, Optional
+from copy import deepcopy
+from datetime import datetime, timezone
+from typing import Any, Dict, Iterable, List, Optional
 
 from .config import LightingFixture
 from .device_models import Device, GroupSchedule, Schedule, SensorEvent
@@ -51,6 +52,23 @@ class SensorEventBuffer:
                 if event.topic == topic:
                     return event
             return None
+
+
+def _merge_dicts(base: Dict[str, Any], updates: Dict[str, Any]) -> Dict[str, Any]:
+    """Recursively merge two dictionaries without mutating the inputs."""
+
+    merged = dict(base)
+    for key, value in updates.items():
+        if isinstance(value, dict) and isinstance(merged.get(key), dict):
+            merged[key] = _merge_dicts(merged[key], value)
+        else:
+            merged[key] = deepcopy(value)
+    return merged
+
+
+def _utc_isoformat(ts: Optional[datetime] = None) -> str:
+    moment = ts or datetime.now(timezone.utc)
+    return moment.astimezone(timezone.utc).replace(microsecond=0).isoformat().replace("+00:00", "Z")
 
 
 class LightingState:
@@ -133,10 +151,133 @@ class GroupScheduleStore:
             self._entries.clear()
 
 
+class PlanStore:
+    """Thread-safe storage for lighting plans published via /plans."""
+
+    def __init__(self) -> None:
+        self._plans: Dict[str, Dict[str, Any]] = {}
+        self._updated: Dict[str, str] = {}
+        self._lock = threading.RLock()
+
+    def upsert_many(self, plans: Dict[str, Dict[str, Any]]) -> Dict[str, Dict[str, Any]]:
+        with self._lock:
+            for key, payload in plans.items():
+                if not isinstance(key, str) or not key.strip():
+                    continue
+                normalized_key = key.strip()
+                existing = self._plans.get(normalized_key, {})
+                if isinstance(payload, dict):
+                    base = existing if isinstance(existing, dict) else {}
+                    merged = _merge_dicts(base, payload)
+                else:
+                    merged = deepcopy(payload)
+                self._plans[normalized_key] = merged
+                self._updated[normalized_key] = _utc_isoformat()
+        return self.list()
+
+    def list(self) -> Dict[str, Dict[str, Any]]:
+        with self._lock:
+            return {key: deepcopy(value) for key, value in self._plans.items()}
+
+    def get(self, plan_key: str) -> Optional[Dict[str, Any]]:
+        with self._lock:
+            if plan_key not in self._plans:
+                return None
+            return deepcopy(self._plans[plan_key])
+
+    def metadata(self) -> Dict[str, Dict[str, str]]:
+        with self._lock:
+            return {key: {"updatedAt": value} for key, value in self._updated.items()}
+
+    def clear(self) -> None:
+        with self._lock:
+            self._plans.clear()
+            self._updated.clear()
+
+
+class EnvironmentStateStore:
+    """Maintain the latest environmental targets and telemetry configuration."""
+
+    def __init__(self) -> None:
+        self._state: Dict[str, Any] = {"rooms": {}, "zones": {}}
+        self._lock = threading.RLock()
+
+    def upsert_rooms(self, rooms: Dict[str, Any]) -> Dict[str, Any]:
+        with self._lock:
+            current_rooms = self._state.get("rooms", {})
+            merged = _merge_dicts(current_rooms, rooms)
+            self._state["rooms"] = merged
+            self._state["updatedAt"] = _utc_isoformat()
+            return deepcopy(merged)
+
+    def upsert_zone(self, zone_id: str, payload: Dict[str, Any]) -> Dict[str, Any]:
+        with self._lock:
+            zones = self._state.setdefault("zones", {})
+            existing = zones.get(zone_id, {"zoneId": zone_id})
+            incoming = dict(payload)
+            incoming["zoneId"] = zone_id
+            incoming["updatedAt"] = _utc_isoformat()
+            zones[zone_id] = _merge_dicts(existing, incoming)
+            self._state["updatedAt"] = _utc_isoformat()
+            return deepcopy(zones[zone_id])
+
+    def merge(self, payload: Dict[str, Any]) -> Dict[str, Any]:
+        with self._lock:
+            self._state = _merge_dicts(self._state, payload)
+            self._state["updatedAt"] = _utc_isoformat()
+            return self.snapshot()
+
+    def get_zone(self, zone_id: str) -> Optional[Dict[str, Any]]:
+        with self._lock:
+            zone = self._state.get("zones", {}).get(zone_id)
+            return deepcopy(zone) if zone else None
+
+    def snapshot(self) -> Dict[str, Any]:
+        with self._lock:
+            return deepcopy(self._state)
+
+    def clear(self) -> None:
+        with self._lock:
+            self._state = {"rooms": {}, "zones": {}}
+
+
+class DeviceDataStore:
+    """Persist best-effort controller state for /api/devicedatas."""
+
+    def __init__(self) -> None:
+        self._entries: Dict[str, Dict[str, Any]] = {}
+        self._lock = threading.RLock()
+
+    def upsert(self, device_id: str, payload: Dict[str, Any]) -> Dict[str, Any]:
+        with self._lock:
+            entry = self._entries.get(device_id, {"deviceId": device_id})
+            merged = _merge_dicts(entry, payload)
+            merged["deviceId"] = device_id
+            merged["updatedAt"] = _utc_isoformat()
+            self._entries[device_id] = merged
+            return deepcopy(merged)
+
+    def get(self, device_id: str) -> Optional[Dict[str, Any]]:
+        with self._lock:
+            entry = self._entries.get(device_id)
+            return deepcopy(entry) if entry else None
+
+    def list(self) -> List[Dict[str, Any]]:
+        with self._lock:
+            return [deepcopy(entry) for entry in self._entries.values()]
+
+    def clear(self) -> None:
+        with self._lock:
+            self._entries.clear()
+
+
 __all__ = [
     "DeviceRegistry",
     "SensorEventBuffer",
     "LightingState",
     "ScheduleStore",
     "GroupScheduleStore",
+    "PlanStore",
+    "EnvironmentStateStore",
+    "DeviceDataStore",
 ]

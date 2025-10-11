@@ -6,16 +6,16 @@ import asyncio
 import contextlib
 import logging
 import os
-from datetime import date, datetime, time
+from datetime import date, datetime, time, timezone
 from typing import Any, Dict, List, Optional
 
-from fastapi import Depends, FastAPI, Header, HTTPException, Query, status
+from fastapi import Body, Depends, FastAPI, Header, HTTPException, Query, status
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field, validator
 
 from .ai_assist import SetupAssistError, SetupAssistService
 from .automation import AutomationEngine, lux_balancing_rule, occupancy_rule
-from .config import EnvironmentConfig, build_environment_config
+from .config import EnvironmentConfig, LightingFixture, build_environment_config
 from .device_discovery import fetch_switchbot_status, full_discovery_cycle
 from .device_models import (
     GroupSchedule,
@@ -26,9 +26,12 @@ from .device_models import (
 from .lighting import LightingController
 from .logging_config import configure_logging
 from .state import (
+    DeviceDataStore,
     DeviceRegistry,
+    EnvironmentStateStore,
     GroupScheduleStore,
     LightingState,
+    PlanStore,
     ScheduleStore,
     SensorEventBuffer,
 )
@@ -53,6 +56,9 @@ LIGHTING_STATE = LightingState(CONFIG.lighting_inventory or [])
 CONTROLLER = LightingController(CONFIG.lighting_inventory or [], LIGHTING_STATE)
 SCHEDULES = ScheduleStore()
 GROUP_SCHEDULES = GroupScheduleStore()
+PLAN_STORE = PlanStore()
+ENVIRONMENT_STATE = EnvironmentStateStore()
+DEVICE_DATA = DeviceDataStore()
 AUTOMATION = AutomationEngine(CONTROLLER, SCHEDULES)
 AI_ASSIST_SERVICE: Optional[SetupAssistService] = None
 
@@ -70,6 +76,24 @@ if ZONE_MAP:
     vacant_level = int(os.getenv("VACANT_BRIGHTNESS", "30"))
     AUTOMATION.register_rule(lux_balancing_rule(ZONE_MAP, target_lux))
     AUTOMATION.register_rule(occupancy_rule(ZONE_MAP, occupied_level, vacant_level))
+
+FIXTURE_INVENTORY = CONFIG.lighting_inventory or []
+DEVICE_ID_MAP: Dict[str, LightingFixture] = {}
+DEVICE_ID_BY_ADDRESS: Dict[str, str] = {}
+for index, fixture in enumerate(FIXTURE_INVENTORY, start=1):
+    device_id = str(index)
+    DEVICE_ID_MAP[device_id] = fixture
+    DEVICE_ID_BY_ADDRESS[fixture.address] = device_id
+    DEVICE_DATA.upsert(
+        device_id,
+        {
+            "status": "off",
+            "value": None,
+            "name": fixture.name,
+            "address": fixture.address,
+            "model": fixture.model,
+        },
+    )
 
 _AUTOMATION_TASK: Optional[asyncio.Task] = None
 _DISCOVERY_TASK: Optional[asyncio.Task] = None
@@ -109,6 +133,48 @@ class LightingFixtureResponse(BaseModel):
     max_brightness: int
     spectrum_min: int
     spectrum_max: int
+
+
+class DeviceDataPatch(BaseModel):
+    status: Optional[str] = None
+    value: Optional[str] = None
+
+    class Config:
+        extra = "allow"
+
+    @validator("status")
+    def _normalize_status(cls, value: Optional[str]) -> Optional[str]:
+        if value is None:
+            return None
+        if not isinstance(value, str):
+            raise ValueError("status must be a string")
+        trimmed = value.strip()
+        if not trimmed:
+            raise ValueError("status must be a non-empty string")
+        return trimmed.lower()
+
+    @validator("value")
+    def _normalize_value(cls, value: Optional[str]) -> Optional[str]:
+        if value is None:
+            return None
+        if not isinstance(value, str):
+            raise ValueError("value must be a string")
+        stripped = value.strip()
+        if not stripped:
+            return None
+        if stripped.lower().startswith("0x"):
+            stripped = stripped[2:]
+        stripped = stripped.replace(" ", "")
+        if len(stripped) % 2 != 0:
+            raise ValueError("value must be an even-length hexadecimal string")
+        allowed = set("0123456789abcdefABCDEF")
+        if any(ch not in allowed for ch in stripped):
+            raise ValueError("value must be hexadecimal")
+        return stripped.upper()
+
+    def to_payload(self) -> Dict[str, Any]:
+        payload = self.dict(exclude_unset=True)
+        return {key: value for key, value in payload.items() if value is not None}
 
 
 class ScheduleOverridePayload(BaseModel):
@@ -263,6 +329,100 @@ def _serialize_group_schedule(schedule: GroupSchedule) -> Dict[str, Any]:
     return schedule.to_response_payload()
 
 
+def _iso_now() -> str:
+    return datetime.now(timezone.utc).replace(microsecond=0).isoformat().replace("+00:00", "Z")
+
+
+def _resolve_fixture(device_identifier: str) -> tuple[str, LightingFixture]:
+    candidate = device_identifier.strip()
+    if candidate in DEVICE_ID_MAP:
+        return candidate, DEVICE_ID_MAP[candidate]
+    if candidate in DEVICE_ID_BY_ADDRESS:
+        resolved = DEVICE_ID_BY_ADDRESS[candidate]
+        return resolved, DEVICE_ID_MAP[resolved]
+    for device_id, fixture in DEVICE_ID_MAP.items():
+        if fixture.name == candidate:
+            return device_id, fixture
+    raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Device not found")
+
+
+def _hex_to_channels(value: str) -> List[int]:
+    stripped = value.strip()
+    if stripped.startswith("0x"):
+        stripped = stripped[2:]
+    if len(stripped) % 2 != 0:
+        return []
+    channels: List[int] = []
+    for index in range(0, len(stripped), 2):
+        try:
+            channels.append(int(stripped[index : index + 2], 16))
+        except ValueError:
+            return []
+    return channels
+
+
+def _estimate_brightness(value: Optional[str], fixture: LightingFixture) -> Optional[int]:
+    if not value:
+        return None
+    channels = _hex_to_channels(value)
+    if not channels:
+        return None
+    window = channels[:4] or channels
+    if not window:
+        return None
+    average = sum(window) / len(window)
+    percentage = int(round((average / 255.0) * 100))
+    clamped = max(fixture.min_brightness, min(fixture.max_brightness, percentage))
+    return clamped
+
+
+def _apply_device_patch(fixture: LightingFixture, entry: Dict[str, Any]) -> None:
+    status_text = entry.get("status")
+    value_text = entry.get("value")
+    brightness: Optional[int] = None
+    if isinstance(status_text, str) and status_text.lower() == "off":
+        brightness = fixture.min_brightness
+    else:
+        brightness = _estimate_brightness(value_text, fixture)
+        if brightness is None and isinstance(status_text, str) and status_text.lower() == "on":
+            brightness = fixture.max_brightness
+    if brightness is not None:
+        try:
+            CONTROLLER.set_output(fixture.address, brightness)
+        except ValueError:
+            LOGGER.warning("Failed to apply lighting update for %s", fixture.address)
+
+
+def _serialize_device_data(device_id: str, fixture: LightingFixture) -> Dict[str, Any]:
+    stored = DEVICE_DATA.get(device_id) or {}
+    last_state = LIGHTING_STATE.get_state(fixture.address) or {}
+    status_text = stored.get("status")
+    if not status_text:
+        brightness = last_state.get("brightness", 0)
+        status_text = "on" if brightness and brightness > fixture.min_brightness else "off"
+    value_text = stored.get("value")
+    response: Dict[str, Any] = {
+        "id": device_id,
+        "deviceId": device_id,
+        "name": fixture.name,
+        "model": fixture.model,
+        "address": fixture.address,
+        "status": status_text,
+        "value": value_text,
+        "online": True,
+        "updatedAt": stored.get("updatedAt"),
+        "controlInterface": fixture.control_interface,
+        "lastKnown": last_state,
+    }
+    channels = _hex_to_channels(value_text) if isinstance(value_text, str) else []
+    if channels:
+        response["channels"] = channels
+        response["estimatedBrightness"] = _estimate_brightness(value_text, fixture)
+    elif stored.get("estimatedBrightness") is not None:
+        response["estimatedBrightness"] = stored.get("estimatedBrightness")
+    return response
+
+
 def get_user_context(
     x_user_id: str = Header("system", alias="X-User-Id"),
     x_user_groups: str = Header("", alias="X-User-Groups"),
@@ -318,6 +478,126 @@ async def save_group_schedule(
     schedule = request.to_group_schedule()
     saved = GROUP_SCHEDULES.upsert(schedule)
     return {"status": "ok", "schedule": _serialize_group_schedule(saved)}
+
+
+@app.get("/plans")
+async def list_plans() -> Dict[str, Any]:
+    plans = PLAN_STORE.list()
+    metadata = PLAN_STORE.metadata()
+    response: Dict[str, Any] = {"status": "ok", "plans": plans}
+    if metadata:
+        response["metadata"] = metadata
+    return response
+
+
+@app.get("/plans/{plan_key}")
+async def get_plan(plan_key: str) -> Dict[str, Any]:
+    plan = PLAN_STORE.get(plan_key)
+    if plan is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Plan not found")
+    response: Dict[str, Any] = {"status": "ok", "planKey": plan_key, "plan": plan}
+    metadata = PLAN_STORE.metadata().get(plan_key)
+    if metadata:
+        response["metadata"] = metadata
+    return response
+
+
+@app.post("/plans", status_code=status.HTTP_201_CREATED)
+async def publish_plans(payload: Dict[str, Any] = Body(...)) -> Dict[str, Any]:
+    if not isinstance(payload, dict) or not payload:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Request body must be a non-empty object",
+        )
+    normalized: Dict[str, Dict[str, Any]] = {}
+    for key, value in payload.items():
+        if not isinstance(key, str) or not key.strip():
+            continue
+        if not isinstance(value, dict):
+            continue
+        normalized[key.strip()] = value
+    if not normalized:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="No valid plans supplied")
+    PLAN_STORE.upsert_many(normalized)
+    saved_plans = {key: PLAN_STORE.get(key) for key in normalized.keys() if PLAN_STORE.get(key) is not None}
+    response: Dict[str, Any] = {
+        "status": "ok",
+        "saved": sorted(saved_plans.keys()),
+        "plans": saved_plans,
+    }
+    metadata = PLAN_STORE.metadata()
+    if metadata:
+        response["metadata"] = {key: metadata[key] for key in saved_plans.keys() if key in metadata}
+    return response
+
+
+@app.get("/env")
+async def get_environment(zone_id: Optional[str] = Query(None, alias="zoneId")) -> Dict[str, Any]:
+    if zone_id:
+        zone = ENVIRONMENT_STATE.get_zone(zone_id)
+        if zone is None:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Zone not found")
+        return {"status": "ok", "zone": zone}
+    snapshot = ENVIRONMENT_STATE.snapshot()
+    return {"status": "ok", **snapshot}
+
+
+@app.post("/env", status_code=status.HTTP_200_OK)
+async def upsert_environment(payload: Dict[str, Any] = Body(...)) -> Dict[str, Any]:
+    if not isinstance(payload, dict) or not payload:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Request body must be a non-empty object",
+        )
+
+    response: Dict[str, Any] = {"status": "ok"}
+
+    rooms_payload = payload.get("rooms")
+    if isinstance(rooms_payload, dict):
+        response["rooms"] = ENVIRONMENT_STATE.upsert_rooms(rooms_payload)
+
+    processed_zone = False
+    zone_identifier = payload.get("zoneId") or payload.get("zone_id")
+    if isinstance(zone_identifier, str) and zone_identifier.strip():
+        zone_payload = dict(payload)
+        zone_payload.pop("rooms", None)
+        zone_payload.pop("zoneId", None)
+        zone_payload.pop("zone_id", None)
+        zone_payload.pop("zones", None)
+        response["zone"] = ENVIRONMENT_STATE.upsert_zone(zone_identifier.strip(), zone_payload)
+        processed_zone = True
+
+    zones_payload = payload.get("zones")
+    if isinstance(zones_payload, dict) and not processed_zone:
+        merged_zones: Dict[str, Any] = {}
+        for zone_key, zone_body in zones_payload.items():
+            if not isinstance(zone_key, str) or not isinstance(zone_body, dict):
+                continue
+            merged_zones[zone_key] = ENVIRONMENT_STATE.upsert_zone(zone_key, zone_body)
+        if merged_zones:
+            response["zones"] = merged_zones
+
+    remaining = {
+        key: value
+        for key, value in payload.items()
+        if key not in {"rooms", "zoneId", "zone_id", "zones"}
+    }
+    if remaining:
+        if processed_zone:
+            extra = {
+                key: value
+                for key, value in remaining.items()
+                if key not in {"targets", "control", "metadata", "sensors"}
+            }
+            if extra:
+                ENVIRONMENT_STATE.merge(extra)
+        else:
+            ENVIRONMENT_STATE.merge(remaining)
+
+    snapshot = ENVIRONMENT_STATE.snapshot()
+    for key, value in snapshot.items():
+        response.setdefault(key, value)
+    return response
 
 @app.get("/discovery/devices", response_class=JSONResponse)
 async def discovery_devices() -> dict:
@@ -408,7 +688,17 @@ async def shutdown() -> None:
 
 @app.get("/health")
 async def health() -> dict:
-    return {"status": "ok", "devices": len(REGISTRY.list())}
+    return {
+        "status": "ok",
+        "devices": len(REGISTRY.list()),
+        "timestamp": _iso_now(),
+        "version": app.version,
+    }
+
+
+@app.get("/healthz")
+async def healthz() -> dict:
+    return await health()
 
 
 @app.post("/ai/setup-assist", response_model=SetupAssistResponse)
@@ -433,6 +723,36 @@ async def setup_assist(request: SetupAssistRequest) -> SetupAssistResponse:
 @app.get("/devices", response_model=List[DeviceResponse])
 async def list_devices() -> List[DeviceResponse]:
     return [DeviceResponse(**device.__dict__) for device in REGISTRY.list()]
+
+
+@app.get("/api/devicedatas")
+async def list_device_data() -> Dict[str, Any]:
+    devices = [_serialize_device_data(device_id, fixture) for device_id, fixture in DEVICE_ID_MAP.items()]
+    return {"data": devices, "count": len(devices), "updatedAt": _iso_now()}
+
+
+@app.patch("/api/devicedatas/device/{device_id}")
+async def update_device_data(device_id: str, request: DeviceDataPatch) -> Dict[str, Any]:
+    resolved_id, fixture = _resolve_fixture(device_id)
+    payload = request.to_payload()
+    if not payload:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="No updates supplied")
+
+    status_text = payload.get("status")
+    value_text = payload.get("value")
+    estimated = None
+    if isinstance(value_text, str) and value_text:
+        estimated = _estimate_brightness(value_text, fixture)
+    elif isinstance(status_text, str) and status_text.lower() == "off":
+        estimated = fixture.min_brightness
+    elif isinstance(status_text, str) and status_text.lower() == "on":
+        estimated = fixture.max_brightness
+    if estimated is not None:
+        payload["estimatedBrightness"] = estimated
+
+    entry = DEVICE_DATA.upsert(resolved_id, payload)
+    _apply_device_patch(fixture, entry)
+    return {"status": "ok", "device": _serialize_device_data(resolved_id, fixture)}
 
 
 @app.post("/discovery/run", status_code=status.HTTP_202_ACCEPTED)
