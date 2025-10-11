@@ -126,29 +126,55 @@ function saveGroupsFile(groups) {
   }
 }
 
-function loadPlansFile() {
-  ensureDataDir();
-  try {
-    if (!fs.existsSync(PLANS_PATH)) return [];
-    const raw = JSON.parse(fs.readFileSync(PLANS_PATH, 'utf8'));
-    if (Array.isArray(raw)) return raw;
-    if (raw && Array.isArray(raw.plans)) return raw.plans;
-    return [];
-  } catch (err) {
-    console.warn('[plans] Failed to read plans.json:', err.message);
-    return [];
+function sanitizePlansEnvelope(source, excludeKeys = []) {
+  if (!source || typeof source !== 'object') return {};
+  const skip = new Set(['plans', 'ok', ...excludeKeys]);
+  const envelope = {};
+  for (const [key, value] of Object.entries(source)) {
+    if (skip.has(key)) continue;
+    envelope[key] = value;
   }
+  return envelope;
 }
 
-function savePlansFile(plans) {
+function loadPlansDocument() {
   ensureDataDir();
   try {
-    fs.writeFileSync(PLANS_PATH, JSON.stringify({ plans }, null, 2));
+    if (!fs.existsSync(PLANS_PATH)) return { plans: [] };
+    const raw = JSON.parse(fs.readFileSync(PLANS_PATH, 'utf8'));
+    if (Array.isArray(raw)) return { plans: raw };
+    if (raw && typeof raw === 'object') {
+      const doc = { ...raw };
+      if (!Array.isArray(doc.plans)) doc.plans = [];
+      return doc;
+    }
+  } catch (err) {
+    console.warn('[plans] Failed to read plans.json:', err.message);
+  }
+  return { plans: [] };
+}
+
+function savePlansDocument(document) {
+  ensureDataDir();
+  try {
+    const plansArray = Array.isArray(document?.plans) ? document.plans : [];
+    const envelope = sanitizePlansEnvelope(document || {});
+    const payload = { ...envelope, plans: plansArray };
+    fs.writeFileSync(PLANS_PATH, JSON.stringify(payload, null, 2));
     return true;
   } catch (err) {
     console.error('[plans] Failed to write plans.json:', err.message);
     return false;
   }
+}
+
+function loadPlansFile() {
+  const doc = loadPlansDocument();
+  return Array.isArray(doc.plans) ? doc.plans : [];
+}
+
+function savePlansFile(plans) {
+  return savePlansDocument({ plans });
 }
 
 function loadSchedulesFile() {
@@ -329,24 +355,54 @@ function normalizePlanEntry(raw, fallbackId = '') {
 }
 
 function parseIncomingPlans(body) {
-  let entries = [];
   if (!body) throw new Error('Plan payload required.');
+  let entries = [];
+  let excludeKeys = [];
+  let envelope = {};
+
   if (Array.isArray(body)) {
     entries = body;
-  } else if (Array.isArray(body.plans)) {
-    entries = body.plans;
-  } else if (typeof body === 'object') {
-    entries = Object.entries(body).map(([id, value]) => ({ id, ...(value && typeof value === 'object' ? value : {}) }));
+  } else if (body && typeof body === 'object') {
+    const rawPlans = body.plans;
+    if (Array.isArray(rawPlans)) {
+      entries = rawPlans;
+      excludeKeys.push('plans');
+    } else if (rawPlans && typeof rawPlans === 'object') {
+      entries = Object.entries(rawPlans).map(([id, value]) => ({
+        id,
+        ...(value && typeof value === 'object' ? value : { value })
+      }));
+      excludeKeys.push('plans');
+    }
+
+    if (!entries.length) {
+      const candidateEntries = Object.entries(body)
+        .filter(([key]) => key !== 'plans' && key !== 'ok')
+        .filter(([, value]) => value && typeof value === 'object' && !Array.isArray(value) && (
+          Array.isArray(value.days) ||
+          Array.isArray(value.light?.days) ||
+          typeof value.defaults === 'object' ||
+          typeof value.meta === 'object' ||
+          typeof value.env === 'object'
+        ));
+      if (candidateEntries.length) {
+        excludeKeys.push(...candidateEntries.map(([key]) => key));
+        entries = candidateEntries.map(([id, value]) => ({ id, ...(value && typeof value === 'object' ? value : {}) }));
+      }
+    }
+
+    envelope = sanitizePlansEnvelope(body, excludeKeys);
   }
+
   const normalized = entries
     .map((entry, idx) => normalizePlanEntry(entry, entry?.id ?? `plan-${idx + 1}`))
     .filter(Boolean);
+
   if (!normalized.length) {
-    if (Array.isArray(body?.plans) && body.plans.length === 0) return [];
-    if (Array.isArray(body) && body.length === 0) return [];
     throw new Error('At least one plan entry is required.');
   }
-  return normalized;
+
+  return { ...envelope, plans: normalized };
 }
 
 function normalizeScheduleEntry(raw) {
@@ -4548,8 +4604,11 @@ app.options('/plans', (req, res) => { setCors(req, res); res.status(204).end(); 
 app.get('/plans', (req, res) => {
   try {
     setCors(req, res);
-    const plans = loadPlansFile();
-    res.json({ ok: true, plans: plans.map((plan) => normalizePlanEntry(plan, plan?.id)).filter(Boolean) });
+    const doc = loadPlansDocument();
+    const plans = Array.isArray(doc.plans) ? doc.plans : [];
+    const envelope = sanitizePlansEnvelope(doc);
+    const normalized = plans.map((plan) => normalizePlanEntry(plan, plan?.id)).filter(Boolean);
+    res.json({ ok: true, ...envelope, plans: normalized });
   } catch (err) {
     res.status(500).json({ ok: false, error: err.message });
   }
@@ -4558,23 +4617,23 @@ app.get('/plans', (req, res) => {
 app.post('/plans', (req, res) => {
   try {
     setCors(req, res);
-    const plans = parseIncomingPlans(req.body);
-    if (Array.isArray(req.body?.plans) && req.body.plans.length === 0) {
-      if (!savePlansFile([])) {
+    const isArrayClear = Array.isArray(req.body) && req.body.length === 0;
+    const isObjectClear = Array.isArray(req.body?.plans) && req.body.plans.length === 0 &&
+      (!req.body || typeof req.body !== 'object' || Object.keys(req.body).every((key) => key === 'plans'));
+    if (isArrayClear || isObjectClear) {
+      if (!savePlansDocument({ plans: [] })) {
         return res.status(500).json({ ok: false, error: 'Failed to persist plans.' });
       }
       return res.json({ ok: true, plans: [] });
     }
-    if (Array.isArray(req.body) && req.body.length === 0) {
-      if (!savePlansFile([])) {
-        return res.status(500).json({ ok: false, error: 'Failed to persist plans.' });
-      }
-      return res.json({ ok: true, plans: [] });
-    }
-    if (!savePlansFile(plans)) {
+
+    const doc = parseIncomingPlans(req.body);
+    if (!savePlansDocument(doc)) {
       return res.status(500).json({ ok: false, error: 'Failed to persist plans.' });
     }
-    res.json({ ok: true, plans });
+    const envelope = sanitizePlansEnvelope(doc);
+    const plans = Array.isArray(doc.plans) ? doc.plans.map((plan) => normalizePlanEntry(plan, plan?.id)).filter(Boolean) : [];
+    res.json({ ok: true, ...envelope, plans });
   } catch (err) {
     res.status(400).json({ ok: false, error: err.message });
   }

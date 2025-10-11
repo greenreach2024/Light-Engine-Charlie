@@ -151,13 +151,13 @@ document.addEventListener('DOMContentLoaded', () => {
   if (applyPlanBtn) {
     applyPlanBtn.addEventListener('click', () => {
       const planSelect = document.getElementById('groupsV2PlanSelect');
-      const planId = planSelect && planSelect.value;
+      const planId = groupsV2FormState.planId || (planSelect && planSelect.value);
       if (!planId) {
         alert('Select a plan to apply.');
         return;
       }
-      const plans = (window.STATE && Array.isArray(window.STATE.plans)) ? window.STATE.plans : [];
-      const plan = plans.find(p => (p.id || p.name) === planId);
+      const plans = getGroupsV2Plans();
+      const plan = plans.find((p) => (p.id || p.name) === planId);
       if (!plan) {
         alert('Plan not found.');
         return;
@@ -168,10 +168,20 @@ document.addEventListener('DOMContentLoaded', () => {
         return;
       }
       const group = groups[groups.length - 1];
-      group.plan = plan;
+      const targetPlanId = plan.id || plan.name || planId;
+      group.plan = targetPlanId ? String(targetPlanId) : '';
+      const config = buildGroupsV2PlanConfig(plan);
+      if (config) group.planConfig = config;
+      else delete group.planConfig;
+      groupsV2FormState.planId = group.plan;
       document.dispatchEvent(new Event('groups-updated'));
+      updateGroupsV2Preview();
       if (typeof showToast === 'function') {
-        showToast({ title: 'Plan Applied', msg: 'Plan applied to current group.', kind: 'success', icon: '✅' });
+        const preview = computeGroupsV2PreviewData(plan);
+        const summary = preview && preview.stage
+          ? `Today: ${preview.stage} • ${Number.isFinite(preview.ppfd) ? `${Math.round(preview.ppfd)} µmol` : 'PPFD —'}`
+          : 'Plan applied to current group.';
+        showToast({ title: 'Plan Applied', msg: summary, kind: 'success', icon: '✅' });
       }
     });
   }
@@ -401,14 +411,22 @@ document.addEventListener('DOMContentLoaded', () => {
         alert('A group with this name, room, and zone already exists.');
         return;
       }
-      window.STATE.groups.push({ id, name: groupName, room, zone });
+      const plan = getGroupsV2SelectedPlan();
+      const planId = groupsV2FormState.planId || plan?.id || plan?.name || '';
+      const groupRecord = { id, name: groupName, room, zone };
+      if (planId) groupRecord.plan = planId;
+      const config = buildGroupsV2PlanConfig(plan);
+      if (config) groupRecord.planConfig = config;
+      window.STATE.groups.push(groupRecord);
       // Dispatch event to update dropdown
       document.dispatchEvent(new Event('groups-updated'));
       // Optionally clear the input
       nameInput.value = '';
       // Optionally show a toast
       if (typeof showToast === 'function') {
-        showToast({ title: 'Group Saved', msg: `${groupName} (${room}:${zone})`, kind: 'success', icon: '✅' });
+        const details = [`${groupName} (${room}:${zone})`];
+        if (planId) details.push(`Plan ${plan?.name || planId}`);
+        showToast({ title: 'Group Saved', msg: details.join(' • '), kind: 'success', icon: '✅' });
       }
     });
   }
@@ -553,28 +571,433 @@ document.addEventListener('DOMContentLoaded', () => {
     });
   }
 });
+
+const GROUPS_V2_DEFAULTS = {
+  schedule: { startTime: '08:00', durationHours: 12, rampUpMin: 10, rampDownMin: 10 },
+  gradients: { ppfd: 0, blue: 0, tempC: 0, rh: 0 },
+};
+
+const groupsV2FormState = {
+  planId: '',
+  planSearch: '',
+  anchorMode: 'seedDate',
+  seedDate: formatDateInputValue(new Date()),
+  dps: 1,
+  schedule: { ...GROUPS_V2_DEFAULTS.schedule },
+  gradients: { ...GROUPS_V2_DEFAULTS.gradients },
+};
+
+const MS_PER_DAY = 24 * 60 * 60 * 1000;
+
+function formatDateInputValue(date) {
+  if (!(date instanceof Date) || !Number.isFinite(date.getTime())) return '';
+  const year = date.getFullYear();
+  const month = String(date.getMonth() + 1).padStart(2, '0');
+  const day = String(date.getDate()).padStart(2, '0');
+  return `${year}-${month}-${day}`;
+}
+
+function parseLocalDateInput(value) {
+  if (!value || typeof value !== 'string') return null;
+  const trimmed = value.trim();
+  if (!trimmed) return null;
+  const parts = trimmed.split('-');
+  if (parts.length !== 3) return null;
+  const [y, m, d] = parts.map((part) => Number(part));
+  if (!Number.isFinite(y) || !Number.isFinite(m) || !Number.isFinite(d)) return null;
+  const date = new Date(y, m - 1, d);
+  if (!Number.isFinite(date.getTime())) return null;
+  date.setHours(0, 0, 0, 0);
+  return date;
+}
+
+function formatSigned(value, precision = 1) {
+  const num = Number(value);
+  if (!Number.isFinite(num) || Math.abs(num) < 1e-9) return '0';
+  const abs = Math.abs(num);
+  const formatted = abs % 1 === 0 ? abs.toFixed(0) : abs.toFixed(precision);
+  return `${num > 0 ? '+' : '-'}${formatted}`;
+}
+
+function getGroupsV2Plans() {
+  return (window.STATE && Array.isArray(window.STATE.plans)) ? window.STATE.plans : [];
+}
+
+function planMatchesSearch(plan, query) {
+  if (!query) return true;
+  const needle = query.toLowerCase();
+  if (!needle) return true;
+  const derived = plan?._derived;
+  const applies = derived?.appliesTo || plan?.meta?.appliesTo || {};
+  const haystack = [
+    plan?.id,
+    plan?.name,
+    plan?.label,
+    plan?.meta?.label,
+    plan?.kind,
+    plan?.crop,
+    ...(Array.isArray(plan?.meta?.category) ? plan.meta.category : []),
+    ...(Array.isArray(applies.category) ? applies.category : []),
+    ...(Array.isArray(applies.varieties) ? applies.varieties : []),
+    ...(Array.isArray(derived?.notes) ? derived.notes : []),
+  ];
+  return haystack.some((entry) => typeof entry === 'string' && entry.toLowerCase().includes(needle));
+}
+
+function getGroupsV2SelectedPlan() {
+  const plans = getGroupsV2Plans();
+  const id = groupsV2FormState.planId || '';
+  if (!id) return null;
+  return plans.find((plan) => (plan.id || plan.name) === id) || null;
+}
+
+function updateGroupsV2AnchorInputs() {
+  const seedInput = document.getElementById('groupsV2SeedDate');
+  const dpsInput = document.getElementById('groupsV2Dps');
+  const isSeed = groupsV2FormState.anchorMode !== 'dps';
+  if (seedInput) {
+    seedInput.disabled = !isSeed;
+    if (!isSeed) seedInput.setAttribute('aria-disabled', 'true');
+    else seedInput.removeAttribute('aria-disabled');
+  }
+  if (dpsInput) {
+    dpsInput.disabled = isSeed;
+    if (isSeed) dpsInput.setAttribute('aria-disabled', 'true');
+    else dpsInput.removeAttribute('aria-disabled');
+  }
+}
+
+function applyGroupsV2StateToInputs() {
+  const searchInput = document.getElementById('groupsV2PlanSearch');
+  if (searchInput) searchInput.value = groupsV2FormState.planSearch || '';
+  const planSelect = document.getElementById('groupsV2PlanSelect');
+  if (planSelect) planSelect.value = groupsV2FormState.planId || '';
+  const seedInput = document.getElementById('groupsV2SeedDate');
+  if (seedInput) seedInput.value = groupsV2FormState.seedDate || '';
+  const dpsInput = document.getElementById('groupsV2Dps');
+  if (dpsInput) dpsInput.value = groupsV2FormState.dps != null ? String(groupsV2FormState.dps) : '';
+
+  const scheduleState = groupsV2FormState.schedule || {};
+  const startInput = document.getElementById('groupsV2ScheduleStart');
+  if (startInput) startInput.value = scheduleState.startTime || GROUPS_V2_DEFAULTS.schedule.startTime;
+  const durationInput = document.getElementById('groupsV2ScheduleDuration');
+  if (durationInput) {
+    const duration = scheduleState.durationHours;
+    durationInput.value = duration != null ? String(duration) : String(GROUPS_V2_DEFAULTS.schedule.durationHours);
+  }
+  const rampUpInput = document.getElementById('groupsV2ScheduleRampUp');
+  if (rampUpInput) {
+    const rampUp = scheduleState.rampUpMin;
+    rampUpInput.value = rampUp != null ? String(rampUp) : String(GROUPS_V2_DEFAULTS.schedule.rampUpMin);
+  }
+  const rampDownInput = document.getElementById('groupsV2ScheduleRampDown');
+  if (rampDownInput) {
+    const rampDown = scheduleState.rampDownMin;
+    rampDownInput.value = rampDown != null ? String(rampDown) : String(GROUPS_V2_DEFAULTS.schedule.rampDownMin);
+  }
+  const gradientMap = {
+    groupsV2GradientPpfd: 'ppfd',
+    groupsV2GradientBlue: 'blue',
+    groupsV2GradientTemp: 'tempC',
+    groupsV2GradientRh: 'rh',
+  };
+  Object.entries(gradientMap).forEach(([id, key]) => {
+    const input = document.getElementById(id);
+    if (!input) return;
+    const value = groupsV2FormState.gradients[key];
+    const defaultValue = GROUPS_V2_DEFAULTS.gradients[key] ?? 0;
+    input.value = value != null ? String(value) : String(defaultValue);
+  });
+  const anchorRadios = document.querySelectorAll('input[name="groupsV2AnchorMode"]');
+  anchorRadios.forEach((radio) => { radio.checked = radio.value === groupsV2FormState.anchorMode; });
+}
+
+function getGroupsV2DayNumber() {
+  if (groupsV2FormState.anchorMode === 'dps') {
+    const dps = toNumberOrNull(groupsV2FormState.dps);
+    return dps != null ? Math.max(0, Math.round(dps)) : null;
+  }
+  const seed = parseLocalDateInput(groupsV2FormState.seedDate);
+  if (!seed) return null;
+  const today = new Date();
+  today.setHours(0, 0, 0, 0);
+  const diff = Math.floor((today.getTime() - seed.getTime()) / MS_PER_DAY);
+  return diff < 0 ? 0 : diff + 1;
+}
+
+function resolvePlanTargetsForDay(plan, dayNumber) {
+  if (!plan || typeof plan !== 'object') return null;
+  const derived = plan._derived || derivePlanRuntime(plan);
+  const lightDays = Array.isArray(derived?.lightDays) ? derived.lightDays.slice() : [];
+  if (!lightDays.length) {
+    const basePhotoperiod = firstNonEmpty(plan.photoperiod, derived?.photoperiod, plan.defaults?.photoperiod);
+    const photoperiodHours = readPhotoperiodHours(basePhotoperiod) ?? derived?.photoperiodHours ?? null;
+    return {
+      stage: plan.stage || '',
+      ppfd: toNumberOrNull(firstNonEmpty(plan.ppfd, derived?.ppfd)),
+      photoperiod: basePhotoperiod,
+      photoperiodHours,
+    };
+  }
+  const sorted = lightDays.slice().sort((a, b) => {
+    const aDay = Number.isFinite(a.day) ? a.day : 0;
+    const bDay = Number.isFinite(b.day) ? b.day : 0;
+    return aDay - bDay;
+  });
+  const effectiveDay = Math.max(1, Number.isFinite(dayNumber) ? dayNumber : 1);
+  let target = sorted[0];
+  for (const entry of sorted) {
+    const start = Number.isFinite(entry.day) ? entry.day : null;
+    if (start === null) {
+      if (!target) target = entry;
+      continue;
+    }
+    if (effectiveDay >= start) target = entry;
+    else break;
+  }
+  const photoperiodHours = readPhotoperiodHours(target?.photoperiod) ?? derived?.photoperiodHours ?? null;
+  const ppfd = toNumberOrNull(firstNonEmpty(target?.ppfd, derived?.ppfd, plan.ppfd));
+  return {
+    stage: target?.stage || plan.stage || '',
+    ppfd,
+    photoperiod: target?.photoperiod,
+    photoperiodHours,
+  };
+}
+
+function computeGroupsV2PreviewData(planOverride) {
+  const plan = planOverride || getGroupsV2SelectedPlan();
+  if (!plan) return null;
+  const dayNumber = getGroupsV2DayNumber();
+  const target = resolvePlanTargetsForDay(plan, dayNumber ?? 1) || {};
+  const scheduleHours = toNumberOrNull(groupsV2FormState.schedule.durationHours);
+  const basePhotoperiod = target.photoperiodHours ?? readPhotoperiodHours(firstNonEmpty(plan.photoperiod, plan.defaults?.photoperiod, plan._derived?.photoperiod));
+  const photoperiodHours = Number.isFinite(scheduleHours) && scheduleHours > 0 ? scheduleHours : basePhotoperiod;
+  const basePpfd = toNumberOrNull(firstNonEmpty(target.ppfd, plan.ppfd, plan._derived?.ppfd));
+  const gradientPpfd = toNumberOrNull(groupsV2FormState.gradients.ppfd) || 0;
+  const adjustedPpfd = basePpfd != null ? basePpfd + gradientPpfd : null;
+  const safePpfd = adjustedPpfd != null ? Math.max(0, adjustedPpfd) : null;
+  const hours = Number.isFinite(photoperiodHours) ? Math.max(0, photoperiodHours) : null;
+  const dli = safePpfd != null && hours != null ? (safePpfd * 3600 * hours) / 1e6 : null;
+  return {
+    planId: plan.id || plan.name || '',
+    day: dayNumber != null ? Math.max(0, dayNumber) : null,
+    stage: target.stage || '',
+    basePpfd,
+    ppfd: safePpfd,
+    basePhotoperiod,
+    photoperiodHours: hours,
+    dli,
+    gradients: { ...groupsV2FormState.gradients },
+    schedule: { ...groupsV2FormState.schedule },
+    anchor: {
+      mode: groupsV2FormState.anchorMode,
+      seedDate: groupsV2FormState.anchorMode === 'seedDate' ? (groupsV2FormState.seedDate || null) : null,
+      dps: groupsV2FormState.anchorMode === 'dps' ? toNumberOrNull(groupsV2FormState.dps) : null,
+    },
+  };
+}
+
+function updateGroupsV2Preview() {
+  const previewEl = document.getElementById('groupsV2PlanPreview');
+  if (!previewEl) return;
+  const plan = getGroupsV2SelectedPlan();
+  if (!plan) {
+    previewEl.innerHTML = '<div class="tiny text-muted">Select a plan to preview today’s stage, PPFD, photoperiod, and DLI.</div>';
+    return;
+  }
+  const preview = computeGroupsV2PreviewData(plan);
+  if (!preview) {
+    previewEl.innerHTML = '<div class="tiny text-muted">Enter a seed date or DPS to preview today’s targets.</div>';
+    return;
+  }
+  const dayLabel = preview.day != null ? `Day ${preview.day}` : 'Day —';
+  const stage = preview.stage || '—';
+  const photoperiodLabel = Number.isFinite(preview.photoperiodHours) ? `${preview.photoperiodHours.toFixed(1)} h` : '—';
+  const ppfdLabel = Number.isFinite(preview.ppfd) ? `${Math.round(preview.ppfd)} µmol·m⁻²·s⁻¹` : '—';
+  const dliLabel = Number.isFinite(preview.dli) ? `${preview.dli.toFixed(2)} mol·m⁻²·d⁻¹` : '—';
+  const basePhotoperiodLabel = Number.isFinite(preview.basePhotoperiod) ? `${preview.basePhotoperiod.toFixed(1)} h plan` : '';
+  const basePpfdLabel = Number.isFinite(preview.basePpfd) ? `${Math.round(preview.basePpfd)} µmol plan` : '';
+  const gradients = preview.gradients || {};
+  const gradientParts = [];
+  const gradientPpfd = toNumberOrNull(gradients.ppfd);
+  const gradientBlue = toNumberOrNull(gradients.blue);
+  const gradientTemp = toNumberOrNull(gradients.tempC);
+  const gradientRh = toNumberOrNull(gradients.rh);
+  if (Number.isFinite(gradientPpfd) && gradientPpfd !== 0) gradientParts.push(`PPFD ${formatSigned(gradientPpfd, 0)} µmol`);
+  if (Number.isFinite(gradientBlue) && gradientBlue !== 0) gradientParts.push(`Blue ${formatSigned(gradientBlue, 1)}%`);
+  if (Number.isFinite(gradientTemp) && gradientTemp !== 0) gradientParts.push(`Temp ${formatSigned(gradientTemp, 1)}°C`);
+  if (Number.isFinite(gradientRh) && gradientRh !== 0) gradientParts.push(`RH ${formatSigned(gradientRh, 1)}%`);
+  const gradientHtml = gradientParts.length
+    ? `<div class="tiny text-muted">Gradients: ${gradientParts.map((part) => escapeHtml(part)).join(' • ')}</div>`
+    : '';
+  previewEl.innerHTML = `
+    <div><strong>Today →</strong> ${escapeHtml(dayLabel)}</div>
+    <div class="tiny">Stage: <strong>${escapeHtml(stage)}</strong></div>
+    <div class="tiny">PPFD: <strong>${escapeHtml(ppfdLabel)}</strong>${basePpfdLabel ? ` <span class="text-muted">(${escapeHtml(basePpfdLabel)})</span>` : ''}</div>
+    <div class="tiny">Photoperiod: <strong>${escapeHtml(photoperiodLabel)}</strong>${basePhotoperiodLabel ? ` <span class="text-muted">(${escapeHtml(basePhotoperiodLabel)})</span>` : ''}</div>
+    <div class="tiny">DLI: <strong>${escapeHtml(dliLabel)}</strong></div>
+    ${gradientHtml}
+  `;
+}
+
+function buildGroupsV2PlanConfig(planOverride) {
+  const plan = planOverride || getGroupsV2SelectedPlan();
+  if (!plan) return null;
+  const preview = computeGroupsV2PreviewData(plan);
+  const updatedAt = new Date().toISOString();
+  const schedule = {
+    startTime: groupsV2FormState.schedule.startTime || GROUPS_V2_DEFAULTS.schedule.startTime,
+    durationHours: toNumberOrNull(groupsV2FormState.schedule.durationHours) ?? GROUPS_V2_DEFAULTS.schedule.durationHours,
+    rampUpMin: toNumberOrNull(groupsV2FormState.schedule.rampUpMin) ?? GROUPS_V2_DEFAULTS.schedule.rampUpMin,
+    rampDownMin: toNumberOrNull(groupsV2FormState.schedule.rampDownMin) ?? GROUPS_V2_DEFAULTS.schedule.rampDownMin,
+  };
+  const gradients = {
+    ppfd: toNumberOrNull(groupsV2FormState.gradients.ppfd) ?? GROUPS_V2_DEFAULTS.gradients.ppfd,
+    blue: toNumberOrNull(groupsV2FormState.gradients.blue) ?? GROUPS_V2_DEFAULTS.gradients.blue,
+    tempC: toNumberOrNull(groupsV2FormState.gradients.tempC) ?? GROUPS_V2_DEFAULTS.gradients.tempC,
+    rh: toNumberOrNull(groupsV2FormState.gradients.rh) ?? GROUPS_V2_DEFAULTS.gradients.rh,
+  };
+  const anchor = {
+    mode: groupsV2FormState.anchorMode,
+    seedDate: groupsV2FormState.anchorMode === 'seedDate' ? (groupsV2FormState.seedDate || null) : null,
+    dps: groupsV2FormState.anchorMode === 'dps' ? toNumberOrNull(groupsV2FormState.dps) : null,
+  };
+  const config = { anchor, schedule, gradients, updatedAt };
+  if (preview) config.preview = { ...preview, updatedAt };
+  return config;
+}
+
+function initializeGroupsV2Form() {
+  if (initializeGroupsV2Form._initialized) return;
+  initializeGroupsV2Form._initialized = true;
+  applyGroupsV2StateToInputs();
+  const planSearchInput = document.getElementById('groupsV2PlanSearch');
+  if (planSearchInput) {
+    planSearchInput.addEventListener('input', (event) => {
+      groupsV2FormState.planSearch = event.target.value || '';
+      populateGroupsV2PlanDropdown(groupsV2FormState.planSearch);
+    });
+  }
+  const seedInput = document.getElementById('groupsV2SeedDate');
+  if (seedInput) {
+    seedInput.addEventListener('input', (event) => {
+      groupsV2FormState.seedDate = event.target.value || '';
+      updateGroupsV2Preview();
+    });
+  }
+  const dpsInput = document.getElementById('groupsV2Dps');
+  if (dpsInput) {
+    dpsInput.addEventListener('input', (event) => {
+      groupsV2FormState.dps = toNumberOrNull(event.target.value);
+      updateGroupsV2Preview();
+    });
+  }
+  const startInput = document.getElementById('groupsV2ScheduleStart');
+  if (startInput) {
+    startInput.addEventListener('change', (event) => {
+      groupsV2FormState.schedule.startTime = event.target.value || GROUPS_V2_DEFAULTS.schedule.startTime;
+      updateGroupsV2Preview();
+    });
+  }
+  const durationInput = document.getElementById('groupsV2ScheduleDuration');
+  if (durationInput) {
+    durationInput.addEventListener('input', (event) => {
+      const value = toNumberOrNull(event.target.value);
+      groupsV2FormState.schedule.durationHours = value != null ? value : GROUPS_V2_DEFAULTS.schedule.durationHours;
+      updateGroupsV2Preview();
+    });
+  }
+  const rampUpInput = document.getElementById('groupsV2ScheduleRampUp');
+  if (rampUpInput) {
+    rampUpInput.addEventListener('input', (event) => {
+      const value = toNumberOrNull(event.target.value);
+      groupsV2FormState.schedule.rampUpMin = value != null ? value : GROUPS_V2_DEFAULTS.schedule.rampUpMin;
+    });
+  }
+  const rampDownInput = document.getElementById('groupsV2ScheduleRampDown');
+  if (rampDownInput) {
+    rampDownInput.addEventListener('input', (event) => {
+      const value = toNumberOrNull(event.target.value);
+      groupsV2FormState.schedule.rampDownMin = value != null ? value : GROUPS_V2_DEFAULTS.schedule.rampDownMin;
+    });
+  }
+  const gradientMap = {
+    groupsV2GradientPpfd: 'ppfd',
+    groupsV2GradientBlue: 'blue',
+    groupsV2GradientTemp: 'tempC',
+    groupsV2GradientRh: 'rh',
+  };
+  Object.entries(gradientMap).forEach(([id, key]) => {
+    const input = document.getElementById(id);
+    if (!input) return;
+    input.addEventListener('input', (event) => {
+      const value = toNumberOrNull(event.target.value);
+      const defaultValue = GROUPS_V2_DEFAULTS.gradients[key] ?? 0;
+      groupsV2FormState.gradients[key] = value != null ? value : defaultValue;
+      updateGroupsV2Preview();
+    });
+  });
+  const anchorRadios = document.querySelectorAll('input[name="groupsV2AnchorMode"]');
+  anchorRadios.forEach((radio) => {
+    radio.addEventListener('change', (event) => {
+      if (!event.target.checked) return;
+      groupsV2FormState.anchorMode = event.target.value === 'dps' ? 'dps' : 'seedDate';
+      updateGroupsV2AnchorInputs();
+      updateGroupsV2Preview();
+    });
+  });
+  updateGroupsV2AnchorInputs();
+}
 // Populate Groups V2 Plan and Schedule dropdowns from setup cards
-function populateGroupsV2PlanDropdown() {
+function populateGroupsV2PlanDropdown(filterQuery) {
   const select = document.getElementById('groupsV2PlanSelect');
   if (!select) return;
+  const query = typeof filterQuery === 'string'
+    ? filterQuery.trim().toLowerCase()
+    : (groupsV2FormState.planSearch || '').trim().toLowerCase();
   while (select.options.length > 1) select.remove(1);
-  const plans = (window.STATE && Array.isArray(window.STATE.plans)) ? window.STATE.plans : [];
-  plans.forEach(plan => {
-    const opt = document.createElement('option');
-    opt.value = plan.id || plan.name || '';
-    opt.textContent = plan.name || plan.label || plan.id || '(unnamed plan)';
-    select.appendChild(opt);
-  });
-  // Add event listener for plan selection (only once)
+  const plans = getGroupsV2Plans();
+  const filtered = !query ? plans : plans.filter((plan) => planMatchesSearch(plan, query));
+  if (!filtered.length) {
+    const placeholder = document.createElement('option');
+    placeholder.value = '';
+    placeholder.textContent = '(no matching plans)';
+    placeholder.disabled = true;
+    select.appendChild(placeholder);
+  } else {
+    filtered.forEach((plan) => {
+      const opt = document.createElement('option');
+      opt.value = plan.id || plan.name || '';
+      opt.textContent = plan.name || plan.label || plan.id || '(unnamed plan)';
+      select.appendChild(opt);
+    });
+  }
+  const current = groupsV2FormState.planId;
+  const hasMatch = filtered.some((plan) => (plan.id || plan.name || '') === current);
+  if (hasMatch) {
+    select.value = current;
+  } else {
+    select.value = '';
+    if (current) groupsV2FormState.planId = '';
+  }
+  if (!select.value && filtered.length === 1) {
+    const fallback = filtered[0].id || filtered[0].name || '';
+    select.value = fallback;
+  }
   if (!select._planListenerAttached) {
-    select.addEventListener('change', function() {
-      const planId = select.value;
-      const plansArr = (window.STATE && Array.isArray(window.STATE.plans)) ? window.STATE.plans : [];
-      const plan = plansArr.find(p => (p.id || p.name) === planId);
+    select.addEventListener('change', () => {
+      groupsV2FormState.planId = select.value || '';
+      const plan = getGroupsV2SelectedPlan();
       renderGroupsV2PlanCard(plan);
+      updateGroupsV2Preview();
     });
     select._planListenerAttached = true;
   }
+  groupsV2FormState.planId = select.value || '';
+  const plan = getGroupsV2SelectedPlan();
+  renderGroupsV2PlanCard(plan);
+  updateGroupsV2Preview();
 }
 
 // Render the plan card for Group V2 Setup
@@ -646,13 +1069,66 @@ function populateGroupsV2ScheduleDropdown() {
 
 document.addEventListener('DOMContentLoaded', () => {
   // ...existing code...
-  populateGroupsV2PlanDropdown();
+  initializeGroupsV2Form();
+  populateGroupsV2PlanDropdown(groupsV2FormState.planSearch);
   populateGroupsV2ScheduleDropdown();
-  document.addEventListener('plans-updated', populateGroupsV2PlanDropdown);
+  document.addEventListener('plans-updated', () => populateGroupsV2PlanDropdown(groupsV2FormState.planSearch));
   document.addEventListener('schedules-updated', populateGroupsV2ScheduleDropdown);
 
   // Wire up embedded schedule card in Group V2
   wireEmbeddedScheduleCard();
+  updateGroupsV2Preview();
+});
+
+document.addEventListener('DOMContentLoaded', () => {
+  const select = document.getElementById('groupsV2LoadGroup');
+  if (!select || select._groupsV2ListenerAttached) return;
+  select.addEventListener('change', () => {
+    const groupId = select.value;
+    if (!groupId) return;
+    const groups = (window.STATE && Array.isArray(window.STATE.groups)) ? window.STATE.groups : [];
+    const matchById = groups.find((g) => g && typeof g.id === 'string' && g.id === groupId);
+    const matchByLabel = groups.find((g) => {
+      if (!g) return false;
+      const label = [g.room || g.roomName || '', g.zone || '', g.name || g.label || '']
+        .filter(Boolean)
+        .join(':');
+      return label === groupId;
+    });
+    const group = matchById || matchByLabel || null;
+    if (!group) return;
+    const planId = typeof group.plan === 'string'
+      ? group.plan
+      : (group.plan && typeof group.plan === 'object' ? (group.plan.id || group.plan.name) : '');
+    groupsV2FormState.planId = planId || '';
+    groupsV2FormState.planSearch = '';
+    const cfg = group.planConfig && typeof group.planConfig === 'object' ? group.planConfig : {};
+    const anchor = cfg.anchor && typeof cfg.anchor === 'object' ? cfg.anchor : {};
+    const seed = typeof anchor.seedDate === 'string' ? anchor.seedDate : '';
+    const parsedSeed = parseLocalDateInput(seed);
+    groupsV2FormState.anchorMode = anchor.mode === 'dps' ? 'dps' : 'seedDate';
+    groupsV2FormState.seedDate = parsedSeed ? formatDateInputValue(parsedSeed) : '';
+    groupsV2FormState.dps = toNumberOrNull(anchor.dps);
+    const scheduleCfg = cfg.schedule && typeof cfg.schedule === 'object' ? cfg.schedule : {};
+    groupsV2FormState.schedule = {
+      startTime: scheduleCfg.startTime || GROUPS_V2_DEFAULTS.schedule.startTime,
+      durationHours: toNumberOrNull(scheduleCfg.durationHours) ?? GROUPS_V2_DEFAULTS.schedule.durationHours,
+      rampUpMin: toNumberOrNull(scheduleCfg.rampUpMin) ?? GROUPS_V2_DEFAULTS.schedule.rampUpMin,
+      rampDownMin: toNumberOrNull(scheduleCfg.rampDownMin) ?? GROUPS_V2_DEFAULTS.schedule.rampDownMin,
+    };
+    const gradientCfg = cfg.gradients && typeof cfg.gradients === 'object' ? cfg.gradients : {};
+    groupsV2FormState.gradients = {
+      ppfd: toNumberOrNull(gradientCfg.ppfd) ?? GROUPS_V2_DEFAULTS.gradients.ppfd,
+      blue: toNumberOrNull(gradientCfg.blue) ?? GROUPS_V2_DEFAULTS.gradients.blue,
+      tempC: toNumberOrNull(gradientCfg.tempC) ?? GROUPS_V2_DEFAULTS.gradients.tempC,
+      rh: toNumberOrNull(gradientCfg.rh) ?? GROUPS_V2_DEFAULTS.gradients.rh,
+    };
+    populateGroupsV2PlanDropdown(groupsV2FormState.planSearch);
+    applyGroupsV2StateToInputs();
+    updateGroupsV2AnchorInputs();
+    updateGroupsV2Preview();
+  });
+  select._groupsV2ListenerAttached = true;
 });
 // Populate Groups V2 Load Group dropdown with saved groups, format: Room Name:Zone:Name
 function populateGroupsV2LoadGroupDropdown() {
