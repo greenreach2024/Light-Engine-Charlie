@@ -44,24 +44,26 @@ function wireEmbeddedScheduleCard() {
   // Utility: get schedule from editor
   function getEditorSchedule() {
     const tz = tzSelect?.value || 'America/Toronto';
-    const mode = modeRadios.find(r=>r.checked)?.value || 'one';
+    const mode = modeRadios.find((r) => r.checked)?.value || 'one';
     const c1OnVal = c1On?.value || '08:00';
     const c1HoursVal = Math.max(0, Math.min(24, Number(c1Hours?.value || 0)));
-    const c1Off = minutesToHHMM(toMinutes(c1OnVal) + Math.round(c1HoursVal*60));
-    const cycles = [ { on: c1OnVal, off: c1Off } ];
+    const c1Off = minutesToHHMM(toMinutes(c1OnVal) + Math.round(c1HoursVal * 60));
+    const cycles = [{ on: c1OnVal, off: c1Off }];
     if (mode === 'two') {
       const c2OnVal = c2On?.value || '00:00';
       const c2HoursVal = Math.max(0, Math.min(24, Number(c2Hours?.value || 0)));
-      const c2Off = minutesToHHMM(toMinutes(c2OnVal) + Math.round(c2HoursVal*60));
+      const c2Off = minutesToHHMM(toMinutes(c2OnVal) + Math.round(c2HoursVal * 60));
       cycles.push({ on: c2OnVal, off: c2Off });
     }
     return { id: '', mode, timezone: tz, cycles };
+  }
+
   // Add Apply to Current Group button logic
   const applyBtn = $('#applySchedToGroupBtn');
   if (applyBtn) {
     applyBtn.addEventListener('click', () => {
       // Get current group (last group for now)
-      const groups = (window.STATE && Array.isArray(window.STATE.groups)) ? window.STATE.groups : [];
+      const groups = window.STATE && Array.isArray(window.STATE.groups) ? window.STATE.groups : [];
       if (!groups.length) {
         alert('No group to apply schedule to.');
         return;
@@ -74,7 +76,6 @@ function wireEmbeddedScheduleCard() {
         showToast({ title: 'Schedule Applied', msg: 'Schedule applied to current group.', kind: 'success', icon: '✅' });
       }
     });
-  }
   }
   // Update schedule math UI
   function updateScheduleMathUI() {
@@ -91,7 +92,6 @@ function wireEmbeddedScheduleCard() {
     // TODO: Add preview bar/transitions if needed
   }
   // Wire up listeners
-  if (nameInput) nameInput.addEventListener('input', updateScheduleMathUI);
   if (tzSelect) tzSelect.addEventListener('change', updateScheduleMathUI);
   modeRadios.forEach(r => r.addEventListener('change', updateScheduleMathUI));
   if (c1On) c1On.addEventListener('input', updateScheduleMathUI);
@@ -101,14 +101,22 @@ function wireEmbeddedScheduleCard() {
   // Save schedule
   if (saveBtn) saveBtn.addEventListener('click', async () => {
     const edited = getEditorSchedule();
-    const name = edited.name?.trim();
-    if (!name) { showToast({ title:'Name required', msg:'Enter a schedule name before saving.', kind:'warn', icon:'⚠️' }); return; }
+    const zoneNameInput = document.getElementById('groupsV2ZoneName');
+    const defaultName = zoneNameInput?.value?.trim() || '';
+    let name = prompt('Enter schedule name', defaultName) || '';
+    name = name.trim();
+    if (!name) {
+      showToast({ title: 'Name required', msg: 'Enter a schedule name before saving.', kind: 'warn', icon: '⚠️' });
+      return;
+    }
     // Generate unique id
     let id = slugifyName(name);
-    const existingIds = new Set(STATE.schedules.map(s=>s.id));
+    const existingSchedules = Array.isArray(STATE?.schedules) ? STATE.schedules : [];
+    const existingIds = new Set(existingSchedules.map((s) => s.id));
     let i = 2;
     while (existingIds.has(id)) { id = `${id}-${i++}`; }
-    STATE.schedules.push({ ...edited, id, active: true });
+    if (!Array.isArray(STATE.schedules)) STATE.schedules = [];
+    STATE.schedules.push({ ...edited, id, name, active: true });
     await saveJSON('./data/schedules.json', { schedules: STATE.schedules });
     document.dispatchEvent(new Event('schedules-updated'));
     showToast({ title:'Schedule saved', msg:`Schedule "${name}" saved.`, kind:'success', icon:'💾' });
