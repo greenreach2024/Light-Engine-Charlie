@@ -291,6 +291,14 @@ h3 { font-size: 1.125rem; }
   align-items: start;
 }
 
+.dashboard-content {
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  gap: var(--hud-shell-gap, 24px);
+  min-width: 0;
+}
+
 .dashboard-sidebar {
   box-sizing: border-box;
   width: clamp(240px, 22vw, 280px);
@@ -450,6 +458,8 @@ h3 { font-size: 1.125rem; }
   flex-direction: column;
   align-items: flex-start;
   gap: var(--hud-shell-gap, 24px);
+  width: 100%;
+  min-width: 0;
 }
 
 .dashboard-main > .card,
