@@ -2072,7 +2072,10 @@ function normalizeEnvTargetsForAutomation(targets) {
   const normalized = {};
   if (!targets || typeof targets !== 'object') return normalized;
   const temp = toNumberOrNull(targets.tempC ?? targets.temperature ?? targets.temp);
-  if (temp != null) normalized.tempC = temp;
+  if (temp != null) {
+    normalized.tempC = temp;
+    normalized.temp = temp;
+  }
   const rh = toNumberOrNull(targets.rh ?? targets.humidity);
   if (rh != null) normalized.rh = Math.min(100, Math.max(0, rh));
   const rhBand = toNumberOrNull(targets.rhBand ?? targets.rh_band ?? targets.humidityBand);
@@ -2099,10 +2102,22 @@ function normalizeEnvControlForAutomation(control) {
   if (!control || typeof control !== 'object') return normalized;
   if (typeof control.enable === 'boolean') normalized.enable = control.enable;
   if (typeof control.mode === 'string' && control.mode.trim()) normalized.mode = control.mode.trim();
-  const step = toNumberOrNull(control.step);
-  if (step != null) normalized.step = step;
-  const dwell = toNumberOrNull(control.dwell);
-  if (dwell != null) normalized.dwell = dwell;
+  const stepRaw = toNumberOrNull(control.step ?? control.stepPct ?? control.stepPercent);
+  if (stepRaw != null) {
+    const normalizedStep = stepRaw > 1 ? stepRaw / 100 : stepRaw;
+    if (Number.isFinite(normalizedStep)) {
+      normalized.step = normalizedStep;
+      normalized.stepPercent = Math.round(normalizedStep * 10000) / 100;
+    }
+  }
+  const dwellRaw = toNumberOrNull(control.dwell ?? control.dwellMinutes ?? control.dwellMin);
+  if (dwellRaw != null) {
+    const normalizedDwell = dwellRaw >= 60 ? dwellRaw : dwellRaw * 60;
+    if (Number.isFinite(normalizedDwell) && normalizedDwell > 0) {
+      normalized.dwell = normalizedDwell;
+      normalized.dwellMinutes = Math.round((normalizedDwell / 60) * 100) / 100;
+    }
+  }
   return normalized;
 }
 
@@ -2689,7 +2704,18 @@ app.post('/env', (req, res) => {
   try {
     setPreAutomationCors(req, res);
     const body = req.body || {};
-    const scope = body.scope || body.room || 'default';
+    const scopeCandidates = [
+      body.zoneId,
+      body.zone,
+      body.scope,
+      body.scopeId,
+      body.room,
+      body.id
+    ];
+    const scope = scopeCandidates
+      .map((value) => (typeof value === 'string' ? value.trim() : ''))
+      .find((value) => !!value) || 'default';
+
     const sensors = body.sensors || body.readings || {};
     const sensorArray = Array.isArray(sensors) ? sensors : Object.entries(sensors).map(([type, value]) => ({ type, value }));
     sensorArray.forEach((reading) => {
@@ -2705,13 +2731,30 @@ app.post('/env', (req, res) => {
       });
     });
 
-    if (body.targets) {
-      preAutomationEngine.setTargets(scope, body.targets);
+    const normalizedTargets = normalizeEnvTargetsForAutomation(body.targets);
+    const normalizedControl = normalizeEnvControlForAutomation(body.control);
+    const hasTargets = Object.keys(normalizedTargets).length > 0;
+    const hasControl = Object.keys(normalizedControl).length > 0;
+    const zoneNameCandidates = [body.zoneName, body.name, body.label];
+    const zoneName = zoneNameCandidates
+      .map((value) => (typeof value === 'string' ? value.trim() : ''))
+      .find((value) => !!value) || scope;
+    const metaPayload = body.meta && typeof body.meta === 'object' ? body.meta : null;
+
+    if (hasTargets || hasControl || zoneName || metaPayload) {
+      const upsertPayload = { name: zoneName };
+      if (hasTargets) upsertPayload.targets = normalizedTargets;
+      if (hasControl) upsertPayload.control = normalizedControl;
+      if (metaPayload) upsertPayload.meta = metaPayload;
+      preEnvStore.upsertRoom(scope, upsertPayload);
+      if (hasTargets) {
+        preAutomationEngine.setTargets(scope, normalizedTargets);
+      }
     }
 
-    const env = preEnvStore.getScope(scope);
+    const room = preEnvStore.getRoom(scope);
     const targets = preEnvStore.getTargets(scope);
-    res.json({ ok: true, scope, env, targets });
+    res.json({ ok: true, scope, zoneId: scope, room, targets });
   } catch (error) {
     res.status(500).json({ ok: false, error: error.message });
   }
