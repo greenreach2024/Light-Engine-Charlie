@@ -557,9 +557,37 @@ app.post('/env', (req, res) => {
   }
 });
 
+
 app.get('/plugs', asyncHandler(async (req, res) => {
   setPreAutomationCors(req, res);
-  const plugs = await prePlugManager.discoverAll();
+  // Get all plug-type devices from the device store
+  let allPlugDevices = [];
+  try {
+    // Query for devices with type 'plug' (case-insensitive, supports SwitchBot, Kasa, Shelly, etc)
+    const rows = await devicesStore.find({});
+    allPlugDevices = rows.filter(d => {
+      const type = (d.type || d.deviceType || '').toLowerCase();
+      return type.includes('plug');
+    });
+  } catch (e) {
+    console.warn('[plugs] Failed to load plug devices from device store:', e.message);
+  }
+
+  // Get plugs from prePlugManager (Kasa, Shelly, etc)
+  let discoveredPlugs = [];
+  try {
+    discoveredPlugs = await prePlugManager.discoverAll();
+  } catch (e) {
+    console.warn('[plugs] prePlugManager.discoverAll() failed:', e.message);
+  }
+
+  // Merge by id (device id is unique)
+  const plugMap = new Map();
+  for (const plug of [...allPlugDevices, ...discoveredPlugs]) {
+    const id = plug.id || plug.deviceId || plug.device_id;
+    if (id) plugMap.set(id, plug);
+  }
+  const plugs = Array.from(plugMap.values());
   res.json({ ok: true, plugs });
 }));
 

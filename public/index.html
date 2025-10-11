@@ -26,9 +26,36 @@
       <span class="chip chip--tour-lock" data-role="tour-lock" hidden>Tour Lock</span>
     </div>
   </template>
-  <div class="dashboard-shell">
+  <header id="mainHeader" style="width:100%; max-width:1440px; margin:0 auto; padding:0;">
+    <section id="topCard" class="card card--hero top-card" style="width:100%; max-width:1200px; margin:0 auto 24px auto; border-radius:18px;">
+      <div class="row row--between row--center top-card__content" style="width:100%;">
+        <!-- Left side: Farm branding -->
+        <div class="row row--center row--gap-md flex-1">
+          <img id="farmLogo" src="" alt="Farm logo" class="farm-logo" onerror="this.style.display='none'">
+          <div id="farmBrandingSection" class="farm-branding">
+            <h1 id="farmName" class="farm-name"></h1>
+            <div id="farmTagline" class="tiny farm-tagline"></div>
+          </div>
+        </div>
+        <!-- Right side: Light Engine Charlie and controls -->
+        <div class="row row--gap-lg row--center top-card__status">
+          <div class="text-right">
+            <h1 id="lightEngineTitle" class="top-card__title">Light Engine Charlie</h1>
+            <div class="automation-indicator" id="automationIndicator" aria-live="polite">
+              <span class="automation-indicator__dot" aria-hidden="true"></span>
+              <span class="automation-indicator__label">Centralized Automation</span>
+              <span class="automation-indicator__status" id="automationIndicatorStatus">Idle</span>
+            </div>
+            <div id="communicationStatus" class="tiny text-muted top-card__status-text">System Online</div>
+          </div>
+        </div>
+      </div>
+    </section>
+  </header>
 
-<aside class="dashboard-sidebar" aria-label="Setup and management navigation">
+  <div class="dashboard-shell" style="display: flex; flex-direction: row; align-items: flex-start; width:100%; max-width:1440px; margin:0 auto;">
+
+<aside class="dashboard-sidebar" aria-label="Setup and management navigation" style="margin-top:0;">
   <div class="sidebar-header">
     <h2 class="sidebar-title">Setup &amp; Management</h2>
     <p class="tiny text-muted">Organize farm setup, device control, and daily grow operations.</p>
@@ -100,36 +127,15 @@
     <button type="button" class="sidebar-link" data-sidebar-link data-target="profile">
       Profile
     </button>
+    <button type="button" class="sidebar-link" data-sidebar-link data-target="groups-v2">
+      Groups V2
+    </button>
   </div>
 </aside>
 
 
 
-    <main class="dashboard-main">
-      <section id="topCard" class="card card--hero top-card">
-        <div class="row row--between row--center top-card__content">
-          <!-- Left side: Farm branding -->
-          <div class="row row--center row--gap-md flex-1">
-            <img id="farmLogo" src="" alt="Farm logo" class="farm-logo" onerror="this.style.display='none'">
-            <div id="farmBrandingSection" class="farm-branding">
-              <h1 id="farmName" class="farm-name"></h1>
-              <div id="farmTagline" class="tiny farm-tagline"></div>
-            </div>
-          </div>
-          <!-- Right side: Light Engine Charlie and controls -->
-          <div class="row row--gap-lg row--center top-card__status">
-            <div class="text-right">
-              <h1 id="lightEngineTitle" class="top-card__title">Light Engine Charlie</h1>
-              <div class="automation-indicator" id="automationIndicator" aria-live="polite">
-                <span class="automation-indicator__dot" aria-hidden="true"></span>
-                <span class="automation-indicator__label">Centralized Automation</span>
-                <span class="automation-indicator__status" id="automationIndicatorStatus">Idle</span>
-              </div>
-              <div id="communicationStatus" class="tiny text-muted top-card__status-text">System Online</div>
-            </div>
-          </div>
-        </div>
-      </section>
+    <main class="dashboard-main" style="flex: 1 1 auto; display: flex; flex-direction: column; gap: var(--gap); align-items: flex-start;">
       <section id="environmentalAiCard" class="card card--feature">
               <div class="row row--between row--center mb-md">
                 <h2 class="section-title">Environmental & AI Features</h2>
@@ -226,19 +232,7 @@
           </div>
         </section>
 
-  <section id="lightsStatusPanel" class="card card--panel">
-    <div class="row row--between row--center">
-              <h2 class="section-title">
-                Current Lights Status
-                <span class="hint" tabindex="0" data-tip="Aggregates SwitchBot, Kasa, and registered fixtures. Uses cached cloud/device data by default to avoid rate limits.">?</span>
-              </h2>
-              <div class="row row--center row--gap-xs">
-                <button id="btnRefreshLights" type="button" class="ghost">Refresh</button>
-              </div>
-            </div>
-      <p id="lightsStatusSummary" class="tiny text-muted mt-xs mb-xs" aria-live="polite">Loading…</p>
-      <div id="lightsStatusList" class="grid cols-3 gap-sm"></div>
-    </section>
+  <!-- Current Lights Status card removed -->
     <!-- Overview hero (now below lights status) -->
     <section class="dashboard-panel dashboard-panel--overview is-active" data-panel="overview">
       <section id="overview" class="overview" aria-labelledby="overviewTitle">
@@ -459,74 +453,7 @@
             </div>
             <div id="plansList" class="grid cols-2 gap-sm" aria-live="polite"></div>
           </section>
-      <section id="schedulesPanel" class="card" data-panel="schedules">
-            <div class="row row--between row--center">
-              <h2 style="margin:0">
-                Schedules
-                <span class="hint" tabindex="0" data-tip="Define single or split light cycles (ON/OFF). We track wall-clock times in America/Toronto and sync to sched.json.">?</span>
-              </h2>
-              <span id="schedStatus" class="tiny" aria-live="polite"></span>
-            </div>
-
-            <div class="schedule-editor">
-              <div class="schedule-editor__col">
-                <div class="row row--gap-sm row--wrap mt-sm mb-sm">
-                  <input id="schedName" type="text" placeholder="Schedule name (e.g., Flower A)">
-                  <label class="row row--gap-xs"><span>Timezone</span>
-                    <select id="schedTz">
-                      <option value="America/Toronto">America/Toronto</option>
-                    </select>
-                  </label>
-                </div>
-
-                <div class="schedule-mode" role="radiogroup" aria-label="Schedule mode">
-                  <span class="tiny">Mode</span>
-                  <label class="chip-option"><input type="radio" name="schedMode" value="one" checked><span>One cycle</span></label>
-                  <label class="chip-option"><input type="radio" name="schedMode" value="two"><span>Two cycles</span></label>
-                </div>
-
-                <div class="schedule-cycle" data-cycle="1">
-                  <div class="tiny">Cycle 1</div>
-                  <label><span>Start</span><input id="schedCycle1On" type="time" value="08:00"></label>
-                  <label><span>Photoperiod (h)</span><input id="schedC1Hours" type="number" min="0" max="24" step="0.5" value="12"></label>
-                  <div class="tiny" id="schedC1End">End: 20:00</div>
-                  <div class="tiny" style="color:#475569">Repeated daily</div>
-                </div>
-                <div class="schedule-cycle" data-cycle="2">
-                  <div class="tiny">Cycle 2</div>
-                  <label><span>Start</span><input id="schedCycle2On" type="time" value="00:00"></label>
-                  <label><span>Photoperiod (h)</span><input id="schedC2Hours" type="number" min="0" max="24" step="0.5" value="12"></label>
-                  <div class="tiny" id="schedC2End">End: 12:00</div>
-                  <div class="tiny" style="color:#475569">Repeated daily</div>
-                </div>
-              </div>
-
-              <div class="schedule-editor__col schedule-editor__col--preview">
-                <div class="schedule-math" aria-live="polite">
-                  <div><strong>ON total</strong><span id="schedOnTotal">--</span></div>
-                  <div><strong>OFF total</strong><span id="schedOffTotal">--</span></div>
-                  <div><strong>Δ vs 24h</strong><span id="schedDelta">--</span></div>
-                </div>
-                <div id="schedMathWarning" class="schedule-warning" role="alert" aria-live="polite" style="display:none"></div>
-                <div class="schedule-preview schedule-preview--editor">
-                  <div class="schedule-preview__bar" id="schedEditorBar"></div>
-                  <div class="schedule-preview__legend">
-                    <span class="tiny">24h preview</span>
-                    <span class="schedule-preview__dst" id="schedEditorDst" style="display:none">DST</span>
-                  </div>
-                  <div class="schedule-preview__transitions" id="schedEditorTransitions"></div>
-                </div>
-              </div>
-            </div>
-
-            <!-- Group-only scope: removed Room/Zone selectors per redesign -->
-
-            <div class="row row--gap-sm row--wrap mt-sm mb-sm">
-              <button id="btnSaveSched" type="button" class="primary">Save Schedule</button>
-              <button id="btnDeleteSched" type="button" class="ghost">Delete Schedule</button>
-              <button id="btnReloadSched" type="button" class="ghost">Reload Schedules</button>
-            </div>
-          </section>
+      <!-- <section id="schedulesPanel" class="card" data-panel="schedules" style="display:none"> ...original schedule setup card hidden after embedding in Group V2... </section> -->
       <section id="groupsPanel" class="card" data-panel="groups">
 
             <div class="row row--between row--center">
@@ -580,23 +507,7 @@
               </footer>
             </section>
 
-            <!-- Room/Zone dropdowns for group assignment -->
-            <div class="row row--gap-sm row--wrap mb-sm">
-              <label for="groupRoomDropdown" class="tiny" style="margin-right:8px;">Room</label>
-              <select id="groupRoomDropdown" style="min-width:140px;margin-right:16px;"></select>
-              <label for="groupZoneDropdown" class="tiny" style="margin-right:8px;">Zone</label>
-              <select id="groupZoneDropdown" style="min-width:140px;"></select>
-            </div>
 
-            <!-- Group pick / save -->
-            <div class="row row--gap-sm row--wrap mt-sm mb-sm">
-              <label class="sr-only" for="groupSelect">Active group</label>
-              <select id="groupSelect" title="Active group" style="min-width:180px"></select>
-              <input id="groupName" type="text" placeholder="New or existing group name" style="min-width:220px">
-              <button id="btnSaveGroup" type="button" class="primary">Save Group</button>
-              <button id="btnDeleteGroup" type="button" class="ghost" title="Delete this group">Delete Group</button>
-              <button id="btnReloadGroups" type="button" class="ghost">Reload Groups</button>
-            </div>
 
             <!-- Group plan / schedule -->
             <div class="group-card-meta">
@@ -799,6 +710,161 @@
   </form>
 </section>
     </main>
+
+    <!-- Groups V2 Panel -->
+    <section id="groupsV2Panel" class="card" data-panel="groups-v2" style="display:none" hidden>
+      <div class="row row--between row--center">
+        <h2 style="margin:0">Group V2 Setup</h2>
+        <span id="groupsV2Status" class="tiny" aria-live="polite"></span>
+      </div>
+      <div class="panel-body">
+  <div class="row group-v2-builder" style="margin-bottom:16px; align-items: flex-end; gap: 16px; flex-wrap: wrap; border: 1.5px solid #cbd5e1; background: linear-gradient(90deg, #f8fafc 80%, #e0f2fe 100%); border-radius: 10px; box-shadow: 0 2px 8px 0 rgba(100, 199, 199, 0.07); padding: 18px 18px 10px 18px;">
+          <label for="groupsV2RoomSelect" style="margin-right:8px">Select Room:</label>
+          <select id="groupsV2RoomSelect" style="margin-right:16px">
+            <option value="GreenReach">GreenReach</option>
+            <!-- Dynamic room options will be inserted here by JS -->
+          </select>
+          <label for="groupsV2ZoneSelect" style="margin-right:8px">Zone:</label>
+          <select id="groupsV2ZoneSelect" style="margin-right:16px">
+            <option value="">(none)</option>
+            <option value="Zone 1">Zone 1</option>
+            <option value="Zone 2">Zone 2</option>
+            <option value="Zone 3">Zone 3</option>
+            <option value="Zone 4">Zone 4</option>
+            <option value="Zone 5">Zone 5</option>
+            <option value="Zone 6">Zone 6</option>
+            <option value="Zone 7">Zone 7</option>
+            <option value="Zone 8">Zone 8</option>
+            <option value="Zone 9">Zone 9</option>
+            <option value="Zone 10">Zone 10</option>
+          </select>
+          <label for="groupsV2ZoneName" style="margin-right:8px">Name this zone:</label>
+          <input id="groupsV2ZoneName" type="text" placeholder="e.g., Propagation North — Bench A" style="min-width:180px;">
+          <button id="groupsV2SaveGroup" type="button" class="primary" style="margin-left:8px;">Save New Group</button>
+          <label for="groupsV2LoadGroup" style="margin-left:16px; margin-right:8px;">Load Group:</label>
+          <select id="groupsV2LoadGroup" style="max-width:180px;">
+            <option value="">(none)</option>
+            <!-- Saved groups will be populated here by JS -->
+          </select>
+        </div>
+        <div class="row group-v2-plansched" style="margin-bottom:18px; gap: 24px; align-items: flex-end; border: 1.5px solid #cbd5e1; background: linear-gradient(90deg, #f8fafc 80%, #e0f2fe 100%); border-radius: 10px; box-shadow: 0 2px 8px 0 rgba(100, 199, 199, 0.07); padding: 18px 18px 10px 18px;">
+          <label for="groupsV2PlanSelect" style="margin-right:8px">Plan:</label>
+          <select id="groupsV2PlanSelect">
+            <option value="">(none)</option>
+            <!-- Plans will be populated by JS -->
+          </select>
+          <button id="applyPlanToGroupBtn" type="button" class="primary" style="margin-left:8px;">Apply to Current Plan</button>
+        </div>
+        <!-- Embedded Schedule Setup Card -->
+        <section id="schedulesPanel-embedded" class="card" style="margin-bottom:18px;">
+          <div class="row row--between row--center">
+            <h3 style="margin:0">Schedule Setup</h3>
+            <span id="schedStatus-embedded" class="tiny" aria-live="polite"></span>
+          </div>
+          <div class="schedule-editor">
+            <div class="schedule-editor__col">
+              <div class="row row--gap-sm row--wrap mt-sm mb-sm">
+                <!-- Name field removed -->
+                <label class="row row--gap-xs"><span>Timezone</span>
+                  <select id="schedTz-embedded">
+                    <option value="America/Toronto">America/Toronto</option>
+                  </select>
+                </label>
+                <button id="applySchedToGroupBtn" type="button" class="primary" style="margin-left:8px;">Apply to Current Group</button>
+              </div>
+              <div class="schedule-mode" role="radiogroup" aria-label="Schedule mode">
+                <span class="tiny">Mode</span>
+                <label class="chip-option"><input type="radio" name="schedMode-embedded" value="one" checked><span>One cycle</span></label>
+                <label class="chip-option"><input type="radio" name="schedMode-embedded" value="two"><span>Two cycles</span></label>
+              </div>
+              <div class="schedule-cycle" data-cycle="1">
+                <div class="tiny">Cycle 1</div>
+                <label><span>Start</span><input id="schedCycle1On-embedded" type="time" value="08:00"></label>
+                <label><span>Photoperiod (h)</span><input id="schedC1Hours-embedded" type="number" min="0" max="24" step="0.5" value="12"></label>
+                <div class="tiny" id="schedC1End-embedded">End: 20:00</div>
+                <div class="tiny" style="color:#475569">Repeated daily</div>
+              </div>
+              <div class="schedule-cycle" data-cycle="2">
+                <div class="tiny">Cycle 2</div>
+                <label><span>Start</span><input id="schedCycle2On-embedded" type="time" value="00:00"></label>
+                <label><span>Photoperiod (h)</span><input id="schedC2Hours-embedded" type="number" min="0" max="24" step="0.5" value="12"></label>
+                <div class="tiny" id="schedC2End-embedded">End: 12:00</div>
+                <div class="tiny" style="color:#475569">Repeated daily</div>
+              </div>
+            </div>
+            <div class="schedule-editor__col schedule-editor__col--preview">
+              <div class="schedule-math" aria-live="polite">
+                <div><strong>ON total</strong><span id="schedOnTotal-embedded">--</span></div>
+                <div><strong>OFF total</strong><span id="schedOffTotal-embedded">--</span></div>
+                <div><strong>Δ vs 24h</strong><span id="schedDelta-embedded">--</span></div>
+              </div>
+              <div id="schedMathWarning-embedded" class="schedule-warning" role="alert" aria-live="polite" style="display:none"></div>
+              <div class="schedule-preview schedule-preview--editor">
+                <div class="schedule-preview__bar" id="schedEditorBar-embedded"></div>
+                <div class="schedule-preview__legend">
+                  <span class="tiny">24h preview</span>
+                  <span class="schedule-preview__dst" id="schedEditorDst-embedded" style="display:none">DST</span>
+                </div>
+                <div class="schedule-preview__transitions" id="schedEditorTransitions-embedded"></div>
+              </div>
+            </div>
+          </div>
+          <div class="row row--gap-sm row--wrap mt-sm mb-sm">
+            <button id="btnSaveSched-embedded" type="button" class="primary">Save Schedule</button>
+            <button id="btnDeleteSched-embedded" type="button" class="ghost">Delete Schedule</button>
+            <button id="btnReloadSched-embedded" type="button" class="ghost">Reload Schedules</button>
+          </div>
+        </section>
+        <div class="group-v2-card" style="margin-bottom:18px; border: 1.5px solid #cbd5e1; background: linear-gradient(90deg, #f8fafc 80%, #e0f2fe 100%); border-radius: 10px; box-shadow: 0 2px 8px 0 rgba(100, 199, 199, 0.07); padding: 0; width:100%; font-family: var(--gr-font, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif);">
+          <div style="display:flex; flex-direction:column; width:100%; min-height:100px; background:#f6f8fa; border-radius:8px 8px 0 0; padding:18px 18px 10px 18px;">
+            <h4 style="margin:0 0 8px 0; font-size:1.1em; color:#334155; font-weight:600;">Unassigned Equipment</h4>
+            <div style="display:flex; align-items:center; gap:8px; flex-wrap:wrap;">
+              <label for="groupsV2UnassignedEquipSelect" style="margin-right:8px; font-size:1em; color:#334155;">Unassigned Equipment:</label>
+              <select id="groupsV2UnassignedEquipSelect" multiple size="3" style="min-width:180px; font-size:1em;">
+                <!-- Equipment will be populated by JS -->
+              </select>
+              <button id="assignEquipToZoneBtn" style="margin-left:16px; font-size:1em;">Assign to Zone</button>
+            </div>
+          </div>
+        </div>
+        <div class="group-v2-card" style="margin-bottom:18px; border: 1.5px solid #cbd5e1; background: linear-gradient(90deg, #f8fafc 80%, #e0f2fe 100%); border-radius: 10px; box-shadow: 0 2px 8px 0 rgba(100, 199, 199, 0.07); padding: 0; width:100%; font-family: var(--gr-font, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif);">
+          <div style="display:flex; flex-direction:column; width:100%; min-height:100px; background:#e0f7fa; border-radius:8px 8px 0 0; padding:18px 18px 10px 18px;">
+            <h4 style="margin:0 0 8px 0; font-size:1.1em; color:#334155; font-weight:600;">Assigned Equipment</h4>
+            <select id="assignedEquipSelect" multiple size="3" style="min-width:180px; font-size:1em; margin-bottom:10px;">
+              <!-- Assigned equipment will be populated by JS -->
+            </select>
+            <ul id="assignedEquipList" style="display:none;"></ul>
+          </div>
+        </div>
+        <div class="group-v2-card" style="margin-bottom:18px; border: 1.5px solid #cbd5e1; background: linear-gradient(90deg, #f8fafc 80%, #e0f2fe 100%); border-radius: 10px; box-shadow: 0 2px 8px 0 rgba(100, 199, 199, 0.07); padding: 0; width:100%; font-family: var(--gr-font, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif);">
+          <div style="display:flex; flex-direction:column; width:100%; min-height:100px; background:#f1f5f9; border-radius:8px 8px 0 0; padding:18px 18px 10px 18px;">
+            <h4 style="margin:0 0 8px 0; font-size:1.1em; color:#334155; font-weight:600;">Unassigned Lights</h4>
+            <div style="display:flex; align-items:center; gap:8px; flex-wrap:wrap;">
+              <label for="groupsV2UnassignedLightsSelect" style="margin-right:8px; font-size:1em; color:#334155;">Unassigned Lights:</label>
+              <select id="groupsV2UnassignedLightsSelect" multiple size="6" style="min-width:320px; max-width:600px; height:176px; font-size:1em;">
+                <!-- Lights will be populated by JS -->
+              </select>
+              <button id="assignLightsToGroupBtn" style="margin-left:16px; font-size:1em;">Assign to Group</button>
+            </div>
+            <div id="lightInfoCard" style="flex:1 1 auto; overflow-y:auto; display:none;">
+              <h4 id="lightInfoCardTitle" style="margin-top:0; margin-bottom:8px; font-size:1.1em; color:#334155; font-weight:600;">Light Info</h4>
+              <div id="lightInfoCardBody" style="font-size:0.98em; color:#334155;"></div>
+            </div>
+          </div>
+        </div>
+        <div class="group-v2-card" style="margin-bottom:18px; border: 1.5px solid #cbd5e1; background: linear-gradient(90deg, #f8fafc 80%, #e0f2fe 100%); border-radius: 10px; box-shadow: 0 2px 8px 0 rgba(100, 199, 199, 0.07); padding: 0; width:100%; font-family: var(--gr-font, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif);">
+          <div style="display:flex; flex-direction:column; width:100%; min-height:100px; background:#e0f7fa; border-radius:8px 8px 0 0; padding:18px 18px 10px 18px;">
+            <h4 style="margin:0 0 8px 0; font-size:1.1em; color:#334155; font-weight:600;">Assigned Lights</h4>
+            <select id="assignedLightsSelect" multiple size="6" style="min-width:320px; max-width:600px; height:176px; margin-bottom:10px; font-size:1em;">
+              <!-- Assigned lights will be populated by JS -->
+            </select>
+            <ul id="assignedLightsList" style="display:none;"></ul>
+          </div>
+        </div>
+        <p class="tiny" style="color:#475569">This is the new Groups V2 setup card. Add your new group management features here.</p>
+        <!-- TODO: Add Groups V2 UI here -->
+      </div>
+    </section>
 
   </div>
 
@@ -1004,9 +1070,6 @@
             <p class="cal-question">Select the fixtures to calibrate.</p>
             <div id="calScopeLights" class="cal-scope-block" aria-live="polite"></div>
             <div id="calScopeGroup" class="cal-scope-block" style="display:none">
-              <label class="row row--gap-xs"><span>Group</span><select id="calScopeGroupSelect"></select></label>
-              <p class="tiny" style="color:#475569">Lights inherit the current group roster. Offline lights are skipped automatically.</p>
-            </div>
             <div id="calScopeLocation" class="cal-scope-block" style="display:none">
               <div class="row row--gap-sm row--wrap">
                 <label class="row row--gap-xs"><span>Room</span><select id="calScopeRoom"></select></label>
@@ -1099,14 +1162,11 @@
           
 
           <section class="room-step" data-step="room-info">
-            <p class="room-question">Name the grow room and define its zones.</p>
+            <p class="room-question">Name the grow room.</p>
             <div class="farm-step__stack">
               <div id="roomInfoError" class="tiny" style="color:#e11d48;margin-bottom:8px;display:none"></div>
               <label class="tiny" for="roomInfoName">Grow room name</label>
               <input id="roomInfoName" type="text" placeholder="e.g., Flower A" required>
-              <label class="tiny" for="roomInfoZoneCount" style="margin-top:12px">Number of zones</label>
-              <input id="roomInfoZoneCount" type="number" min="1" max="12" value="1" style="width:80px">
-              <div id="roomInfoZoneInputs" style="margin-top:12px;display:flex;flex-direction:column;gap:8px"></div>
             </div>
           </section>
           <section class="room-step" data-step="hardware">

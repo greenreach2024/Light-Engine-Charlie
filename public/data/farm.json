@@ -4,7 +4,7 @@
   "rooms": [
     {
       "id": "room-ue2cer",
-      "name": "My FArm - Room 1",
+      "name": "GreenReach",
       "location": "",
       "hardwareCats": [
         "dehumidifier"
@@ -51,17 +51,38 @@
       "seriesCount": 0,
       "category": {
         "dehumidifier": {
-          "selectedEquipment": [],
+          "selectedEquipment": [
+            {
+              "category": "dehumidifier",
+              "vendor": "Anden",
+              "model": "A710",
+              "capacity": "710 pints/day",
+              "control": "0-10V",
+              "count": 1
+            }
+          ],
           "wifi": false,
           "wired": false,
-          "count": 0
+          "count": 1,
+          "manufacturer": "Anden",
+          "model": "A710"
         }
       },
-      "_categoryProgress": {}
+      "_categoryProgress": {
+        "2": {
+          "selectedEquipment": [
+            {
+              "category": "dehumidifier",
+              "vendor": "Anden",
+              "model": "A710",
+              "capacity": "710 pints/day",
+              "control": "0-10V",
+              "count": 1
+            }
+          ]
+        }
+      }
     }
   ],
-  "zones": [
-    "Propagation North",
-    "Flower East"
-  ]
+  "zones": []
 }

@@ -1,3 +1,703 @@
+// Ensure lights from lightSetups are always in window.STATE.lights and update unassigned lights
+window.addEventListener('lightSetupsChanged', () => {
+  if (!window.STATE) window.STATE = {};
+  if (!Array.isArray(window.STATE.lights)) window.STATE.lights = [];
+  const setups = Array.isArray(window.STATE.lightSetups) ? window.STATE.lightSetups : [];
+  setups.forEach(setup => {
+    (setup.fixtures || []).forEach(fixture => {
+      if (!window.STATE.lights.some(l => l.id === fixture.id)) {
+        window.STATE.lights.push({
+          ...fixture,
+          roomId: setup.room,
+          zoneId: null // Unassigned by default
+        });
+      }
+    });
+  });
+  document.dispatchEvent(new Event('lights-updated'));
+});
+// --- Embedded Schedule Setup Card Logic for Group V2 --- //
+function wireEmbeddedScheduleCard() {
+  // Helper for querySelector
+  const $ = (sel) => document.querySelector(sel);
+  // Embedded schedule editor elements
+  // const nameInput = $('#schedName-embedded'); // Name field removed
+  const tzSelect = $('#schedTz-embedded');
+  const modeRadios = Array.from(document.querySelectorAll('input[name="schedMode-embedded"]'));
+  const c1On = $('#schedCycle1On-embedded');
+  const c1Hours = $('#schedC1Hours-embedded');
+  const c1End = $('#schedC1End-embedded');
+  const c2On = $('#schedCycle2On-embedded');
+  const c2Hours = $('#schedC2Hours-embedded');
+  const c2End = $('#schedC2End-embedded');
+  const onTotalEl = $('#schedOnTotal-embedded');
+  const offTotalEl = $('#schedOffTotal-embedded');
+  const deltaEl = $('#schedDelta-embedded');
+  const warningEl = $('#schedMathWarning-embedded');
+  const previewBar = $('#schedEditorBar-embedded');
+  const dstEl = $('#schedEditorDst-embedded');
+  const transitionsEl = $('#schedEditorTransitions-embedded');
+  // Button elements
+  const saveBtn = $('#btnSaveSched-embedded');
+  const deleteBtn = $('#btnDeleteSched-embedded');
+  const reloadBtn = $('#btnReloadSched-embedded');
+  // Utility: get schedule from editor
+  function getEditorSchedule() {
+    const tz = tzSelect?.value || 'America/Toronto';
+    const mode = modeRadios.find(r=>r.checked)?.value || 'one';
+    const c1OnVal = c1On?.value || '08:00';
+    const c1HoursVal = Math.max(0, Math.min(24, Number(c1Hours?.value || 0)));
+    const c1Off = minutesToHHMM(toMinutes(c1OnVal) + Math.round(c1HoursVal*60));
+    const cycles = [ { on: c1OnVal, off: c1Off } ];
+    if (mode === 'two') {
+      const c2OnVal = c2On?.value || '00:00';
+      const c2HoursVal = Math.max(0, Math.min(24, Number(c2Hours?.value || 0)));
+      const c2Off = minutesToHHMM(toMinutes(c2OnVal) + Math.round(c2HoursVal*60));
+      cycles.push({ on: c2OnVal, off: c2Off });
+    }
+    return { id: '', mode, timezone: tz, cycles };
+  // Add Apply to Current Group button logic
+  const applyBtn = $('#applySchedToGroupBtn');
+  if (applyBtn) {
+    applyBtn.addEventListener('click', () => {
+      // Get current group (last group for now)
+      const groups = (window.STATE && Array.isArray(window.STATE.groups)) ? window.STATE.groups : [];
+      if (!groups.length) {
+        alert('No group to apply schedule to.');
+        return;
+      }
+      const group = groups[groups.length - 1];
+      const sched = getEditorSchedule();
+      group.schedule = sched;
+      document.dispatchEvent(new Event('groups-updated'));
+      if (typeof showToast === 'function') {
+        showToast({ title: 'Schedule Applied', msg: 'Schedule applied to current group.', kind: 'success', icon: '✅' });
+      }
+    });
+  }
+  }
+  // Update schedule math UI
+  function updateScheduleMathUI() {
+    const s = getEditorSchedule();
+    const { errors, onTotal, offTotal, overlapTrim } = validateSchedule(s.mode, s.cycles);
+    onTotalEl.textContent = `${(onTotal/60).toFixed(1)} h`;
+    offTotalEl.textContent = `${(offTotal/60).toFixed(1)} h`;
+    deltaEl.textContent = `${(Math.max(0, overlapTrim)/60).toFixed(1)} h overlap`;
+    if (errors.length) { warningEl.style.display = 'block'; warningEl.textContent = errors.join(' ');} else { warningEl.style.display = 'none'; }
+    // End labels
+    const c1Cycle = s.cycles[0];
+    if (c1End) c1End.textContent = `End: ${c1Cycle?.off || '--:--'}`;
+    if (s.mode === 'two' && c2End) c2End.textContent = `End: ${s.cycles[1]?.off || '--:--'}`;
+    // TODO: Add preview bar/transitions if needed
+  }
+  // Wire up listeners
+  if (nameInput) nameInput.addEventListener('input', updateScheduleMathUI);
+  if (tzSelect) tzSelect.addEventListener('change', updateScheduleMathUI);
+  modeRadios.forEach(r => r.addEventListener('change', updateScheduleMathUI));
+  if (c1On) c1On.addEventListener('input', updateScheduleMathUI);
+  if (c1Hours) c1Hours.addEventListener('input', updateScheduleMathUI);
+  if (c2On) c2On.addEventListener('input', updateScheduleMathUI);
+  if (c2Hours) c2Hours.addEventListener('input', updateScheduleMathUI);
+  // Save schedule
+  if (saveBtn) saveBtn.addEventListener('click', async () => {
+    const edited = getEditorSchedule();
+    const name = edited.name?.trim();
+    if (!name) { showToast({ title:'Name required', msg:'Enter a schedule name before saving.', kind:'warn', icon:'⚠️' }); return; }
+    // Generate unique id
+    let id = slugifyName(name);
+    const existingIds = new Set(STATE.schedules.map(s=>s.id));
+    let i = 2;
+    while (existingIds.has(id)) { id = `${id}-${i++}`; }
+    STATE.schedules.push({ ...edited, id, active: true });
+    await saveJSON('./data/schedules.json', { schedules: STATE.schedules });
+    document.dispatchEvent(new Event('schedules-updated'));
+    showToast({ title:'Schedule saved', msg:`Schedule "${name}" saved.`, kind:'success', icon:'💾' });
+    updateScheduleMathUI();
+  });
+  // Reload schedules
+  if (reloadBtn) reloadBtn.addEventListener('click', async () => {
+    const sched = await loadJSON('./data/schedules.json');
+    STATE.schedules = sched?.schedules || [];
+    document.dispatchEvent(new Event('schedules-updated'));
+    showToast({ title:'Schedules reloaded', msg:'Schedules reloaded from disk.', kind:'info', icon:'🔄' });
+    updateScheduleMathUI();
+  });
+  // Delete schedule
+  if (deleteBtn) deleteBtn.addEventListener('click', async () => {
+    const id = prompt('Enter schedule id to delete');
+    if (!id) return;
+    STATE.schedules = STATE.schedules.filter(s => s.id !== id);
+    await saveJSON('./data/schedules.json', { schedules: STATE.schedules });
+    document.dispatchEvent(new Event('schedules-updated'));
+    showToast({ title:'Schedule deleted', msg:`Schedule "${id}" deleted.`, kind:'info', icon:'🗑️' });
+    updateScheduleMathUI();
+  });
+  // Initial math update
+  updateScheduleMathUI();
+}
+
+// Assign selected unassigned lights to the current group
+document.addEventListener('DOMContentLoaded', () => {
+  // Wire up Apply to Current Plan button
+  const applyPlanBtn = document.getElementById('applyPlanToGroupBtn');
+  if (applyPlanBtn) {
+    applyPlanBtn.addEventListener('click', () => {
+      const planSelect = document.getElementById('groupsV2PlanSelect');
+      const planId = planSelect && planSelect.value;
+      if (!planId) {
+        alert('Select a plan to apply.');
+        return;
+      }
+      const plans = (window.STATE && Array.isArray(window.STATE.plans)) ? window.STATE.plans : [];
+      const plan = plans.find(p => (p.id || p.name) === planId);
+      if (!plan) {
+        alert('Plan not found.');
+        return;
+      }
+      const groups = (window.STATE && Array.isArray(window.STATE.groups)) ? window.STATE.groups : [];
+      if (!groups.length) {
+        alert('No group to apply plan to.');
+        return;
+      }
+      const group = groups[groups.length - 1];
+      group.plan = plan;
+      document.dispatchEvent(new Event('groups-updated'));
+      if (typeof showToast === 'function') {
+        showToast({ title: 'Plan Applied', msg: 'Plan applied to current group.', kind: 'success', icon: '✅' });
+      }
+    });
+  }
+  const assignBtn = document.getElementById('assignLightsToGroupBtn');
+  if (assignBtn) {
+    assignBtn.addEventListener('click', () => {
+      const select = document.getElementById('groupsV2UnassignedLightsSelect');
+      if (!select) return;
+      const selectedIds = Array.from(select.selectedOptions).map(opt => opt.value).filter(Boolean);
+      if (!selectedIds.length) {
+        alert('Select at least one light to assign.');
+        return;
+      }
+      // Find the current group (last group for now)
+      const groups = (window.STATE && Array.isArray(window.STATE.groups)) ? window.STATE.groups : [];
+      if (!groups.length) {
+        alert('No group to assign to.');
+        return;
+      }
+      const group = groups[groups.length - 1];
+      if (!Array.isArray(group.lights)) group.lights = [];
+      // Add selected lights to group if not already present
+      selectedIds.forEach(id => {
+        if (!group.lights.some(l => l.id === id)) {
+          group.lights.push({ id });
+        }
+        // Update the light's zoneId to mark as assigned
+        const light = (window.STATE.lights || []).find(l => l.id === id);
+        if (light) {
+          light.zoneId = group.zone || 'assigned';
+        }
+      });
+      document.dispatchEvent(new Event('groups-updated'));
+      document.dispatchEvent(new Event('lights-updated'));
+    });
+  }
+});
+// Light spec for TopLight MH Model-300W-22G12
+const TOPLIGHT_MH_300W_SPEC = {
+  watts: 300,
+  ppf: 709,
+  ppe: 2.59,
+  powerInput: '100~277VAC 50/60Hz',
+  colorRange: '400-700',
+  uv: 'NO',
+  farRed: 'NO',
+  spectrumBooster: 'BLUE',
+  factoryDefaultRatio: '0.68:1',
+  bestRatioRange: '0.68:1~2:1',
+  dimming: 'YES',
+  controlBox: 'YES',
+  app: 'YES',
+  bluetooth: 'YES',
+  wifi: 'YES',
+  lynx3: 'YES',
+  smartune: 'YES',
+  cooling: 'PASSIVE, FANLESS COOLING',
+  dimensions: '1240mm x 140mm x 76 mm (48.4\" x 5.5\" x 3.0\")',
+  weight: '6.35 kg (14 lbs)',
+  ipRating: 'IP66',
+};
+
+function renderLightInfoCard(light) {
+  if (!light) return '';
+  // Try to find the full light object from STATE.lights by id or serial
+  const db = (window.STATE && Array.isArray(window.STATE.lights)) ? window.STATE.lights : [];
+  const dbLight = db.find(l => l.id === light.id || l.serial === light.serial) || light;
+  // Show all available fields
+  let html = '';
+  Object.entries(dbLight).forEach(([key, value]) => {
+    if (typeof value === 'object' && value !== null) return;
+    html += `<div><strong>${key.replace(/([A-Z])/g, ' $1').replace(/^./, s => s.toUpperCase())}:</strong> ${value ?? ''}</div>`;
+  });
+  // Add spectra graph if spectra breakdown is available
+  if (dbLight.spectrum || dbLight.spectra) {
+    const spectrum = dbLight.spectrum || dbLight.spectra;
+    html += '<div style="margin-top:10px;"><canvas id="lightInfoSpectrumCanvas" width="300" height="60" style="border-radius:6px; background:#f8fafc; box-shadow:0 1px 4px #0001;"></canvas></div>';
+    setTimeout(() => {
+      const canvas = document.getElementById('lightInfoSpectrumCanvas');
+      if (canvas && typeof renderSpectrumCanvas === 'function') {
+        // If spectrum is already SPD, use as is; else compute SPD
+        let spd = typeof computeWeightedSPD === 'function' ? computeWeightedSPD(spectrum) : spectrum;
+        renderSpectrumCanvas(canvas, spd, { width: canvas.width, height: canvas.height });
+      }
+    }, 0);
+  }
+  if (!html) html = '<em>No info available for this light.</em>';
+  return html;
+}
+
+// Show light info card when a light is highlighted in the unassigned lights field
+document.addEventListener('DOMContentLoaded', () => {
+// Populate Assigned Lights select beside Unassigned Lights
+document.addEventListener('DOMContentLoaded', () => {
+  function renderAssignedLights() {
+    const select = document.getElementById('assignedLightsSelect');
+    if (!select) return;
+    select.innerHTML = '';
+    // Find the current group (assume last created or selected)
+    const groups = (window.STATE && Array.isArray(window.STATE.groups)) ? window.STATE.groups : [];
+    const lights = (window.STATE && Array.isArray(window.STATE.lights)) ? window.STATE.lights : [];
+    // Use the last group as the current group for now
+    const group = groups.length ? groups[groups.length - 1] : null;
+    if (!group || !Array.isArray(group.lights) || !group.lights.length) {
+      const opt = document.createElement('option');
+      opt.value = '';
+      opt.textContent = '(none assigned)';
+      select.appendChild(opt);
+      return;
+    }
+    group.lights.forEach(member => {
+      const light = lights.find(l => l.id === member.id || l.serial === member.id);
+      const label = light ? `${light.name || light.id} (S/N: ${light.id || ''})` : (member.id || '(unknown)');
+      const opt = document.createElement('option');
+      opt.value = light ? light.id : member.id;
+      opt.textContent = label;
+      select.appendChild(opt);
+    });
+  }
+  document.addEventListener('groups-updated', renderAssignedLights);
+  document.addEventListener('lights-updated', renderAssignedLights);
+  // Initial render
+  setTimeout(renderAssignedLights, 200);
+});
+  const select = document.getElementById('groupsV2UnassignedLightsSelect');
+  const card = document.getElementById('lightInfoCard');
+  const cardBody = document.getElementById('lightInfoCardBody');
+  if (!select || !card || !cardBody) return;
+  function updateCard() {
+    const lights = (window.STATE && Array.isArray(window.STATE.lights)) ? window.STATE.lights : [];
+    const selectedId = select.value;
+    const light = lights.find(l => l.id === selectedId || l.serial === selectedId);
+    if (light) {
+      cardBody.innerHTML = renderLightInfoCard(light);
+      card.style.display = '';
+    } else {
+      cardBody.innerHTML = '';
+      card.style.display = 'none';
+    }
+  }
+  select.addEventListener('change', updateCard);
+  select.addEventListener('focus', updateCard);
+  select.addEventListener('click', updateCard);
+  // Show info for first light if present
+  setTimeout(updateCard, 100);
+});
+// Hard code five lights for room GreenReach
+document.addEventListener('DOMContentLoaded', () => {
+  if (!window.STATE) window.STATE = {};
+  if (!Array.isArray(window.STATE.lights)) window.STATE.lights = [];
+  const greenReachLights = [
+    {
+      id: '22G12-001',
+      name: 'TopLight MH Model-300W-22G12',
+      serial: '22G12-001',
+      room: 'GreenReach',
+      roomId: 'GreenReach',
+      zoneId: undefined
+    },
+    {
+      id: '22G12-002',
+      name: 'TopLight MH Model-300W-22G12',
+      serial: '22G12-002',
+      room: 'GreenReach',
+      roomId: 'GreenReach',
+      zoneId: undefined
+    },
+    {
+      id: '22G12-003',
+      name: 'TopLight MH Model-300W-22G12',
+      serial: '22G12-003',
+      room: 'GreenReach',
+      roomId: 'GreenReach',
+      zoneId: undefined
+    },
+    {
+      id: '22G12-004',
+      name: 'TopLight MH Model-300W-22G12',
+      serial: '22G12-004',
+      room: 'GreenReach',
+      roomId: 'GreenReach',
+      zoneId: undefined
+    },
+    {
+      id: '22G12-005',
+      name: 'TopLight MH Model-300W-22G12',
+      serial: '22G12-005',
+      room: 'GreenReach',
+      roomId: 'GreenReach',
+      zoneId: undefined
+    },
+  ];
+  // Add if not already present
+  greenReachLights.forEach(light => {
+    if (!window.STATE.lights.some(l => l.id === light.id)) {
+      window.STATE.lights.push(light);
+    }
+  });
+  // Optionally trigger update event
+  document.dispatchEvent(new Event('lights-updated'));
+});
+// Handle Save New Group button for Groups V2 card
+document.addEventListener('DOMContentLoaded', () => {
+  const saveBtn = document.getElementById('groupsV2SaveGroup');
+  if (saveBtn) {
+    saveBtn.addEventListener('click', () => {
+      const nameInput = document.getElementById('groupsV2ZoneName');
+      const zoneSelect = document.getElementById('groupsV2ZoneSelect');
+      const roomSelect = document.getElementById('groupsV2RoomSelect');
+      if (!nameInput || !zoneSelect || !roomSelect) return;
+      const groupName = nameInput.value.trim();
+      const zone = zoneSelect.value;
+      const room = roomSelect.value;
+      if (!groupName || !zone || !room) {
+        alert('Enter a group name, select a room, and select a zone.');
+        return;
+      }
+      // Add to window.STATE.groups
+      if (!window.STATE) window.STATE = {};
+      if (!Array.isArray(window.STATE.groups)) window.STATE.groups = [];
+      // Generate a unique id
+      const id = `${room}:${zone}:${groupName}`;
+      // Check for existing group with same id
+      const exists = window.STATE.groups.find(g => (g.id === id || (g.room === room && g.zone === zone && g.name === groupName)));
+      if (exists) {
+        alert('A group with this name, room, and zone already exists.');
+        return;
+      }
+      window.STATE.groups.push({ id, name: groupName, room, zone });
+      // Dispatch event to update dropdown
+      document.dispatchEvent(new Event('groups-updated'));
+      // Optionally clear the input
+      nameInput.value = '';
+      // Optionally show a toast
+      if (typeof showToast === 'function') {
+        showToast({ title: 'Group Saved', msg: `${groupName} (${room}:${zone})`, kind: 'success', icon: '✅' });
+      }
+    });
+  }
+});
+// Assign selected lights to the zone selected at the top
+document.addEventListener('DOMContentLoaded', () => {
+  // Removed zone assignment logic from light setup as per new process
+});
+
+// Assign selected equipment to the zone selected at the top
+document.addEventListener('DOMContentLoaded', () => {
+  // Removed zone assignment logic from equipment setup as per new process
+});
+// Populate Unassigned Lights dropdown from light setup wizard
+function populateGroupsV2UnassignedLightsDropdown() {
+  const select = document.getElementById('groupsV2UnassignedLightsSelect');
+  if (!select) return;
+  select.innerHTML = '';
+  const lights = (window.STATE && Array.isArray(window.STATE.lights)) ? window.STATE.lights : [];
+  // Only show lights assigned to a room but not yet assigned to a zone
+  const unassigned = lights.filter(light => light.roomId && !light.zoneId);
+  if (unassigned.length === 0) {
+    const opt = document.createElement('option');
+    opt.value = '';
+    opt.textContent = '(none)';
+    select.appendChild(opt);
+    return;
+  }
+  unassigned.forEach(light => {
+  const opt = document.createElement('option');
+  opt.value = light.id || light.name || '';
+  // Show name and S/N (ID) for clarity
+  const label = light.name ? `${light.name} (S/N: ${light.id || ''})` : (light.id || '(unnamed light)');
+  opt.textContent = label;
+  select.appendChild(opt);
+  });
+}
+
+document.addEventListener('DOMContentLoaded', () => {
+  // ...existing code...
+  populateGroupsV2UnassignedLightsDropdown();
+  document.addEventListener('lights-updated', populateGroupsV2UnassignedLightsDropdown);
+});
+
+// Assign selected lights to selected zone (in group card context)
+document.addEventListener('DOMContentLoaded', () => {
+  const assignBtn = document.getElementById('assignLightsToZoneBtn');
+  if (assignBtn) {
+    assignBtn.addEventListener('click', () => {
+      const lightsSelect = document.getElementById('groupsV2UnassignedLightsSelect');
+      const zoneSelect = document.getElementById('groupsV2ZoneSelect');
+      if (!lightsSelect || !zoneSelect) return;
+      const selectedLights = Array.from(lightsSelect.selectedOptions).map(opt => opt.value).filter(Boolean);
+      const selectedZone = zoneSelect.value;
+      if (!selectedZone || selectedLights.length === 0) {
+        alert('Select lights and a zone to assign.');
+        return;
+      }
+      // Dispatch a custom event to handle assignment logic elsewhere
+      const evt = new CustomEvent('assign-lights-to-zone', {
+        detail: { lightIds: selectedLights, zoneId: selectedZone }
+      });
+      document.dispatchEvent(evt);
+    });
+  }
+});
+// Populate Unassigned Equipment dropdown from equipment setup wizard
+function populateGroupsV2UnassignedEquipDropdown() {
+  const select = document.getElementById('groupsV2UnassignedEquipSelect');
+  if (!select) return;
+  select.innerHTML = '';
+  const equipment = (window.STATE && Array.isArray(window.STATE.equipment)) ? window.STATE.equipment : [];
+  // Only show equipment assigned to a room but not yet assigned to a zone
+  const unassigned = equipment.filter(eq => (eq.roomId || eq.room) && !eq.zoneId);
+  if (unassigned.length === 0) {
+    const opt = document.createElement('option');
+    opt.value = '';
+    opt.textContent = '(none)';
+    select.appendChild(opt);
+    return;
+  }
+  unassigned.forEach(eq => {
+    const opt = document.createElement('option');
+    opt.value = eq.id || eq.name || '';
+    opt.textContent = eq.name || eq.label || eq.id || '(unnamed equipment)';
+    select.appendChild(opt);
+  });
+}
+
+// Populate Assigned Equipment dropdown for Groups V2
+function populateGroupsV2AssignedEquipDropdown() {
+  const select = document.getElementById('assignedEquipSelect');
+  if (!select) return;
+  select.innerHTML = '';
+  const equipment = (window.STATE && Array.isArray(window.STATE.equipment)) ? window.STATE.equipment : [];
+  // Only show equipment assigned to a zone
+  const assigned = equipment.filter(eq => eq.zoneId);
+  if (assigned.length === 0) {
+    const opt = document.createElement('option');
+    opt.value = '';
+    opt.textContent = '(none)';
+    select.appendChild(opt);
+    return;
+  }
+  assigned.forEach(eq => {
+    const opt = document.createElement('option');
+    opt.value = eq.id || eq.name || '';
+    opt.textContent = eq.name || eq.label || eq.id || '(unnamed equipment)';
+    select.appendChild(opt);
+  });
+}
+
+document.addEventListener('DOMContentLoaded', () => {
+  // ...existing code...
+  populateGroupsV2UnassignedEquipDropdown();
+  populateGroupsV2AssignedEquipDropdown();
+  document.addEventListener('equipment-updated', populateGroupsV2UnassignedEquipDropdown);
+  document.addEventListener('equipment-updated', populateGroupsV2AssignedEquipDropdown);
+});
+
+// Assign selected equipment to selected zone (in group card context)
+document.addEventListener('DOMContentLoaded', () => {
+  const assignBtn = document.getElementById('assignEquipToZoneBtn');
+  if (assignBtn) {
+    assignBtn.addEventListener('click', () => {
+      const equipSelect = document.getElementById('groupsV2UnassignedEquipSelect');
+      const zoneSelect = document.getElementById('groupsV2ZoneSelect');
+      if (!equipSelect || !zoneSelect) return;
+      const selectedEquip = Array.from(equipSelect.selectedOptions).map(opt => opt.value).filter(Boolean);
+      const selectedZone = zoneSelect.value;
+      if (!selectedZone || selectedEquip.length === 0) {
+        alert('Select equipment and a zone to assign.');
+        return;
+      }
+      // Mark equipment as assigned by updating zoneId
+      (window.STATE.equipment || []).forEach(eq => {
+        if (selectedEquip.includes(eq.id)) {
+          eq.zoneId = selectedZone;
+        }
+      });
+      document.dispatchEvent(new Event('equipment-updated'));
+    });
+  }
+});
+// Populate Groups V2 Plan and Schedule dropdowns from setup cards
+function populateGroupsV2PlanDropdown() {
+  const select = document.getElementById('groupsV2PlanSelect');
+  if (!select) return;
+  while (select.options.length > 1) select.remove(1);
+  const plans = (window.STATE && Array.isArray(window.STATE.plans)) ? window.STATE.plans : [];
+  plans.forEach(plan => {
+    const opt = document.createElement('option');
+    opt.value = plan.id || plan.name || '';
+    opt.textContent = plan.name || plan.label || plan.id || '(unnamed plan)';
+    select.appendChild(opt);
+  });
+  // Add event listener for plan selection (only once)
+  if (!select._planListenerAttached) {
+    select.addEventListener('change', function() {
+      const planId = select.value;
+      const plansArr = (window.STATE && Array.isArray(window.STATE.plans)) ? window.STATE.plans : [];
+      const plan = plansArr.find(p => (p.id || p.name) === planId);
+      renderGroupsV2PlanCard(plan);
+    });
+    select._planListenerAttached = true;
+  }
+}
+
+// Render the plan card for Group V2 Setup
+function renderGroupsV2PlanCard(plan) {
+  let card = document.getElementById('groupsV2PlanCard');
+  if (!card) {
+    // Insert after the plan select row
+    const planRow = document.querySelector('.group-v2-plansched');
+    card = document.createElement('section');
+    card.id = 'groupsV2PlanCard';
+    card.className = 'group-info-card';
+    card.style.margin = '12px 0 18px 0';
+    planRow.parentNode.insertBefore(card, planRow.nextSibling);
+  }
+  if (!plan) {
+    card.innerHTML = '<div class="tiny text-muted">Select a plan to view spectrum, DLI, and PPFD targets.</div>';
+    return;
+  }
+  // Prepare spectrum, DLI, PPFD
+  const spectrum = plan.spectrum || { cw: 45, ww: 45, bl: 0, rd: 0 };
+  const photoperiod = Number(plan.photoperiod || 12);
+  const ppfd = Number(plan.ppfd || 0);
+  const dli = plan.dli != null ? Number(plan.dli) : (ppfd > 0 ? (ppfd * 3600 * photoperiod) / 1e6 : 0);
+  // Card HTML
+  card.innerHTML = `
+    <header class="group-info-card__header">
+      <div>
+        <h3>Plan: ${escapeHtml(plan.name || 'Untitled')}</h3>
+        <p class="tiny text-muted">${escapeHtml(plan.description || 'Spectrum and targets for this plan.')}</p>
+      </div>
+    </header>
+    <div class="group-info-card__body">
+      <canvas id="groupsV2PlanSpectrumCanvas" class="group-info-card__canvas" width="320" height="100" role="img" aria-label="Plan spectrum preview"></canvas>
+      <dl class="group-info-card__metrics">
+        <dt>PPFD</dt><dd>${ppfd ? ppfd.toFixed(0) + ' µmol·m⁻²·s⁻¹' : '—'}</dd>
+        <dt>DLI</dt><dd>${dli ? dli.toFixed(2) + ' mol·m⁻²·d⁻¹' : '—'}</dd>
+        <dt>Photoperiod</dt><dd>${photoperiod ? photoperiod.toFixed(1) + ' h' : '—'}</dd>
+      </dl>
+    </div>
+  `;
+  // Render spectrum graph if function available
+  const canvas = document.getElementById('groupsV2PlanSpectrumCanvas');
+  if (canvas && typeof renderSpectrumCanvas === 'function') {
+    const mix = { cw: Number(spectrum.cw || 0), ww: Number(spectrum.ww || 0), bl: Number(spectrum.bl || 0), rd: Number(spectrum.rd || 0) };
+    const spd = computeWeightedSPD(mix);
+    renderSpectrumCanvas(canvas, spd, { width: canvas.width, height: canvas.height });
+  }
+}
+
+function populateGroupsV2ScheduleDropdown() {
+  const select = document.getElementById('groupsV2ScheduleSelect');
+  if (!select) return;
+  while (select.options.length > 1) select.remove(1);
+  const schedules = (window.STATE && Array.isArray(window.STATE.schedules)) ? window.STATE.schedules : [];
+  schedules.forEach(sched => {
+    const opt = document.createElement('option');
+    opt.value = sched.id || sched.name || '';
+    opt.textContent = sched.name || sched.label || sched.id || '(unnamed schedule)';
+    select.appendChild(opt);
+  });
+}
+
+document.addEventListener('DOMContentLoaded', () => {
+  // ...existing code...
+  populateGroupsV2PlanDropdown();
+  populateGroupsV2ScheduleDropdown();
+  document.addEventListener('plans-updated', populateGroupsV2PlanDropdown);
+  document.addEventListener('schedules-updated', populateGroupsV2ScheduleDropdown);
+
+  // Wire up embedded schedule card in Group V2
+  wireEmbeddedScheduleCard();
+});
+// Populate Groups V2 Load Group dropdown with saved groups, format: Room Name:Zone:Name
+function populateGroupsV2LoadGroupDropdown() {
+  const select = document.getElementById('groupsV2LoadGroup');
+  if (!select) return;
+  // Remove all except the first (none)
+  while (select.options.length > 1) select.remove(1);
+  // Example: get groups from window.STATE.groups or similar
+  const groups = (window.STATE && Array.isArray(window.STATE.groups)) ? window.STATE.groups : [];
+  groups.forEach(group => {
+    const room = group.room || group.roomName || '';
+    const zone = group.zone || '';
+    const name = group.name || group.label || '';
+    const label = [room, zone, name].filter(Boolean).join(':');
+    const opt = document.createElement('option');
+    opt.value = group.id || label;
+    opt.textContent = label || '(unnamed group)';
+    select.appendChild(opt);
+  });
+}
+
+document.addEventListener('DOMContentLoaded', () => {
+  // ...existing code...
+  populateGroupsV2LoadGroupDropdown();
+  // If groups can change dynamically, listen for a custom event to refresh
+  document.addEventListener('groups-updated', populateGroupsV2LoadGroupDropdown);
+});
+// Populate Groups V2 Room dropdown with 'GreenReach' and rooms from STATE.rooms
+function populateGroupsV2RoomDropdown() {
+  const select = document.getElementById('groupsV2RoomSelect');
+  if (!select) return;
+  // Remove all except the first (GreenReach)
+  while (select.options.length > 1) select.remove(1);
+  const seen = new Set(['GreenReach']);
+  if (window.STATE && Array.isArray(window.STATE.rooms)) {
+    window.STATE.rooms.forEach(room => {
+      if (!room || !room.name || seen.has(room.name)) return;
+      const opt = document.createElement('option');
+      opt.value = room.name;
+      opt.textContent = room.name;
+      select.appendChild(opt);
+      seen.add(room.name);
+    });
+  }
+}
+
+document.addEventListener('DOMContentLoaded', () => {
+  populateGroupsV2RoomDropdown();
+  // If rooms can change dynamically, listen for a custom event to refresh
+  document.addEventListener('rooms-updated', populateGroupsV2RoomDropdown);
+});
+// Wire up Groups V2 sidebar button to open Group V2 Setup card
+document.addEventListener('DOMContentLoaded', () => {
+  const groupsV2Btn = document.querySelector('[data-sidebar-link][data-target="groups-v2"]');
+  if (groupsV2Btn) {
+    groupsV2Btn.addEventListener('click', (e) => {
+      e.preventDefault();
+      setActivePanel('groups-v2');
+    });
+  }
+});
 // Feature flag: opt-in to simplified room-only group matching
 const ROOM_ONLY_GROUPS = (window.GROUPS_ROOM_ONLY !== false);
 
@@ -7,7 +707,7 @@ const groupsSetupState = (window._groupsSetupState = window._groupsSetupState ||
   planMap: {},
   rooms: [],
   roomLookup: {},
-  zones: [],
+  // zones: [],
   currentRoom: '',
   currentRoomId: '',
   currentRoomOption: null,
@@ -20,59 +720,21 @@ const groupsSetupState = (window._groupsSetupState = window._groupsSetupState ||
 
 // Phase-3: Enforce strict group member selection logic
 function computeGroupMembers(group, allDevices) {
-  const normalize = (value) => (typeof value === 'string' ? value.trim().toLowerCase() : '');
-  const toNeedles = (values) => (Array.isArray(values) ? values : [values]).map(normalize).filter(Boolean);
-  const asId = (entry) => {
-    if (!entry) return '';
-    if (typeof entry === 'string') return entry;
-    if (typeof entry === 'object') {
-      return entry.id || entry.deviceId || entry.device_id || '';
-    }
-    return '';
-  };
-
+  // Simplified: Only require 'room' property to match
   const match = (group && group.match) || {};
-  const roomNeedles = toNeedles([match.room, match.roomId, match.roomName]);
-  const zoneNeedles = toNeedles([match.zone, match.zoneId, match.zoneName]);
-  const hasRoom = roomNeedles.length > 0;
-  const hasZone = zoneNeedles.length > 0;
-  const requireZone = !ROOM_ONLY_GROUPS;
-  if (!hasRoom) return [];
-  if (requireZone && !hasZone) return [];
-
+  const matchRoom = (typeof match.room === 'string' ? match.room.trim() : '');
+  if (!matchRoom) return [];
   const devicePool = Array.isArray(allDevices) && allDevices.length
     ? allDevices
     : (ROOM_ONLY_GROUPS && Array.isArray(window.STATE?.devices) ? window.STATE.devices : []);
-
   const candidates = (devicePool || []).filter((device) => {
     if (!device) return false;
-    const roomValues = toNeedles([
-      device.room,
-      device.roomId,
-      device.roomName,
-      device.location?.room,
-      device.meta?.room,
-      device.meta?.roomId,
-      device.meta?.roomName,
-    ]);
-    const zoneValues = toNeedles([
-      device.zone,
-      device.zoneId,
-      device.zoneName,
-      device.location?.zone,
-      device.meta?.zone,
-      device.meta?.zoneId,
-      device.meta?.zoneName,
-    ]);
-    const roomMatch = roomValues.some((value) => roomNeedles.includes(value));
-    const zoneMatch = requireZone ? zoneValues.some((value) => zoneNeedles.includes(value)) : true;
-    return roomMatch && zoneMatch;
+    return (typeof device.room === 'string' && device.room.trim() === matchRoom);
   });
-
   if (Array.isArray(group?.members) && group.members.length) {
     const ids = new Set(
       group.members
-        .map(asId)
+        .map((entry) => (typeof entry === 'object' ? entry.id : entry))
         .map((id) => (typeof id === 'string' ? id.trim() : ''))
         .filter(Boolean)
     );
@@ -80,7 +742,6 @@ function computeGroupMembers(group, allDevices) {
       return candidates.filter((device) => ids.has(String(device?.id || '').trim()));
     }
   }
-
   return candidates;
 }
 
@@ -3608,11 +4269,7 @@ function drawSparkline(canvas, values = [], options = {}) {
   ctx.arc(lastX, lastY, 2.5, 0, Math.PI * 2);
   ctx.fill();
 }
-// Global lights status UI initializer stub
-function initLightsStatusUI() {
-  // TODO: Replace with real lights status UI initialization if needed
-  console.warn('[Stub] initLightsStatusUI called');
-}
+// ...existing code...
 // Spectral rendering constants
 const HEX_CHANNEL_KEYS = ['cw', 'ww', 'bl', 'rd', 'fr', 'uv'];
 const DRIVER_CHANNEL_KEYS = ['cw', 'ww', 'bl', 'rd'];
@@ -4412,35 +5069,31 @@ class FarmWizard {
     this.updateWifiPasswordUI();
   }
 
+
   addRoom() {
     const input = $('#newRoomName');
     if (!input) return;
     const name = (input.value || '').trim();
     if (!name) return;
     const id = `room-${Date.now().toString(36)}-${Math.random().toString(36).slice(2,6)}`;
-    this.data.rooms.push({ id, name, zones: [] });
+    this.data.rooms.push({ id, name });
     input.value = '';
     this.renderRoomsEditor();
+    window.dispatchEvent(new CustomEvent('rooms-updated'));
   }
+
 
   removeRoom(roomId) {
     this.data.rooms = this.data.rooms.filter(r => r.id !== roomId);
     this.renderRoomsEditor();
+    window.dispatchEvent(new CustomEvent('rooms-updated'));
   }
 
-  addZone(roomId, zoneName) {
-    const room = this.data.rooms.find(r => r.id === roomId);
-    if (!room || !zoneName) return;
-    if (!room.zones.includes(zoneName)) room.zones.push(zoneName);
-    this.renderRoomsEditor();
-  }
 
-  removeZone(roomId, zoneName) {
-    const room = this.data.rooms.find(r => r.id === roomId);
-    if (!room) return;
-    room.zones = room.zones.filter(z => z !== zoneName);
-    this.renderRoomsEditor();
-  }
+  // addZone removed
+
+
+  // removeZone removed
 
   renderRoomsEditor() {
     const host = $('#roomsEditor');
@@ -6298,10 +6951,11 @@ class DeviceManagerWindow {
 
     // Create New Zone action
     createZoneBtn.addEventListener('click', () => {
-      const roomId = roomSelect.value;
-      if (!roomId) return alert('Select a room first');
-      const zoneName = prompt('Enter new zone name:');
-      if (!zoneName) return;
+  const roomId = roomSelect.value;
+  // No need to check for room selection; equipment is already assigned to a room
+  // Zone creation prompt removed as requested
+  const zoneName = '';
+  // No prompt for zone name; zoneName will be empty
       // Find and update the room in STATE.rooms (preferred) or STATE.farm.rooms
       let updated = false;
       if (Array.isArray(STATE.rooms)) {
@@ -6332,7 +6986,7 @@ class DeviceManagerWindow {
         }
         window.dispatchEvent(new CustomEvent('farmDataChanged'));
       } else {
-        alert('Failed to add zone.');
+  // Removed: alert('Failed to add zone.');
       }
     });
 
@@ -9448,8 +10102,10 @@ async function loadAllData() {
       members: lights.map((light) => ({ id: light.id })),
     };
   });
-    STATE.schedules = schedules?.schedules || [];
-    STATE.plans = plans?.plans || [];
+  STATE.schedules = schedules?.schedules || [];
+  STATE.plans = plans?.plans || [];
+  document.dispatchEvent(new Event('plans-updated'));
+  document.dispatchEvent(new Event('schedules-updated'));
   STATE.environment = environment?.zones || [];
     STATE.calibrations = calibrations?.calibrations || [];
     STATE._calibrationCache = new Map();
@@ -12835,10 +13491,11 @@ class FreshLightWizard {
 
     // Create New Zone action
     createZoneBtn.addEventListener('click', () => {
-      const roomId = roomSelect.value;
-      if (!roomId) return alert('Select a room first');
-      const zoneName = prompt('Enter new zone name:');
-      if (!zoneName) return;
+  const roomId = roomSelect.value;
+  // No need to check for room selection; equipment is already assigned to a room
+  // Zone creation prompt removed as requested
+  const zoneName = '';
+  // No prompt for zone name; zoneName will be empty
       let updated = false;
       if (Array.isArray(STATE.rooms)) {
         const r = STATE.rooms.find(r => (r.id || r.name) === roomId);
@@ -12868,7 +13525,7 @@ class FreshLightWizard {
         }
         window.dispatchEvent(new CustomEvent('farmDataChanged'));
       } else {
-        alert('Failed to add zone.');
+  // Removed: alert('Failed to add zone.');
       }
     });
 
