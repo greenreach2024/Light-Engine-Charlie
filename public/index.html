@@ -26,9 +26,9 @@
       <span class="chip chip--tour-lock" data-role="tour-lock" hidden>Tour Lock</span>
     </div>
   </template>
-  <header id="mainHeader" style="width:100%; max-width:1440px; margin:0 auto; padding:0;">
-    <section id="topCard" class="card card--hero top-card" style="width:100%; max-width:1200px; margin:0 auto 24px auto; border-radius:18px;">
-      <div class="row row--between row--center top-card__content" style="width:100%;">
+  <header id="mainHeader" class="dashboard-header">
+    <section id="topCard" class="card card--hero top-card">
+      <div class="row row--between row--center top-card__content">
         <!-- Left side: Farm branding -->
         <div class="row row--center row--gap-md flex-1">
           <img id="farmLogo" src="" alt="Farm logo" class="farm-logo" onerror="this.style.display='none'">
@@ -53,9 +53,9 @@
     </section>
   </header>
 
-  <div class="dashboard-shell" style="display: flex; flex-direction: row; align-items: flex-start; width:100%; max-width:1440px; margin:0 auto;">
+  <div class="dashboard-shell">
 
-<aside class="dashboard-sidebar" aria-label="Setup and management navigation" style="margin-top:0;">
+<aside class="dashboard-sidebar" aria-label="Setup and management navigation">
   <div class="sidebar-header">
     <h2 class="sidebar-title">Setup &amp; Management</h2>
     <p class="tiny text-muted">Organize farm setup, device control, and daily grow operations.</p>
@@ -135,10 +135,10 @@
 
 
 
-    <main class="dashboard-main" style="flex: 1 1 auto; display: flex; flex-direction: column; gap: var(--gap); align-items: flex-start;">
-      <section id="environmentalAiCard" class="card card--feature">
-              <div class="row row--between row--center mb-md">
-                <h2 class="section-title">Environmental & AI Features</h2>
+    <main class="dashboard-main">
+      <section id="environmentalAiCard" class="card card--feature hud-shell">
+              <div class="row row--between row--center mb-md hud-shell__header">
+                <h2 class="section-title hud-shell__title">Environmental & AI Features</h2>
                 <span class="tiny text-muted">Autonomous Growing Intelligence</span>
               </div>
 
@@ -258,7 +258,7 @@
         <div id="overviewGrid" class="overview__grid" aria-live="polite"></div>
       </section>
     </section>
-      <section id="farmPanel" class="card card--compact" data-panel="farm-registration">
+      <section id="farmPanel" class="card card--compact hud-shell" data-panel="farm-registration">
               <header class="panel-header">
                 <div>
                   <h2>Farm Registration</h2>
@@ -278,7 +278,7 @@
                 <!-- <button id="btnStartDeviceSetup" type="button" class="ghost is-hidden">Continue device setup</button> -->
               </div>
             </section>
-      <section id="roomsPanel" class="card card--compact" data-panel="grow-rooms">
+      <section id="roomsPanel" class="card card--compact hud-shell" data-panel="grow-rooms">
               <header class="panel-header">
                 <div>
                   <h2>Grow Rooms</h2>
@@ -290,7 +290,7 @@
                 <div id="roomsList"></div>
               </div>
             </section>
-      <section id="lightsPanel" class="card card--compact" data-panel="light-setup">
+      <section id="lightsPanel" class="card card--compact hud-shell" data-panel="light-setup">
               <header class="panel-header">
                 <div>
                   <h2>Light Setup</h2>
@@ -306,15 +306,15 @@
               </div>
             </section>
 
-<section id="pairDevicesPanel" class="card" data-panel="pair-devices">
-  <div class="row row--between row--center">
+<section id="pairDevicesPanel" class="card hud-shell" data-panel="pair-devices">
+  <div class="row row--between row--center hud-shell__header">
     <div>
-      <h2 class="section-title" style="margin:0">Pair Devices</h2>
+      <h2 class="section-title hud-shell__title">Pair Devices</h2>
       <p class="tiny text-muted">Link new controllers, sensors, and fixtures to the dashboard.</p>
     </div>
     <span id="pairDevicesStatus" class="tiny" aria-live="polite"></span>
   </div>
-  <p class="tiny" style="margin:8px 0 12px;color:#475569">Walk through Wi‑Fi, Bluetooth, and wired pairing with contextual AI assistance. We detect network details, confirm hub requirements, and document installation notes.</p>
+  <p class="tiny hud-shell__supporting-text">Walk through Wi‑Fi, Bluetooth, and wired pairing with contextual AI assistance. We detect network details, confirm hub requirements, and document installation notes.</p>
   <div class="row row--gap-sm row--wrap">
   <button id="btnLaunchPairWizard" type="button" class="primary">Start Pairing Wizard</button>
 <!-- Modal for Pairing Wizard (BLE/MQTT/Bluetooth) -->
@@ -334,15 +334,15 @@
     <button id="btnPairWizardDocs" type="button" class="ghost">Pairing checklist</button>
   </div>
 </section>
-      <section id="iotPanel" class="card" data-panel="iot-devices">
-            <div class="row row--between row--center">
-              <h2 style="margin:0">
+      <section id="iotPanel" class="card hud-shell" data-panel="iot-devices">
+            <div class="row row--between row--center hud-shell__header">
+              <h2 class="hud-shell__title">
                 IoT Devices
                 <span class="hint" tabindex="0" data-tip="Manage all connected IoT devices including SwitchBot, Kasa, Shelly, and GreenReach devices. View status, set names and locations, and identify controlled equipment.">?</span>
               </h2>
-              <div class="row row--gap-sm row--wrap" style="align-items:flex-start;">
+              <div class="row row--gap-sm row--wrap row--align-start">
                 <button id="btnScanIoTDevices" type="button" class="primary" title="Scan for all IoT devices">Scan for Devices</button>
-                <div class="iot-action-group" role="group" aria-label="Device managers" style="display:flex;flex-direction:column;gap:4px;min-width:160px;">
+                <div class="iot-action-group" role="group" aria-label="Device managers">
                   <span class="tiny text-muted" style="letter-spacing:0.02em;text-transform:uppercase;font-weight:600;">Device managers</span>
                   <div class="row row--gap-xs">
                     <button id="btnOpenSwitchBotManager" type="button" class="ghost">SwitchBot Manager</button>
@@ -355,7 +355,7 @@
     <iframe id="switchBotIframe" src="./switchbot.html" style="width:100%;height:80vh;border:none;border-radius:0 0 10px 10px;"></iframe>
   </div>
 </div>
-                <div class="iot-action-group" role="group" aria-label="Device setup" style="display:flex;flex-direction:column;gap:4px;min-width:160px;">
+                <div class="iot-action-group" role="group" aria-label="Device setup">
                   <span class="tiny text-muted" style="letter-spacing:0.02em;text-transform:uppercase;font-weight:600;">Device setup</span>
                   <div class="row row--gap-xs">
                     <button id="btnShowIotSetup" type="button" class="ghost">View setup options</button>
@@ -395,33 +395,33 @@
                 </div>
               </div>
             </div>
-            <p class="tiny" style="margin:8px 0 0;color:#475569">Configure and monitor your IoT devices including SwitchBot environmental sensors, Kasa smart plugs, Shelly relays, and GreenReach grow lights. Use "Discover" to find new GreenReach devices or "Open Device Manager" for full management interface.</p>
+            <p class="tiny hud-shell__supporting-text">Configure and monitor your IoT devices including SwitchBot environmental sensors, Kasa smart plugs, Shelly relays, and GreenReach grow lights. Use "Discover" to find new GreenReach devices or "Open Device Manager" for full management interface.</p>
 
-            <div id="iotDevicesList" style="margin-top:12px">
+            <div id="iotDevicesList" class="iot-devices-list">
               <!-- Unknown Devices Table will be rendered here -->
               <div id="unknownDevicesTable" style="margin-bottom:24px;"></div>
               <!-- IoT device cards by manufacturer will be loaded here -->
             </div>
           </section>
 
-          <section id="smartPlugsPanel" class="card" data-panel="smart-plugs">
-            <div class="row row--between row--center">
-              <h2 style="margin:0">Smart Plugs</h2>
+          <section id="smartPlugsPanel" class="card hud-shell" data-panel="smart-plugs">
+            <div class="row row--between row--center hud-shell__header">
+              <h2 class="hud-shell__title">Smart Plugs</h2>
               <div class="row row--gap-xs">
                 <button id="btnRefreshSmartPlugs" type="button" class="ghost">Refresh</button>
                 <button id="btnDiscoverSmartPlugs" type="button" class="primary">Discover</button>
               </div>
             </div>
-            <p class="tiny" style="margin:8px 0 16px;color:#475569;max-width:720px;">
+            <p class="tiny hud-shell__supporting-text" data-width="wide">
               Manage Shelly, Kasa, Tasmota, and SwitchBot plugs that control HVAC, dehumidifiers, and circulation fans. Toggle power, inspect live wattage, and attach rule guardrails per room scope.
             </p>
             <div id="smartPlugsAlert" class="alert" role="status" aria-live="polite" hidden></div>
             <div class="table" id="smartPlugsTable" role="region" aria-live="polite"></div>
           </section>
 
-          <section id="controllerAssignmentsPanel" class="card card--panel" data-panel="control-assignments" style="margin-top:24px;">
-            <div class="row row--between row--center">
-              <h2 class="section-title">
+          <section id="controllerAssignmentsPanel" class="card card--panel hud-shell" data-panel="control-assignments">
+            <div class="row row--between row--center hud-shell__header">
+              <h2 class="section-title hud-shell__title">
                 Controller Assignments
                 <span class="hint" tabindex="0" data-tip="Assign controllers to equipment requiring smart control (lights, HVAC, sensors).">?</span>
               </h2>
@@ -436,9 +436,9 @@
               <!-- Table will be populated by JavaScript -->
             </div>
           </section>
-      <section id="plansPanel" class="card" data-panel="plans">
-            <div class="row row--between row--center">
-              <h2 class="section-title">
+      <section id="plansPanel" class="card hud-shell" data-panel="plans">
+            <div class="row row--between row--center hud-shell__header">
+              <h2 class="section-title hud-shell__title">
                 Plans (Grow recipes)
                 <span class="hint" tabindex="0" data-tip="Create and manage grow recipes. Each plan defines a spectrum mix and a target DLI. Preview spectrum, see where used, and assign later to Groups. DLI = PPFD × 3600 × photoperiod ÷ 1e6.">?</span>
               </h2>
@@ -454,10 +454,10 @@
             <div id="plansList" class="grid cols-2 gap-sm" aria-live="polite"></div>
           </section>
       <!-- <section id="schedulesPanel" class="card" data-panel="schedules" style="display:none"> ...original schedule setup card hidden after embedding in Group V2... </section> -->
-      <section id="groupsPanel" class="card" data-panel="groups">
+      <section id="groupsPanel" class="card hud-shell" data-panel="groups">
 
-            <div class="row row--between row--center">
-              <h2 style="margin:0">
+            <div class="row row--between row--center hud-shell__header">
+              <h2 class="hud-shell__title">
                 Groups
                 <span class="hint" tabindex="0" data-tip="Make named collections of devices. Quick selectors use Farm Rooms/Zones. Save writes to groups.json. Apply sends spectrum (HEX12) to all checked devices.">?</span>
               </h2>
@@ -668,15 +668,15 @@
               <!-- Removed twin spectrum preview beside sliders: HUD mix and Plan mix -->
             </div>
           </section>
-      <section id="calibrationPanel" class="card" data-panel="calibration">
-            <div class="row row--between row--center">
-              <h2 style="margin:0">
+      <section id="calibrationPanel" class="card hud-shell" data-panel="calibration">
+            <div class="row row--between row--center hud-shell__header">
+              <h2 class="hud-shell__title">
                 Calibration
                 <span class="hint" tabindex="0" data-tip="Match lights to a target using controller or meter readings. Gains apply at send-time as a correction layer.">?</span>
               </h2>
               <span id="calStatus" class="tiny" aria-live="polite"></span>
             </div>
-            <p class="tiny" style="margin:8px 0 12px;color:#475569">Pick a scope (Light, Group, or Location), choose a target light, and preview corrections before applying. Calibrations store per-light gains that wrap all future writes.</p>
+            <p class="tiny hud-shell__supporting-text">Pick a scope (Light, Group, or Location), choose a target light, and preview corrections before applying. Calibrations store per-light gains that wrap all future writes.</p>
             <div class="row row--gap-sm row--wrap mb-md">
               <button id="btnOpenCalWizard" type="button" class="primary">Open Calibration Wizard</button>
               <button id="btnReloadCal" type="button" class="ghost">Reload Profiles</button>
@@ -684,13 +684,13 @@
             <div id="calibrationRegistry" class="cal-registry"></div>
           </section>
 
-<section id="profilePanel" class="card" data-panel="profile">
-  <div class="row row--between row--center">
-    <h2 style="margin:0">Profile</h2>
+<section id="profilePanel" class="card hud-shell" data-panel="profile">
+  <div class="row row--between row--center hud-shell__header">
+    <h2 class="hud-shell__title">Profile</h2>
     <span id="profileStatus" class="tiny" aria-live="polite"></span>
   </div>
-  <p class="tiny" style="margin:8px 0 12px;color:#475569">Manage the farm operator details and contact preferences used across reports and support requests.</p>
-  <form id="profileForm" class="grid cols-2" style="gap:12px;align-items:end;max-width:640px">
+  <p class="tiny hud-shell__supporting-text">Manage the farm operator details and contact preferences used across reports and support requests.</p>
+  <form id="profileForm" class="grid cols-2 profile-form">
     <label class="tiny">Name
       <input id="profileName" type="text" placeholder="Operator name" autocomplete="name">
     </label>
@@ -703,7 +703,7 @@
     <label class="tiny">Phone
       <input id="profilePhone" type="tel" placeholder="+1 (555) 123-4567" autocomplete="tel">
     </label>
-    <div class="row row--gap-sm" style="grid-column:1 / -1">
+    <div class="row row--gap-sm profile-form__actions">
       <button id="profileSave" type="submit" class="primary">Save Profile</button>
       <button id="profileReset" type="button" class="ghost">Reset</button>
     </div>
@@ -712,9 +712,9 @@
     </main>
 
     <!-- Groups V2 Panel -->
-    <section id="groupsV2Panel" class="card" data-panel="groups-v2" style="display:none" hidden>
-      <div class="row row--between row--center">
-        <h2 style="margin:0">Group V2 Setup</h2>
+    <section id="groupsV2Panel" class="card hud-shell" data-panel="groups-v2" hidden>
+      <div class="row row--between row--center hud-shell__header">
+        <h2 class="hud-shell__title">Group V2 Setup</h2>
         <span id="groupsV2Status" class="tiny" aria-live="polite"></span>
       </div>
       <div class="panel-body">
