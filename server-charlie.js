@@ -82,6 +82,9 @@ const GROUPS_PATH = path.join(DATA_DIR, 'groups.json');
 const PLANS_PATH = path.join(DATA_DIR, 'plans.json');
 const SCHEDULES_PATH = path.join(DATA_DIR, 'schedules.json');
 const ROOMS_PATH = path.join(DATA_DIR, 'rooms.json');
+const CALIBRATIONS_PATH = path.join(DATA_DIR, 'calibration.json');
+const CHANNEL_SCALE_PATH = path.resolve('./config/channel-scale.json');
+const MS_PER_DAY = 24 * 60 * 60 * 1000;
 const UI_DATA_RESOURCES = new Map([
   ['farm', 'farm.json'],
   ['groups', 'groups.json'],
@@ -320,6 +323,129 @@ function parseIncomingGroup(raw, knownDeviceIds = null) {
   return { stored, response };
 }
 
+function firstNonEmpty(...values) {
+  for (const value of values) {
+    if (value === undefined || value === null) continue;
+    if (typeof value === 'string') {
+      if (!value.trim()) continue;
+      return value;
+    }
+    return value;
+  }
+  return undefined;
+}
+
+function readPhotoperiodHours(value) {
+  if (value === undefined || value === null) return null;
+  if (typeof value === 'number' && Number.isFinite(value)) return value;
+  if (typeof value === 'string') {
+    const trimmed = value.trim();
+    if (!trimmed) return null;
+    const first = trimmed.split('/')[0];
+    const hours = Number(first);
+    return Number.isFinite(hours) ? hours : null;
+  }
+  return null;
+}
+
+function normalizePlanLightDay(entry) {
+  if (!entry || typeof entry !== 'object') return null;
+  const mixSource = entry.mix && typeof entry.mix === 'object' ? entry.mix : entry;
+  const cw = toNumberOrNull(mixSource?.cw ?? mixSource?.coolWhite);
+  const ww = toNumberOrNull(mixSource?.ww ?? mixSource?.warmWhite);
+  const bl = toNumberOrNull(mixSource?.bl ?? mixSource?.blue);
+  const rd = toNumberOrNull(mixSource?.rd ?? mixSource?.red);
+  return {
+    raw: entry,
+    day: toNumberOrNull(entry.d ?? entry.day ?? entry.dayStart) ?? null,
+    stage: entry.stage ?? entry.label ?? '',
+    ppfd: toNumberOrNull(entry.ppfd),
+    photoperiod: firstNonEmpty(entry.photoperiod, entry.hours, entry.photoperiodHours),
+    mix: {
+      cw: cw ?? 0,
+      ww: ww ?? 0,
+      bl: bl ?? 0,
+      rd: rd ?? 0,
+    },
+  };
+}
+
+function normalizePlanEnvDay(entry) {
+  if (!entry || typeof entry !== 'object') return null;
+  return {
+    raw: entry,
+    day: toNumberOrNull(entry.d ?? entry.day ?? entry.dayStart) ?? null,
+    tempC: toNumberOrNull(entry.tempC ?? entry.temp ?? entry.temperature),
+    rh: toNumberOrNull(entry.rh ?? entry.humidity ?? entry.rhPct),
+    rhBand: toNumberOrNull(entry.rhBand ?? entry.humidityBand ?? entry.rhDelta),
+  };
+}
+
+function derivePlanRuntime(plan) {
+  if (!plan || typeof plan !== 'object') {
+    return { structured: false, lightDays: [], envDays: [] };
+  }
+  const lightV2 = Array.isArray(plan?.light?.days) ? plan.light.days : [];
+  const legacyDays = Array.isArray(plan?.days) ? plan.days : [];
+  const normalizedLight = lightV2.map(normalizePlanLightDay).filter(Boolean);
+  const normalizedLegacy = legacyDays.map(normalizePlanLightDay).filter(Boolean);
+  const lightDays = normalizedLight.length ? normalizedLight : normalizedLegacy;
+  const firstDay = lightDays.length ? lightDays[0] : null;
+  const envDays = Array.isArray(plan?.env?.days) ? plan.env.days.map(normalizePlanEnvDay).filter(Boolean) : [];
+  const spectrum = firstDay?.mix ? { ...firstDay.mix } : (plan.spectrum && typeof plan.spectrum === 'object' ? { ...plan.spectrum } : null);
+  const ppfd = toNumberOrNull(firstNonEmpty(plan?.ppfd, firstDay?.ppfd));
+  const photoperiodRaw = firstNonEmpty(plan?.photoperiod, firstDay?.photoperiod, plan?.defaults?.photoperiod);
+  const photoperiodHours = readPhotoperiodHours(photoperiodRaw);
+  const dliProvided = toNumberOrNull(plan?.dli);
+  const dli = dliProvided != null
+    ? dliProvided
+    : (ppfd != null && photoperiodHours != null ? (ppfd * 3600 * photoperiodHours) / 1e6 : null);
+  const notes = Array.isArray(plan?.meta?.notes)
+    ? plan.meta.notes.map((note) => (typeof note === 'string' ? note.trim() : '')).filter(Boolean)
+    : [];
+  const appliesRaw = plan?.meta?.appliesTo && typeof plan.meta.appliesTo === 'object' ? plan.meta.appliesTo : {};
+  const appliesTo = {
+    category: Array.isArray(appliesRaw.category)
+      ? appliesRaw.category.map((entry) => (typeof entry === 'string' ? entry : '')).filter(Boolean)
+      : [],
+    varieties: Array.isArray(appliesRaw.varieties)
+      ? appliesRaw.varieties.map((entry) => (typeof entry === 'string' ? entry : '')).filter(Boolean)
+      : [],
+  };
+  const structured = normalizedLight.length > 0 || envDays.length > 0 || !!plan?.defaults || !!plan?.meta;
+  return {
+    structured,
+    lightDays,
+    envDays,
+    firstDay,
+    spectrum,
+    ppfd,
+    photoperiod: photoperiodRaw,
+    photoperiodHours,
+    dli,
+    notes,
+    appliesTo,
+  };
+}
+
+function hydratePlan(plan, index = 0) {
+  if (!plan || typeof plan !== 'object') return null;
+  const normalized = { ...plan };
+  const fallbackId = firstNonEmpty(plan.id, plan.planId, plan.plan_id, plan.key, `plan-${index + 1}`);
+  const id = typeof fallbackId === 'string' ? fallbackId.trim() : String(fallbackId || '').trim();
+  if (id) {
+    normalized.id = id;
+  }
+  if (!normalized.id) normalized.id = `plan-${index + 1}`;
+  if (!normalized.key) normalized.key = normalized.id;
+  const derived = derivePlanRuntime(normalized);
+  const nameCandidate = firstNonEmpty(normalized.name, normalized.label, normalized.meta?.label, normalized.key, normalized.id);
+  if (nameCandidate) normalized.name = String(nameCandidate).trim();
+  Object.defineProperty(normalized, '_derived', { value: derived, enumerable: false, configurable: true, writable: true });
+  Object.defineProperty(normalized, '_structured', { value: !!derived.structured, enumerable: false, configurable: true, writable: true });
+  return normalized;
+}
+
 function normalizePlanEntry(raw, fallbackId = '') {
   if (!raw || typeof raw !== 'object') return null;
   const idSource = raw.id ?? raw.planId ?? raw.plan_id ?? raw.key ?? fallbackId ?? '';
@@ -549,6 +675,8 @@ const SENSOR_ENTRY_KIND = 'sensor';
 const ACTION_ENTRY_KIND = 'action';
 
 function toNumberOrNull(value) {
+  if (value === undefined || value === null) return null;
+  if (typeof value === 'string' && !value.trim()) return null;
   const num = Number(value);
   return Number.isFinite(num) ? num : null;
 }
@@ -1406,9 +1534,16 @@ function evaluateRoomAutomationState(envSnapshot, zones, legacyEnv) {
 function getPlanIndex() {
   const plans = loadPlansFile();
   const map = new Map();
-  plans.forEach((plan) => {
-    if (!plan || !plan.id) return;
-    map.set(plan.id, plan);
+  plans.forEach((plan, index) => {
+    if (!plan) return;
+    const hydrated = hydratePlan(plan, index);
+    if (!hydrated?.id) return;
+    const keys = [hydrated.id, hydrated.key, hydrated.name]
+      .map((value) => (typeof value === 'string' ? value.trim() : ''))
+      .filter(Boolean);
+    keys.forEach((key) => {
+      if (!map.has(key)) map.set(key, hydrated);
+    });
   });
   return map;
 }
@@ -1645,6 +1780,751 @@ function buildRoomAnalytics(room, legacyEnv, planIndex) {
     lastActionAt: lastAction?.ts || null,
     lastResult: lastAction?.result || null
   };
+}
+
+function parseLocalDate(value) {
+  if (!value) return null;
+  if (value instanceof Date) {
+    const copy = new Date(value);
+    if (!Number.isFinite(copy.getTime())) return null;
+    copy.setHours(0, 0, 0, 0);
+    return copy;
+  }
+  const str = String(value).trim();
+  if (!str) return null;
+  const isoMatch = str.match(/^([0-9]{4})-([0-9]{1,2})-([0-9]{1,2})$/);
+  if (isoMatch) {
+    const [, year, month, day] = isoMatch;
+    const parsed = new Date(Number(year), Number(month) - 1, Number(day));
+    if (Number.isFinite(parsed.getTime())) {
+      parsed.setHours(0, 0, 0, 0);
+      return parsed;
+    }
+  }
+  const parsed = new Date(str);
+  if (!Number.isFinite(parsed.getTime())) return null;
+  parsed.setHours(0, 0, 0, 0);
+  return parsed;
+}
+
+function pickDefined(source) {
+  const out = {};
+  Object.entries(source || {}).forEach(([key, value]) => {
+    if (value !== undefined && value !== null) out[key] = value;
+  });
+  return out;
+}
+
+function normalizeMixInput(mix) {
+  const src = mix && typeof mix === 'object' ? mix : {};
+  return {
+    cw: toNumberOrNull(src.cw) ?? 0,
+    ww: toNumberOrNull(src.ww) ?? 0,
+    bl: toNumberOrNull(src.bl) ?? 0,
+    rd: toNumberOrNull(src.rd) ?? 0,
+  };
+}
+
+function clampPercent(value) {
+  if (!Number.isFinite(value)) return 0;
+  if (value < 0) return 0;
+  if (value > 100) return 100;
+  return value;
+}
+
+function applyCalibrationToMix(mix, calibration) {
+  const base = normalizeMixInput(mix);
+  const gains = calibration || {};
+  const intensity = Number.isFinite(gains.intensity) ? gains.intensity : 1;
+  return {
+    cw: clampPercent(base.cw * (Number.isFinite(gains.cw) ? gains.cw : 1) * intensity),
+    ww: clampPercent(base.ww * (Number.isFinite(gains.ww) ? gains.ww : 1) * intensity),
+    bl: clampPercent(base.bl * (Number.isFinite(gains.bl) ? gains.bl : 1) * intensity),
+    rd: clampPercent(base.rd * (Number.isFinite(gains.rd) ? gains.rd : 1) * intensity),
+  };
+}
+
+function buildHexPayload(mix, maxByte) {
+  const normalized = normalizeMixInput(mix);
+  const scale = Number.isFinite(maxByte) && maxByte > 0 ? Math.min(Math.round(maxByte), 255) : 255;
+  const toHex = (value) => {
+    const clamped = clampPercent(value);
+    const scaled = Math.round((clamped / 100) * scale);
+    const bounded = Math.min(scale, Math.max(0, scaled));
+    return bounded.toString(16).padStart(2, '0').toUpperCase();
+  };
+  return `${toHex(normalized.cw)}${toHex(normalized.ww)}${toHex(normalized.bl)}${toHex(normalized.rd)}0000`;
+}
+
+function loadChannelScaleConfig() {
+  const doc = readJsonSafe(CHANNEL_SCALE_PATH, null) || {};
+  const maxByte = toNumberOrNull(doc.maxByte);
+  const scale = typeof doc.scale === 'string' && doc.scale.trim() ? doc.scale.trim() : '00-FF';
+  const safeMaxByte = Number.isFinite(maxByte) && maxByte > 0 ? Math.min(Math.round(maxByte), 255) : 255;
+  return { maxByte: safeMaxByte, scale };
+}
+
+function buildCalibrationMap() {
+  const doc = readJsonSafe(CALIBRATIONS_PATH, null);
+  const entries = Array.isArray(doc?.calibrations) ? doc.calibrations : [];
+  const map = new Map();
+  entries.forEach((entry) => {
+    if (!entry || typeof entry !== 'object') return;
+    const gains = entry.gains && typeof entry.gains === 'object' ? entry.gains : {};
+    Object.entries(gains).forEach(([deviceId, gain]) => {
+      const id = String(deviceId || '').trim();
+      if (!id) return;
+      const existing = map.get(id) || { cw: 1, ww: 1, bl: 1, rd: 1, intensity: 1, sources: [] };
+      const next = { ...existing };
+      if (gain && typeof gain === 'object') {
+        ['cw', 'ww', 'bl', 'rd'].forEach((key) => {
+          const factor = toNumberOrNull(gain[key]);
+          if (Number.isFinite(factor)) next[key] *= factor;
+        });
+        const intensity = toNumberOrNull(gain.intensity);
+        if (Number.isFinite(intensity)) next.intensity *= intensity;
+      }
+      const sourceId = entry.id || entry.name || entry.targetId || null;
+      if (sourceId) {
+        const sources = new Set(next.sources || []);
+        sources.add(String(sourceId));
+        next.sources = Array.from(sources);
+      }
+      map.set(id, next);
+    });
+  });
+  return map;
+}
+
+function resolveDeviceCalibration(calibrationMap, deviceId) {
+  if (!deviceId) return { cw: 1, ww: 1, bl: 1, rd: 1, intensity: 1, sources: [] };
+  const entry = calibrationMap.get(deviceId);
+  if (!entry) return { cw: 1, ww: 1, bl: 1, rd: 1, intensity: 1, sources: [] };
+  return { ...entry };
+}
+
+function getGroupDeviceIds(group) {
+  const ids = new Set();
+  const push = (value) => {
+    if (typeof value !== 'string') return;
+    const trimmed = value.trim();
+    if (trimmed) ids.add(trimmed);
+  };
+  if (Array.isArray(group?.members)) {
+    group.members.forEach(push);
+  }
+  if (Array.isArray(group?.lights)) {
+    group.lights.forEach((entry) => {
+      if (!entry) return;
+      if (typeof entry === 'string') {
+        push(entry);
+      } else if (entry.id) {
+        push(String(entry.id));
+      }
+    });
+  }
+  return Array.from(ids);
+}
+
+function resolvePlanLightTargets(plan, requestedDay) {
+  const derived = plan?._derived || derivePlanRuntime(plan);
+  const dayNumber = Math.max(1, Number.isFinite(requestedDay) ? Number(requestedDay) : 1);
+  const entries = Array.isArray(derived?.lightDays) ? derived.lightDays : [];
+  if (!entries.length) {
+    const spectrum = plan?.spectrum || derived?.spectrum || {};
+    const ppfd = toNumberOrNull(firstNonEmpty(plan?.ppfd, derived?.ppfd));
+    const photoperiod = firstNonEmpty(plan?.photoperiod, derived?.photoperiod, plan?.defaults?.photoperiod);
+    return {
+      day: dayNumber,
+      stage: plan?.stage || '',
+      mix: normalizeMixInput(spectrum),
+      ppfd,
+      photoperiod,
+      photoperiodHours: readPhotoperiodHours(photoperiod) ?? derived?.photoperiodHours ?? null,
+    };
+  }
+  const sorted = entries.slice().sort((a, b) => {
+    const aDay = Number.isFinite(a.day) ? a.day : 0;
+    const bDay = Number.isFinite(b.day) ? b.day : 0;
+    return aDay - bDay;
+  });
+  let selected = sorted[0];
+  let effectiveDay = dayNumber;
+  let maxDay = 0;
+  for (const entry of sorted) {
+    if (!Number.isFinite(entry.day)) continue;
+    maxDay = Math.max(maxDay, entry.day);
+    if (dayNumber >= entry.day) {
+      selected = entry;
+    } else {
+      break;
+    }
+  }
+  if (maxDay > 0 && dayNumber > maxDay) {
+    effectiveDay = maxDay;
+    const last = sorted.slice().reverse().find((entry) => Number.isFinite(entry.day) && entry.day === maxDay);
+    if (last) selected = last;
+  }
+  const mix = selected?.mix ? normalizeMixInput(selected.mix) : normalizeMixInput(selected?.raw?.mix || {});
+  const ppfd = toNumberOrNull(firstNonEmpty(selected?.ppfd, derived?.ppfd, plan?.ppfd));
+  const photoperiod = firstNonEmpty(selected?.photoperiod, derived?.photoperiod, plan?.photoperiod, plan?.defaults?.photoperiod);
+  const photoperiodHours = readPhotoperiodHours(photoperiod) ?? derived?.photoperiodHours ?? null;
+  return {
+    day: effectiveDay,
+    stage: selected?.stage || plan?.stage || '',
+    mix,
+    ppfd,
+    photoperiod,
+    photoperiodHours,
+  };
+}
+
+function resolvePlanEnvTargets(plan, requestedDay) {
+  const derived = plan?._derived || derivePlanRuntime(plan);
+  const dayNumber = Math.max(1, Number.isFinite(requestedDay) ? Number(requestedDay) : 1);
+  const entries = Array.isArray(derived?.envDays) ? derived.envDays : [];
+  if (!entries.length) {
+    return {
+      day: dayNumber,
+      tempC: toNumberOrNull(plan?.env?.defaults?.tempC),
+      rh: toNumberOrNull(plan?.env?.defaults?.rh),
+      rhBand: toNumberOrNull(plan?.env?.defaults?.rhBand),
+    };
+  }
+  const sorted = entries.slice().sort((a, b) => {
+    const aDay = Number.isFinite(a.day) ? a.day : 0;
+    const bDay = Number.isFinite(b.day) ? b.day : 0;
+    return aDay - bDay;
+  });
+  let selected = sorted[0];
+  let effectiveDay = dayNumber;
+  let maxDay = 0;
+  for (const entry of sorted) {
+    if (!Number.isFinite(entry.day)) continue;
+    maxDay = Math.max(maxDay, entry.day);
+    if (dayNumber >= entry.day) {
+      selected = entry;
+    } else {
+      break;
+    }
+  }
+  if (maxDay > 0 && dayNumber > maxDay) {
+    effectiveDay = maxDay;
+    const last = sorted.slice().reverse().find((entry) => Number.isFinite(entry.day) && entry.day === maxDay);
+    if (last) selected = last;
+  }
+  return {
+    day: effectiveDay,
+    tempC: selected?.tempC != null ? selected.tempC : toNumberOrNull(plan?.env?.defaults?.tempC),
+    rh: selected?.rh != null ? selected.rh : toNumberOrNull(plan?.env?.defaults?.rh),
+    rhBand: selected?.rhBand != null ? selected.rhBand : toNumberOrNull(plan?.env?.defaults?.rhBand),
+  };
+}
+
+function computePlanDayNumber(planConfig, group, todayStart) {
+  const today = todayStart instanceof Date ? new Date(todayStart) : new Date();
+  today.setHours(0, 0, 0, 0);
+  const anchor = planConfig?.anchor && typeof planConfig.anchor === 'object' ? planConfig.anchor : {};
+  const mode = typeof anchor.mode === 'string' ? anchor.mode.trim().toLowerCase() : null;
+  const anchorDps = toNumberOrNull(anchor.dps);
+  if (mode === 'dps' && anchorDps != null) return Math.max(1, Math.round(anchorDps));
+  if (anchorDps != null) return Math.max(1, Math.round(anchorDps));
+  const previewDay = toNumberOrNull(planConfig?.preview?.day);
+  if (previewDay != null) return Math.max(1, Math.round(previewDay));
+  const seedCandidates = [
+    anchor.seedDate,
+    anchor.seed,
+    anchor.date,
+    planConfig?.seedDate,
+    group?.seedDate,
+    group?.planSeedDate,
+    group?.plan?.seedDate
+  ];
+  for (const candidate of seedCandidates) {
+    const parsed = parseLocalDate(candidate);
+    if (!parsed) continue;
+    const diff = Math.floor((today.getTime() - parsed.getTime()) / MS_PER_DAY);
+    return diff >= 0 ? diff + 1 : 1;
+  }
+  return 1;
+}
+
+function normalizePlanControl(controlSpec) {
+  const control = {
+    enable: false,
+    mode: 'advisory',
+    step: 0.05,
+    dwell: 600,
+  };
+  if (!controlSpec || typeof controlSpec !== 'object') return control;
+  if (typeof controlSpec.enable === 'boolean') control.enable = controlSpec.enable;
+  if (typeof controlSpec.mode === 'string' && controlSpec.mode.trim()) control.mode = controlSpec.mode.trim();
+  const rawStep = toNumberOrNull(controlSpec.step);
+  if (rawStep != null) control.step = rawStep > 1 ? rawStep / 100 : rawStep;
+  const rawDwell = toNumberOrNull(controlSpec.dwell);
+  if (rawDwell != null) control.dwell = rawDwell >= 60 ? rawDwell : rawDwell * 60;
+  if (!Number.isFinite(control.step) || control.step < 0) control.step = 0.05;
+  if (!Number.isFinite(control.dwell) || control.dwell <= 0) control.dwell = 600;
+  return control;
+}
+
+function normalizeEnvTargetsForAutomation(targets) {
+  const normalized = {};
+  if (!targets || typeof targets !== 'object') return normalized;
+  const temp = toNumberOrNull(targets.tempC ?? targets.temperature ?? targets.temp);
+  if (temp != null) normalized.tempC = temp;
+  const rh = toNumberOrNull(targets.rh ?? targets.humidity);
+  if (rh != null) normalized.rh = Math.min(100, Math.max(0, rh));
+  const rhBand = toNumberOrNull(targets.rhBand ?? targets.rh_band ?? targets.humidityBand);
+  if (rhBand != null) normalized.rhBand = Math.abs(rhBand);
+  const ppfd = toNumberOrNull(targets.ppfd);
+  if (ppfd != null) normalized.ppfd = Math.max(0, ppfd);
+  const photoperiod = toNumberOrNull(targets.photoperiodHours ?? targets.photoperiod);
+  if (photoperiod != null) normalized.photoperiodHours = Math.max(0, photoperiod);
+  const dli = toNumberOrNull(targets.dli);
+  if (dli != null) normalized.dli = Math.max(0, dli);
+  const stage = typeof targets.stage === 'string' && targets.stage.trim() ? targets.stage.trim() : null;
+  if (stage) normalized.stage = stage;
+  const planDay = toNumberOrNull(targets.planDay ?? targets.day);
+  if (planDay != null) normalized.planDay = Math.max(1, Math.round(planDay));
+  const planKey = typeof targets.planKey === 'string' && targets.planKey.trim() ? targets.planKey.trim() : null;
+  if (planKey) normalized.planKey = planKey;
+  const planName = typeof targets.planName === 'string' && targets.planName.trim() ? targets.planName.trim() : null;
+  if (planName) normalized.planName = planName;
+  return normalized;
+}
+
+function normalizeEnvControlForAutomation(control) {
+  const normalized = {};
+  if (!control || typeof control !== 'object') return normalized;
+  if (typeof control.enable === 'boolean') normalized.enable = control.enable;
+  if (typeof control.mode === 'string' && control.mode.trim()) normalized.mode = control.mode.trim();
+  const step = toNumberOrNull(control.step);
+  if (step != null) normalized.step = step;
+  const dwell = toNumberOrNull(control.dwell);
+  if (dwell != null) normalized.dwell = dwell;
+  return normalized;
+}
+
+function applyEnvTargetsToAutomation(scopeId, {
+  name,
+  targets,
+  control,
+  deviceIds = [],
+  meta = {},
+  updatedAt = new Date().toISOString()
+} = {}) {
+  if (!scopeId) return { ok: false, error: 'scope-missing' };
+  const zoneName = (typeof name === 'string' && name.trim()) ? name.trim() : scopeId;
+  const sanitizedTargets = normalizeEnvTargetsForAutomation(targets);
+  const sanitizedControl = normalizeEnvControlForAutomation(control);
+  const lights = Array.isArray(deviceIds) ? Array.from(new Set(deviceIds.map((id) => String(id)))) : [];
+
+  try {
+    if (preEnvStore && typeof preEnvStore.upsertRoom === 'function') {
+      preEnvStore.upsertRoom(scopeId, {
+        name: zoneName,
+        targets: sanitizedTargets,
+        control: sanitizedControl,
+        actuators: lights.length ? { lights } : {},
+        meta
+      });
+    }
+  } catch (error) {
+    console.warn(`[daily] failed to upsert automation room ${scopeId}:`, error?.message || error);
+  }
+
+  try {
+    if (preEnvStore && typeof preEnvStore.setTargets === 'function' && Object.keys(sanitizedTargets).length) {
+      preEnvStore.setTargets(scopeId, { ...sanitizedTargets, updatedAt });
+    }
+  } catch (error) {
+    console.warn(`[daily] failed to persist automation targets for ${scopeId}:`, error?.message || error);
+  }
+
+  try {
+    if (preAutomationEngine && typeof preAutomationEngine.setTargets === 'function' && Object.keys(sanitizedTargets).length) {
+      preAutomationEngine.setTargets(scopeId, sanitizedTargets);
+    }
+  } catch (error) {
+    console.warn(`[daily] failed to apply automation targets for ${scopeId}:`, error?.message || error);
+  }
+
+  return { ok: true, scopeId, targets: sanitizedTargets, control: sanitizedControl };
+}
+
+async function patchControllerLight(deviceId, hex, shouldPowerOn) {
+  if (!deviceId) return { ok: false, error: 'device-id-missing' };
+  const payload = shouldPowerOn
+    ? { status: 'on', value: hex }
+    : { status: 'off', value: null };
+
+  if (RUNNING_UNDER_NODE_TEST) {
+    return { ok: true, skipped: true, reason: 'test-mode' };
+  }
+
+  const controller = getController();
+  if (!controller) {
+    return { ok: false, error: 'controller-unset' };
+  }
+
+  try {
+    const base = controller.replace(/\/$/, '');
+    const url = `${base}/api/devicedatas/device/${encodeURIComponent(deviceId)}`;
+    const response = await fetch(url, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload)
+    });
+    if (!response) return { ok: false, error: 'no-response' };
+    if (!response.ok) {
+      const text = await response.text().catch(() => '');
+      return { ok: false, status: response.status, error: text || `HTTP ${response.status}` };
+    }
+    return { ok: true, status: response.status };
+  } catch (error) {
+    return { ok: false, error: error.message || 'controller-error' };
+  }
+}
+
+let dailyResolverRunning = false;
+let dailyResolverTimer = null;
+
+async function runDailyPlanResolver(trigger = 'manual') {
+  if (dailyResolverRunning) {
+    console.warn(`[daily] resolver already running (trigger: ${trigger})`);
+    return null;
+  }
+  dailyResolverRunning = true;
+  const startedAt = new Date();
+  startedAt.setMilliseconds(0);
+  const startedMs = Date.now();
+
+  try {
+    const groups = loadGroupsFile();
+    const planIndex = getPlanIndex();
+    const channelScale = loadChannelScaleConfig();
+    const calibrationMap = buildCalibrationMap();
+    const envState = readEnv();
+    const results = [];
+    const todayStart = new Date(startedAt);
+    todayStart.setHours(0, 0, 0, 0);
+
+    if (!Array.isArray(groups) || !groups.length || !planIndex.size) {
+      envState.lastDailyResolverAt = startedAt.toISOString();
+      envState.lastDailyResolverTrigger = trigger;
+      envState.planResolver = { lastRunAt: startedAt.toISOString(), trigger, groups: [] };
+      envState.updatedAt = startedAt.toISOString();
+      writeEnv(envState);
+      if (!groups.length) {
+        console.log(`[daily] no groups to resolve (trigger: ${trigger})`);
+      } else {
+        console.log(`[daily] no plans available to resolve groups (trigger: ${trigger})`);
+      }
+      return [];
+    }
+
+    for (const group of groups) {
+      try {
+        const planKeyCandidate = [
+          group.plan,
+          group.planKey,
+          group.plan_id,
+          group.planId,
+          group?.planConfig?.planId,
+          group?.planConfig?.preview?.planId,
+          group?.planConfig?.preview?.planKey,
+          group?.planConfig?.preview?.plan
+        ].find((value) => typeof value === 'string' && value.trim());
+        if (!planKeyCandidate) continue;
+        const planKey = planKeyCandidate.trim();
+        let plan = planIndex.get(planKey);
+        if (!plan) {
+          const lower = planKey.toLowerCase();
+          for (const [key, candidate] of planIndex.entries()) {
+            if (String(key).toLowerCase() === lower) {
+              plan = candidate;
+              break;
+            }
+          }
+        }
+        if (!plan) {
+          console.warn(`[daily] plan '${planKey}' not found for group ${group.id || group.name || 'unknown'}`);
+          continue;
+        }
+
+        const deviceIds = Array.from(new Set(getGroupDeviceIds(group)));
+        if (!deviceIds.length) continue;
+
+        const planConfig = (group.planConfig && typeof group.planConfig === 'object') ? group.planConfig : {};
+        const dayNumber = computePlanDayNumber(planConfig, group, todayStart);
+        const lightTargets = resolvePlanLightTargets(plan, dayNumber);
+        const envTargets = resolvePlanEnvTargets(plan, dayNumber);
+        const effectiveDay = lightTargets?.day || envTargets?.day || dayNumber;
+        const gradients = (planConfig.gradients && typeof planConfig.gradients === 'object') ? planConfig.gradients : {};
+        const gradientPpfd = toNumberOrNull(gradients.ppfd) ?? 0;
+        const gradientBlue = toNumberOrNull(gradients.blue) ?? 0;
+        const gradientTemp = toNumberOrNull(gradients.tempC) ?? 0;
+        const gradientRh = toNumberOrNull(gradients.rh) ?? 0;
+
+        const baseMix = normalizeMixInput(lightTargets?.mix || {});
+        const basePpfd = toNumberOrNull(lightTargets?.ppfd);
+        const targetPpfd = basePpfd != null ? Math.max(0, basePpfd + gradientPpfd) : null;
+        let workingMix = { ...baseMix };
+        if (Number.isFinite(basePpfd) && basePpfd > 0 && Number.isFinite(targetPpfd)) {
+          const scale = targetPpfd / basePpfd;
+          if (Number.isFinite(scale) && scale > 0) {
+            workingMix = {
+              cw: clampPercent(baseMix.cw * scale),
+              ww: clampPercent(baseMix.ww * scale),
+              bl: clampPercent(baseMix.bl * scale),
+              rd: clampPercent(baseMix.rd * scale),
+            };
+          }
+        }
+        if (Number.isFinite(gradientBlue) && gradientBlue !== 0) {
+          workingMix.bl = clampPercent((workingMix.bl ?? 0) + gradientBlue);
+        }
+
+        const scheduleCfg = planConfig?.schedule && typeof planConfig.schedule === 'object' ? planConfig.schedule : {};
+        const scheduleDuration = toNumberOrNull(scheduleCfg.durationHours);
+        const photoperiodFallback = Number.isFinite(lightTargets?.photoperiodHours)
+          ? lightTargets.photoperiodHours
+          : readPhotoperiodHours(lightTargets?.photoperiod);
+        const resolvedPhotoperiod = Number.isFinite(scheduleDuration) && scheduleDuration > 0
+          ? scheduleDuration
+          : (Number.isFinite(photoperiodFallback)
+            ? photoperiodFallback
+            : (readPhotoperiodHours(plan?.defaults?.photoperiod) ?? null));
+
+        let envTargetTemp = envTargets?.tempC;
+        if (envTargetTemp != null && Number.isFinite(gradientTemp)) envTargetTemp += gradientTemp;
+        let envTargetRh = envTargets?.rh;
+        if (envTargetRh != null && Number.isFinite(gradientRh)) {
+          envTargetRh = Math.min(100, Math.max(0, envTargetRh + gradientRh));
+        }
+        const envTargetRhBand = envTargets?.rhBand != null ? Math.abs(envTargets.rhBand) : null;
+
+        const normalizedControl = normalizePlanControl(plan?.env?.control || planConfig?.control || {});
+        const envControl = { ...normalizedControl, enable: normalizedControl.enable === false ? false : true };
+        const planName = plan?.name || planKey;
+        const stage = lightTargets?.stage || plan?.stage || '';
+        const shouldPowerOn = !(Number.isFinite(targetPpfd) && targetPpfd <= 0);
+
+        const hexPayloads = [];
+        for (const deviceId of deviceIds) {
+          const calibration = resolveDeviceCalibration(calibrationMap, deviceId);
+          const calibratedMix = applyCalibrationToMix(workingMix, calibration);
+          const hex = buildHexPayload(calibratedMix, channelScale.maxByte);
+          const patchResult = await patchControllerLight(deviceId, hex, shouldPowerOn, {
+            planKey,
+            planName,
+            stage,
+            day: effectiveDay
+          });
+          if (!patchResult?.ok && !patchResult?.skipped) {
+            console.warn(`[daily] failed to patch ${deviceId} for group ${group.id || group.name || 'unknown'}:`, patchResult?.error || patchResult?.status || 'unknown error');
+          }
+          const mixSummary = {
+            cw: Number(clampPercent(calibratedMix.cw).toFixed(2)),
+            ww: Number(clampPercent(calibratedMix.ww).toFixed(2)),
+            bl: Number(clampPercent(calibratedMix.bl).toFixed(2)),
+            rd: Number(clampPercent(calibratedMix.rd).toFixed(2)),
+          };
+          hexPayloads.push({
+            deviceId,
+            hex: shouldPowerOn ? hex : null,
+            mix: mixSummary,
+            calibrationSources: calibration.sources || [],
+            patched: !!patchResult?.ok,
+            skipped: !!patchResult?.skipped,
+            status: patchResult?.status ?? null,
+            error: patchResult?.ok ? null : (patchResult?.error || null)
+          });
+        }
+
+        const envScopeCandidates = [
+          group.zone,
+          group.room,
+          planConfig?.zone,
+          planConfig?.scope,
+          planConfig?.room,
+          planKey
+        ];
+        const envScopeId = envScopeCandidates
+          .map((value) => (typeof value === 'string' ? value.trim() : ''))
+          .find((value) => !!value) || 'default';
+        const legacyRoomId = (typeof group.room === 'string' && group.room.trim()) ? group.room.trim() : envScopeId;
+
+        const container = ensureRoomContainer(envState, legacyRoomId);
+        container.name = group.name || container.name || legacyRoomId;
+        container.zone = group.zone || container.zone || envScopeId;
+        container.scopeId = envScopeId;
+        container.plan = planKey;
+        container.members = deviceIds;
+        container.updatedAt = new Date().toISOString();
+        const dli = Number.isFinite(targetPpfd) && Number.isFinite(resolvedPhotoperiod)
+          ? (targetPpfd * 3600 * resolvedPhotoperiod) / 1e6
+          : null;
+        container.targets = {
+          ...(container.targets || {}),
+          ...pickDefined({
+            temp: envTargetTemp,
+            rh: envTargetRh,
+            rhBand: envTargetRhBand,
+            ppfd: targetPpfd,
+            photoperiodHours: resolvedPhotoperiod,
+            stage,
+            planDay: effectiveDay,
+            dli,
+            planKey,
+            planName
+          })
+        };
+        container.control = {
+          ...(container.control || {}),
+          ...pickDefined(envControl)
+        };
+        container.actuators = container.actuators || {};
+        container.actuators.lights = deviceIds;
+        container.planDay = { day: effectiveDay, stage, computedAt: container.updatedAt };
+        container.planConfig = planConfig;
+
+        if (!envState.targets || typeof envState.targets !== 'object') envState.targets = {};
+        envState.targets[legacyRoomId] = {
+          ...(envState.targets[legacyRoomId] || {}),
+          ...pickDefined({
+            tempC: envTargetTemp,
+            rh: envTargetRh,
+            rhBand: envTargetRhBand,
+            ppfd: targetPpfd,
+            photoperiodHours: resolvedPhotoperiod,
+            stage,
+            planDay: effectiveDay,
+            dli,
+            planKey,
+            planName
+          }),
+          updatedAt: container.updatedAt
+        };
+        if (!envState.control || typeof envState.control !== 'object') envState.control = {};
+        envState.control[legacyRoomId] = {
+          ...(envState.control[legacyRoomId] || {}),
+          ...pickDefined(envControl),
+          updatedAt: container.updatedAt
+        };
+
+        const preTargets = pickDefined({
+          tempC: envTargetTemp,
+          rh: envTargetRh,
+          rhBand: envTargetRhBand,
+          ppfd: targetPpfd,
+          photoperiodHours: resolvedPhotoperiod,
+          stage,
+          planDay: effectiveDay,
+          dli,
+          planKey,
+          planName
+        });
+
+        applyEnvTargetsToAutomation(envScopeId, {
+          name: container.name,
+          targets: preTargets,
+          control: envControl,
+          deviceIds,
+          updatedAt: container.updatedAt,
+          meta: pickDefined({
+            planKey,
+            planName,
+            planStage: stage,
+            planDay: effectiveDay,
+            zone: group.zone,
+            room: group.room,
+            lastDailyResolverAt: container.updatedAt
+          })
+        });
+
+        const scheduleSummary = Object.keys(scheduleCfg).length ? {
+          startTime: scheduleCfg.startTime || null,
+          durationHours: toNumberOrNull(scheduleCfg.durationHours) ?? null,
+          rampUpMin: toNumberOrNull(scheduleCfg.rampUpMin) ?? null,
+          rampDownMin: toNumberOrNull(scheduleCfg.rampDownMin) ?? null,
+        } : null;
+
+        results.push({
+          groupId: group.id || null,
+          groupName: group.name || null,
+          room: group.room || null,
+          planKey,
+          planName,
+          day: effectiveDay,
+          stage,
+          targetPpfd,
+          photoperiodHours: resolvedPhotoperiod,
+          dli,
+          shouldPowerOn,
+          schedule: scheduleSummary,
+          env: pickDefined({ tempC: envTargetTemp, rh: envTargetRh, rhBand: envTargetRhBand }),
+          control: pickDefined({ step: envControl.step, dwell: envControl.dwell, enable: envControl.enable, mode: envControl.mode }),
+          scopeId: envScopeId,
+          devices: hexPayloads,
+        });
+      } catch (groupError) {
+        console.warn('[daily] failed to resolve group plan:', groupError?.message || groupError);
+      }
+    }
+
+    envState.lastDailyResolverAt = startedAt.toISOString();
+    envState.lastDailyResolverTrigger = trigger;
+    envState.planResolver = { lastRunAt: startedAt.toISOString(), trigger, groups: results };
+    envState.updatedAt = startedAt.toISOString();
+    writeEnv(envState);
+    console.log(`[daily] resolved ${results.length} group(s) in ${Date.now() - startedMs}ms (trigger: ${trigger})`);
+    return results;
+  } catch (error) {
+    console.warn('[daily] plan resolver failed:', error?.message || error);
+    return null;
+  } finally {
+    dailyResolverRunning = false;
+  }
+}
+
+function computeNextDailyResolverDelay() {
+  const now = new Date();
+  const next = new Date(now);
+  next.setHours(0, 0, 15, 0);
+  if (next <= now) {
+    next.setDate(next.getDate() + 1);
+  }
+  const delay = next.getTime() - now.getTime();
+  return Math.max(30000, delay);
+}
+
+function scheduleDailyPlanResolver() {
+  if (RUNNING_UNDER_NODE_TEST) return;
+  if (dailyResolverTimer) {
+    clearTimeout(dailyResolverTimer);
+  }
+  const delay = computeNextDailyResolverDelay();
+  dailyResolverTimer = setTimeout(async () => {
+    try {
+      await runDailyPlanResolver('scheduled');
+    } catch (error) {
+      console.warn('[daily] scheduled resolver run failed:', error?.message || error);
+    } finally {
+      scheduleDailyPlanResolver();
+    }
+  }, delay);
+  if (typeof dailyResolverTimer.unref === 'function') {
+    dailyResolverTimer.unref();
+  }
+}
+
+if (!RUNNING_UNDER_NODE_TEST) {
+  runDailyPlanResolver('startup').catch((error) => {
+    console.warn('[daily] startup resolver failed:', error?.message || error);
+  });
+  scheduleDailyPlanResolver();
 }
 
 function buildAiAdvisory(rooms, legacyEnv) {
