@@ -49,3 +49,59 @@ export interface SetupGuide {
   title: string;
   steps: SetupGuideStep[];
 }
+
+export type GroupKind = "light" | "equip";
+
+export interface GroupMatch {
+  room?: string;
+  zone?: string;
+  [key: string]: string | undefined;
+}
+
+export interface GroupMember {
+  kind: GroupKind;
+  deviceId: number | string;
+}
+
+export interface DeviceGroup {
+  id: string;
+  label: string;
+  kind: GroupKind;
+  match?: GroupMatch;
+  members: GroupMember[];
+}
+
+export interface EnvControlTuning {
+  enable: boolean;
+  step?: number;
+  dwell?: number;
+  [key: string]: number | boolean | undefined;
+}
+
+export interface EnvTargets {
+  temp?: number;
+  rh?: number;
+  rhBand?: number;
+  [metric: string]: number | undefined;
+}
+
+export interface EnvSensorConfig {
+  id: string;
+  metrics: string[];
+  primary?: boolean;
+  weight?: number;
+}
+
+export interface EnvActuatorConfig {
+  id: string;
+  controlledType: string;
+  controlMethod: string;
+}
+
+export interface ZoneEnvironmentConfig {
+  zoneId: string;
+  targets: EnvTargets;
+  control: EnvControlTuning;
+  sensors: EnvSensorConfig[];
+  actuators: EnvActuatorConfig[];
+}
