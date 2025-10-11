@@ -83,23 +83,9 @@
       </div>
     </div>
 
-    <div class="sidebar-group" data-group="control-devices">
-      <button class="sidebar-group__trigger" type="button" aria-expanded="false">
-        <span>Control Devices</span>
-        <span class="sidebar-group__icon" aria-hidden="true"></span>
-      </button>
-      <div class="sidebar-group__items" role="menu" hidden>
-        <button type="button" class="sidebar-link" data-sidebar-link data-group="control-devices" data-target="iot-devices">
-          IoT Devices
-        </button>
-        <button type="button" class="sidebar-link" data-sidebar-link data-group="control-devices" data-target="smart-plugs">
-          Smart Plugs
-        </button>
-        <button type="button" class="sidebar-link" data-sidebar-link data-group="control-devices" data-target="control-assignments">
-          Control Assignments
-        </button>
-      </div>
-    </div>
+    <button type="button" class="sidebar-link" data-sidebar-link data-target="smart-controllers">
+      Smart Controllers
+    </button>
 
     <div class="sidebar-group" data-group="grow-management">
       <button class="sidebar-group__trigger" type="button" aria-expanded="false">
@@ -367,106 +353,107 @@
     <button id="btnPairWizardDocs" type="button" class="ghost">Pairing checklist</button>
   </div>
 </section>
-      <section id="iotPanel" class="card hud-shell" data-panel="iot-devices">
-            <div class="row row--between row--center hud-shell__header">
-              <h2 class="hud-shell__title">
-                IoT Devices
-                <span class="hint" tabindex="0" data-tip="Manage all connected IoT devices including SwitchBot, Kasa, Shelly, and GreenReach devices. View status, set names and locations, and identify controlled equipment.">?</span>
-              </h2>
-              <div class="row row--gap-sm row--wrap row--align-start">
-                <button id="btnScanIoTDevices" type="button" class="primary" title="Scan for all IoT devices">Scan for Devices</button>
-                <div class="iot-action-group" role="group" aria-label="Device managers">
-                  <span class="tiny text-muted" style="letter-spacing:0.02em;text-transform:uppercase;font-weight:600;">Device managers</span>
-                  <div class="row row--gap-xs">
-                    <button id="btnOpenSwitchBotManager" type="button" class="ghost">SwitchBot Manager</button>
-                  </div>
-                </div>
-<!-- Modal for SwitchBot Manager -->
-<div id="switchBotModal" class="modal" style="display:none;position:fixed;z-index:10000;left:0;top:0;width:100vw;height:100vh;background:rgba(0,0,0,0.4);align-items:center;justify-content:center;">
-  <div style="background:#fff;border-radius:10px;max-width:90vw;max-height:90vh;width:900px;box-shadow:0 8px 32px rgba(0,0,0,0.25);position:relative;display:flex;flex-direction:column;">
-    <button id="closeSwitchBotModal" style="position:absolute;top:10px;right:10px;background:none;border:none;font-size:1.5em;cursor:pointer;z-index:2;">&times;</button>
-    <iframe id="switchBotIframe" src="./switchbot.html" style="width:100%;height:80vh;border:none;border-radius:0 0 10px 10px;"></iframe>
-  </div>
-</div>
-                <div class="iot-action-group" role="group" aria-label="Device setup">
-                  <span class="tiny text-muted" style="letter-spacing:0.02em;text-transform:uppercase;font-weight:600;">Device setup</span>
-                  <div class="row row--gap-xs">
-                    <button id="btnShowIotSetup" type="button" class="ghost">View setup options</button>
-                  </div>
-                </div>
-              </div>
-              <div id="iotEcosystemCard" class="card" style="display:none;margin:16px 0 0 0;padding:20px 24px 16px 24px;background:#f8fafc;border:1px solid #e5e7eb;border-radius:12px;">
-                <div style="display:flex;flex-direction:column;gap:4px;margin-bottom:12px;">
-                  <span class="tiny text-muted" style="letter-spacing:0.02em;text-transform:uppercase;font-weight:600;">Device setup options</span>
-                  <p class="tiny" style="margin:0;color:#475569;">Choose an ecosystem to start configuration for new hardware integrations.</p>
-                </div>
-                <div class="row row--gap-xs" id="iotEcosystemButtons" style="flex-wrap:wrap;">
-                  <button class="ghost" id="btnMgrKasa">Kasa</button>
-                  <button class="ghost" id="btnMgrSonoff">Sonoff</button>
-                  <button class="ghost" id="btnMgrShelly">Shelly</button>
-                  <button class="ghost" id="btnMgrTuya">Tuya</button>
-                  <button class="ghost" id="btnMgrHue">Hue</button>
-                  <button class="ghost" id="btnMgrLIFX">LIFX</button>
-                  <button class="ghost" id="btnMgrMeross">Meross</button>
-                  <button class="ghost" id="btnMgrAqara">Aqara</button>
-                  <button class="ghost" id="btnMgrTasmota">Tasmota/ESPHome</button>
-                </div>
-              </div>
-              <!-- Generic IoT Ecosystem Modal -->
-              <div id="iotEcosystemModal" class="modal" style="display:none;position:fixed;z-index:10001;left:0;top:0;width:100vw;height:100vh;background:rgba(0,0,0,0.4);align-items:center;justify-content:center;">
-                <div id="iotEcosystemModalContent" style="background:#fff;border-radius:10px;max-width:90vw;max-height:90vh;width:420px;box-shadow:0 8px 32px rgba(0,0,0,0.25);position:relative;display:flex;flex-direction:column;padding:32px 24px 24px 24px;">
-                  <button id="closeIotEcosystemModal" style="position:absolute;top:10px;right:10px;background:none;border:none;font-size:1.5em;cursor:pointer;z-index:2;">&times;</button>
-                  <div id="iotEcosystemModalBody"></div>
-                </div>
-              </div>
-              </div>
-              <div id="iotScanBarContainer" style="margin:12px 0 0 0;display:none;">
-                <div id="iotScanBar" style="position:relative;width:100%;height:22px;background:#e0e7ef;border-radius:12px;overflow:hidden;box-shadow:0 1px 4px #0001;">
-                  <div id="iotScanBarFill" style="height:100%;width:0%;background:linear-gradient(90deg,#60a5fa,#34d399);transition:width 0.2s cubic-bezier(.4,2,.6,1);display:flex;align-items:center;justify-content:center;">
-                    <span id="iotScanBarPercent" style="position:absolute;width:100%;text-align:center;font-weight:bold;color:#222;letter-spacing:0.5px;">0%</span>
-                  </div>
-                </div>
-              </div>
-            </div>
-            <p class="tiny hud-shell__supporting-text">Configure and monitor your IoT devices including SwitchBot environmental sensors, Kasa smart plugs, Shelly relays, and GreenReach grow lights. Use "Discover" to find new GreenReach devices or "Open Device Manager" for full management interface.</p>
-
-            <div id="iotDevicesList" class="iot-devices-list">
-              <!-- Unknown Devices Table will be rendered here -->
-              <div id="unknownDevicesTable" style="margin-bottom:24px;"></div>
-              <!-- IoT device cards by manufacturer will be loaded here -->
-            </div>
-          </section>
-
-          <section id="smartPlugsPanel" class="card hud-shell" data-panel="smart-plugs">
-            <div class="row row--between row--center hud-shell__header">
-              <h2 class="hud-shell__title">Smart Plugs</h2>
-              <div class="row row--gap-xs">
-                <button id="btnRefreshSmartPlugs" type="button" class="ghost">Refresh</button>
-                <button id="btnDiscoverSmartPlugs" type="button" class="primary">Discover</button>
-              </div>
-            </div>
-            <p class="tiny hud-shell__supporting-text" data-width="wide">
-              Manage Shelly, Kasa, Tasmota, and SwitchBot plugs that control HVAC, dehumidifiers, and circulation fans. Toggle power, inspect live wattage, and attach rule guardrails per room scope.
-            </p>
-            <div id="smartPlugsAlert" class="alert" role="status" aria-live="polite" hidden></div>
-            <div class="table" id="smartPlugsTable" role="region" aria-live="polite"></div>
-          </section>
-
-          <section id="controllerAssignmentsPanel" class="card card--panel hud-shell" data-panel="control-assignments">
+      <section id="smartControllersPanel" class="card hud-shell" data-panel="smart-controllers">
             <div class="row row--between row--center hud-shell__header">
               <h2 class="section-title hud-shell__title">
-                Controller Assignments
-                <span class="hint" tabindex="0" data-tip="Assign controllers to equipment requiring smart control (lights, HVAC, sensors).">?</span>
+                Smart Controllers
+                <span class="hint" tabindex="0" data-tip="Unified workspace for IoT ecosystems, smart plugs, and controller assignments. Discover hardware, launch vendor managers, and keep equipment mapped to the right rooms.">?</span>
               </h2>
-              <div class="row row--gap-xs">
-                <button id="btnRefreshControllerAssignments" type="button" class="ghost">Refresh</button>
-                <button id="btnManageControllers" type="button" class="primary">Manage Controllers</button>
-              </div>
             </div>
-
-            <!-- Controller Assignments Table (now directly in the card panel) -->
-            <div id="controllerAssignmentsTable" class="panel-body">
-              <!-- Table will be populated by JavaScript -->
+            <p class="tiny hud-shell__supporting-text" data-width="wide">
+              Manage SwitchBot, Kasa, Shelly, Tuya, and grow-light controllers from one place. Scan for new IoT hardware, open ecosystem setup tools, monitor smart plug power, and keep controllers mapped to farm equipment.
+            </p>
+            <div class="smart-controllers__stack">
+              <article class="smart-controllers__module">
+                <div class="row row--between row--center hud-shell__header">
+                  <h3 class="hud-shell__title">
+                    IoT Devices
+                    <span class="hint" tabindex="0" data-tip="Manage all connected IoT devices including SwitchBot, Kasa, Shelly, and GreenReach devices. View status, set names and locations, and identify controlled equipment.">?</span>
+                  </h3>
+                  <div class="row row--gap-sm row--wrap row--align-start">
+                    <button id="btnScanIoTDevices" type="button" class="primary" title="Scan for all IoT devices">Scan for Devices</button>
+                    <div class="iot-action-group" role="group" aria-label="Device managers">
+                      <span class="tiny text-muted" style="letter-spacing:0.02em;text-transform:uppercase;font-weight:600;">Device managers</span>
+                      <div class="row row--gap-xs">
+                        <button id="btnOpenSwitchBotManager" type="button" class="ghost">SwitchBot Manager</button>
+                      </div>
+                    </div>
+                    <div class="iot-action-group" role="group" aria-label="Device setup">
+                      <span class="tiny text-muted" style="letter-spacing:0.02em;text-transform:uppercase;font-weight:600;">Device setup</span>
+                      <div class="row row--gap-xs">
+                        <button id="btnShowIotSetup" type="button" class="ghost">View setup options</button>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+                <div id="iotEcosystemCard" class="card" style="display:none;margin:16px 0 0 0;padding:20px 24px 16px 24px;background:#f8fafc;border:1px solid #e5e7eb;border-radius:12px;">
+                  <div style="display:flex;flex-direction:column;gap:4px;margin-bottom:12px;">
+                    <span class="tiny text-muted" style="letter-spacing:0.02em;text-transform:uppercase;font-weight:600;">Device setup options</span>
+                    <p class="tiny" style="margin:0;color:#475569;">Choose an ecosystem to start configuration for new hardware integrations.</p>
+                  </div>
+                  <div class="row row--gap-xs" id="iotEcosystemButtons" style="flex-wrap:wrap;">
+                    <button class="ghost" id="btnMgrKasa">Kasa</button>
+                    <button class="ghost" id="btnMgrSonoff">Sonoff</button>
+                    <button class="ghost" id="btnMgrShelly">Shelly</button>
+                    <button class="ghost" id="btnMgrTuya">Tuya</button>
+                    <button class="ghost" id="btnMgrHue">Hue</button>
+                    <button class="ghost" id="btnMgrLIFX">LIFX</button>
+                    <button class="ghost" id="btnMgrMeross">Meross</button>
+                    <button class="ghost" id="btnMgrAqara">Aqara</button>
+                    <button class="ghost" id="btnMgrTasmota">Tasmota/ESPHome</button>
+                  </div>
+                </div>
+                <div id="iotEcosystemModal" class="modal" style="display:none;position:fixed;z-index:10001;left:0;top:0;width:100vw;height:100vh;background:rgba(0,0,0,0.4);align-items:center;justify-content:center;">
+                  <div id="iotEcosystemModalContent" style="background:#fff;border-radius:10px;max-width:90vw;max-height:90vh;width:420px;box-shadow:0 8px 32px rgba(0,0,0,0.25);position:relative;display:flex;flex-direction:column;padding:32px 24px 24px 24px;">
+                    <button id="closeIotEcosystemModal" style="position:absolute;top:10px;right:10px;background:none;border:none;font-size:1.5em;cursor:pointer;z-index:2;">&times;</button>
+                    <div id="iotEcosystemModalBody"></div>
+                  </div>
+                </div>
+                <div id="switchBotModal" class="modal" style="display:none;position:fixed;z-index:10000;left:0;top:0;width:100vw;height:100vh;background:rgba(0,0,0,0.4);align-items:center;justify-content:center;">
+                  <div style="background:#fff;border-radius:10px;max-width:90vw;max-height:90vh;width:900px;box-shadow:0 8px 32px rgba(0,0,0,0.25);position:relative;display:flex;flex-direction:column;">
+                    <button id="closeSwitchBotModal" style="position:absolute;top:10px;right:10px;background:none;border:none;font-size:1.5em;cursor:pointer;z-index:2;">&times;</button>
+                    <iframe id="switchBotIframe" src="./switchbot.html" style="width:100%;height:80vh;border:none;border-radius:0 0 10px 10px;"></iframe>
+                  </div>
+                </div>
+                <div id="iotScanBarContainer" style="margin:12px 0 0 0;display:none;">
+                  <div id="iotScanBar" style="position:relative;width:100%;height:22px;background:#e0e7ef;border-radius:12px;overflow:hidden;box-shadow:0 1px 4px #0001;">
+                    <div id="iotScanBarFill" style="height:100%;width:0%;background:linear-gradient(90deg,#60a5fa,#34d399);transition:width 0.2s cubic-bezier(.4,2,.6,1);display:flex;align-items:center;justify-content:center;">
+                      <span id="iotScanBarPercent" style="position:absolute;width:100%;text-align:center;font-weight:bold;color:#222;letter-spacing:0.5px;">0%</span>
+                    </div>
+                  </div>
+                </div>
+                <p class="tiny hud-shell__supporting-text">Configure and monitor your IoT devices including SwitchBot environmental sensors, Kasa smart plugs, Shelly relays, and GreenReach grow lights. Use "Discover" to find new GreenReach devices or "Open Device Manager" for full management interface.</p>
+                <div id="iotDevicesList" class="iot-devices-list">
+                  <div id="unknownDevicesTable" style="margin-bottom:24px;"></div>
+                </div>
+              </article>
+              <article class="smart-controllers__module">
+                <div class="row row--between row--center hud-shell__header">
+                  <h3 class="hud-shell__title">Smart Plugs</h3>
+                  <div class="row row--gap-xs">
+                    <button id="btnRefreshSmartPlugs" type="button" class="ghost">Refresh</button>
+                    <button id="btnDiscoverSmartPlugs" type="button" class="primary">Discover</button>
+                  </div>
+                </div>
+                <p class="tiny hud-shell__supporting-text" data-width="wide">
+                  Manage Shelly, Kasa, Tasmota, and SwitchBot plugs that control HVAC, dehumidifiers, and circulation fans. Toggle power, inspect live wattage, and attach rule guardrails per room scope.
+                </p>
+                <div id="smartPlugsAlert" class="alert" role="status" aria-live="polite" hidden></div>
+                <div class="table" id="smartPlugsTable" role="region" aria-live="polite"></div>
+              </article>
+              <article class="smart-controllers__module">
+                <div class="row row--between row--center hud-shell__header">
+                  <h3 class="section-title hud-shell__title">
+                    Controller Assignments
+                    <span class="hint" tabindex="0" data-tip="Assign controllers to equipment requiring smart control (lights, HVAC, sensors).">?</span>
+                  </h3>
+                  <div class="row row--gap-xs">
+                    <button id="btnRefreshControllerAssignments" type="button" class="ghost">Refresh</button>
+                    <button id="btnManageControllers" type="button" class="primary">Manage Controllers</button>
+                  </div>
+                </div>
+                <div id="controllerAssignmentsTable" class="panel-body"></div>
+              </article>
             </div>
           </section>
       <section id="plansPanel" class="card hud-shell" data-panel="plans">

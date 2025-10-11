@@ -851,11 +851,11 @@ document.addEventListener('DOMContentLoaded', async () => {
   window.dispatchEvent(new CustomEvent('lightSetupsChanged'));
 
   // --- Smart Plugs sidebar link wiring ---
-  const smartPlugsBtn = document.querySelector('[data-sidebar-link][data-target="smart-plugs"]');
-  if (smartPlugsBtn) {
-    smartPlugsBtn.addEventListener('click', (e) => {
+  const smartControllersBtn = document.querySelector('[data-sidebar-link][data-target="smart-controllers"]');
+  if (smartControllersBtn) {
+    smartControllersBtn.addEventListener('click', (e) => {
       e.preventDefault();
-      setActivePanel('smart-plugs');
+      setActivePanel('smart-controllers');
     });
   }
 });

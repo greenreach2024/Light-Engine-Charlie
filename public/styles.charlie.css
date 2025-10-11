@@ -33,6 +33,33 @@
   font-size: 1em;
   pointer-events: none;
 }
+
+.smart-controllers__stack {
+  display: flex;
+  flex-direction: column;
+  gap: 24px;
+  margin-top: 16px;
+}
+
+.smart-controllers__module {
+  background: #ffffff;
+  border: 1px solid #e5e7eb;
+  border-radius: 12px;
+  padding: 20px 24px;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.smart-controllers__module .hud-shell__title {
+  font-size: 1.1rem;
+}
+
+@media (max-width: 768px) {
+  .smart-controllers__module {
+    padding: 16px 20px;
+  }
+}
 /* Device Pair Modal (mirrors room/farm modal) */
 .device-pair-modal {
   position: fixed;
