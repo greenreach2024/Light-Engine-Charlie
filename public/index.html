@@ -83,18 +83,14 @@
       </div>
     </div>
 
-    <button type="button" class="sidebar-link" data-sidebar-link data-target="smart-controllers">
-      Smart Controllers
-    </button>
-
     <div class="sidebar-group" data-group="control-devices">
       <button class="sidebar-group__trigger" type="button" aria-expanded="false">
         <span>Control Devices</span>
         <span class="sidebar-group__icon" aria-hidden="true"></span>
       </button>
       <div class="sidebar-group__items" role="menu" hidden>
-        <button type="button" class="sidebar-link" data-sidebar-link data-group="control-devices" data-target="smart-plugs">
-          Smart Plugs
+        <button type="button" class="sidebar-link" data-sidebar-link data-group="control-devices" data-target="smart-controllers">
+          Smart Controllers
         </button>
         <button type="button" class="sidebar-link" data-sidebar-link data-group="control-devices" data-target="control-assignments">
           Control Assignments
@@ -383,6 +379,7 @@
                 <div class="smart-controller-action-group" role="group" aria-label="Device managers">
                   <span class="tiny text-muted" style="letter-spacing:0.02em;text-transform:uppercase;font-weight:600;">Device managers</span>
                   <div class="row row--gap-xs">
+                    <button id="btnOpenSmartPlugsPanel" type="button" class="ghost">Smart Plugs</button>
                     <button id="btnOpenSwitchBotManager" type="button" class="ghost">SwitchBot Manager</button>
                   </div>
                 </div>
