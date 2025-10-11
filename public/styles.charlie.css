@@ -1242,7 +1242,7 @@ h3 { font-size: 1.125rem; }
 }
 
 /* Card System */
-.card {
+:where(.dashboard-header, .dashboard-main) .card {
   background: var(--gr-surface, white);
   border-radius: var(--radius);
   box-shadow: var(--shadow, var(--gr-shadow));
@@ -1251,7 +1251,7 @@ h3 { font-size: 1.125rem; }
   margin-bottom: var(--gap);
 }
 
-.card:hover {
+:where(.dashboard-header, .dashboard-main) .card:hover {
   box-shadow: var(--shadow-lg, var(--gr-shadow-lg));
   transition: box-shadow 0.2s ease;
 }
