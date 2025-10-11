@@ -4628,6 +4628,7 @@ STATE.preAutomationRules = Array.isArray(STATE.preAutomationRules) ? STATE.preAu
 STATE.preAutomationEnv = STATE.preAutomationEnv || { scopes: {} };
 STATE.preAutomationAlert = null;
 STATE.environment = Array.isArray(STATE.environment) ? STATE.environment : [];
+STATE.roomAutomation = STATE.roomAutomation || { rooms: [], meta: {} };
 
 // ...existing code...
 class FarmWizard {
@@ -6653,7 +6654,8 @@ class DeviceManagerWindow {
     this.runBtn?.addEventListener('click', () => this.runDiscovery());
     this.filterButtons.forEach(btn => btn.addEventListener('click', () => this.setFilter(btn.dataset.filter)));
     this.automationBtn?.addEventListener('click', () => {
-      showToast({ title: 'Automation card', msg: 'Coming soon — natural language rules for any sensor to control any device.', kind: 'info', icon: '🧠' }, 5000);
+      focusAutomationCard();
+      showToast({ title: 'Automation card', msg: 'Scroll to Grow Room Automation for live advisories.', kind: 'info', icon: '⚙️' }, 4000);
     });
   }
 
@@ -11327,15 +11329,28 @@ function updateAutomationIndicator(status = {}) {
 
   const managedZones = (STATE.environment || []).filter(zone => zone.meta?.managedByPlugs);
   const hasRules = (STATE.preAutomationRules || []).length > 0;
+  const automationRooms = Array.isArray(STATE.roomAutomation?.rooms) ? STATE.roomAutomation.rooms : [];
+  const suggestionCount = automationRooms.reduce((acc, room) => acc + (room.suggestions?.length || 0), 0);
+  const autopilotRooms = automationRooms.filter(room => room.control?.enable && room.control?.mode === 'autopilot').length;
+  const alertRooms = automationRooms.filter(room => ['alert', 'critical'].includes(room.status?.level)).length;
 
-  if (managedZones.length > 0) {
+  if (autopilotRooms > 0) {
+    indicator.classList.add('is-active');
+    statusEl.textContent = autopilotRooms === 1
+      ? 'Autopilot • 1 room'
+      : `Autopilot • ${autopilotRooms} rooms`;
+  } else if (suggestionCount > 0) {
+    indicator.classList.add('is-alert');
+    const alertSuffix = alertRooms > 0 ? ` • ${alertRooms} room${alertRooms === 1 ? '' : 's'} out of range` : '';
+    statusEl.textContent = `Advisory • ${suggestionCount} suggestion${suggestionCount === 1 ? '' : 's'}${alertSuffix}`;
+  } else if (managedZones.length > 0) {
     indicator.classList.add('is-active');
     statusEl.textContent = managedZones.length === 1
       ? 'Managing 1 zone'
       : `Managing ${managedZones.length} zones`;
-  } else if (hasRules) {
+  } else if (hasRules || automationRooms.length > 0) {
     indicator.classList.add('is-idle');
-    statusEl.textContent = 'Armed';
+    statusEl.textContent = hasRules ? 'Armed' : 'Targets stable';
   } else {
     indicator.classList.add('is-idle');
     statusEl.textContent = 'Idle';
@@ -11525,10 +11540,191 @@ async function refreshSmartPlug(plugId) {
   }
 }
 
+function onAutomationCardClick(event) {
+  const actionBtn = event.target.closest('[data-action="apply-suggestion"]');
+  if (actionBtn) {
+    const roomId = actionBtn.getAttribute('data-room-id');
+    const suggestionId = actionBtn.getAttribute('data-suggestion-id');
+    applyAutomationSuggestion(roomId, suggestionId, actionBtn);
+    return;
+  }
+
+  const modeBtn = event.target.closest('[data-mode]');
+  if (modeBtn) {
+    const mode = modeBtn.getAttribute('data-mode');
+    if (mode === 'autopilot') {
+      event.preventDefault();
+      modeBtn.blur();
+      showToast({ title: 'Autopilot', msg: 'Guardrailed Autopilot is on deck. For now, run in Advisory to review actions.', kind: 'info', icon: '🛡️' }, 5000);
+    }
+  }
+}
+
+function renderRoomAutomationCard() {
+  const card = document.getElementById('roomAutomationCard');
+  if (!card) return;
+
+  if (!card.dataset.bound) {
+    card.dataset.bound = '1';
+    card.addEventListener('click', onAutomationCardClick);
+  }
+
+  const body = card.querySelector('[data-role="automation-body"]');
+  const statusEl = card.querySelector('[data-role="automation-status"]');
+  const modeLabel = card.querySelector('[data-role="automation-mode-label"]');
+  if (!body) return;
+
+  const automation = STATE.roomAutomation || {};
+  const rooms = Array.isArray(automation.rooms) ? automation.rooms : [];
+  const totalSuggestions = rooms.reduce((acc, room) => acc + (room.suggestions?.length || 0), 0);
+  const alertRooms = rooms.filter((room) => ['alert', 'critical'].includes(room.status?.level)).length;
+  const autopilotRooms = rooms.filter((room) => room.control?.enable && room.control?.mode === 'autopilot').length;
+
+  if (modeLabel) {
+    if (autopilotRooms > 0) {
+      modeLabel.textContent = `Autopilot (${autopilotRooms})`;
+    } else {
+      modeLabel.textContent = 'Advisory';
+    }
+  }
+
+  if (!rooms.length) {
+    body.innerHTML = '<p class="tiny text-muted">No rooms are mapped to automation yet. Configure Grow Rooms to seed advisory guardrails.</p>';
+  } else {
+    body.innerHTML = rooms.map((room) => {
+      const control = room.control || {};
+      const targets = room.targets || {};
+      const stepPct = Math.round((control.step ?? 0.05) * 100);
+      const dwell = control.dwell ?? 180;
+      const modeText = control.mode === 'autopilot' ? 'Autopilot' : 'Advisory';
+      const enableText = control.enable ? 'Enabled' : 'Manual';
+      const statusSummary = escapeHtml(room.status?.summary || 'Within guardrails');
+      const statusDetail = escapeHtml(room.status?.detail || '');
+      const statusLevel = room.status?.level || 'idle';
+      const tempTarget = typeof targets.temp === 'number' ? `${targets.temp.toFixed(1)}°C` : null;
+      const rhBand = typeof targets.rhBand === 'number' ? targets.rhBand : 5;
+      const rhTarget = typeof targets.rh === 'number' ? `${targets.rh.toFixed(0)}% ±${rhBand}` : null;
+      const minBlue = typeof targets.minBlue === 'number' ? `Blue ≥${Math.round(targets.minBlue * 100)}%` : null;
+      const minMaster = typeof targets.minMaster === 'number' ? `Master ≥${Math.round(targets.minMaster * 100)}%` : null;
+      const targetParts = [tempTarget, rhTarget, minBlue, minMaster].filter(Boolean).join(' • ');
+      const targetsText = targetParts || '—';
+      const tempReading = room.readings?.temp?.value;
+      const rhReading = room.readings?.rh?.value;
+      const readingParts = [];
+      if (typeof tempReading === 'number') readingParts.push(`Temp ${tempReading.toFixed(1)}°C`);
+      if (typeof rhReading === 'number') readingParts.push(`RH ${rhReading.toFixed(1)}%`);
+      const readingsText = readingParts.length ? readingParts.join(' • ') : 'Awaiting sensors';
+      const lights = Array.isArray(room.actuators?.lights) ? room.actuators.lights : [];
+      const fans = Array.isArray(room.actuators?.fans) ? room.actuators.fans : [];
+      const dehu = Array.isArray(room.actuators?.dehu) ? room.actuators.dehu : [];
+      const actuatorParts = [];
+      if (lights.length) actuatorParts.push(`Lights: ${lights.map(escapeHtml).join(', ')}`);
+      if (fans.length) actuatorParts.push(`Fans: ${fans.map(escapeHtml).join(', ')}`);
+      if (dehu.length) actuatorParts.push(`Dehu: ${dehu.map(escapeHtml).join(', ')}`);
+      const actuatorsText = actuatorParts.length ? actuatorParts.map((part) => `<span>${part}</span>`).join('') : '<span class="tiny text-muted">No actuators mapped</span>';
+
+      const suggestions = Array.isArray(room.suggestions) ? room.suggestions : [];
+      const suggestionsHtml = suggestions.length
+        ? suggestions.map((suggestion) => {
+            const severity = suggestion.severity || 'minor';
+            const label = escapeHtml(suggestion.label || 'Suggested action');
+            const detail = escapeHtml(suggestion.detail || '');
+            const disabledAttr = suggestion.disabled ? ' disabled' : '';
+            return `
+              <div class="automation-suggestion" data-severity="${severity}">
+                <div class="automation-suggestion__text">
+                  <span class="automation-suggestion__label">${label}</span>
+                  ${detail ? `<span class="automation-suggestion__detail tiny text-muted">${detail}</span>` : ''}
+                </div>
+                <button type="button" class="ghost automation-suggestion__apply" data-action="apply-suggestion" data-room-id="${escapeHtml(room.roomId || '')}" data-suggestion-id="${escapeHtml(suggestion.id || '')}"${disabledAttr}>Apply</button>
+              </div>`;
+          }).join('')
+        : '<div class="automation-suggestion automation-suggestion--empty"><span>No actions recommended.</span></div>';
+
+      return `
+        <article class="automation-room automation-room--${statusLevel}" data-room="${escapeHtml(room.roomId || '')}">
+          <header class="automation-room__header">
+            <div>
+              <h3 class="automation-room__title">${escapeHtml(room.name || room.roomId || 'Room')}</h3>
+              <p class="tiny automation-room__status" title="${statusDetail}">${statusSummary}</p>
+            </div>
+            <div class="automation-room__badges">
+              <span class="badge">${escapeHtml(modeText)}</span>
+              <span class="badge">${escapeHtml(enableText)}</span>
+              <span class="badge">Step ${stepPct}%</span>
+              <span class="badge">Dwell ${dwell}s</span>
+            </div>
+          </header>
+          <div class="automation-room__metrics">
+            <div>
+              <span class="automation-room__metric-label">Targets</span>
+              <span class="automation-room__metric-value">${escapeHtml(targetsText)}</span>
+            </div>
+            <div>
+              <span class="automation-room__metric-label">Readings</span>
+              <span class="automation-room__metric-value">${escapeHtml(readingsText)}</span>
+            </div>
+          </div>
+          <div class="automation-room__actuators">${actuatorsText}</div>
+          <div class="automation-room__suggestions">
+            <h4 class="automation-room__suggestions-title">Suggestions</h4>
+            ${suggestionsHtml}
+          </div>
+        </article>`;
+    }).join('');
+  }
+
+  if (statusEl) {
+    if (!rooms.length) {
+      statusEl.textContent = 'Add rooms to enable automation guardrails.';
+    } else if (totalSuggestions > 0) {
+      statusEl.textContent = `${totalSuggestions} suggestion${totalSuggestions === 1 ? '' : 's'} ready · ${alertRooms} room${alertRooms === 1 ? '' : 's'} out of range`;
+    } else {
+      statusEl.textContent = 'All rooms within configured guardrails.';
+    }
+  }
+}
+
+async function applyAutomationSuggestion(roomId, suggestionId, button) {
+  if (!roomId || !suggestionId) return;
+  const btn = button instanceof HTMLElement ? button : null;
+  if (btn) {
+    btn.disabled = true;
+    btn.classList.add('is-loading');
+  }
+  try {
+    showToast({ title: 'Automation', msg: 'Sending advisory action…', kind: 'info', icon: '⚙️' }, 2500);
+    const payload = await api(`/env/rooms/${encodeURIComponent(roomId)}/actions`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ suggestionId })
+    });
+    if (payload?.room) {
+      const rooms = Array.isArray(STATE.roomAutomation?.rooms) ? STATE.roomAutomation.rooms : [];
+      const idx = rooms.findIndex((entry) => entry.roomId === payload.room.roomId);
+      if (idx >= 0) {
+        rooms[idx] = payload.room;
+      }
+      STATE.roomAutomation.rooms = rooms;
+    }
+    const appliedLabel = payload?.appliedSuggestion?.label || 'Automation action logged.';
+    showToast({ title: 'Applied', msg: appliedLabel, kind: 'success', icon: '✅' }, 4000);
+    await reloadEnvironment();
+  } catch (error) {
+    console.warn('Automation apply failed', error);
+    showToast({ title: 'Automation', msg: error.message || 'Failed to apply automation suggestion.', kind: 'warn', icon: '⚠️' }, 5000);
+  } finally {
+    if (btn) {
+      btn.disabled = false;
+      btn.classList.remove('is-loading');
+    }
+  }
+}
+
 function renderEnvironment() {
   const container = document.getElementById('envZones');
   if (!container) return;
-  
+
   container.innerHTML = STATE.environment.map(zone => `
     <div class="env-zone" data-zone-id="${zone.id}">
       <div class="env-zone__header">
@@ -11580,6 +11776,7 @@ function renderEnvironment() {
     });
   });
 
+  renderRoomAutomationCard();
   renderGrowRoomOverview();
   updateAutomationIndicator();
 }
@@ -11591,6 +11788,10 @@ async function reloadEnvironment() {
     const payload = await api('/env');
     STATE.preAutomationEnv = payload?.env || { scopes: {} };
     STATE.environment = Array.isArray(payload?.zones) ? payload.zones : [];
+    STATE.roomAutomation = {
+      rooms: Array.isArray(payload?.rooms) ? payload.rooms : [],
+      meta: payload?.meta || {}
+    };
     renderEnvironment();
     $('#envStatus')?.replaceChildren(document.createTextNode(`Updated ${new Date().toLocaleTimeString()}`));
   } catch (e) {
@@ -14997,6 +15198,42 @@ function gatherRulesForRoom(room, zone, rules) {
 
 function deriveAutomationStatus(room, zone, rules, devices) {
   const matches = gatherRulesForRoom(room, zone, rules);
+  const automationRooms = Array.isArray(STATE.roomAutomation?.rooms) ? STATE.roomAutomation.rooms : [];
+  const identifiers = new Set([
+    ...collectRoomIdentifiers(room),
+    ...collectZoneIdentifiers(zone)
+  ].map((value) => String(value || '').toLowerCase()));
+
+  const automationEntry = automationRooms.find((entry) => {
+    if (!entry) return false;
+    const roomId = String(entry.roomId || '').toLowerCase();
+    const name = String(entry.name || '').toLowerCase();
+    return identifiers.has(roomId) || identifiers.has(name);
+  });
+
+  if (automationEntry) {
+    const hasSuggestions = Array.isArray(automationEntry.suggestions) && automationEntry.suggestions.length > 0;
+    const autopilot = automationEntry.control?.enable && automationEntry.control?.mode === 'autopilot';
+    const status = autopilot ? 'on' : hasSuggestions ? 'alert' : 'off';
+    const labelParts = [autopilot ? 'Autopilot' : 'Advisory'];
+    if (hasSuggestions) {
+      labelParts.push(`${automationEntry.suggestions.length} suggestion${automationEntry.suggestions.length === 1 ? '' : 's'}`);
+    }
+    const label = `Automation ${labelParts.join(' • ')}`;
+    const description = automationEntry.status?.detail || automationEntry.status?.summary || label;
+    const suggestionWord = automationEntry.suggestions.length === 1 ? 'advisory' : 'advisories';
+    return {
+      status,
+      label,
+      matches,
+      governed: autopilot,
+      description,
+      shortLabel: hasSuggestions
+        ? `${automationEntry.suggestions.length} ${suggestionWord}`
+        : (autopilot ? 'On' : 'Idle')
+    };
+  }
+
   const governed = Boolean(zone?.meta?.managedByPlugs || zone?.meta?.automation === 'on' || zone?.meta?.governance === 'automation');
   const active = governed || matches.length > 0;
   const detailParts = [];
@@ -15167,6 +15404,16 @@ function handleAiControlClick(entry) {
   }
 }
 
+function focusAutomationCard() {
+  const card = document.getElementById('roomAutomationCard');
+  if (!card) return;
+  if (typeof card.scrollIntoView === 'function') {
+    card.scrollIntoView({ behavior: 'smooth', block: 'center' });
+  }
+  card.classList.add('card--spotlight');
+  setTimeout(() => card.classList.remove('card--spotlight'), 1200);
+}
+
 function handleAutomationControlClick(entry) {
   if (!entry || !entry.automation) return;
   const msg = entry.automation.description || entry.automation.label || 'Automation status';
@@ -15178,6 +15425,7 @@ function handleAutomationControlClick(entry) {
       icon: '⚙️'
     });
   }
+  focusAutomationCard();
 }
 
 function handleSpectraControlClick(entry) {
