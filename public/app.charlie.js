@@ -10473,8 +10473,13 @@ function renderGroups() {
 
 function renderRooms() {
   const host = $('#roomsList'); if (!host) return;
+  const automationHost = ensureRoomAutomationHost();
   if (!STATE.rooms.length) {
     host.innerHTML = '<p class="tiny" style="color:#64748b">No rooms yet. Create one to get started.</p>';
+    if (automationHost) {
+      automationHost.dataset.activeRoom = '';
+      automationHost.innerHTML = '<p class="tiny text-muted">Add a grow room to enable automation guardrails.</p>';
+    }
     return;
   }
     host.innerHTML = STATE.rooms.map(r => {
@@ -10505,12 +10510,22 @@ function renderRooms() {
             <div class="tiny" style="color:#475569">${lightsList}</div>
           </div>
           <div class="row" style="gap:6px">
+            <button type="button" class="ghost" data-action="room-automation" data-room-id="${roomId}">Automation</button>
             <button type="button" class="ghost" data-action="edit-room" data-room-id="${roomId}">Edit</button>
             <button type="button" class="ghost danger" data-action="del-room" data-room-id="${roomId}">Delete</button>
           </div>
         </div>
       </div>`;
     }).join('');
+
+    // Wire Automation actions
+    host.querySelectorAll('[data-action="room-automation"]').forEach(btn => {
+      btn.addEventListener('click', () => {
+        const id = btn.getAttribute('data-room-id');
+        if (!id) return;
+        openRoomAutomationConfig(id);
+      });
+    });
 
     // Wire Edit actions
     host.querySelectorAll('[data-action="edit-room"]').forEach(btn => {
@@ -10560,7 +10575,424 @@ function renderRooms() {
       });
     });
 
+  if (automationHost && !automationHost.dataset.activeRoom && !automationHost.hasChildNodes()) {
+    automationHost.innerHTML = '<p class="tiny text-muted">Select a room to configure automation.</p>';
+  }
+
   renderGrowRoomOverview();
+}
+
+function ensureRoomAutomationHost() {
+  const panelBody = document.getElementById('roomsPanelBody');
+  if (!panelBody) return null;
+  let host = document.getElementById('roomAutomationConfigHost');
+  if (!host) {
+    host = document.createElement('div');
+    host.id = 'roomAutomationConfigHost';
+    host.className = 'room-automation-config-host';
+    host.innerHTML = '<p class="tiny text-muted">Select a room to configure automation.</p>';
+    panelBody.appendChild(host);
+  }
+  return host;
+}
+
+function normalizeEnvRoomsMap(rooms) {
+  if (!rooms) return {};
+  if (Array.isArray(rooms)) {
+    return rooms.reduce((acc, room) => {
+      const key = room?.roomId || room?.id || room?.name;
+      if (key) acc[key] = room;
+      return acc;
+    }, {});
+  }
+  if (typeof rooms === 'object') {
+    return { ...rooms };
+  }
+  return {};
+}
+
+function openRoomAutomationConfig(roomId) {
+  if (!roomId) return;
+  const host = ensureRoomAutomationHost();
+  if (!host) return;
+  host.dataset.activeRoom = roomId;
+  host.innerHTML = '';
+  const card = mountAutomationCard(host, roomId);
+  if (!card) {
+    host.dataset.activeRoom = '';
+    host.innerHTML = '<p class="tiny text-muted">Unable to load automation controls for this room.</p>';
+    return;
+  }
+  if (typeof card.scrollIntoView === 'function') {
+    try {
+      card.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    } catch (error) {
+      console.warn('scrollIntoView failed', error);
+    }
+  }
+}
+
+function mountAutomationCard(container, roomId) {
+  if (!(container instanceof HTMLElement)) return null;
+  const slug = (String(roomId || 'room')
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, '-')
+    .replace(/^-+|-+$/g, '') || 'room');
+
+  const enableId = `auto-enable-${slug}`;
+  const modeId = `auto-mode-${slug}`;
+  const tempId = `t-temp-${slug}`;
+  const rhId = `t-rh-${slug}`;
+  const rhBandId = `t-rhband-${slug}`;
+  const minMasterId = `t-minm-${slug}`;
+  const minBlueId = `t-minb-${slug}`;
+  const stepId = `c-step-${slug}`;
+  const dwellId = `c-dwell-${slug}`;
+  const suggestionsId = `suggestions-${slug}`;
+  const saveId = `btn-save-${slug}`;
+  const runId = `btn-run-${slug}`;
+  const applyId = `btn-apply-${slug}`;
+
+  const card = document.createElement('section');
+  card.className = 'card std hud-shell';
+  card.dataset.size = 'md';
+  card.dataset.role = 'room-automation-config';
+  card.dataset.roomId = roomId;
+  card.innerHTML = `
+    <div class="card-head">
+      <h3>Room Automation — ${escapeHtml(roomId)}</h3>
+      <label><input type="checkbox" id="${enableId}"> Enable</label>
+      <select id="${modeId}"><option value="advisory">Advisory</option><option value="autopilot">Autopilot</option></select>
+    </div>
+    <div class="card-body">
+      <div class="grid two">
+        <label>Target Temp °C <input id="${tempId}" type="number" step="0.1"></label>
+        <label>Target RH % <input id="${rhId}" type="number" step="1"></label>
+        <label>RH Band ±% <input id="${rhBandId}" type="number" step="1" value="5"></label>
+        <label>Min Master <input id="${minMasterId}" type="number" step="0.05" value="0.6"></label>
+        <label>Min Blue <input id="${minBlueId}" type="number" step="0.05" value="0.5"></label>
+        <label>Step (Δ) <input id="${stepId}" type="number" step="0.01" value="0.05"></label>
+        <label>Dwell (s) <input id="${dwellId}" type="number" step="10" value="180"></label>
+      </div>
+      <div id="${suggestionsId}" class="suggestions"></div>
+    </div>
+    <div class="card-foot">
+      <button id="${saveId}">Save</button>
+      <button id="${runId}">Run Policy Once</button>
+      <button id="${applyId}" hidden>Apply Suggestion</button>
+    </div>`;
+  container.appendChild(card);
+
+  const refs = {
+    enable: card.querySelector(`#${enableId}`),
+    mode: card.querySelector(`#${modeId}`),
+    targetTemp: card.querySelector(`#${tempId}`),
+    targetRh: card.querySelector(`#${rhId}`),
+    targetRhBand: card.querySelector(`#${rhBandId}`),
+    minMaster: card.querySelector(`#${minMasterId}`),
+    minBlue: card.querySelector(`#${minBlueId}`),
+    step: card.querySelector(`#${stepId}`),
+    dwell: card.querySelector(`#${dwellId}`),
+    suggestions: card.querySelector(`#${suggestionsId}`),
+    saveBtn: card.querySelector(`#${saveId}`),
+    runBtn: card.querySelector(`#${runId}`),
+    applyBtn: card.querySelector(`#${applyId}`)
+  };
+
+  let envState = null;
+  let currentRoom = null;
+  let currentActions = [];
+
+  const setBusy = (btn, busy) => {
+    if (!btn) return;
+    btn.disabled = Boolean(busy);
+    btn.classList.toggle('is-loading', Boolean(busy));
+  };
+
+  const updateApplyVisibility = () => {
+    if (!refs.applyBtn) return;
+    const mode = (refs.mode?.value || 'advisory').toLowerCase();
+    const hasLightAction = currentActions.some(action => action?.type === 'lights.scale');
+    refs.applyBtn.hidden = !(mode === 'advisory' && hasLightAction);
+  };
+
+  const renderPlaceholder = (message) => {
+    if (!refs.suggestions) return;
+    refs.suggestions.innerHTML = `<p class="tiny text-muted">${escapeHtml(message)}</p>`;
+  };
+
+  const renderActions = (actions) => {
+    if (!Array.isArray(actions)) actions = [];
+    currentActions = actions.filter(action => !action.roomId || action.roomId === roomId);
+    if (!refs.suggestions) {
+      updateApplyVisibility();
+      return;
+    }
+    if (!currentActions.length) {
+      renderPlaceholder('No automation suggestions yet. Run policy to generate adjustments.');
+      updateApplyVisibility();
+      return;
+    }
+    const html = currentActions.map((action) => {
+      if (action.type === 'lights.scale') {
+        const parts = [];
+        if (Number.isFinite(action.masterDelta) && action.masterDelta !== 0) {
+          parts.push(`${action.masterDelta > 0 ? '+' : ''}${(action.masterDelta * 100).toFixed(1)}% master`);
+        }
+        if (Number.isFinite(action.blueDelta) && action.blueDelta !== 0) {
+          parts.push(`${action.blueDelta > 0 ? '+' : ''}${(action.blueDelta * 100).toFixed(1)}% blue`);
+        }
+        if (Number.isFinite(action.dwell)) {
+          parts.push(`${Math.round(action.dwell)}s dwell`);
+        }
+        const guardrails = [];
+        if (Number.isFinite(action.minMaster)) guardrails.push(`Master ≥${(action.minMaster * 100).toFixed(0)}%`);
+        if (Number.isFinite(action.minBlue)) guardrails.push(`Blue ≥${(action.minBlue * 100).toFixed(0)}%`);
+        const guardrailText = guardrails.length ? `<span class="tiny text-muted">Guardrails: ${escapeHtml(guardrails.join(', '))}</span>` : '';
+        const detail = parts.length ? escapeHtml(parts.join(' • ')) : 'Review lighting adjustments.';
+        return `
+          <div class="automation-suggestion" data-kind="lights">
+            <div class="automation-suggestion__text">
+              <span class="automation-suggestion__label">Lights scaling</span>
+              <span class="automation-suggestion__detail tiny text-muted">${detail}</span>
+              ${guardrailText}
+            </div>
+          </div>`;
+      }
+      const label = escapeHtml(action.label || 'Automation action');
+      const detail = action.detail ? `<span class="automation-suggestion__detail tiny text-muted">${escapeHtml(action.detail)}</span>` : '';
+      return `
+        <div class="automation-suggestion" data-kind="${escapeHtml(action.type || 'action')}">
+          <div class="automation-suggestion__text">
+            <span class="automation-suggestion__label">${label}</span>
+            ${detail}
+          </div>
+        </div>`;
+    }).join('');
+    refs.suggestions.innerHTML = html;
+    updateApplyVisibility();
+  };
+
+  const parseNumber = (input) => {
+    if (!input) return null;
+    const value = Number(input.value);
+    return Number.isFinite(value) ? value : null;
+  };
+
+  const loadEnv = async () => {
+    try {
+      const payload = await api('/env');
+      envState = payload || {};
+      const roomsMap = normalizeEnvRoomsMap(envState.rooms);
+      currentRoom = roomsMap[roomId] || { roomId, control: {}, targets: {} };
+      currentRoom.roomId = currentRoom.roomId || roomId;
+      currentRoom.control = currentRoom.control || {};
+      currentRoom.targets = currentRoom.targets || {};
+
+      if (refs.enable) refs.enable.checked = Boolean(currentRoom.control.enable);
+      if (refs.mode) refs.mode.value = currentRoom.control.mode || 'advisory';
+      if (refs.step && Number.isFinite(currentRoom.control.step)) refs.step.value = currentRoom.control.step;
+      if (refs.dwell && Number.isFinite(currentRoom.control.dwell)) refs.dwell.value = currentRoom.control.dwell;
+      if (refs.targetTemp && Number.isFinite(currentRoom.targets.temp)) refs.targetTemp.value = currentRoom.targets.temp;
+      if (refs.targetRh && Number.isFinite(currentRoom.targets.rh)) refs.targetRh.value = currentRoom.targets.rh;
+      if (refs.targetRhBand && Number.isFinite(currentRoom.targets.rhBand)) refs.targetRhBand.value = currentRoom.targets.rhBand;
+      if (refs.minMaster && Number.isFinite(currentRoom.targets.minMaster)) refs.minMaster.value = currentRoom.targets.minMaster;
+      if (refs.minBlue && Number.isFinite(currentRoom.targets.minBlue)) refs.minBlue.value = currentRoom.targets.minBlue;
+
+      const suggestions = Array.isArray(currentRoom.suggestions) ? currentRoom.suggestions : [];
+      if (suggestions.length) {
+        const suggestionHtml = suggestions.map((item) => {
+          const label = escapeHtml(item.label || 'Suggestion');
+          const detail = item.detail ? `<span class="automation-suggestion__detail tiny text-muted">${escapeHtml(item.detail)}</span>` : '';
+          return `
+            <div class="automation-suggestion" data-kind="${escapeHtml(item.type || 'suggestion')}">
+              <div class="automation-suggestion__text">
+                <span class="automation-suggestion__label">${label}</span>
+                ${detail}
+              </div>
+            </div>`;
+        }).join('');
+        if (refs.suggestions) refs.suggestions.innerHTML = suggestionHtml;
+        currentActions = [];
+      } else {
+        renderPlaceholder('No automation suggestions yet. Run policy to generate adjustments.');
+        currentActions = [];
+      }
+      updateApplyVisibility();
+    } catch (error) {
+      console.warn('Failed to load automation config', error);
+      if (refs.suggestions) {
+        refs.suggestions.innerHTML = `<p class="tiny" style="color:#b91c1c">Failed to load automation config: ${escapeHtml(error.message || String(error))}</p>`;
+      }
+    }
+  };
+
+  const saveConfig = async () => {
+    try {
+      setBusy(refs.saveBtn, true);
+      if (!envState) {
+        await loadEnv();
+      }
+      const roomsMap = normalizeEnvRoomsMap(envState?.rooms);
+      const existingRoom = roomsMap[roomId] || { roomId, control: {}, targets: {} };
+      const nextControl = { ...existingRoom.control };
+      nextControl.enable = Boolean(refs.enable?.checked);
+      nextControl.mode = refs.mode?.value || 'advisory';
+      const stepVal = parseNumber(refs.step);
+      const dwellVal = parseNumber(refs.dwell);
+      if (stepVal !== null) nextControl.step = stepVal;
+      if (dwellVal !== null) nextControl.dwell = dwellVal;
+
+      const nextTargets = { ...existingRoom.targets };
+      const tempVal = parseNumber(refs.targetTemp);
+      const rhVal = parseNumber(refs.targetRh);
+      const rhBandVal = parseNumber(refs.targetRhBand);
+      const minMasterVal = parseNumber(refs.minMaster);
+      const minBlueVal = parseNumber(refs.minBlue);
+
+      if (tempVal !== null) nextTargets.temp = tempVal; else delete nextTargets.temp;
+      if (rhVal !== null) nextTargets.rh = rhVal; else delete nextTargets.rh;
+      if (rhBandVal !== null) nextTargets.rhBand = rhBandVal; else delete nextTargets.rhBand;
+      if (minMasterVal !== null) nextTargets.minMaster = minMasterVal; else delete nextTargets.minMaster;
+      if (minBlueVal !== null) nextTargets.minBlue = minBlueVal; else delete nextTargets.minBlue;
+
+      const updatedRoom = {
+        ...existingRoom,
+        roomId,
+        control: nextControl,
+        targets: nextTargets
+      };
+
+      roomsMap[roomId] = updatedRoom;
+
+      await api('/env', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ rooms: roomsMap })
+      });
+
+      envState = { ...(envState || {}), rooms: roomsMap };
+      currentRoom = updatedRoom;
+
+      if (typeof showToast === 'function') {
+        showToast({ title: 'Automation saved', msg: `Guardrails updated for ${roomId}.`, kind: 'success', icon: '✅' }, 4000);
+      }
+      await reloadEnvironment();
+    } catch (error) {
+      console.warn('Failed to save automation config', error);
+      if (typeof showToast === 'function') {
+        showToast({ title: 'Automation', msg: error.message || 'Failed to save automation settings.', kind: 'warn', icon: '⚠️' }, 5000);
+      }
+    } finally {
+      setBusy(refs.saveBtn, false);
+      updateApplyVisibility();
+    }
+  };
+
+  const runPolicyOnce = async () => {
+    try {
+      setBusy(refs.runBtn, true);
+      if (typeof showToast === 'function') {
+        showToast({ title: 'Automation', msg: `Evaluating policy for ${roomId}…`, kind: 'info', icon: '⚙️' }, 2500);
+      }
+      const response = await api('/automation/run', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ room: roomId })
+      });
+      const actions = Array.isArray(response?.actions) ? response.actions : [];
+      renderActions(actions.filter(action => !action.roomId || action.roomId === roomId));
+      if (!currentActions.length && typeof showToast === 'function') {
+        showToast({ title: 'Automation', msg: 'No adjustments recommended at this time.', kind: 'info', icon: 'ℹ️' }, 3500);
+      }
+      await reloadEnvironment();
+    } catch (error) {
+      console.warn('Automation run failed', error);
+      if (typeof showToast === 'function') {
+        showToast({ title: 'Automation', msg: error.message || 'Failed to run automation policy.', kind: 'warn', icon: '⚠️' }, 5000);
+      }
+    } finally {
+      setBusy(refs.runBtn, false);
+      updateApplyVisibility();
+    }
+  };
+
+  const applyActions = async () => {
+    const mode = (refs.mode?.value || 'advisory').toLowerCase();
+    if (mode !== 'advisory') {
+      if (typeof showToast === 'function') {
+        showToast({ title: 'Automation', msg: 'Autopilot applies adjustments automatically.', kind: 'info', icon: 'ℹ️' }, 3500);
+      }
+      return;
+    }
+    const lightActions = currentActions.filter(action => action.type === 'lights.scale');
+    if (!lightActions.length) {
+      if (typeof showToast === 'function') {
+        showToast({ title: 'Automation', msg: 'No lighting adjustments to apply.', kind: 'info', icon: 'ℹ️' }, 3500);
+      }
+      return;
+    }
+    const lights = Array.isArray(currentRoom?.actuators?.lights) ? currentRoom.actuators.lights : [];
+    if (!lights.length) {
+      if (typeof showToast === 'function') {
+        showToast({ title: 'Automation', msg: 'Map lights to this room before applying adjustments.', kind: 'warn', icon: '⚠️' }, 5000);
+      }
+      return;
+    }
+    try {
+      setBusy(refs.applyBtn, true);
+      let success = 0;
+      let failure = 0;
+      for (const action of lightActions) {
+        for (const lightId of lights) {
+          try {
+            const payload = { adjust: {} };
+            if (Number.isFinite(action.masterDelta) && action.masterDelta !== 0) payload.adjust.master = action.masterDelta;
+            if (Number.isFinite(action.blueDelta) && action.blueDelta !== 0) payload.adjust.blue = action.blueDelta;
+            if (Number.isFinite(action.dwell) && action.dwell > 0) payload.adjust.dwell = Math.round(action.dwell);
+            const guardrails = {};
+            if (Number.isFinite(action.minMaster)) guardrails.minMaster = action.minMaster;
+            if (Number.isFinite(action.minBlue)) guardrails.minBlue = action.minBlue;
+            if (Object.keys(guardrails).length) payload.adjust.guardrails = guardrails;
+            if (!Object.keys(payload.adjust).length) continue;
+            await controllerPatchDevice(lightId, payload);
+            success += 1;
+          } catch (error) {
+            failure += 1;
+            console.warn('Failed to patch light for automation', lightId, error);
+          }
+        }
+      }
+      if (typeof showToast === 'function') {
+        const msg = failure
+          ? `Sent ${success} adjustment${success === 1 ? '' : 's'} · ${failure} failed`
+          : `Sent ${success} adjustment${success === 1 ? '' : 's'} to lights`;
+        showToast({ title: failure ? 'Automation warning' : 'Automation applied', msg, kind: failure ? 'warn' : 'success', icon: failure ? '⚠️' : '✅' }, 4500);
+      }
+      await reloadEnvironment();
+    } catch (error) {
+      console.warn('Automation apply failed', error);
+      if (typeof showToast === 'function') {
+        showToast({ title: 'Automation', msg: error.message || 'Failed to apply automation suggestion.', kind: 'warn', icon: '⚠️' }, 5000);
+      }
+    } finally {
+      setBusy(refs.applyBtn, false);
+      updateApplyVisibility();
+    }
+  };
+
+  refs.saveBtn?.addEventListener('click', saveConfig);
+  refs.runBtn?.addEventListener('click', runPolicyOnce);
+  refs.applyBtn?.addEventListener('click', applyActions);
+  refs.mode?.addEventListener('change', () => {
+    updateApplyVisibility();
+  });
+
+  loadEnv().catch((error) => {
+    console.warn('Initial automation load failed', error);
+  });
+
+  return card;
 }
 
 function renderLightSetups() {
