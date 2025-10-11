@@ -8964,3 +8964,16 @@ export { app };
 export function __resetWizardSystemForTests() {
   resetWizardSystem();
 }
+
+export async function __runDailyPlanResolverForTests(trigger = 'test-helper') {
+  return runDailyPlanResolver(trigger);
+}
+
+export const __testUtils = {
+  computePlanDayNumber,
+  resolvePlanLightTargets,
+  resolvePlanEnvTargets,
+  buildHexPayload,
+  evaluateRoomAutomationConfig,
+  computeEnergy,
+};
