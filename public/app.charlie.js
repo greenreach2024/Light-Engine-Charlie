@@ -16025,13 +16025,26 @@ function handleAiControlClick(entry) {
 }
 
 function focusAutomationCard() {
+  if (typeof setActivePanel === 'function') {
+    setActivePanel('automation');
+  }
+
   const card = document.getElementById('roomAutomationCard');
   if (!card) return;
-  if (typeof card.scrollIntoView === 'function') {
-    card.scrollIntoView({ behavior: 'smooth', block: 'center' });
+
+  const spotlight = () => {
+    if (typeof card.scrollIntoView === 'function') {
+      card.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    }
+    card.classList.add('card--spotlight');
+    setTimeout(() => card.classList.remove('card--spotlight'), 1200);
+  };
+
+  if (typeof requestAnimationFrame === 'function') {
+    requestAnimationFrame(spotlight);
+  } else {
+    spotlight();
   }
-  card.classList.add('card--spotlight');
-  setTimeout(() => card.classList.remove('card--spotlight'), 1200);
 }
 
 function handleAutomationControlClick(entry) {
