@@ -566,9 +566,15 @@
     let baseZoneOptions = [];
     let zoneOptionsLocked = false;
     let baseRoomOptions = [];
+    let baseLevelOptions = [];
+    let baseSideOptions = [];
     let availableZones = [];
     let availableRooms = [];
-    const fallbackCounters = { zone: 0, room: 0 };
+    let availableLevels = [];
+    let availableSides = [];
+    const fallbackCounters = { zone: 0, room: 0, level: 0, side: 0 };
+    let groupCatalog = [];
+    let groupCatalogLoaded = false;
 
     function escapeHtml(value) {
       return String(value ?? '')
@@ -594,6 +600,10 @@
     function nextFallbackValue(prefix) {
       fallbackCounters[prefix] = (fallbackCounters[prefix] || 0) + 1;
       return `${prefix}-${fallbackCounters[prefix]}`;
+    }
+
+    function domSafeId(value) {
+      return String(value ?? '').replace(/[^a-zA-Z0-9_-]/g, '_');
     }
 
     const CONTROLLED_TYPE_OPTIONS = ['dehumidifier', 'fan', 'light', 'heater', 'misc'];
@@ -624,6 +634,25 @@
         }
       }
       return null;
+    }
+
+    function firstString(...values) {
+      for (const candidate of values) {
+        if (typeof candidate === 'string' && candidate.trim()) {
+          return candidate.trim();
+        }
+      }
+      return '';
+    }
+
+    function equalsIgnoreCase(a, b) {
+      if (a === undefined || a === null || b === undefined || b === null) return false;
+      return String(a).trim().toLowerCase() === String(b).trim().toLowerCase();
+    }
+
+    function matchesAny(value, candidates = []) {
+      if (!value && value !== 0) return false;
+      return candidates.some(candidate => equalsIgnoreCase(candidate, value));
     }
 
     function clampWeight(value, fallback = null) {
@@ -897,14 +926,30 @@
       const roomLabel = roomLabelCandidates.find(label => typeof label === 'string' && label.trim());
       const roomPlacement = buildPlacementEntry(roomOption, roomLabel);
 
-      const level = metaDetails.level || metaDetails.rackLevel || metaDetails.tier || metaDetails.shelf || metadata?.level || device?.placement?.level || null;
-      const side = metaDetails.side || metaDetails.orientation || metaDetails.aisle || metadata?.side || device?.placement?.side || null;
+      const level =
+        metaDetails.level ||
+        metaDetails.rackLevel ||
+        metaDetails.tier ||
+        metaDetails.shelf ||
+        metadata?.level ||
+        (typeof device?.placement?.level === 'object' ? device.placement.level.value || device.placement.level.name : device?.placement?.level) ||
+        null;
+      const side =
+        metaDetails.side ||
+        metaDetails.orientation ||
+        metaDetails.aisle ||
+        metadata?.side ||
+        (typeof device?.placement?.side === 'object' ? device.placement.side.value || device.placement.side.name : device?.placement?.side) ||
+        null;
+
+      const levelOption = level ? findLevelOption(level) : null;
+      const sideOption = side ? findSideOption(side) : null;
 
       return {
         zone: zonePlacement,
         room: roomPlacement,
-        level: level || null,
-        side: side || null
+        level: buildPlacementEntry(levelOption, level),
+        side: buildPlacementEntry(sideOption, side)
       };
     }
 
@@ -950,11 +995,21 @@
         device.name ||
         canonicalId;
 
+      const lastSeen = firstString(
+        reading.lastUpdate,
+        reading.timestamp,
+        reading.meta?.lastUpdate,
+        metadata?.lastSeen,
+        metaDetails.lastSeen,
+        device.identity?.lastSeen
+      );
+
       device.identity = {
         deviceId: canonicalId,
         name: displayName,
         battery: batteryLevel,
-        signal: signalLevel
+        signal: signalLevel,
+        lastSeen: lastSeen || null
       };
 
       device.placement = buildPlacement(device, metadata);
@@ -1050,6 +1105,81 @@
       });
     }
 
+    function getZoneKey(device) {
+      if (!device) return '__unassigned__';
+      const placement = device.placement || {};
+      return (
+        firstString(
+          placement.zone?.value,
+          placement.zone?.id,
+          placement.zone?.name,
+          device.zoneId,
+          device.zoneName
+        ) || '__unassigned__'
+      );
+    }
+
+    function getZoneSensors(device) {
+      const zoneKey = getZoneKey(device);
+      return devices.filter(candidate => candidate && candidate.role === 'sensor' && getZoneKey(candidate) === zoneKey);
+    }
+
+    function computeMedian(values) {
+      if (!Array.isArray(values) || values.length === 0) return 0;
+      const sorted = values.slice().sort((a, b) => a - b);
+      const mid = Math.floor(sorted.length / 2);
+      if (sorted.length % 2 === 0) {
+        return (sorted[mid - 1] + sorted[mid]) / 2;
+      }
+      return sorted[mid];
+    }
+
+    function computeZoneWeightStats(device) {
+      const sensors = getZoneSensors(device);
+      if (!sensors.length) {
+        return { median: 0, average: 0, total: 0, count: 0 };
+      }
+      const weights = sensors.map(sensor => {
+        const numeric = clampWeight(sensor.weight, null);
+        return numeric === null ? 0 : numeric;
+      });
+      const total = weights.reduce((sum, value) => sum + value, 0);
+      const average = weights.length ? total / weights.length : 0;
+      const median = computeMedian(weights);
+      return { median, average, total, count: weights.length };
+    }
+
+    function formatWeightPercent(value) {
+      const numeric = clampWeight(value, null);
+      if (numeric === null) return '--';
+      return `${Math.round(numeric * 100)}%`;
+    }
+
+    function renderSensorWeightPreview(device) {
+      if (!device) return '';
+      const stats = computeZoneWeightStats(device);
+      const defaultWeight = stats.count > 0 ? 1 / stats.count : 0;
+      const weight = clampWeight(device.weight, defaultWeight) ?? defaultWeight;
+      const weightPercent = formatWeightPercent(weight);
+      const medianPercent = formatWeightPercent(stats.median);
+      let deltaText = '';
+      if (stats.count > 0) {
+        const deltaPercent = Math.round((weight - stats.median) * 100);
+        if (deltaPercent > 0) {
+          deltaText = `(+${deltaPercent}%)`;
+        } else if (deltaPercent < 0) {
+          deltaText = `(${deltaPercent}%)`;
+        }
+      }
+      const zoneShare = stats.total > 0 ? `${formatNumber((weight / stats.total) * 100, 1)}% share` : '';
+      const parts = [
+        `${weightPercent} weight`,
+        `Median ${medianPercent}${deltaText ? ` ${deltaText}` : ''}`,
+        zoneShare
+      ].filter(Boolean);
+      return parts.join(' • ');
+    }
+
     function createOption(id, name, prefix) {
       const trimmedName = typeof name === 'string' ? name.trim() : '';
       const trimmedId = typeof id === 'string' ? id.trim() : '';
@@ -1091,6 +1221,56 @@
         const id = source.id || source.roomId || source.room_id || source.identifier || null;
         const name = source.name || source.label || source.title || source.roomName || source.location || id || `Room ${index + 1}`;
         return createOption(id, name, 'room');
+      }
+      return null;
+    }
+
+    function normalizeLevelOption(level, index = 0) {
+      if (!level) return null;
+      if (typeof level === 'string' || typeof level === 'number') {
+        return createOption(null, String(level), 'level');
+      }
+      if (typeof level === 'object') {
+        const source = level;
+        const rawValue = source.value || source.slug || source.code || null;
+        const id = source.id || source.levelId || source.level || rawValue || null;
+        const name =
+          source.name ||
+          source.label ||
+          source.levelName ||
+          source.level ||
+          id ||
+          `Level ${index + 1}`;
+        const option = createOption(id, name, 'level');
+        if (option && rawValue) {
+          option.value = String(rawValue).trim();
+        }
+        return option;
+      }
+      return null;
+    }
+
+    function normalizeSideOption(side, index = 0) {
+      if (!side) return null;
+      if (typeof side === 'string' || typeof side === 'number') {
+        return createOption(null, String(side), 'side');
+      }
+      if (typeof side === 'object') {
+        const source = side;
+        const rawValue = source.value || source.slug || source.code || null;
+        const id = source.id || source.sideId || source.side || rawValue || null;
+        const name =
+          source.name ||
+          source.label ||
+          source.sideName ||
+          source.side ||
+          id ||
+          `Side ${index + 1}`;
+        const option = createOption(id, name, 'side');
+        if (option && rawValue) {
+          option.value = String(rawValue).trim();
+        }
+        return option;
       }
       return null;
     }
@@ -1149,6 +1329,16 @@
       rebuildRoomOptions();
     }
 
+    function setBaseLevelOptions(options) {
+      baseLevelOptions = dedupeAndSortOptions(options || []);
+      rebuildLevelOptions();
+    }
+
+    function setBaseSideOptions(options) {
+      baseSideOptions = dedupeAndSortOptions(options || []);
+      rebuildSideOptions();
+    }
+
     function extractZoneOptionsFromMetadata(meta) {
       if (!meta || typeof meta !== 'object') return [];
       const details = meta.details || {};
@@ -1199,12 +1389,265 @@
       availableRooms = dedupeAndSortOptions(combined);
     }
 
+    function rebuildLevelOptions() {
+      const combined = [...baseLevelOptions];
+      devices.forEach(device => {
+        const level = device?.placement?.level;
+        if (level) {
+          const option = normalizeLevelOption(level);
+          if (option) combined.push(option);
+        }
+      });
+      deviceMetadataMap.forEach(meta => {
+        const details = meta?.details || {};
+        if (details.level || details.rackLevel || details.tier || details.shelf) {
+          combined.push(
+            ...[
+              details.level,
+              details.rackLevel,
+              details.tier,
+              details.shelf
+            ]
+              .filter(Boolean)
+              .map(value => normalizeLevelOption(value))
+              .filter(Boolean)
+          );
+        }
+      });
+      availableLevels = dedupeAndSortOptions(combined);
+    }
+
+    function rebuildSideOptions() {
+      const combined = [...baseSideOptions];
+      devices.forEach(device => {
+        const side = device?.placement?.side;
+        if (side) {
+          const option = normalizeSideOption(side);
+          if (option) combined.push(option);
+        }
+      });
+      deviceMetadataMap.forEach(meta => {
+        const details = meta?.details || {};
+        if (details.side || details.orientation || details.aisle) {
+          combined.push(
+            ...[
+              details.side,
+              details.orientation,
+              details.aisle
+            ]
+              .filter(Boolean)
+              .map(value => normalizeSideOption(value))
+              .filter(Boolean)
+          );
+        }
+      });
+      availableSides = dedupeAndSortOptions(combined);
+    }
+
     function findZoneOption(value) {
       return findOption(availableZones, value) || findOption(baseZoneOptions, value);
     }
 
     function findRoomOption(value) {
       return findOption(availableRooms, value) || findOption(baseRoomOptions, value);
+    }
+
+    function findLevelOption(value) {
+      return findOption(availableLevels, value) || findOption(baseLevelOptions, value);
+    }
+
+    function findSideOption(value) {
+      return findOption(availableSides, value) || findOption(baseSideOptions, value);
+    }
+
+    function normalizeGroupKind(value) {
+      if (!value && value !== 0) return null;
+      const normalized = String(value).trim().toLowerCase();
+      if (!normalized) return null;
+      if (normalized === 'light' || normalized === 'lighting' || normalized === 'lights') return 'light';
+      if (
+        normalized === 'equip' ||
+        normalized === 'equipment' ||
+        normalized === 'environment' ||
+        normalized === 'env' ||
+        normalized === 'climate'
+      ) {
+        return 'equip';
+      }
+      if (normalized.includes('light')) return 'light';
+      if (normalized.includes('equip') || normalized.includes('env') || normalized.includes('climate')) return 'equip';
+      return null;
+    }
+
+    function normalizeGroupEntry(entry, index = 0) {
+      if (!entry) return null;
+      if (typeof entry === 'string') {
+        return null;
+      }
+      if (typeof entry !== 'object') {
+        return null;
+      }
+      const source = entry;
+      const id = firstString(source.id, source.groupId, source.group_id, source.uuid, source.slug, source.value);
+      const value = firstString(source.value, id, `group-${index + 1}`);
+      const name = firstString(
+        source.name,
+        source.label,
+        source.title,
+        source.displayName,
+        source.groupName,
+        source.group,
+        value,
+        `Group ${index + 1}`
+      );
+      const kind = normalizeGroupKind(source.kind || source.type || source.groupType || source.category || source.domain);
+      if (!kind) return null;
+      const zoneId = firstString(source.zoneId, source.zoneSlug, source.zone_id, source.zone);
+      const zoneName = firstString(source.zoneName, source.zoneLabel, source.zoneTitle, source.zone);
+      const roomId = firstString(source.roomId, source.roomSlug, source.room_id, source.locationId, source.room);
+      const roomName = firstString(source.roomName, source.roomLabel, source.roomTitle, source.locationName, source.location);
+
+      return {
+        id: id || value,
+        value: value || id,
+        name,
+        kind,
+        zoneId,
+        zoneName,
+        roomId,
+        roomName,
+        raw: { ...source }
+      };
+    }
+
+    function ingestGroupCatalog(list = []) {
+      const map = new Map();
+      (list || []).forEach((entry, index) => {
+        const normalized = normalizeGroupEntry(entry, index);
+        if (!normalized) return;
+        const key = String(normalized.id || normalized.value).toLowerCase();
+        if (!map.has(key)) {
+          map.set(key, normalized);
+        }
+      });
+      groupCatalog = Array.from(map.values()).sort((a, b) => a.name.localeCompare(b.name));
+      groupCatalogLoaded = true;
+    }
+
+    function findGroupById(groupId) {
+      if (!groupId) return null;
+      const normalized = String(groupId).trim().toLowerCase();
+      if (!normalized) return null;
+      return (
+        groupCatalog.find(group =>
+          equalsIgnoreCase(group.id, normalized) || equalsIgnoreCase(group.value, normalized)
+        ) || null
+      );
+    }
+
+    async function fetchGroupCatalog() {
+      if (groupCatalogLoaded && groupCatalog.length > 0) {
+        return groupCatalog;
+      }
+
+      const collected = [];
+      const sources = ['/groups/catalog', '/groups', '/data/groups.json'];
+
+      for (const source of sources) {
+        try {
+          const response = await fetch(source);
+          if (!response.ok) continue;
+          const data = await response.json();
+          if (!data) continue;
+          if (Array.isArray(data)) {
+            collected.push(...data);
+          } else if (Array.isArray(data.groups)) {
+            collected.push(...data.groups);
+          } else {
+            const lightGroups = Array.isArray(data.lightGroups) ? data.lightGroups : [];
+            const equipGroups = Array.isArray(data.equipGroups) ? data.equipGroups : [];
+            const environmentGroups = Array.isArray(data.environmentGroups) ? data.environmentGroups : [];
+            collected.push(...lightGroups, ...equipGroups, ...environmentGroups);
+          }
+        } catch (error) {
+          console.warn(`Failed to load groups from ${source}:`, error);
+        }
+      }
+
+      if (collected.length > 0) {
+        ingestGroupCatalog(collected);
+      } else {
+        groupCatalogLoaded = true;
+      }
+
+      return groupCatalog;
+    }
+
+    function valuesForPlacementEntry(entry) {
+      if (!entry) return [];
+      if (typeof entry === 'string') {
+        return [entry];
+      }
+      if (typeof entry === 'object') {
+        return [entry.value, entry.id, entry.name].filter(Boolean);
+      }
+      return [];
+    }
+
+    function getDevicePlacementValues(device) {
+      const placement = device?.placement || {};
+      const zoneValues = [
+        device?.zoneId,
+        device?.zoneName,
+        ...(valuesForPlacementEntry(placement.zone) || []),
+        device?.lastReading?.zone,
+        device?.lastReading?.name
+      ]
+        .filter(Boolean)
+        .map(value => String(value));
+      const roomValues = [
+        device?.farmLocationId,
+        device?.farmLocation,
+        ...(valuesForPlacementEntry(placement.room) || []),
+        device?.lastReading?.location
+      ]
+        .filter(Boolean)
+        .map(value => String(value));
+      return { zoneValues, roomValues };
+    }
+
+    function filterGroupsForDevice(device, kind) {
+      if (!device || !kind) return [];
+      const normalizedKind = normalizeGroupKind(kind);
+      if (!normalizedKind) return [];
+      const { zoneValues, roomValues } = getDevicePlacementValues(device);
+
+      const matches = groupCatalog.filter(group => {
+        if (group.kind !== normalizedKind) return false;
+        const zoneMatch =
+          !group.zoneId ||
+          matchesAny(group.zoneId, zoneValues) ||
+          matchesAny(group.zoneName, zoneValues);
+        const roomMatch =
+          !group.roomId ||
+          matchesAny(group.roomId, roomValues) ||
+          matchesAny(group.roomName, roomValues);
+        return zoneMatch && roomMatch;
+      });
+
+      if (matches.length > 0) {
+        return matches;
+      }
+
+      return groupCatalog.filter(group => group.kind === normalizedKind);
+    }
+
+    function buildGroupOptionsForDevice(device, kind) {
+      return filterGroupsForDevice(device, kind).map(group => ({
+        id: group.id,
+        name: group.name,
+        value: group.value
+      }));
     }
 
     function getCanonicalDeviceId(source) {
@@ -1340,6 +1783,41 @@
       return fixed.replace(/\.0+$/, '').replace(/(\.\d*[1-9])0+$/, '$1');
     }
 
+    function formatRelativeTime(timestamp) {
+      if (!timestamp) return 'Never';
+      const date = new Date(timestamp);
+      if (Number.isNaN(date.getTime())) {
+        return String(timestamp);
+      }
+      const diffMs = Date.now() - date.getTime();
+      if (diffMs < 0) {
+        return date.toLocaleString();
+      }
+      const seconds = Math.floor(diffMs / 1000);
+      if (seconds < 60) {
+        return 'Just now';
+      }
+      const minutes = Math.floor(seconds / 60);
+      if (minutes < 60) {
+        return `${minutes} min${minutes === 1 ? '' : 's'} ago`;
+      }
+      const hours = Math.floor(minutes / 60);
+      if (hours < 24) {
+        return `${hours} hr${hours === 1 ? '' : 's'} ago`;
+      }
+      const days = Math.floor(hours / 24);
+      if (days <= 7) {
+        return `${days} day${days === 1 ? '' : 's'} ago`;
+      }
+      return date.toLocaleString();
+    }
+
+    function formatSignalLabel(signal) {
+      const numeric = toNumeric(signal);
+      if (numeric === null) return '--';
+      return `${numeric} dBm`;
+    }
+
     function getPowerState(reading = {}) {
       if (!reading || typeof reading !== 'object') return null;
       const candidates = [
@@ -1449,10 +1927,75 @@
           device.managedEquipment ??
           '';
         device.managedEquipment = managed || '';
+        const assignedGroups = metadata.assignedGroups || metadata.groups || {};
+        const lightGroupId = firstString(
+          assignedGroups.lightGroupId,
+          assignedGroups.lightGroup,
+          assignedGroups.light,
+          metadata.lightGroupId,
+          metadata.lightGroup,
+          metadata.lightingGroupId,
+          metadata.lightingGroup,
+          metadataDetails.lightGroupId,
+          metadataDetails.lightGroup,
+          metadataDetails.lightingGroupId,
+          metadataDetails.lightingGroup,
+          device.groupAssignments?.light
+        );
+        const equipGroupId = firstString(
+          assignedGroups.equipGroupId,
+          assignedGroups.equipmentGroupId,
+          assignedGroups.environmentGroupId,
+          assignedGroups.envGroupId,
+          assignedGroups.equip,
+          metadata.equipGroupId,
+          metadata.equipmentGroupId,
+          metadata.environmentGroupId,
+          metadata.envGroupId,
+          metadataDetails.equipGroupId,
+          metadataDetails.equipmentGroupId,
+          metadataDetails.environmentGroupId,
+          metadataDetails.envGroupId,
+          device.groupAssignments?.equip
+        );
+        const lightGroupName = firstString(
+          assignedGroups.lightGroupName,
+          assignedGroups.lightingGroupName,
+          metadata.lightGroupName,
+          metadata.lightingGroupName,
+          metadataDetails.lightGroupName,
+          metadataDetails.lightingGroupName
+        );
+        const equipGroupName = firstString(
+          assignedGroups.equipGroupName,
+          assignedGroups.equipmentGroupName,
+          assignedGroups.environmentGroupName,
+          assignedGroups.envGroupName,
+          metadata.equipGroupName,
+          metadata.equipmentGroupName,
+          metadata.environmentGroupName,
+          metadata.envGroupName,
+          metadataDetails.equipGroupName,
+          metadataDetails.equipmentGroupName,
+          metadataDetails.environmentGroupName,
+          metadataDetails.envGroupName
+        );
+        const lightGroup = lightGroupId ? findGroupById(lightGroupId) : null;
+        const equipGroup = equipGroupId ? findGroupById(equipGroupId) : null;
+        device.groupAssignments = {
+          light: lightGroupId || '',
+          equip: equipGroupId || ''
+        };
+        device.groupAssignmentLabels = {
+          light: firstString(lightGroupName, lightGroup?.name),
+          equip: firstString(equipGroupName, equipGroup?.name)
+        };
       } else {
         if (!device.displayName) {
           device.displayName = device.deviceName || device.device_id || device.deviceId;
         }
+        device.groupAssignments = device.groupAssignments || { light: '', equip: '' };
+        device.groupAssignmentLabels = device.groupAssignmentLabels || { light: '', equip: '' };
       }
       syncDeviceCardSchema(device, metadata);
       if (!options.skipRecalculate) {
@@ -1465,6 +2008,8 @@
         applyMetadataToDevice(device, undefined, { skipRecalculate: true });
       });
       recalculateSensorWeights();
+      rebuildLevelOptions();
+      rebuildSideOptions();
     }
 
     function renderSelectOptions(options, selectedValue, selectedLabel, placeholder) {
@@ -1601,10 +2146,10 @@
       }
     }
 
-    function collectFarmLayoutEntities(payload, rooms = [], zones = []) {
+    function collectFarmLayoutEntities(payload, rooms = [], zones = [], levels = [], sides = []) {
       if (!payload) return;
       if (Array.isArray(payload)) {
-        payload.forEach(item => collectFarmLayoutEntities(item, rooms, zones));
+        payload.forEach(item => collectFarmLayoutEntities(item, rooms, zones, levels, sides));
         return;
       }
       if (typeof payload !== 'object') {
@@ -1629,8 +2174,23 @@
             const zoneOption = normalizeZoneOption(zone, zones.length);
             if (zoneOption) zones.push(zoneOption);
           });
+          const levelCandidates = [
+            room.level,
+            room.rackLevel,
+            room.tier,
+            room.shelf
+          ].filter(Boolean);
+          levelCandidates.forEach(level => {
+            const option = normalizeLevelOption(level, levels.length);
+            if (option) levels.push(option);
+          });
+          const sideCandidates = [room.side, room.orientation, room.aisle].filter(Boolean);
+          sideCandidates.forEach(side => {
+            const option = normalizeSideOption(side, sides.length);
+            if (option) sides.push(option);
+          });
           if (Array.isArray(room.children)) {
-            room.children.forEach(child => collectFarmLayoutEntities(child, rooms, zones));
+            room.children.forEach(child => collectFarmLayoutEntities(child, rooms, zones, levels, sides));
           }
         }
       });
@@ -1647,16 +2207,30 @@
         if (zoneOption) {
           zones.push(zoneOption);
         }
+        if (zone && typeof zone === 'object') {
+          const levelCandidates = [zone.level, zone.tier, zone.shelf].filter(Boolean);
+          levelCandidates.forEach(level => {
+            const option = normalizeLevelOption(level, levels.length);
+            if (option) levels.push(option);
+          });
+          const sideCandidates = [zone.side, zone.orientation, zone.aisle].filter(Boolean);
+          sideCandidates.forEach(side => {
+            const option = normalizeSideOption(side, sides.length);
+            if (option) sides.push(option);
+          });
+        }
       });
 
       const nestedLayouts = [payload.layout, payload.farm, payload.greenhouse, payload.facility]
         .filter(section => section && typeof section === 'object');
-      nestedLayouts.forEach(section => collectFarmLayoutEntities(section, rooms, zones));
+      nestedLayouts.forEach(section => collectFarmLayoutEntities(section, rooms, zones, levels, sides));
     }
 
     async function fetchFarmLayout() {
       const rooms = [];
       const zones = [];
+      const levels = [];
+      const sides = [];
       const sources = ['/farm', '/data/farm.json', '/data/rooms.json'];
 
       for (const source of sources) {
@@ -1670,11 +2244,17 @@
             rawRooms.forEach(room => {
               const option = normalizeRoomOption(room, rooms.length);
               if (option) rooms.push(option);
+              if (room && typeof room === 'object') {
+                const levelOption = normalizeLevelOption(room.level || room.tier || room.shelf, levels.length);
+                if (levelOption) levels.push(levelOption);
+                const sideOption = normalizeSideOption(room.side || room.orientation || room.aisle, sides.length);
+                if (sideOption) sides.push(sideOption);
+              }
             });
           } else if (Array.isArray(data)) {
-            data.forEach(entry => collectFarmLayoutEntities(entry, rooms, zones));
+            data.forEach(entry => collectFarmLayoutEntities(entry, rooms, zones, levels, sides));
           } else {
-            collectFarmLayoutEntities(data, rooms, zones);
+            collectFarmLayoutEntities(data, rooms, zones, levels, sides);
           }
         } catch (error) {
           console.warn(`Failed to load farm layout from ${source}:`, error);
@@ -1687,8 +2267,14 @@
       if (zones.length > 0) {
         setBaseZoneOptions(zones, { lock: true });
       }
+      if (levels.length > 0) {
+        setBaseLevelOptions(levels);
+      }
+      if (sides.length > 0) {
+        setBaseSideOptions(sides);
+      }
 
-      return { rooms, zones };
+      return { rooms, zones, levels, sides };
     }
 
     async function fetchDeviceMetadata() {
@@ -1742,6 +2328,10 @@
         fetchFarmLayout().catch(error => {
           console.warn('Farm layout unavailable:', error);
           return { rooms: [], zones: [] };
+        }),
+        fetchGroupCatalog().catch(error => {
+          console.warn('Group catalog unavailable:', error);
+          return [];
         }),
         (async () => {
           try {
@@ -1833,6 +2423,8 @@
         const normalized = storeDeviceMetadata(saved);
         rebuildZoneOptions();
         rebuildRoomOptions();
+        rebuildLevelOptions();
+        rebuildSideOptions();
         return normalized || saved;
       }
 
@@ -2397,37 +2989,115 @@
       const sourceBadge = device.isRealDevice
         ? '<span class="status-badge tone-positive">Real Farm Device</span>'
         : '<span class="status-badge tone-neutral">Live Demo API</span>';
+      const placement = device.placement || {};
+      const levelSelection = {
+        value: firstString(placement.level?.value, placement.level?.id),
+        label: placement.level?.name || ''
+      };
+      const sideSelection = {
+        value: firstString(placement.side?.value, placement.side?.id),
+        label: placement.side?.name || ''
+      };
+      const levelOptionsHtml = renderSelectOptions(availableLevels, levelSelection.value, levelSelection.label, 'Select Level');
+      const sideOptionsHtml = renderSelectOptions(availableSides, sideSelection.value, sideSelection.label, 'Select Side');
+      const isSensor = device.role === 'sensor';
+      const safeDomId = domSafeId(device.deviceId || device.device_id || device.deviceId);
+      const sensorStats = isSensor ? computeZoneWeightStats(device) : null;
+      const defaultSensorWeight = sensorStats ? (sensorStats.count > 0 ? 1 / sensorStats.count : 0) : 0;
+      const sensorWeightValue = isSensor ? clampWeight(device.weight, defaultSensorWeight) ?? defaultSensorWeight : 0;
+      if (isSensor && device.weight !== sensorWeightValue) {
+        device.weight = sensorWeightValue;
+      }
+      const sensorWeightPreview = isSensor ? renderSensorWeightPreview(device) : '';
+      const sensorWeightPreviewId = `sensorWeightPreview-${safeDomId}`;
+      const sensorPrimary = Boolean(device.primary);
+      const controlledOptions = CONTROLLED_TYPE_OPTIONS.map(option => ({
+        id: option,
+        value: option,
+        name: option.charAt(0).toUpperCase() + option.slice(1)
+      }));
+      const controlledType = device.controlledType || '';
+      const controlledLabel = controlledOptions.find(option => option.value === controlledType)?.name || controlledType;
+      const controlledOptionsHtml = renderSelectOptions(controlledOptions, controlledType, controlledLabel, 'Controlled type');
+      const energyOptions = ENERGY_TELEMETRY_OPTIONS.map(option => ({
+        id: option,
+        value: option,
+        name:
+          option === 'plug_builtin'
+            ? 'Plug built-in'
+            : option === 'branch_meter'
+            ? 'Branch meter'
+            : 'No telemetry'
+      }));
+      const energyTelemetry = device.energyTelemetry || 'none';
+      const energyTelemetryLabel = energyOptions.find(option => option.value === energyTelemetry)?.name || energyTelemetry;
+      const energyOptionsHtml = renderSelectOptions(energyOptions, energyTelemetry, energyTelemetryLabel, 'Energy source');
+      const signalLevel = coalesceNumeric(
+        currentReading?.rssi,
+        currentReading?.signal,
+        currentReading?.version?.rssi,
+        device.identity?.signal
+      );
+      const signalLabel = formatSignalLabel(signalLevel);
+      let signalTone = 'neutral';
+      if (signalLevel !== null) {
+        if (signalLevel >= -67) {
+          signalTone = 'positive';
+        } else if (signalLevel >= -80) {
+          signalTone = 'warning';
+        } else {
+          signalTone = 'critical';
+        }
+      }
+      const lastSeenIso = firstString(device.identity?.lastSeen, currentReading?.lastUpdate, currentReading?.timestamp);
+      const lastSeenRelative = formatRelativeTime(lastSeenIso);
+      const lastSeenExact = lastSeenIso ? new Date(lastSeenIso).toLocaleString() : 'Never';
+      const lightGroupValue = device.groupAssignments?.light || '';
+      const lightGroupLabel = device.groupAssignmentLabels?.light || '';
+      const equipGroupValue = device.groupAssignments?.equip || '';
+      const equipGroupLabel = device.groupAssignmentLabels?.equip || '';
+      const lightGroupOptions = buildGroupOptionsForDevice(device, 'light');
+      const equipGroupOptions = buildGroupOptionsForDevice(device, 'equip');
+      const lightGroupOptionsHtml = renderSelectOptions(lightGroupOptions, lightGroupValue, lightGroupLabel, 'Select Light Group');
+      const equipGroupOptionsHtml = renderSelectOptions(equipGroupOptions, equipGroupValue, equipGroupLabel, 'Select Equip Group');
 
       return `
         <div class="device-card" style="border-left: 4px solid ${statusColor}; opacity: ${isOnline ? 1 : 0.7};">
-          <div class="device-header">
-            <div style="display: flex; align-items: flex-start; gap: 12px; flex: 1; min-width: 0;">
-              ${deviceAvatar}
-              <div style="flex: 1; min-width: 0; overflow: hidden;">
-                <h4 style="margin: 0 0 8px 0; color: #1e293b; font-size: 16px; font-weight: 600; cursor: pointer; line-height: 1.2; word-break: break-word;"
-                    onclick="editDeviceName('${safeDeviceIdAttr}')"
-                    title="Click to edit device name">
-                  ${displayName}
-                </h4>
-                <div style="display: flex; flex-direction: column; gap: 4px;">
+          <div class="device-header" style="display: flex; flex-direction: column; gap: 8px;">
+            <div style="display: flex; justify-content: space-between; gap: 16px; align-items: flex-start;">
+              <div style="display: flex; align-items: flex-start; gap: 12px; flex: 1; min-width: 0;">
+                ${deviceAvatar}
+                <div style="flex: 1; min-width: 0; overflow: hidden;">
                   <div style="display: flex; align-items: center; gap: 8px; flex-wrap: wrap;">
+                    <div class="device-status ${isOnline ? 'status-online' : 'status-offline'}"></div>
+                    <h4 style="margin: 0; color: #1e293b; font-size: 16px; font-weight: 600; cursor: pointer; line-height: 1.2; word-break: break-word;"
+                        onclick="editDeviceName('${safeDeviceIdAttr}')"
+                        title="Click to edit device name">
+                      ${displayName}
+                    </h4>
+                  </div>
+                  <div style="display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin-top: 4px; color: #64748b; font-size: 11px; line-height: 1.3;">
                     ${statusBadge}
                     ${powerBadge}
-                  </div>
-                  <div style="color: #64748b; font-size: 11px; line-height: 1.3; word-break: break-word;">
-                    ${escapeHtml(deviceCategory)}
+                    <span>${escapeHtml(deviceCategory)}</span>
+                    <span>${safeConnectivity}</span>
                   </div>
                 </div>
               </div>
-            </div>
-            <div style="display: flex; flex-direction: column; align-items: flex-end; gap: 4px; min-width: 100px;">
-              ${batteryMarkup}
-              <div class="tiny" style="color: #64748b;">${safeConnectivity}</div>
-              <button onclick="refreshDeviceData('${safeDeviceIdAttr}')"
-                      class="control-button secondary"
-                      style="padding: 6px 12px; font-size: 12px;">
-                Refresh
-              </button>
+              <div style="display: flex; flex-direction: column; align-items: flex-end; gap: 6px; min-width: 180px;">
+                <div style="display: flex; gap: 6px; flex-wrap: wrap; justify-content: flex-end;">
+                  ${batteryMarkup}
+                  <span class="status-badge tone-${signalTone}" title="Signal strength">${escapeHtml(signalLabel)}</span>
+                </div>
+                <div class="tiny" style="color: #64748b;" title="${escapeAttribute(lastSeenExact)}">
+                  Last seen: ${escapeHtml(lastSeenRelative)}
+                </div>
+                <button onclick="refreshDeviceData('${safeDeviceIdAttr}')"
+                        class="control-button secondary"
+                        style="padding: 6px 12px; font-size: 12px;">
+                  Refresh
+                </button>
+              </div>
             </div>
           </div>
 
@@ -2438,33 +3108,99 @@
           </div>
 
           <div class="device-info">
+            <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); gap: 12px; margin-bottom: 12px;">
+              <label class="tiny" style="color: #64748b; display: block;">
+                <span style="display: block; margin-bottom: 4px;">Zone Assignment</span>
+                <select onchange="updateDeviceZone('${safeDeviceIdAttr}', this.value)"
+                        style="width: 100%; padding: 4px 8px; border: 1px solid #d1d5db; border-radius: 4px; font-size: 12px;">
+                  ${zoneOptionsHtml}
+                </select>
+              </label>
+              <label class="tiny" style="color: #64748b; display: block;">
+                <span style="display: block; margin-bottom: 4px;">Room / Location</span>
+                <select onchange="updateDeviceLocation('${safeDeviceIdAttr}', this.value)"
+                        style="width: 100%; padding: 4px 8px; border: 1px solid #d1d5db; border-radius: 4px; font-size: 12px;">
+                  ${roomOptionsHtml}
+                </select>
+              </label>
+              <label class="tiny" style="color: #64748b; display: block;">
+                <span style="display: block; margin-bottom: 4px;">Level</span>
+                <select onchange="updateDeviceLevel('${safeDeviceIdAttr}', this.value)"
+                        style="width: 100%; padding: 4px 8px; border: 1px solid #d1d5db; border-radius: 4px; font-size: 12px;">
+                  ${levelOptionsHtml}
+                </select>
+              </label>
+              <label class="tiny" style="color: #64748b; display: block;">
+                <span style="display: block; margin-bottom: 4px;">Side</span>
+                <select onchange="updateDeviceSide('${safeDeviceIdAttr}', this.value)"
+                        style="width: 100%; padding: 4px 8px; border: 1px solid #d1d5db; border-radius: 4px; font-size: 12px;">
+                  ${sideOptionsHtml}
+                </select>
+              </label>
+            </div>
+
+            ${!isSensor ? '' : `
+            <div style="display: flex; flex-wrap: wrap; gap: 16px; margin-bottom: 12px; align-items: flex-end;">
+              <label class="tiny" style="color: #64748b; display: flex; align-items: center; gap: 8px;">
+                <input type="checkbox" ${sensorPrimary ? 'checked' : ''}
+                       onchange="updateSensorPrimary('${safeDeviceIdAttr}', this.checked)" />
+                Primary sensor
+              </label>
+              <div style="flex: 1; min-width: 200px;">
+                <label class="tiny" style="color: #64748b; display: block; margin-bottom: 4px;">Weight</label>
+                <input type="range" min="0" max="1" step="0.05" value="${sensorWeightValue.toFixed(2)}"
+                       oninput="handleSensorWeightInput('${safeDeviceIdAttr}', this.value)"
+                       onchange="commitSensorWeight('${safeDeviceIdAttr}', this.value)"
+                       style="width: 100%;" />
+                <div class="tiny" id="${sensorWeightPreviewId}" style="color: #0f172a; margin-top: 4px;">
+                  ${escapeHtml(sensorWeightPreview)}
+                </div>
+              </div>
+            </div>
+            `}
+
+            ${!isPlug ? '' : `
+            <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); gap: 12px; margin-bottom: 12px;">
+              <label class="tiny" style="color: #64748b; display: block;">
+                <span style="display: block; margin-bottom: 4px;">Controlled Type</span>
+                <select onchange="updateControlledType('${safeDeviceIdAttr}', this.value)"
+                        style="width: 100%; padding: 4px 8px; border: 1px solid #d1d5db; border-radius: 4px; font-size: 12px;">
+                  ${controlledOptionsHtml}
+                </select>
+              </label>
+              <label class="tiny" style="color: #64748b; display: block;">
+                <span style="display: block; margin-bottom: 4px;">Energy Source</span>
+                <select onchange="updateEnergyTelemetry('${safeDeviceIdAttr}', this.value)"
+                        style="width: 100%; padding: 4px 8px; border: 1px solid #d1d5db; border-radius: 4px; font-size: 12px;">
+                  ${energyOptionsHtml}
+                </select>
+              </label>
+            </div>
             <div style="margin-bottom: 12px;">
-              <div style="display: flex; gap: 12px; margin-bottom: 8px;">
-                <div style="flex: 1; min-width: 0;">
-                  <label class="tiny" style="color: #64748b; display: block; margin-bottom: 4px;">Zone Assignment:</label>
-                  <select onchange="updateDeviceZone('${safeDeviceIdAttr}', this.value)"
-                          style="width: 100%; padding: 4px 8px; border: 1px solid #d1d5db; border-radius: 4px; font-size: 12px;">
-                    ${zoneOptionsHtml}
-                  </select>
-                </div>
-                <div style="flex: 1; min-width: 0;">
-                  <label class="tiny" style="color: #64748b; display: block; margin-bottom: 4px;">Farm Location:</label>
-                  <select onchange="updateDeviceLocation('${safeDeviceIdAttr}', this.value)"
-                          style="width: 100%; padding: 4px 8px; border: 1px solid #d1d5db; border-radius: 4px; font-size: 12px;">
-                    ${roomOptionsHtml}
-                  </select>
-                </div>
-              </div>
-              ${!isPlug ? '' : `
-              <div style="margin-bottom: 8px;">
-                <label class="tiny" style="color: #64748b; display: block; margin-bottom: 4px;">Managed Equipment:</label>
-                <input type="text"
-                       value="${safeManagedEquipmentValue}"
-                       onchange="updateManagedEquipment('${safeDeviceIdAttr}', this.value)"
-                       placeholder="e.g., Heater, Fan, Lights"
-                       style="width: 100%; padding: 4px 8px; border: 1px solid #d1d5db; border-radius: 4px; font-size: 12px;">
-              </div>
-              `}
+              <label class="tiny" style="color: #64748b; display: block; margin-bottom: 4px;">Managed Equipment</label>
+              <input type="text"
+                     value="${safeManagedEquipmentValue}"
+                     onchange="updateManagedEquipment('${safeDeviceIdAttr}', this.value)"
+                     placeholder="e.g., Heater, Fan, Lights"
+                     style="width: 100%; padding: 4px 8px; border: 1px solid #d1d5db; border-radius: 4px; font-size: 12px;">
+            </div>
+            `}
+
+            <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); gap: 12px; margin-bottom: 12px;">
+              <label class="tiny" style="color: #64748b; display: block;">
+                <span style="display: block; margin-bottom: 4px;">Light Group</span>
+                <select onchange="updateDeviceGroupAssignment('${safeDeviceIdAttr}', this.value, 'light')"
+                        style="width: 100%; padding: 4px 8px; border: 1px solid #d1d5db; border-radius: 4px; font-size: 12px;">
+                  ${lightGroupOptionsHtml}
+                </select>
+              </label>
+              <label class="tiny" style="color: #64748b; display: block;">
+                <span style="display: block; margin-bottom: 4px;">Equip Group</span>
+                <select onchange="updateDeviceGroupAssignment('${safeDeviceIdAttr}', this.value, 'equip')"
+                        style="width: 100%; padding: 4px 8px; border: 1px solid #d1d5db; border-radius: 4px; font-size: 12px;">
+                  ${equipGroupOptionsHtml}
+                </select>
+              </label>
             </div>
 
             <div class="device-meta" style="background: #f8fafc; border-radius: 6px; padding: 10px; margin-bottom: 12px;">
@@ -2982,6 +3718,238 @@
       } catch (error) {
         console.error('Failed to update managed equipment:', error);
         showError(`Failed to update managed equipment: ${escapeHtml(error.message || 'Unknown error')}`);
+        applyMetadataToDevice(device);
+        renderDevicesFromAPI();
+      }
+    }
+
+    async function updateDeviceLevel(deviceId, levelValue) {
+      const device = devices.find(d => d.deviceId === deviceId);
+      if (!device) return;
+      const option = findLevelOption(levelValue);
+      const levelName = option ? option.name : firstString(levelValue);
+
+      try {
+        const metadata = await persistDeviceMetadata(device, {
+          level: levelName || null,
+          levelId: option ? option.id || option.value : null
+        });
+        if (metadata) {
+          applyMetadataToDevice(device, metadata);
+        } else {
+          device.placement = device.placement || {};
+          device.placement.level = buildPlacementEntry(option, levelName);
+          syncDeviceCardSchema(device);
+        }
+        renderDevicesFromAPI();
+        const safeDeviceName = escapeHtml(device.displayName || device.deviceName || deviceId);
+        if (levelName) {
+          showInfo(`Updated level for ${safeDeviceName} to ${escapeHtml(levelName)}.`);
+        } else {
+          showInfo(`Cleared level for ${safeDeviceName}.`);
+        }
+      } catch (error) {
+        console.error('Failed to update device level:', error);
+        showError(`Failed to update level: ${escapeHtml(error.message || 'Unknown error')}`);
+        applyMetadataToDevice(device);
+        renderDevicesFromAPI();
+      }
+    }
+
+    async function updateDeviceSide(deviceId, sideValue) {
+      const device = devices.find(d => d.deviceId === deviceId);
+      if (!device) return;
+      const option = findSideOption(sideValue);
+      const sideName = option ? option.name : firstString(sideValue);
+
+      try {
+        const metadata = await persistDeviceMetadata(device, {
+          side: sideName || null,
+          sideId: option ? option.id || option.value : null
+        });
+        if (metadata) {
+          applyMetadataToDevice(device, metadata);
+        } else {
+          device.placement = device.placement || {};
+          device.placement.side = buildPlacementEntry(option, sideName);
+          syncDeviceCardSchema(device);
+        }
+        renderDevicesFromAPI();
+        const safeDeviceName = escapeHtml(device.displayName || device.deviceName || deviceId);
+        if (sideName) {
+          showInfo(`Updated side for ${safeDeviceName} to ${escapeHtml(sideName)}.`);
+        } else {
+          showInfo(`Cleared side for ${safeDeviceName}.`);
+        }
+      } catch (error) {
+        console.error('Failed to update device side:', error);
+        showError(`Failed to update side: ${escapeHtml(error.message || 'Unknown error')}`);
+        applyMetadataToDevice(device);
+        renderDevicesFromAPI();
+      }
+    }
+
+    async function updateSensorPrimary(deviceId, isPrimary) {
+      const device = devices.find(d => d.deviceId === deviceId);
+      if (!device) return;
+
+      const desired = Boolean(isPrimary);
+      const safeDeviceName = escapeHtml(device.displayName || device.deviceName || deviceId);
+
+      try {
+        const metadata = await persistDeviceMetadata(device, { primary: desired });
+        if (metadata) {
+          applyMetadataToDevice(device, metadata);
+        } else {
+          device.primary = desired;
+        }
+        recalculateSensorWeights();
+        renderDevicesFromAPI();
+        showInfo(
+          desired
+            ? `${safeDeviceName} set as primary sensor.`
+            : `${safeDeviceName} marked as secondary.`
+        );
+      } catch (error) {
+        console.error('Failed to update primary sensor flag:', error);
+        showError(`Failed to update primary flag: ${escapeHtml(error.message || 'Unknown error')}`);
+        applyMetadataToDevice(device);
+        renderDevicesFromAPI();
+      }
+    }
+
+    function handleSensorWeightInput(deviceId, rawValue) {
+      const device = devices.find(d => d.deviceId === deviceId);
+      if (!device) return;
+      const numeric = clampWeight(rawValue, device.weight ?? 0);
+      if (numeric !== null) {
+        device.weight = numeric;
+      }
+      const previewElement = document.getElementById(`sensorWeightPreview-${domSafeId(deviceId)}`);
+      if (previewElement) {
+        previewElement.textContent = renderSensorWeightPreview(device);
+      }
+    }
+
+    async function commitSensorWeight(deviceId, rawValue) {
+      const device = devices.find(d => d.deviceId === deviceId);
+      if (!device) return;
+      const numeric = clampWeight(rawValue, device.weight ?? 0);
+      if (numeric === null) return;
+
+      const rounded = Number(numeric.toFixed(3));
+      device.weight = rounded;
+      const previewElement = document.getElementById(`sensorWeightPreview-${domSafeId(deviceId)}`);
+      if (previewElement) {
+        previewElement.textContent = renderSensorWeightPreview(device);
+      }
+
+      try {
+        const metadata = await persistDeviceMetadata(device, { weight: rounded });
+        if (metadata) {
+          applyMetadataToDevice(device, metadata);
+        }
+        recalculateSensorWeights();
+        renderDevicesFromAPI();
+        const safeDeviceName = escapeHtml(device.displayName || device.deviceName || deviceId);
+        showInfo(`Updated weight for ${safeDeviceName} to ${formatWeightPercent(rounded)}.`);
+      } catch (error) {
+        console.error('Failed to update sensor weight:', error);
+        showError(`Failed to update sensor weight: ${escapeHtml(error.message || 'Unknown error')}`);
+        applyMetadataToDevice(device);
+        renderDevicesFromAPI();
+      }
+    }
+
+    async function updateControlledType(deviceId, controlledType) {
+      const device = devices.find(d => d.deviceId === deviceId);
+      if (!device) return;
+      const normalized = normalizeControlledType(controlledType) || '';
+
+      try {
+        const metadata = await persistDeviceMetadata(device, {
+          controlledType: normalized || null
+        });
+        if (metadata) {
+          applyMetadataToDevice(device, metadata);
+        } else {
+          device.controlledType = normalized;
+          syncDeviceCardSchema(device);
+        }
+        renderDevicesFromAPI();
+        const safeName = escapeHtml(device.displayName || device.deviceName || deviceId);
+        if (normalized) {
+          showInfo(`Controlled type for ${safeName} set to ${escapeHtml(normalized)}.`);
+        } else {
+          showInfo(`Cleared controlled type for ${safeName}.`);
+        }
+      } catch (error) {
+        console.error('Failed to update controlled type:', error);
+        showError(`Failed to update controlled type: ${escapeHtml(error.message || 'Unknown error')}`);
+        applyMetadataToDevice(device);
+        renderDevicesFromAPI();
+      }
+    }
+
+    async function updateEnergyTelemetry(deviceId, telemetry) {
+      const device = devices.find(d => d.deviceId === deviceId);
+      if (!device) return;
+      const normalized = normalizeEnergyTelemetry(telemetry) || 'none';
+
+      try {
+        const metadata = await persistDeviceMetadata(device, {
+          energyTelemetry: normalized
+        });
+        if (metadata) {
+          applyMetadataToDevice(device, metadata);
+        } else {
+          device.energyTelemetry = normalized;
+          syncDeviceCardSchema(device);
+        }
+        renderDevicesFromAPI();
+        const safeName = escapeHtml(device.displayName || device.deviceName || deviceId);
+        showInfo(`Energy telemetry for ${safeName} set to ${escapeHtml(normalized)}.`);
+      } catch (error) {
+        console.error('Failed to update energy telemetry:', error);
+        showError(`Failed to update energy telemetry: ${escapeHtml(error.message || 'Unknown error')}`);
+        applyMetadataToDevice(device);
+        renderDevicesFromAPI();
+      }
+    }
+
+    async function updateDeviceGroupAssignment(deviceId, groupValue, kind) {
+      const device = devices.find(d => d.deviceId === deviceId);
+      if (!device) return;
+      const normalizedKind = normalizeGroupKind(kind);
+      if (!normalizedKind) return;
+      const trimmedValue = firstString(groupValue);
+      const option = trimmedValue ? findGroupById(trimmedValue) : null;
+      const payload = {};
+      const assignmentKey = normalizedKind === 'light' ? 'light' : 'equip';
+      const metadataKey = normalizedKind === 'light' ? 'lightGroupId' : 'equipGroupId';
+      payload[metadataKey] = option ? option.id : trimmedValue || null;
+
+      try {
+        const metadata = await persistDeviceMetadata(device, payload);
+        if (metadata) {
+          applyMetadataToDevice(device, metadata);
+        } else {
+          device.groupAssignments = device.groupAssignments || { light: '', equip: '' };
+          device.groupAssignmentLabels = device.groupAssignmentLabels || { light: '', equip: '' };
+          device.groupAssignments[assignmentKey] = trimmedValue || '';
+          device.groupAssignmentLabels[assignmentKey] = option ? option.name : '';
+          syncDeviceCardSchema(device);
+        }
+        renderDevicesFromAPI();
+        const safeName = escapeHtml(device.displayName || device.deviceName || deviceId);
+        if (trimmedValue) {
+          showInfo(`Attached ${safeName} to ${escapeHtml(option?.name || trimmedValue)} ${normalizedKind} group.`);
+        } else {
+          showInfo(`Cleared ${normalizedKind} group for ${safeName}.`);
+        }
+      } catch (error) {
+        console.error('Failed to update group assignment:', error);
+        showError(`Failed to update group assignment: ${escapeHtml(error.message || 'Unknown error')}`);
         applyMetadataToDevice(device);
         renderDevicesFromAPI();
       }

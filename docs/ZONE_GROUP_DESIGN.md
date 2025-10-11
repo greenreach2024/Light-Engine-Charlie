@@ -35,3 +35,14 @@ We will adopt a robust, scalable separation of concerns by introducing two disti
 - Telemetry should capture group references to aid debugging.
 - UI navigation should emphasize the linkage between the zone and its associated groups while enforcing device type membership rules.
 
+## UI Behavior
+- **SwitchBot Manager cards**
+  - The header row surfaces the device name alongside battery state, RSSI, and a relative "last seen" timestamp so operators can audit health at a glance.
+  - Placement controls expose Room, Zone, Level, and Side selectors that are pre-populated from Farm Setup; selections write back to device metadata.
+  - Sensors surface a primary toggle plus a weight slider with a live preview of the zone median contribution to make balancing easy.
+  - Plugs offer controlled-type and energy-source pickers and retain managed-equipment notes while inheriting the same placement guardrails.
+  - Group attachments render LightGroup and EquipGroup dropdowns filtered by the card's room/zone context so devices can only join compatible groups.
+- **Group setup surface (Option B)**
+  - The UI renders separate LightGroup and EquipGroup cards under a shared zone summary so operators always understand the current binding.
+  - Each card filters its membership list by device kind and persists changes independently, keeping `/sched` and `/env` updates isolated.
+
