@@ -6,3 +6,4 @@ requests
 pyyaml
 bleak  # Bluetooth Low Energy support
 zeroconf  # mDNS/Bonjour discovery
+openpyxl
