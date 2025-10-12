@@ -236,7 +236,6 @@ body {
   background: var(--background);
   color: var(--dark);
   line-height: 1.5;
-  counter-reset: card-counter device-card-counter;
 }
 
 /* Global Typography */
@@ -1728,19 +1727,11 @@ h3 { font-size: 1.125rem; }
 }
 
 :is(.card, [class$="-card"], [class*="-card "], [class*=" card-"], [class^="card-"]):not([class*="card__"]):not(.device-card)::before {
-  counter-increment: card-counter;
-  content: counter(card-counter);
-}
-
-.device-grid,
-.device-manager__grid,
-.device-manager__results {
-  counter-reset: device-card-counter;
+  content: attr(data-card-id);
 }
 
 .device-card::before {
-  counter-increment: device-card-counter;
-  content: counter(device-card-counter);
+  content: attr(data-card-id);
 }
 
 :where(.dashboard-header, .dashboard-main) .card {
