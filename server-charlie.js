@@ -52,15 +52,6 @@ function checkCorsConfigOrExit() {
   }
 }
 
-app.get('/healthz', (req, res) => {
-  // Health probe: returns 200 if CORS is present, 500 otherwise
-  const hasCors = app._router && app._router.stack && app._router.stack.some(
-    (layer) => layer && layer.handle && layer.handle.toString().includes('Access-Control-Allow-Origin')
-  );
-  if (!hasCors) return res.status(500).json({ ok: false, error: 'CORS middleware missing' });
-  res.json({ ok: true, status: 'healthy' });
-});
-
 // Call CORS check after CORS middleware is registered
 checkCorsConfigOrExit();
 // Default controller target. Can be overridden with the CTRL env var.
@@ -4253,45 +4244,10 @@ app.delete('/devices/:id', async (req, res) => {
   }
 });
 
-// Health (includes quick controller reachability check)
-app.get("/healthz", async (req, res) => {
-  const started = Date.now();
-  let controllerReachable = false;
-  let controllerStatus = null;
-  try {
-    const ac = new AbortController();
-    const t = setTimeout(() => ac.abort(), 1200);
-    try {
-      const base = getController().replace(/\/$/, '');
-      // 1) HEAD / (fast)
-      let r = await fetch(base, { method: 'HEAD', signal: ac.signal });
-      controllerReachable = r.ok;
-      controllerStatus = r.status;
-      // 2) If not OK, try GET /healthz (common on forwarders)
-      if (!controllerReachable || (typeof controllerStatus === 'number' && controllerStatus >= 400)) {
-        r = await fetch(`${base}/healthz`, { method: 'GET', headers: { 'accept': '*/*' }, signal: ac.signal });
-        controllerReachable = r.ok;
-        controllerStatus = r.status;
-      }
-      // 3) If still not OK, try GET /api/healthz (some controllers mount under /api)
-      if (!controllerReachable || (typeof controllerStatus === 'number' && controllerStatus >= 400)) {
-        r = await fetch(`${base}/api/healthz`, { method: 'GET', headers: { 'accept': '*/*' }, signal: ac.signal });
-        controllerReachable = r.ok;
-        controllerStatus = r.status;
-      }
-    } catch (e) {
-      controllerReachable = false;
-      controllerStatus = e.name === 'AbortError' ? 'timeout' : (e.message || 'error');
-    } finally {
-      clearTimeout(t);
-    }
-  } catch (_) {}
-  res.json({ ok: true, controller: getController(), controllerReachable, controllerStatus, envSource: ENV_SOURCE, azureLatestUrl: AZURE_LATEST_URL || null, ts: new Date(), dtMs: Date.now() - started });
-});
-
 // SwitchBot Real API Endpoints - MUST be before proxy middleware
-const SWITCHBOT_TOKEN = process.env.SWITCHBOT_TOKEN || "4e6fc805b4a0dd7ed693af1dcf89d9731113d4706b2d796759aafe09cf8f07aed370d35bab4fb4799e1bda57d03c0aed";
-const SWITCHBOT_SECRET = process.env.SWITCHBOT_SECRET || "141c0bc9906ab1f4f73dd9f0c298046b";
+const SWITCHBOT_TOKEN = process.env.SWITCHBOT_TOKEN || '';
+const SWITCHBOT_SECRET = process.env.SWITCHBOT_SECRET || '';
+const SWITCHBOT_REGION = process.env.SWITCHBOT_REGION || '';
 const SWITCHBOT_API_BASE = 'https://api.switch-bot.com/v1.1';
 const SWITCHBOT_API_TIMEOUT_MS = Number(process.env.SWITCHBOT_API_TIMEOUT_MS || 8000);
 const SWITCHBOT_DEVICE_CACHE_TTL_MS = Number(process.env.SWITCHBOT_DEVICE_CACHE_TTL_MS || 1_800_000); // 30 minutes
@@ -4309,6 +4265,86 @@ const switchBotDevicesCache = {
 };
 
 const switchBotStatusCache = new Map();
+
+// Unified health endpoint with controller + SwitchBot diagnostics
+app.get('/healthz', async (req, res) => {
+  const started = Date.now();
+  const hasCors = app._router && app._router.stack && app._router.stack.some(
+    (layer) => layer && layer.handle && layer.handle.toString().includes('Access-Control-Allow-Origin')
+  );
+
+  const controllerInfo = { reachable: false, status: null };
+  try {
+    const ac = new AbortController();
+    const timeout = setTimeout(() => ac.abort(), 1200);
+    try {
+      const base = getController().replace(/\/$/, '');
+      let response = await fetch(base, { method: 'HEAD', signal: ac.signal });
+      controllerInfo.reachable = response.ok;
+      controllerInfo.status = response.status;
+
+      if (!controllerInfo.reachable || (typeof controllerInfo.status === 'number' && controllerInfo.status >= 400)) {
+        response = await fetch(`${base}/healthz`, { method: 'GET', headers: { accept: '*/*' }, signal: ac.signal });
+        controllerInfo.reachable = response.ok;
+        controllerInfo.status = response.status;
+      }
+
+      if (!controllerInfo.reachable || (typeof controllerInfo.status === 'number' && controllerInfo.status >= 400)) {
+        response = await fetch(`${base}/api/healthz`, { method: 'GET', headers: { accept: '*/*' }, signal: ac.signal });
+        controllerInfo.reachable = response.ok;
+        controllerInfo.status = response.status;
+      }
+    } catch (error) {
+      controllerInfo.reachable = false;
+      controllerInfo.status = error.name === 'AbortError' ? 'timeout' : (error.message || 'error');
+    } finally {
+      clearTimeout(timeout);
+    }
+  } catch (error) {
+    controllerInfo.reachable = false;
+    controllerInfo.status = error.message || 'error';
+  }
+
+  let statusCacheEntries = 0;
+  let statusCacheActive = 0;
+  for (const entry of switchBotStatusCache.values()) {
+    statusCacheEntries += 1;
+    if (entry?.payload) statusCacheActive += 1;
+  }
+
+  const switchBotDiagnostics = {
+    configured: ensureSwitchBotConfigured(),
+    tokenPresent: Boolean(process.env.SWITCHBOT_TOKEN && process.env.SWITCHBOT_TOKEN.trim()),
+    secretPresent: Boolean(process.env.SWITCHBOT_SECRET && process.env.SWITCHBOT_SECRET.trim()),
+    region: SWITCHBOT_REGION || null,
+    lastRequestAt: lastSwitchBotRequest ? new Date(lastSwitchBotRequest).toISOString() : null,
+    cache: {
+      devicesCached: Boolean(switchBotDevicesCache.payload),
+      devicesFetchedAt: switchBotDevicesCache.fetchedAt ? new Date(switchBotDevicesCache.fetchedAt).toISOString() : null,
+      devicesError: switchBotDevicesCache.lastError ? (switchBotDevicesCache.lastError.message || String(switchBotDevicesCache.lastError)) : null,
+      statusEntries: statusCacheEntries,
+      statusCached: statusCacheActive
+    }
+  };
+
+  const ok = hasCors && (controllerInfo.reachable || controllerInfo.status === 'timeout');
+  const httpStatus = hasCors ? 200 : 500;
+  res.status(httpStatus).json({
+    ok,
+    status: ok ? 'healthy' : (hasCors ? 'degraded' : 'unhealthy'),
+    cors: { configured: hasCors },
+    controller: {
+      target: getController(),
+      reachable: controllerInfo.reachable,
+      status: controllerInfo.status
+    },
+    envSource: ENV_SOURCE,
+    azureLatestUrl: AZURE_LATEST_URL || null,
+    switchbot: switchBotDiagnostics,
+    ts: new Date().toISOString(),
+    dtMs: Date.now() - started
+  });
+});
 
 function getSwitchBotStatusEntry(deviceId) {
   if (!switchBotStatusCache.has(deviceId)) {
