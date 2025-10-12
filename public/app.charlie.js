@@ -145,6 +145,54 @@
   }
 })();
 
+function escapeAttribute(value) {
+  return String(value ?? '').replace(/"/g, '&quot;');
+}
+
+function grIcon(name, label) {
+  const glyphMap = { ai: '🤖', auto: '⚙️', spectra: '🌈' };
+  const glyph = glyphMap[name] || '•';
+  const safeLabel = label ? String(label) : '';
+  const titleAttr = safeLabel ? ` title="${escapeAttribute(safeLabel)}"` : '';
+  const ariaAttr = safeLabel ? ` aria-label="${escapeAttribute(safeLabel)}"` : '';
+  const dataAttr = name ? ` data-role="${escapeAttribute(name)}"` : '';
+  return `<button type="button" class="gr-icon"${dataAttr}${titleAttr}${ariaAttr}>${glyph}</button>`;
+}
+
+function hydrateIconHost(host) {
+  if (!(host instanceof Element) || host.dataset.iconHydrated === 'true') return null;
+  const slot = host.dataset.iconSlot;
+  if (!slot) return null;
+  const label = host.dataset.iconLabel || '';
+  host.innerHTML = grIcon(slot, label);
+  const iconEl = host.querySelector('.gr-icon');
+  if (!iconEl) return null;
+  if (host.dataset.iconControl) {
+    iconEl.dataset.control = host.dataset.iconControl;
+  }
+  if (host.dataset.iconStatic === 'true') {
+    iconEl.setAttribute('disabled', '');
+    iconEl.setAttribute('aria-hidden', 'true');
+  }
+  host.dataset.iconHydrated = 'true';
+  return iconEl;
+}
+
+function hydrateIconSlots(root = document) {
+  if (!root) return;
+  const hosts = root.querySelectorAll('[data-icon-slot]');
+  hosts.forEach((host) => {
+    if (host.dataset.iconHydrated === 'true') return;
+    hydrateIconHost(host);
+  });
+}
+
+if (document.readyState === 'loading') {
+  document.addEventListener('DOMContentLoaded', () => hydrateIconSlots(document), { once: true });
+} else {
+  hydrateIconSlots(document);
+}
+
 // Ensure lights from lightSetups are always in window.STATE.lights and update unassigned lights
 window.addEventListener('lightSetupsChanged', () => {
   if (!window.STATE) window.STATE = {};
@@ -17652,18 +17700,20 @@ function mountAiAutomationCluster(entry, tile) {
   if (!host || !template) return;
   host.innerHTML = '';
   const fragment = template.content.cloneNode(true);
+  hydrateIconSlots(fragment);
   host.appendChild(fragment);
   const cluster = host.querySelector('.ai-automation-cluster');
   if (!cluster) return;
   cluster.dataset.roomKey = entry.key || '';
 
-  const aiBtn = cluster.querySelector('[data-control="ai"]');
+  const aiChip = cluster.querySelector('[data-control="ai"]');
+  const aiBtn = aiChip ? aiChip.querySelector('.gr-icon') : null;
   if (aiBtn) {
     const mode = entry.ai?.status || 'off';
     aiBtn.dataset.mode = mode;
     aiBtn.setAttribute('aria-pressed', mode !== 'off' ? 'true' : 'false');
     aiBtn.setAttribute('aria-label', `AI ${entry.ai?.label || 'status'} for ${entry.roomLabel}`);
-    const labelEl = aiBtn.querySelector('[data-status]');
+    const labelEl = aiChip?.querySelector('[data-status]');
     if (labelEl) labelEl.textContent = entry.ai?.shortLabel || entry.ai?.label || 'AI';
     if (entry.ai?.description || entry.ai?.label) {
       const tip = entry.ai.description || entry.ai.label;
@@ -17674,13 +17724,14 @@ function mountAiAutomationCluster(entry, tile) {
     aiBtn.addEventListener('click', () => handleAiControlClick(entry));
   }
 
-  const automationBtn = cluster.querySelector('[data-control="automation"]');
+  const automationChip = cluster.querySelector('[data-control="automation"]');
+  const automationBtn = automationChip ? automationChip.querySelector('.gr-icon') : null;
   if (automationBtn) {
     const state = entry.automation?.paused ? 'paused' : entry.automation?.status || 'off';
     automationBtn.dataset.state = state;
     automationBtn.setAttribute('aria-pressed', state === 'on' ? 'true' : 'false');
     automationBtn.setAttribute('aria-label', `Automation ${entry.automation?.label || 'status'} for ${entry.roomLabel}`);
-    const labelEl = automationBtn.querySelector('[data-status]');
+    const labelEl = automationChip?.querySelector('[data-status]');
     if (labelEl) labelEl.textContent = entry.automation?.shortLabel || (state === 'on' ? 'On' : state === 'paused' ? 'Paused' : 'Off');
     if (entry.automation?.description || entry.automation?.label) {
       const tip = entry.automation.description || entry.automation.label;
@@ -17691,7 +17742,8 @@ function mountAiAutomationCluster(entry, tile) {
     automationBtn.addEventListener('click', () => handleAutomationControlClick(entry));
   }
 
-  const spectraBtn = cluster.querySelector('[data-control="spectra"]');
+  const spectraChip = cluster.querySelector('[data-control="spectra"]');
+  const spectraBtn = spectraChip ? spectraChip.querySelector('.gr-icon') : null;
   if (spectraBtn) {
     let state = 'idle';
     if (entry.spectra?.paused) state = 'paused';
@@ -17699,7 +17751,7 @@ function mountAiAutomationCluster(entry, tile) {
     spectraBtn.dataset.state = state;
     spectraBtn.setAttribute('aria-pressed', state === 'active' ? 'true' : 'false');
     spectraBtn.setAttribute('aria-label', `SpectraSync ${entry.spectra?.label || 'status'} for ${entry.roomLabel}`);
-    const labelEl = spectraBtn.querySelector('[data-status]');
+    const labelEl = spectraChip?.querySelector('[data-status]');
     if (labelEl) labelEl.textContent = entry.spectra?.shortLabel || (state === 'active' ? 'Active' : state === 'paused' ? 'Paused' : 'Idle');
     if (entry.spectra?.description || entry.spectra?.label) {
       const tip = entry.spectra.description || entry.spectra.label;
