@@ -795,7 +795,9 @@
           <div style="display:flex; flex-wrap:wrap; gap:16px; align-items:flex-end;">
             <label class="tiny" style="display:flex; flex-direction:column; min-width:220px;">
               Search plan
-              <input id="groupsV2PlanSearch" type="search" placeholder="Search plan, crop, or variety" style="margin-top:4px; padding:6px 8px; border-radius:6px; border:1px solid #cbd5e1;">
+              <select id="groupsV2PlanSearch" style="margin-top:4px; padding:6px 8px; border-radius:6px; border:1px solid #cbd5e1; min-height:34px;">
+                <option value="">All plans</option>
+              </select>
             </label>
             <div class="tiny" style="display:flex; flex-wrap:wrap; gap:8px; align-items:center;">
               <span style="font-weight:600;">Anchor:</span>
@@ -805,23 +807,41 @@
               <input id="groupsV2Dps" type="number" min="0" step="1" value="1" style="width:90px; padding:6px 8px; border-radius:6px; border:1px solid #cbd5e1;">
             </div>
           </div>
-          <div style="margin-top:12px; display:flex; flex-wrap:wrap; gap:16px;">
-            <label class="tiny" style="display:flex; flex-direction:column; min-width:120px;">
-              Schedule start
-              <input id="groupsV2ScheduleStart" type="time" value="08:00" style="margin-top:4px; padding:6px 8px; border-radius:6px; border:1px solid #cbd5e1;">
-            </label>
-            <label class="tiny" style="display:flex; flex-direction:column; min-width:120px;">
-              Duration (h)
-              <input id="groupsV2ScheduleDuration" type="number" min="0" step="0.5" value="12" style="margin-top:4px; padding:6px 8px; border-radius:6px; border:1px solid #cbd5e1;">
-            </label>
-            <label class="tiny" style="display:flex; flex-direction:column; min-width:130px;">
-              Ramp up (min)
-              <input id="groupsV2ScheduleRampUp" type="number" min="0" step="1" value="10" style="margin-top:4px; padding:6px 8px; border-radius:6px; border:1px solid #cbd5e1;">
-            </label>
-            <label class="tiny" style="display:flex; flex-direction:column; min-width:130px;">
-              Ramp down (min)
-              <input id="groupsV2ScheduleRampDown" type="number" min="0" step="1" value="10" style="margin-top:4px; padding:6px 8px; border-radius:6px; border:1px solid #cbd5e1;">
-            </label>
+          <div style="margin-top:12px; display:flex; flex-direction:column; gap:12px;">
+            <div class="tiny" style="display:flex; flex-wrap:wrap; gap:8px; align-items:center;">
+              <span style="font-weight:600;">Grow day cycles</span>
+              <label class="chip-option"><input type="radio" name="groupsV2ScheduleMode" value="one" checked><span>One cycle</span></label>
+              <label class="chip-option"><input type="radio" name="groupsV2ScheduleMode" value="two"><span>Two cycles</span></label>
+            </div>
+            <div style="display:flex; flex-wrap:wrap; gap:16px; align-items:flex-start;">
+              <div class="tiny" style="display:flex; flex-direction:column; gap:6px; min-width:160px; padding:12px; border:1px solid #cbd5e1; border-radius:8px; background:#f8fafc;">
+                <div style="font-weight:600;">Cycle 1</div>
+                <label style="display:flex; flex-direction:column; gap:4px;">
+                  <span>Start</span>
+                  <input id="groupsV2Cycle1On" type="time" value="08:00" style="padding:6px 8px; border-radius:6px; border:1px solid #cbd5e1;">
+                </label>
+                <label style="display:flex; flex-direction:column; gap:4px;">
+                  <span>Photoperiod (h)</span>
+                  <input id="groupsV2Cycle1Hours" type="number" min="0" max="24" step="0.5" value="12" style="padding:6px 8px; border-radius:6px; border:1px solid #cbd5e1;">
+                </label>
+                <div id="groupsV2Cycle1End" class="tiny text-muted">End: 20:00</div>
+                <div class="tiny text-muted">Repeated daily</div>
+              </div>
+              <div id="groupsV2Cycle2Container" class="tiny" style="display:none; flex-direction:column; gap:6px; min-width:160px; padding:12px; border:1px solid #cbd5e1; border-radius:8px; background:#f0f9ff;">
+                <div style="font-weight:600;">Cycle 2</div>
+                <label style="display:flex; flex-direction:column; gap:4px;">
+                  <span>Start</span>
+                  <input id="groupsV2Cycle2On" type="time" value="20:00" style="padding:6px 8px; border-radius:6px; border:1px solid #cbd5e1;">
+                </label>
+                <label style="display:flex; flex-direction:column; gap:4px;">
+                  <span>Photoperiod (h)</span>
+                  <input id="groupsV2Cycle2Hours" type="number" min="0" max="24" step="0.5" value="12" style="padding:6px 8px; border-radius:6px; border:1px solid #cbd5e1;">
+                </label>
+                <div id="groupsV2Cycle2End" class="tiny text-muted">End: 08:00</div>
+                <div class="tiny text-muted">Repeated daily</div>
+              </div>
+            </div>
+            <div id="groupsV2ScheduleSummary" class="tiny text-muted"></div>
           </div>
           <div style="margin-top:12px; display:flex; flex-wrap:wrap; gap:16px;">
             <label class="tiny" style="display:flex; flex-direction:column; min-width:110px;">

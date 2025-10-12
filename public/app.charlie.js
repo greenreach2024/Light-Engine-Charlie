@@ -573,9 +573,195 @@ document.addEventListener('DOMContentLoaded', () => {
 });
 
 const GROUPS_V2_DEFAULTS = {
-  schedule: { startTime: '08:00', durationHours: 12, rampUpMin: 10, rampDownMin: 10 },
+  schedule: {
+    mode: 'one',
+    timezone: 'America/Toronto',
+    cycles: [
+      { on: '08:00', hours: 12, off: '20:00' },
+      { on: '20:00', hours: 12, off: '08:00' },
+    ],
+    rampUpMin: 10,
+    rampDownMin: 10,
+  },
   gradients: { ppfd: 0, blue: 0, tempC: 0, rh: 0 },
 };
+
+function createDefaultGroupsV2Schedule() {
+  const defaults = GROUPS_V2_DEFAULTS.schedule;
+  return {
+    mode: defaults.mode,
+    timezone: defaults.timezone,
+    cycles: defaults.cycles.map((cycle) => ({ ...cycle })),
+    rampUpMin: defaults.rampUpMin,
+    rampDownMin: defaults.rampDownMin,
+  };
+}
+
+function normalizeCycleHours(hours) {
+  const num = Number(hours);
+  if (!Number.isFinite(num)) return 0;
+  const clamped = Math.max(0, Math.min(24, num));
+  return Math.round(clamped * 2) / 2;
+}
+
+function computeGroupsV2CycleOff(on, hours) {
+  if (typeof on !== 'string' || !on) return null;
+  const match = on.match(/^(\d{1,2}):(\d{2})$/);
+  if (!match) return null;
+  const minutes = toMinutes(on);
+  if (!Number.isFinite(minutes)) return null;
+  const durationMinutes = Math.max(0, Math.round(normalizeCycleHours(hours) * 60));
+  return minutesToHHMM(minutes + durationMinutes);
+}
+
+function formatCycleHoursValue(hours) {
+  if (!Number.isFinite(hours)) return '';
+  const rounded = Math.round(hours * 2) / 2;
+  if (Number.isInteger(rounded)) return String(Math.trunc(rounded));
+  return rounded.toFixed(1).replace(/\.0$/, '');
+}
+
+function normalizeGroupsV2Cycle(cycle, fallback = { on: '00:00', hours: 0, off: '00:00' }) {
+  const base = typeof cycle === 'object' && cycle !== null ? cycle : {};
+  const safeFallback = fallback || { on: '00:00', hours: 0, off: '00:00' };
+  const on = typeof base.on === 'string' && base.on ? base.on : safeFallback.on;
+  const fromHours = toNumberOrNull(base.hours);
+  let hours = Number.isFinite(fromHours) ? fromHours : null;
+  if (!Number.isFinite(hours) && typeof base.off === 'string' && base.off) {
+    hours = computeCycleDuration(on, base.off) / 60;
+  }
+  if (!Number.isFinite(hours)) hours = safeFallback.hours;
+  hours = normalizeCycleHours(hours);
+  const off = typeof base.off === 'string' && base.off
+    ? base.off
+    : (computeGroupsV2CycleOff(on, hours) || safeFallback.off || '--:--');
+  return { on, hours, off };
+}
+
+function normalizeGroupsV2Schedule(schedule) {
+  const defaults = createDefaultGroupsV2Schedule();
+  const base = schedule && typeof schedule === 'object' ? schedule : {};
+  const mode = base.mode === 'two' ? 'two' : 'one';
+  const timezone = typeof base.timezone === 'string' && base.timezone ? base.timezone : defaults.timezone;
+  const rampUpMin = toNumberOrNull(base.rampUpMin) ?? defaults.rampUpMin;
+  const rampDownMin = toNumberOrNull(base.rampDownMin) ?? defaults.rampDownMin;
+  const rawCycles = Array.isArray(base.cycles) ? base.cycles : [];
+  const fallbackCycles = defaults.cycles;
+  const normalizedCycles = [0, 1].map((idx) => normalizeGroupsV2Cycle(rawCycles[idx], fallbackCycles[idx] || fallbackCycles[0]));
+  return { mode, timezone, rampUpMin, rampDownMin, cycles: normalizedCycles };
+}
+
+function ensureGroupsV2ScheduleState() {
+  const normalized = normalizeGroupsV2Schedule(groupsV2FormState.schedule);
+  groupsV2FormState.schedule = normalized;
+  return normalized;
+}
+
+function hydrateGroupsV2ScheduleState(scheduleCfg) {
+  const defaults = createDefaultGroupsV2Schedule();
+  if (!scheduleCfg || typeof scheduleCfg !== 'object') return createDefaultGroupsV2Schedule();
+  const base = {
+    mode: scheduleCfg.mode === 'two' ? 'two' : 'one',
+    timezone: typeof scheduleCfg.timezone === 'string' && scheduleCfg.timezone ? scheduleCfg.timezone : defaults.timezone,
+    rampUpMin: toNumberOrNull(scheduleCfg.rampUpMin) ?? defaults.rampUpMin,
+    rampDownMin: toNumberOrNull(scheduleCfg.rampDownMin) ?? defaults.rampDownMin,
+    cycles: [],
+  };
+  if (Array.isArray(scheduleCfg.cycles) && scheduleCfg.cycles.length) {
+    base.cycles = scheduleCfg.cycles.slice(0, 2).map((cycle) => ({ ...cycle }));
+    if (scheduleCfg.mode === 'two' && base.cycles.length === 1 && defaults.cycles[1]) {
+      base.cycles.push({ ...defaults.cycles[1] });
+    }
+  } else {
+    const start = typeof scheduleCfg.startTime === 'string' && scheduleCfg.startTime
+      ? scheduleCfg.startTime
+      : defaults.cycles[0].on;
+    const duration = toNumberOrNull(scheduleCfg.durationHours);
+    const hours = Number.isFinite(duration) && duration > 0 ? duration : defaults.cycles[0].hours;
+    const off = computeGroupsV2CycleOff(start, hours) || defaults.cycles[0].off;
+    base.cycles = [{ on: start, off }];
+    if (scheduleCfg.mode === 'two' && defaults.cycles[1]) {
+      base.mode = 'two';
+      base.cycles.push({ ...defaults.cycles[1] });
+    }
+  }
+  return normalizeGroupsV2Schedule(base);
+}
+
+function buildGroupsV2ScheduleConfig() {
+  const scheduleState = ensureGroupsV2ScheduleState();
+  const defaults = createDefaultGroupsV2Schedule();
+  const mode = scheduleState.mode === 'two' ? 'two' : 'one';
+  const activeCount = mode === 'two' ? 2 : 1;
+  const cycles = [];
+  for (let i = 0; i < activeCount; i += 1) {
+    const fallback = defaults.cycles[i] || defaults.cycles[0];
+    const cycle = scheduleState.cycles[i] || fallback;
+    const on = typeof cycle.on === 'string' && cycle.on ? cycle.on : fallback.on;
+    const hours = Number.isFinite(cycle.hours) ? cycle.hours : fallback.hours;
+    const off = typeof cycle.off === 'string' && cycle.off
+      ? cycle.off
+      : (computeGroupsV2CycleOff(on, hours) || fallback.off);
+    cycles.push({ on, off });
+  }
+  const scheduleForSummary = { mode, cycles };
+  const durationHours = getDailyOnHours(scheduleForSummary);
+  return {
+    mode,
+    timezone: typeof scheduleState.timezone === 'string' && scheduleState.timezone
+      ? scheduleState.timezone
+      : defaults.timezone,
+    cycles,
+    durationHours,
+    startTime: cycles[0]?.on || defaults.cycles[0].on,
+    rampUpMin: toNumberOrNull(scheduleState.rampUpMin) ?? defaults.rampUpMin,
+    rampDownMin: toNumberOrNull(scheduleState.rampDownMin) ?? defaults.rampDownMin,
+  };
+}
+
+function updateGroupsV2ScheduleUI() {
+  const scheduleState = ensureGroupsV2ScheduleState();
+  const defaults = createDefaultGroupsV2Schedule();
+  const mode = scheduleState.mode === 'two' ? 'two' : 'one';
+  const modeRadios = document.querySelectorAll('input[name="groupsV2ScheduleMode"]');
+  modeRadios.forEach((radio) => {
+    radio.checked = radio.value === mode;
+  });
+  const cycleConfigs = [
+    { index: 0, onId: 'groupsV2Cycle1On', hoursId: 'groupsV2Cycle1Hours', endId: 'groupsV2Cycle1End', fallback: defaults.cycles[0] },
+    { index: 1, onId: 'groupsV2Cycle2On', hoursId: 'groupsV2Cycle2Hours', endId: 'groupsV2Cycle2End', fallback: defaults.cycles[1] || defaults.cycles[0] },
+  ];
+  cycleConfigs.forEach((config) => {
+    const cycleState = scheduleState.cycles[config.index] || config.fallback;
+    const onValue = typeof cycleState.on === 'string' && cycleState.on ? cycleState.on : config.fallback.on;
+    const hoursValue = Number.isFinite(cycleState.hours) ? cycleState.hours : config.fallback.hours;
+    const offValue = typeof cycleState.off === 'string' && cycleState.off
+      ? cycleState.off
+      : (computeGroupsV2CycleOff(onValue, hoursValue) || config.fallback.off || '--:--');
+    const onInput = document.getElementById(config.onId);
+    if (onInput) onInput.value = onValue;
+    const hoursInput = document.getElementById(config.hoursId);
+    if (hoursInput) hoursInput.value = formatCycleHoursValue(hoursValue);
+    const endLabel = document.getElementById(config.endId);
+    if (endLabel) endLabel.textContent = `End: ${offValue || '--:--'}`;
+    scheduleState.cycles[config.index] = normalizeGroupsV2Cycle({ on: onValue, hours: hoursValue, off: offValue }, config.fallback);
+  });
+  const cycle2Container = document.getElementById('groupsV2Cycle2Container');
+  if (cycle2Container) {
+    const isTwo = mode === 'two';
+    cycle2Container.style.display = isTwo ? 'flex' : 'none';
+    cycle2Container.querySelectorAll('input').forEach((input) => {
+      input.disabled = !isTwo;
+    });
+  }
+  const summaryEl = document.getElementById('groupsV2ScheduleSummary');
+  if (summaryEl) {
+    const summaryText = scheduleSummary(buildGroupsV2ScheduleConfig());
+    summaryEl.textContent = summaryText && summaryText !== 'No schedule'
+      ? `Summary: ${summaryText}`
+      : '';
+  }
+}
 
 const groupsV2FormState = {
   planId: '',
@@ -583,7 +769,7 @@ const groupsV2FormState = {
   anchorMode: 'seedDate',
   seedDate: formatDateInputValue(new Date()),
   dps: 1,
-  schedule: { ...GROUPS_V2_DEFAULTS.schedule },
+  schedule: createDefaultGroupsV2Schedule(),
   gradients: { ...GROUPS_V2_DEFAULTS.gradients },
 };
 
@@ -668,33 +854,15 @@ function updateGroupsV2AnchorInputs() {
 }
 
 function applyGroupsV2StateToInputs() {
-  const searchInput = document.getElementById('groupsV2PlanSearch');
-  if (searchInput) searchInput.value = groupsV2FormState.planSearch || '';
+  const searchSelect = document.getElementById('groupsV2PlanSearch');
+  if (searchSelect) searchSelect.value = groupsV2FormState.planSearch || '';
   const planSelect = document.getElementById('groupsV2PlanSelect');
   if (planSelect) planSelect.value = groupsV2FormState.planId || '';
   const seedInput = document.getElementById('groupsV2SeedDate');
   if (seedInput) seedInput.value = groupsV2FormState.seedDate || '';
   const dpsInput = document.getElementById('groupsV2Dps');
   if (dpsInput) dpsInput.value = groupsV2FormState.dps != null ? String(groupsV2FormState.dps) : '';
-
-  const scheduleState = groupsV2FormState.schedule || {};
-  const startInput = document.getElementById('groupsV2ScheduleStart');
-  if (startInput) startInput.value = scheduleState.startTime || GROUPS_V2_DEFAULTS.schedule.startTime;
-  const durationInput = document.getElementById('groupsV2ScheduleDuration');
-  if (durationInput) {
-    const duration = scheduleState.durationHours;
-    durationInput.value = duration != null ? String(duration) : String(GROUPS_V2_DEFAULTS.schedule.durationHours);
-  }
-  const rampUpInput = document.getElementById('groupsV2ScheduleRampUp');
-  if (rampUpInput) {
-    const rampUp = scheduleState.rampUpMin;
-    rampUpInput.value = rampUp != null ? String(rampUp) : String(GROUPS_V2_DEFAULTS.schedule.rampUpMin);
-  }
-  const rampDownInput = document.getElementById('groupsV2ScheduleRampDown');
-  if (rampDownInput) {
-    const rampDown = scheduleState.rampDownMin;
-    rampDownInput.value = rampDown != null ? String(rampDown) : String(GROUPS_V2_DEFAULTS.schedule.rampDownMin);
-  }
+  updateGroupsV2ScheduleUI();
   const gradientMap = {
     groupsV2GradientPpfd: 'ppfd',
     groupsV2GradientBlue: 'blue',
@@ -770,7 +938,8 @@ function computeGroupsV2PreviewData(planOverride) {
   if (!plan) return null;
   const dayNumber = getGroupsV2DayNumber();
   const target = resolvePlanTargetsForDay(plan, dayNumber ?? 1) || {};
-  const scheduleHours = toNumberOrNull(groupsV2FormState.schedule.durationHours);
+  const scheduleConfig = buildGroupsV2ScheduleConfig();
+  const scheduleHours = Number.isFinite(scheduleConfig.durationHours) ? scheduleConfig.durationHours : null;
   const basePhotoperiod = target.photoperiodHours ?? readPhotoperiodHours(firstNonEmpty(plan.photoperiod, plan.defaults?.photoperiod, plan._derived?.photoperiod));
   const photoperiodHours = Number.isFinite(scheduleHours) && scheduleHours > 0 ? scheduleHours : basePhotoperiod;
   const basePpfd = toNumberOrNull(firstNonEmpty(target.ppfd, plan.ppfd, plan._derived?.ppfd));
@@ -789,7 +958,7 @@ function computeGroupsV2PreviewData(planOverride) {
     photoperiodHours: hours,
     dli,
     gradients: { ...groupsV2FormState.gradients },
-    schedule: { ...groupsV2FormState.schedule },
+    schedule: scheduleConfig,
     anchor: {
       mode: groupsV2FormState.anchorMode,
       seedDate: groupsV2FormState.anchorMode === 'seedDate' ? (groupsV2FormState.seedDate || null) : null,
@@ -846,12 +1015,7 @@ function buildGroupsV2PlanConfig(planOverride) {
   if (!plan) return null;
   const preview = computeGroupsV2PreviewData(plan);
   const updatedAt = new Date().toISOString();
-  const schedule = {
-    startTime: groupsV2FormState.schedule.startTime || GROUPS_V2_DEFAULTS.schedule.startTime,
-    durationHours: toNumberOrNull(groupsV2FormState.schedule.durationHours) ?? GROUPS_V2_DEFAULTS.schedule.durationHours,
-    rampUpMin: toNumberOrNull(groupsV2FormState.schedule.rampUpMin) ?? GROUPS_V2_DEFAULTS.schedule.rampUpMin,
-    rampDownMin: toNumberOrNull(groupsV2FormState.schedule.rampDownMin) ?? GROUPS_V2_DEFAULTS.schedule.rampDownMin,
-  };
+  const schedule = buildGroupsV2ScheduleConfig();
   const gradients = {
     ppfd: toNumberOrNull(groupsV2FormState.gradients.ppfd) ?? GROUPS_V2_DEFAULTS.gradients.ppfd,
     blue: toNumberOrNull(groupsV2FormState.gradients.blue) ?? GROUPS_V2_DEFAULTS.gradients.blue,
@@ -872,9 +1036,9 @@ function initializeGroupsV2Form() {
   if (initializeGroupsV2Form._initialized) return;
   initializeGroupsV2Form._initialized = true;
   applyGroupsV2StateToInputs();
-  const planSearchInput = document.getElementById('groupsV2PlanSearch');
-  if (planSearchInput) {
-    planSearchInput.addEventListener('input', (event) => {
+  const planSearchSelect = document.getElementById('groupsV2PlanSearch');
+  if (planSearchSelect) {
+    planSearchSelect.addEventListener('change', (event) => {
       groupsV2FormState.planSearch = event.target.value || '';
       populateGroupsV2PlanDropdown(groupsV2FormState.planSearch);
     });
@@ -893,35 +1057,52 @@ function initializeGroupsV2Form() {
       updateGroupsV2Preview();
     });
   }
-  const startInput = document.getElementById('groupsV2ScheduleStart');
-  if (startInput) {
-    startInput.addEventListener('change', (event) => {
-      groupsV2FormState.schedule.startTime = event.target.value || GROUPS_V2_DEFAULTS.schedule.startTime;
+  const scheduleModeRadios = document.querySelectorAll('input[name="groupsV2ScheduleMode"]');
+  scheduleModeRadios.forEach((radio) => {
+    radio.addEventListener('change', (event) => {
+      if (!event.target.checked) return;
+      const schedule = ensureGroupsV2ScheduleState();
+      schedule.mode = event.target.value === 'two' ? 'two' : 'one';
+      groupsV2FormState.schedule = schedule;
+      updateGroupsV2ScheduleUI();
       updateGroupsV2Preview();
     });
-  }
-  const durationInput = document.getElementById('groupsV2ScheduleDuration');
-  if (durationInput) {
-    durationInput.addEventListener('input', (event) => {
-      const value = toNumberOrNull(event.target.value);
-      groupsV2FormState.schedule.durationHours = value != null ? value : GROUPS_V2_DEFAULTS.schedule.durationHours;
-      updateGroupsV2Preview();
-    });
-  }
-  const rampUpInput = document.getElementById('groupsV2ScheduleRampUp');
-  if (rampUpInput) {
-    rampUpInput.addEventListener('input', (event) => {
-      const value = toNumberOrNull(event.target.value);
-      groupsV2FormState.schedule.rampUpMin = value != null ? value : GROUPS_V2_DEFAULTS.schedule.rampUpMin;
-    });
-  }
-  const rampDownInput = document.getElementById('groupsV2ScheduleRampDown');
-  if (rampDownInput) {
-    rampDownInput.addEventListener('input', (event) => {
-      const value = toNumberOrNull(event.target.value);
-      groupsV2FormState.schedule.rampDownMin = value != null ? value : GROUPS_V2_DEFAULTS.schedule.rampDownMin;
-    });
-  }
+  });
+  const defaultSchedule = createDefaultGroupsV2Schedule();
+  [
+    { index: 0, onId: 'groupsV2Cycle1On', hoursId: 'groupsV2Cycle1Hours' },
+    { index: 1, onId: 'groupsV2Cycle2On', hoursId: 'groupsV2Cycle2Hours' },
+  ].forEach(({ index, onId, hoursId }) => {
+    const onInput = document.getElementById(onId);
+    if (onInput) {
+      const handleOnChange = (event) => {
+        const schedule = ensureGroupsV2ScheduleState();
+        const fallback = defaultSchedule.cycles[index] || defaultSchedule.cycles[0];
+        const value = event.target.value || fallback.on;
+        const nextCycle = normalizeGroupsV2Cycle({ ...schedule.cycles[index], on: value }, fallback);
+        schedule.cycles[index] = nextCycle;
+        groupsV2FormState.schedule = schedule;
+        updateGroupsV2ScheduleUI();
+        updateGroupsV2Preview();
+      };
+      onInput.addEventListener('change', handleOnChange);
+      onInput.addEventListener('input', handleOnChange);
+    }
+    const hoursInput = document.getElementById(hoursId);
+    if (hoursInput) {
+      hoursInput.addEventListener('input', (event) => {
+        const schedule = ensureGroupsV2ScheduleState();
+        const fallback = defaultSchedule.cycles[index] || defaultSchedule.cycles[0];
+        const value = normalizeCycleHours(event.target.value);
+        const nextCycle = normalizeGroupsV2Cycle({ ...schedule.cycles[index], hours: value }, fallback);
+        schedule.cycles[index] = nextCycle;
+        groupsV2FormState.schedule = schedule;
+        hoursInput.value = formatCycleHoursValue(nextCycle.hours);
+        updateGroupsV2ScheduleUI();
+        updateGroupsV2Preview();
+      });
+    }
+  });
   const gradientMap = {
     groupsV2GradientPpfd: 'ppfd',
     groupsV2GradientBlue: 'blue',
@@ -950,6 +1131,79 @@ function initializeGroupsV2Form() {
   updateGroupsV2AnchorInputs();
 }
 // Populate Groups V2 Plan and Schedule dropdowns from setup cards
+function populateGroupsV2PlanSearchDropdown() {
+  const select = document.getElementById('groupsV2PlanSearch');
+  if (!select) return;
+  const currentRaw = groupsV2FormState.planSearch || '';
+  const current = currentRaw.trim();
+  const plans = getGroupsV2Plans();
+  const seen = new Set();
+  const options = [{ value: '', label: 'All plans' }];
+  const addOption = (value, label) => {
+    const trimmed = (value || '').trim();
+    if (!trimmed) return;
+    const normalized = trimmed.toLowerCase();
+    if (seen.has(normalized)) return;
+    seen.add(normalized);
+    options.push({ value: trimmed, label });
+  };
+  const categories = new Set();
+  const crops = new Set();
+  const varieties = new Set();
+  const kinds = new Set();
+  const planNames = new Set();
+  plans.forEach((plan) => {
+    const derived = plan?._derived || {};
+    const applies = derived.appliesTo || plan?.meta?.appliesTo || {};
+    const allCategories = [
+      ...(Array.isArray(plan?.meta?.category) ? plan.meta.category : []),
+      ...(Array.isArray(derived?.category) ? derived.category : []),
+      ...(Array.isArray(applies?.category) ? applies.category : []),
+    ];
+    allCategories.forEach((cat) => {
+      if (typeof cat === 'string' && cat.trim()) categories.add(cat.trim());
+    });
+    if (typeof plan?.crop === 'string' && plan.crop.trim()) crops.add(plan.crop.trim());
+    if (typeof plan?.kind === 'string' && plan.kind.trim()) kinds.add(plan.kind.trim());
+    const varietyList = Array.isArray(applies?.varieties) ? applies.varieties : [];
+    varietyList.forEach((variety) => {
+      if (typeof variety === 'string' && variety.trim()) varieties.add(variety.trim());
+    });
+    const planLabel = plan?.name || plan?.label || plan?.id;
+    if (typeof planLabel === 'string' && planLabel.trim()) planNames.add(planLabel.trim());
+  });
+  const addSet = (set, prefix) => {
+    Array.from(set).sort((a, b) => a.localeCompare(b)).forEach((value) => {
+      addOption(value, prefix ? `${prefix} — ${value}` : value);
+    });
+  };
+  addSet(categories, 'Category');
+  addSet(crops, 'Crop');
+  addSet(varieties, 'Variety');
+  addSet(kinds, 'Type');
+  addSet(planNames, 'Plan');
+  const normalizedCurrent = current.toLowerCase();
+  if (normalizedCurrent && !seen.has(normalizedCurrent)) {
+    options.push({ value: current, label: `Filter — ${current}` });
+    seen.add(normalizedCurrent);
+  }
+  select.innerHTML = '';
+  options.forEach(({ value, label }) => {
+    const option = document.createElement('option');
+    option.value = value;
+    option.textContent = label;
+    select.appendChild(option);
+  });
+  if (normalizedCurrent && seen.has(normalizedCurrent)) {
+    select.value = current;
+  } else {
+    select.value = '';
+    if (normalizedCurrent && !seen.has(normalizedCurrent)) {
+      select.value = current;
+    }
+  }
+}
+
 function populateGroupsV2PlanDropdown(filterQuery) {
   const select = document.getElementById('groupsV2PlanSelect');
   if (!select) return;
@@ -1070,9 +1324,13 @@ function populateGroupsV2ScheduleDropdown() {
 document.addEventListener('DOMContentLoaded', () => {
   // ...existing code...
   initializeGroupsV2Form();
+  populateGroupsV2PlanSearchDropdown();
   populateGroupsV2PlanDropdown(groupsV2FormState.planSearch);
   populateGroupsV2ScheduleDropdown();
-  document.addEventListener('plans-updated', () => populateGroupsV2PlanDropdown(groupsV2FormState.planSearch));
+  document.addEventListener('plans-updated', () => {
+    populateGroupsV2PlanSearchDropdown();
+    populateGroupsV2PlanDropdown(groupsV2FormState.planSearch);
+  });
   document.addEventListener('schedules-updated', populateGroupsV2ScheduleDropdown);
 
   // Wire up embedded schedule card in Group V2
@@ -1110,12 +1368,7 @@ document.addEventListener('DOMContentLoaded', () => {
     groupsV2FormState.seedDate = parsedSeed ? formatDateInputValue(parsedSeed) : '';
     groupsV2FormState.dps = toNumberOrNull(anchor.dps);
     const scheduleCfg = cfg.schedule && typeof cfg.schedule === 'object' ? cfg.schedule : {};
-    groupsV2FormState.schedule = {
-      startTime: scheduleCfg.startTime || GROUPS_V2_DEFAULTS.schedule.startTime,
-      durationHours: toNumberOrNull(scheduleCfg.durationHours) ?? GROUPS_V2_DEFAULTS.schedule.durationHours,
-      rampUpMin: toNumberOrNull(scheduleCfg.rampUpMin) ?? GROUPS_V2_DEFAULTS.schedule.rampUpMin,
-      rampDownMin: toNumberOrNull(scheduleCfg.rampDownMin) ?? GROUPS_V2_DEFAULTS.schedule.rampDownMin,
-    };
+    groupsV2FormState.schedule = hydrateGroupsV2ScheduleState(scheduleCfg);
     const gradientCfg = cfg.gradients && typeof cfg.gradients === 'object' ? cfg.gradients : {};
     groupsV2FormState.gradients = {
       ppfd: toNumberOrNull(gradientCfg.ppfd) ?? GROUPS_V2_DEFAULTS.gradients.ppfd,
@@ -1123,6 +1376,7 @@ document.addEventListener('DOMContentLoaded', () => {
       tempC: toNumberOrNull(gradientCfg.tempC) ?? GROUPS_V2_DEFAULTS.gradients.tempC,
       rh: toNumberOrNull(gradientCfg.rh) ?? GROUPS_V2_DEFAULTS.gradients.rh,
     };
+    populateGroupsV2PlanSearchDropdown();
     populateGroupsV2PlanDropdown(groupsV2FormState.planSearch);
     applyGroupsV2StateToInputs();
     updateGroupsV2AnchorInputs();
