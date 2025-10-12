@@ -1,3 +1,150 @@
+// Global card identifier assignment to create stable, unique IDs for every card element
+(function setupGlobalCardIds() {
+  const CARD_SELECTOR = ":is(.card, [class$='-card'], [class*='-card '], [class*=' card-'], [class^='card-'])";
+  const EXCLUDE_CLASS_PATTERN = /card__/;
+  const CONTEXT_CODE_LENGTH = 4;
+  const CARD_CODE_LENGTH = 4;
+  const MAX_PREFIX_LENGTH = 8;
+  let cardSequence = 1;
+
+  const assignedElements = new WeakSet();
+
+  function isEligibleCard(element) {
+    if (!(element instanceof Element)) return false;
+    if (!element.matches(CARD_SELECTOR)) return false;
+    const classes = Array.from(element.classList || []);
+    return !classes.some((cls) => EXCLUDE_CLASS_PATTERN.test(cls));
+  }
+
+  function normalizeToCode(value, fallback = "", maxLength = CARD_CODE_LENGTH) {
+    if (value == null) return fallback;
+    const expanded = String(value)
+      .replace(/([a-z0-9])([A-Z])/g, "$1 $2")
+      .replace(/[^A-Za-z0-9]+/g, " ")
+      .trim();
+    if (!expanded) return fallback;
+    const parts = expanded.split(/\s+/);
+    let code = parts.map((part) => part[0]).join("");
+    if (code.length < 2) {
+      code = parts.map((part) => part.slice(0, Math.min(maxLength, 3))).join("");
+    }
+    code = code.toUpperCase().replace(/[^A-Z0-9]/g, "");
+    if (!code) return fallback;
+    return code.slice(0, maxLength) || fallback;
+  }
+
+  function deriveBaseCode(element) {
+    if (!element) return "";
+    const explicit = element.getAttribute("data-card-code");
+    if (explicit) return normalizeToCode(explicit, "", CARD_CODE_LENGTH);
+
+    const role = element.getAttribute("data-role");
+    if (role) {
+      const code = normalizeToCode(role, "", CARD_CODE_LENGTH);
+      if (code) return code;
+    }
+
+    const panel = element.getAttribute("data-panel");
+    if (panel) {
+      const code = normalizeToCode(panel, "", CARD_CODE_LENGTH);
+      if (code) return code;
+    }
+
+    if (element.id) {
+      const code = normalizeToCode(element.id, "", CARD_CODE_LENGTH);
+      if (code) return code;
+    }
+
+    const labelledBy = element.getAttribute("aria-labelledby");
+    if (labelledBy) {
+      const code = normalizeToCode(labelledBy, "", CARD_CODE_LENGTH);
+      if (code) return code;
+    }
+
+    const heading = element.querySelector("h1, h2, h3, h4, h5, h6");
+    if (heading && heading.textContent) {
+      const code = normalizeToCode(heading.textContent, "", CARD_CODE_LENGTH);
+      if (code) return code;
+    }
+
+    for (const cls of element.classList || []) {
+      if (cls === "card" || cls.includes("card")) {
+        const code = normalizeToCode(cls, "", CARD_CODE_LENGTH);
+        if (code) return code;
+      }
+    }
+
+    return "";
+  }
+
+  function findContextCode(element) {
+    let node = element?.parentElement || null;
+    while (node) {
+      if (isEligibleCard(node)) {
+        const explicit = node.getAttribute("data-card-prefix");
+        if (explicit) {
+          const code = normalizeToCode(explicit, "", CONTEXT_CODE_LENGTH);
+          if (code) return code;
+        }
+        const panel = node.getAttribute("data-panel");
+        if (panel) {
+          const code = normalizeToCode(panel, "", CONTEXT_CODE_LENGTH);
+          if (code) return code;
+        }
+        if (node.id) {
+          const code = normalizeToCode(node.id, "", CONTEXT_CODE_LENGTH);
+          if (code) return code;
+        }
+        const derived = deriveBaseCode(node);
+        if (derived) return normalizeToCode(derived, "", CONTEXT_CODE_LENGTH);
+      }
+      node = node.parentElement;
+    }
+    return "";
+  }
+
+  function assignCardId(element) {
+    if (!isEligibleCard(element) || assignedElements.has(element) || element.dataset.cardId) {
+      return;
+    }
+
+    const ownPrefix = element.getAttribute("data-card-prefix");
+    const contextCode = normalizeToCode(ownPrefix, "", CONTEXT_CODE_LENGTH) || findContextCode(element);
+    const baseCode = normalizeToCode(deriveBaseCode(element), "CARD", CARD_CODE_LENGTH);
+    const combinedPrefix = contextCode && !baseCode.startsWith(contextCode)
+      ? `${contextCode}${baseCode}`
+      : baseCode;
+    const prefix = (combinedPrefix || "CARD").slice(0, MAX_PREFIX_LENGTH);
+    const suffix = String(cardSequence++).padStart(2, "0");
+    element.dataset.cardId = `${prefix}${suffix}`;
+    assignedElements.add(element);
+  }
+
+  function scanNode(node) {
+    if (!(node instanceof Element)) return;
+    if (isEligibleCard(node)) assignCardId(node);
+    node.querySelectorAll(CARD_SELECTOR).forEach((el) => assignCardId(el));
+  }
+
+  function init() {
+    const root = document.body || document.documentElement;
+    if (!root) return;
+    scanNode(root);
+    const observer = new MutationObserver((mutations) => {
+      mutations.forEach((mutation) => {
+        mutation.addedNodes.forEach((added) => scanNode(added));
+      });
+    });
+    observer.observe(root, { childList: true, subtree: true });
+  }
+
+  if (document.readyState === "loading") {
+    document.addEventListener("DOMContentLoaded", init, { once: true });
+  } else {
+    init();
+  }
+})();
+
 // Ensure lights from lightSetups are always in window.STATE.lights and update unassigned lights
 window.addEventListener('lightSetupsChanged', () => {
   if (!window.STATE) window.STATE = {};
