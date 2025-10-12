@@ -723,9 +723,11 @@ const GROUPS_V2_DEFAULTS = {
   schedule: {
     mode: 'one',
     timezone: 'America/Toronto',
+    startTime: '08:00',
+    photoperiodHours: 12,
     cycles: [
       { on: '08:00', hours: 12, off: '20:00' },
-      { on: '20:00', hours: 12, off: '08:00' },
+      { on: '20:00', hours: 6, off: '02:00' },
     ],
     rampUpMin: 10,
     rampDownMin: 10,
@@ -733,12 +735,94 @@ const GROUPS_V2_DEFAULTS = {
   gradients: { ppfd: 0, blue: 0, tempC: 0, rh: 0 },
 };
 
+function normalizePhotoperiodHours(hours) {
+  const num = Number(hours);
+  if (!Number.isFinite(num)) return 0;
+  const clamped = Math.max(0, Math.min(24, num));
+  return Math.round(clamped * 4) / 4;
+}
+
+function normalizeTimeString(value, fallback = '08:00') {
+  if (typeof value === 'string') {
+    const trimmed = value.trim();
+    if (/^\d{1,2}:\d{2}$/.test(trimmed)) {
+      const minutes = toMinutes(trimmed);
+      if (Number.isFinite(minutes)) {
+        return minutesToHHMM(minutes);
+      }
+    }
+  }
+  return typeof fallback === 'string' && fallback ? fallback : '08:00';
+}
+
+function distributeMinutes(total, parts) {
+  const safeTotal = Math.max(0, Math.round(Number(total) || 0));
+  const safeParts = Math.max(1, Math.round(Number(parts) || 1));
+  const base = Math.floor(safeTotal / safeParts);
+  const remainder = safeTotal - base * safeParts;
+  return Array.from({ length: safeParts }, (_, index) => base + (index < remainder ? 1 : 0));
+}
+
+function generateGroupsV2Cycles(mode, startTime, photoperiodHours) {
+  const normalizedMode = mode === 'two' ? 'two' : 'one';
+  const safeStart = normalizeTimeString(startTime, GROUPS_V2_DEFAULTS.schedule.startTime);
+  const normalizedHours = normalizePhotoperiodHours(photoperiodHours);
+  const totalOnMinutes = Math.max(0, Math.round(normalizedHours * 60));
+  const totalOffMinutes = Math.max(0, 1440 - totalOnMinutes);
+  const cycleCount = normalizedMode === 'two' ? 2 : 1;
+  const onMinutesParts = distributeMinutes(totalOnMinutes, cycleCount);
+  const offMinutesParts = distributeMinutes(totalOffMinutes, cycleCount);
+  let cursor = toMinutes(safeStart);
+  if (!Number.isFinite(cursor)) cursor = toMinutes(GROUPS_V2_DEFAULTS.schedule.startTime);
+  if (!Number.isFinite(cursor)) cursor = 0;
+  const cycles = [];
+  for (let i = 0; i < cycleCount; i += 1) {
+    const onMinutes = onMinutesParts[i];
+    const offMinutes = offMinutesParts[i];
+    const cycleOn = minutesToHHMM(cursor);
+    const cycleOff = minutesToHHMM(cursor + onMinutes);
+    cycles.push({ on: cycleOn, off: cycleOff, hours: onMinutes / 60 });
+    cursor = (cursor + onMinutes + offMinutes) % 1440;
+  }
+  return { startTime: safeStart, photoperiodHours: normalizedHours, cycles };
+}
+
+function computePhotoperiodFromCycles(rawCycles, mode, fallbackHours) {
+  if (Array.isArray(rawCycles) && rawCycles.length) {
+    const activeCount = mode === 'two' ? 2 : 1;
+    let total = 0;
+    for (let i = 0; i < activeCount; i += 1) {
+      const entry = rawCycles[i];
+      if (!entry) continue;
+      const directHours = toNumberOrNull(entry.hours);
+      if (Number.isFinite(directHours)) {
+        total += directHours;
+        continue;
+      }
+      const duration = computeCycleDuration(entry.on, entry.off) / 60;
+      if (Number.isFinite(duration)) total += duration;
+    }
+    if (total > 0) return total;
+  }
+  return Number.isFinite(fallbackHours) ? fallbackHours : GROUPS_V2_DEFAULTS.schedule.photoperiodHours;
+}
+
 function createDefaultGroupsV2Schedule() {
   const defaults = GROUPS_V2_DEFAULTS.schedule;
+  const baseMode = defaults.mode === 'two' ? 'two' : 'one';
+  const start = normalizeTimeString(defaults.startTime, defaults.cycles[0]?.on || '08:00');
+  const photoperiod = normalizePhotoperiodHours(
+    Number.isFinite(defaults.photoperiodHours)
+      ? defaults.photoperiodHours
+      : computePhotoperiodFromCycles(defaults.cycles, baseMode, 12),
+  );
+  const generated = generateGroupsV2Cycles('two', start, photoperiod);
   return {
-    mode: defaults.mode,
+    mode: baseMode,
     timezone: defaults.timezone,
-    cycles: defaults.cycles.map((cycle) => ({ ...cycle })),
+    startTime: generated.startTime,
+    photoperiodHours: generated.photoperiodHours,
+    cycles: generated.cycles,
     rampUpMin: defaults.rampUpMin,
     rampDownMin: defaults.rampDownMin,
   };
@@ -763,26 +847,17 @@ function computeGroupsV2CycleOff(on, hours) {
 
 function formatCycleHoursValue(hours) {
   if (!Number.isFinite(hours)) return '';
-  const rounded = Math.round(hours * 2) / 2;
-  if (Number.isInteger(rounded)) return String(Math.trunc(rounded));
-  return rounded.toFixed(1).replace(/\.0$/, '');
-}
-
-function normalizeGroupsV2Cycle(cycle, fallback = { on: '00:00', hours: 0, off: '00:00' }) {
-  const base = typeof cycle === 'object' && cycle !== null ? cycle : {};
-  const safeFallback = fallback || { on: '00:00', hours: 0, off: '00:00' };
-  const on = typeof base.on === 'string' && base.on ? base.on : safeFallback.on;
-  const fromHours = toNumberOrNull(base.hours);
-  let hours = Number.isFinite(fromHours) ? fromHours : null;
-  if (!Number.isFinite(hours) && typeof base.off === 'string' && base.off) {
-    hours = computeCycleDuration(on, base.off) / 60;
+  const normalized = Math.max(0, Number(hours));
+  if (Math.abs(normalized - Math.round(normalized)) < 1e-6) {
+    return String(Math.round(normalized));
   }
-  if (!Number.isFinite(hours)) hours = safeFallback.hours;
-  hours = normalizeCycleHours(hours);
-  const off = typeof base.off === 'string' && base.off
-    ? base.off
-    : (computeGroupsV2CycleOff(on, hours) || safeFallback.off || '--:--');
-  return { on, hours, off };
+  if (Math.abs(normalized * 10 - Math.round(normalized * 10)) < 1e-6) {
+    return (Math.round(normalized * 10) / 10).toFixed(1).replace(/\.0$/, '');
+  }
+  return (Math.round(normalized * 100) / 100)
+    .toFixed(2)
+    .replace(/\.00$/, '')
+    .replace(/(\.\d)0$/, '$1');
 }
 
 function normalizeGroupsV2Schedule(schedule) {
@@ -792,10 +867,26 @@ function normalizeGroupsV2Schedule(schedule) {
   const timezone = typeof base.timezone === 'string' && base.timezone ? base.timezone : defaults.timezone;
   const rampUpMin = toNumberOrNull(base.rampUpMin) ?? defaults.rampUpMin;
   const rampDownMin = toNumberOrNull(base.rampDownMin) ?? defaults.rampDownMin;
-  const rawCycles = Array.isArray(base.cycles) ? base.cycles : [];
-  const fallbackCycles = defaults.cycles;
-  const normalizedCycles = [0, 1].map((idx) => normalizeGroupsV2Cycle(rawCycles[idx], fallbackCycles[idx] || fallbackCycles[0]));
-  return { mode, timezone, rampUpMin, rampDownMin, cycles: normalizedCycles };
+  const startCandidate = normalizeTimeString(
+    base.startTime ?? base.start ?? (Array.isArray(base.cycles) && base.cycles[0]?.on),
+    defaults.startTime,
+  );
+  const providedPhotoperiod = toNumberOrNull(base.photoperiodHours ?? base.durationHours);
+  const fallbackPhotoperiod = computePhotoperiodFromCycles(base.cycles, mode, defaults.photoperiodHours);
+  const photoperiodHours = normalizePhotoperiodHours(
+    Number.isFinite(providedPhotoperiod) ? providedPhotoperiod : fallbackPhotoperiod,
+  );
+  const generated = generateGroupsV2Cycles(mode, startCandidate, photoperiodHours);
+  const twoCycle = generateGroupsV2Cycles('two', generated.startTime, generated.photoperiodHours).cycles;
+  return {
+    mode,
+    timezone,
+    rampUpMin,
+    rampDownMin,
+    startTime: generated.startTime,
+    photoperiodHours: generated.photoperiodHours,
+    cycles: twoCycle,
+  };
 }
 
 function ensureGroupsV2ScheduleState() {
@@ -807,31 +898,18 @@ function ensureGroupsV2ScheduleState() {
 function hydrateGroupsV2ScheduleState(scheduleCfg) {
   const defaults = createDefaultGroupsV2Schedule();
   if (!scheduleCfg || typeof scheduleCfg !== 'object') return createDefaultGroupsV2Schedule();
+  const cycles = Array.isArray(scheduleCfg.cycles)
+    ? scheduleCfg.cycles.slice(0, 2).map((cycle) => ({ ...cycle }))
+    : [];
   const base = {
     mode: scheduleCfg.mode === 'two' ? 'two' : 'one',
     timezone: typeof scheduleCfg.timezone === 'string' && scheduleCfg.timezone ? scheduleCfg.timezone : defaults.timezone,
     rampUpMin: toNumberOrNull(scheduleCfg.rampUpMin) ?? defaults.rampUpMin,
     rampDownMin: toNumberOrNull(scheduleCfg.rampDownMin) ?? defaults.rampDownMin,
-    cycles: [],
+    startTime: scheduleCfg.startTime ?? scheduleCfg.start ?? (cycles[0]?.on ?? defaults.startTime),
+    photoperiodHours: toNumberOrNull(scheduleCfg.photoperiodHours ?? scheduleCfg.durationHours),
+    cycles,
   };
-  if (Array.isArray(scheduleCfg.cycles) && scheduleCfg.cycles.length) {
-    base.cycles = scheduleCfg.cycles.slice(0, 2).map((cycle) => ({ ...cycle }));
-    if (scheduleCfg.mode === 'two' && base.cycles.length === 1 && defaults.cycles[1]) {
-      base.cycles.push({ ...defaults.cycles[1] });
-    }
-  } else {
-    const start = typeof scheduleCfg.startTime === 'string' && scheduleCfg.startTime
-      ? scheduleCfg.startTime
-      : defaults.cycles[0].on;
-    const duration = toNumberOrNull(scheduleCfg.durationHours);
-    const hours = Number.isFinite(duration) && duration > 0 ? duration : defaults.cycles[0].hours;
-    const off = computeGroupsV2CycleOff(start, hours) || defaults.cycles[0].off;
-    base.cycles = [{ on: start, off }];
-    if (scheduleCfg.mode === 'two' && defaults.cycles[1]) {
-      base.mode = 'two';
-      base.cycles.push({ ...defaults.cycles[1] });
-    }
-  }
   return normalizeGroupsV2Schedule(base);
 }
 
@@ -839,28 +917,23 @@ function buildGroupsV2ScheduleConfig() {
   const scheduleState = ensureGroupsV2ScheduleState();
   const defaults = createDefaultGroupsV2Schedule();
   const mode = scheduleState.mode === 'two' ? 'two' : 'one';
-  const activeCount = mode === 'two' ? 2 : 1;
-  const cycles = [];
-  for (let i = 0; i < activeCount; i += 1) {
-    const fallback = defaults.cycles[i] || defaults.cycles[0];
-    const cycle = scheduleState.cycles[i] || fallback;
-    const on = typeof cycle.on === 'string' && cycle.on ? cycle.on : fallback.on;
-    const hours = Number.isFinite(cycle.hours) ? cycle.hours : fallback.hours;
-    const off = typeof cycle.off === 'string' && cycle.off
-      ? cycle.off
-      : (computeGroupsV2CycleOff(on, hours) || fallback.off);
-    cycles.push({ on, off });
-  }
-  const scheduleForSummary = { mode, cycles };
-  const durationHours = getDailyOnHours(scheduleForSummary);
+  const startTime = normalizeTimeString(scheduleState.startTime, defaults.startTime);
+  const photoperiodHours = normalizePhotoperiodHours(
+    Number.isFinite(scheduleState.photoperiodHours)
+      ? scheduleState.photoperiodHours
+      : defaults.photoperiodHours,
+  );
+  const generated = generateGroupsV2Cycles(mode, startTime, photoperiodHours);
+  const selectedCycles = generated.cycles.map(({ on, off, hours }) => ({ on, off, hours }));
   return {
     mode,
     timezone: typeof scheduleState.timezone === 'string' && scheduleState.timezone
       ? scheduleState.timezone
       : defaults.timezone,
-    cycles,
-    durationHours,
-    startTime: cycles[0]?.on || defaults.cycles[0].on,
+    startTime: generated.startTime,
+    photoperiodHours: generated.photoperiodHours,
+    durationHours: generated.photoperiodHours,
+    cycles: selectedCycles,
     rampUpMin: toNumberOrNull(scheduleState.rampUpMin) ?? defaults.rampUpMin,
     rampDownMin: toNumberOrNull(scheduleState.rampDownMin) ?? defaults.rampDownMin,
   };
@@ -874,36 +947,48 @@ function updateGroupsV2ScheduleUI() {
   modeRadios.forEach((radio) => {
     radio.checked = radio.value === mode;
   });
-  const cycleConfigs = [
-    { index: 0, onId: 'groupsV2Cycle1On', hoursId: 'groupsV2Cycle1Hours', endId: 'groupsV2Cycle1End', fallback: defaults.cycles[0] },
-    { index: 1, onId: 'groupsV2Cycle2On', hoursId: 'groupsV2Cycle2Hours', endId: 'groupsV2Cycle2End', fallback: defaults.cycles[1] || defaults.cycles[0] },
-  ];
-  cycleConfigs.forEach((config) => {
-    const cycleState = scheduleState.cycles[config.index] || config.fallback;
-    const onValue = typeof cycleState.on === 'string' && cycleState.on ? cycleState.on : config.fallback.on;
-    const hoursValue = Number.isFinite(cycleState.hours) ? cycleState.hours : config.fallback.hours;
-    const offValue = typeof cycleState.off === 'string' && cycleState.off
-      ? cycleState.off
-      : (computeGroupsV2CycleOff(onValue, hoursValue) || config.fallback.off || '--:--');
-    const onInput = document.getElementById(config.onId);
-    if (onInput) onInput.value = onValue;
-    const hoursInput = document.getElementById(config.hoursId);
-    if (hoursInput) hoursInput.value = formatCycleHoursValue(hoursValue);
-    const endLabel = document.getElementById(config.endId);
-    if (endLabel) endLabel.textContent = `End: ${offValue || '--:--'}`;
-    scheduleState.cycles[config.index] = normalizeGroupsV2Cycle({ on: onValue, hours: hoursValue, off: offValue }, config.fallback);
-  });
+  const startTime = normalizeTimeString(scheduleState.startTime, defaults.startTime);
+  const photoperiodHours = normalizePhotoperiodHours(
+    Number.isFinite(scheduleState.photoperiodHours)
+      ? scheduleState.photoperiodHours
+      : defaults.photoperiodHours,
+  );
+  const singleCycle = generateGroupsV2Cycles('one', startTime, photoperiodHours).cycles[0];
+  const twoCycles = generateGroupsV2Cycles('two', startTime, photoperiodHours).cycles;
+
+  const c1OnInput = document.getElementById('groupsV2Cycle1On');
+  if (c1OnInput) c1OnInput.value = singleCycle?.on || startTime;
+  const c1HoursInput = document.getElementById('groupsV2Cycle1Hours');
+  if (c1HoursInput) c1HoursInput.value = formatCycleHoursValue(photoperiodHours);
+  const c1End = document.getElementById('groupsV2Cycle1End');
+  if (c1End) c1End.textContent = `End: ${singleCycle?.off || '--:--'}`;
+
   const cycle2Container = document.getElementById('groupsV2Cycle2Container');
   if (cycle2Container) {
     const isTwo = mode === 'two';
     cycle2Container.style.display = isTwo ? 'flex' : 'none';
-    cycle2Container.querySelectorAll('input').forEach((input) => {
-      input.disabled = !isTwo;
-    });
+    const c2 = twoCycles[1] || twoCycles[0] || { on: defaults.cycles[1]?.on || startTime, off: defaults.cycles[1]?.off || startTime, hours: defaults.cycles[1]?.hours ?? photoperiodHours / 2 };
+    const c2OnInput = document.getElementById('groupsV2Cycle2On');
+    if (c2OnInput) {
+      c2OnInput.value = c2.on;
+      c2OnInput.readOnly = true;
+      c2OnInput.setAttribute('aria-readonly', 'true');
+      c2OnInput.disabled = !isTwo;
+    }
+    const c2HoursInput = document.getElementById('groupsV2Cycle2Hours');
+    if (c2HoursInput) {
+      c2HoursInput.value = formatCycleHoursValue(c2.hours);
+      c2HoursInput.readOnly = true;
+      c2HoursInput.setAttribute('aria-readonly', 'true');
+      c2HoursInput.disabled = !isTwo;
+    }
+    const c2End = document.getElementById('groupsV2Cycle2End');
+    if (c2End) c2End.textContent = `End: ${c2.off || '--:--'}`;
   }
   const summaryEl = document.getElementById('groupsV2ScheduleSummary');
   if (summaryEl) {
-    const summaryText = scheduleSummary(buildGroupsV2ScheduleConfig());
+    const summaryConfig = buildGroupsV2ScheduleConfig();
+    const summaryText = scheduleSummary({ mode: summaryConfig.mode, cycles: summaryConfig.cycles });
     summaryEl.textContent = summaryText && summaryText !== 'No schedule'
       ? `Summary: ${summaryText}`
       : '';
@@ -1050,6 +1135,7 @@ function resolvePlanTargetsForDay(plan, dayNumber) {
     return {
       stage: plan.stage || '',
       ppfd: toNumberOrNull(firstNonEmpty(plan.ppfd, derived?.ppfd)),
+      dli: toNumberOrNull(firstNonEmpty(plan.dli, derived?.dli)),
       photoperiod: basePhotoperiod,
       photoperiodHours,
     };
@@ -1072,9 +1158,11 @@ function resolvePlanTargetsForDay(plan, dayNumber) {
   }
   const photoperiodHours = readPhotoperiodHours(target?.photoperiod) ?? derived?.photoperiodHours ?? null;
   const ppfd = toNumberOrNull(firstNonEmpty(target?.ppfd, derived?.ppfd, plan.ppfd));
+  const dli = toNumberOrNull(firstNonEmpty(target?.dli, plan.dli, derived?.dli));
   return {
     stage: target?.stage || plan.stage || '',
     ppfd,
+    dli,
     photoperiod: target?.photoperiod,
     photoperiodHours,
   };
@@ -1089,11 +1177,26 @@ function computeGroupsV2PreviewData(planOverride) {
   const scheduleHours = Number.isFinite(scheduleConfig.durationHours) ? scheduleConfig.durationHours : null;
   const basePhotoperiod = target.photoperiodHours ?? readPhotoperiodHours(firstNonEmpty(plan.photoperiod, plan.defaults?.photoperiod, plan._derived?.photoperiod));
   const photoperiodHours = Number.isFinite(scheduleHours) && scheduleHours > 0 ? scheduleHours : basePhotoperiod;
-  const basePpfd = toNumberOrNull(firstNonEmpty(target.ppfd, plan.ppfd, plan._derived?.ppfd));
+  const planPpfd = toNumberOrNull(firstNonEmpty(target.ppfd, plan.ppfd, plan._derived?.ppfd));
   const gradientPpfd = toNumberOrNull(groupsV2FormState.gradients.ppfd) || 0;
+  const hours = Number.isFinite(photoperiodHours) ? Math.max(0, photoperiodHours) : null;
+  const targetDli = toNumberOrNull(firstNonEmpty(target.dli, plan.dli, plan._derived?.dli));
+  let basePpfd = Number.isFinite(planPpfd) ? planPpfd : null;
+  let ppfdAdjustedForDli = false;
+  let aiSuggestion = '';
+  if (Number.isFinite(targetDli) && hours != null && hours > 0) {
+    basePpfd = (targetDli * 1e6) / (3600 * hours);
+    ppfdAdjustedForDli = true;
+  }
+  if ((basePpfd == null || !Number.isFinite(basePpfd)) && hours != null && hours > 0) {
+    basePpfd = 200;
+    const recommendedDli = (basePpfd * 3600 * hours) / 1e6;
+    aiSuggestion = `AI Assist recommends starting at ${Math.round(basePpfd)} µmol·m⁻²·s⁻¹ (${recommendedDli.toFixed(1)} mol·m⁻²·d⁻¹) until plan targets are defined.`;
+  } else if ((basePpfd == null || !Number.isFinite(basePpfd)) && (!hours || hours === 0)) {
+    aiSuggestion = 'AI Assist recommends selecting a photoperiod to receive PPFD guidance.';
+  }
   const adjustedPpfd = basePpfd != null ? basePpfd + gradientPpfd : null;
   const safePpfd = adjustedPpfd != null ? Math.max(0, adjustedPpfd) : null;
-  const hours = Number.isFinite(photoperiodHours) ? Math.max(0, photoperiodHours) : null;
   const dli = safePpfd != null && hours != null ? (safePpfd * 3600 * hours) / 1e6 : null;
   return {
     planId: plan.id || plan.name || '',
@@ -1104,6 +1207,9 @@ function computeGroupsV2PreviewData(planOverride) {
     basePhotoperiod,
     photoperiodHours: hours,
     dli,
+    targetDli: Number.isFinite(targetDli) ? targetDli : null,
+    ppfdAdjustedForDli,
+    aiSuggestion,
     gradients: { ...groupsV2FormState.gradients },
     schedule: scheduleConfig,
     anchor: {
@@ -1129,10 +1235,10 @@ function updateGroupsV2Preview() {
   }
   const dayLabel = preview.day != null ? `Day ${preview.day}` : 'Day —';
   const stage = preview.stage || '—';
-  const photoperiodLabel = Number.isFinite(preview.photoperiodHours) ? `${preview.photoperiodHours.toFixed(1)} h` : '—';
+  const photoperiodLabel = Number.isFinite(preview.photoperiodHours) ? `${formatCycleHoursValue(preview.photoperiodHours)} h` : '—';
   const ppfdLabel = Number.isFinite(preview.ppfd) ? `${Math.round(preview.ppfd)} µmol·m⁻²·s⁻¹` : '—';
   const dliLabel = Number.isFinite(preview.dli) ? `${preview.dli.toFixed(2)} mol·m⁻²·d⁻¹` : '—';
-  const basePhotoperiodLabel = Number.isFinite(preview.basePhotoperiod) ? `${preview.basePhotoperiod.toFixed(1)} h plan` : '';
+  const basePhotoperiodLabel = Number.isFinite(preview.basePhotoperiod) ? `${formatCycleHoursValue(preview.basePhotoperiod)} h plan` : '';
   const basePpfdLabel = Number.isFinite(preview.basePpfd) ? `${Math.round(preview.basePpfd)} µmol plan` : '';
   const gradients = preview.gradients || {};
   const gradientParts = [];
@@ -1147,6 +1253,16 @@ function updateGroupsV2Preview() {
   const gradientHtml = gradientParts.length
     ? `<div class="tiny text-muted">Gradients: ${gradientParts.map((part) => escapeHtml(part)).join(' • ')}</div>`
     : '';
+  const notes = [];
+  if (preview.ppfdAdjustedForDli && Number.isFinite(preview.targetDli)) {
+    notes.push(`PPFD auto-scaled to maintain ${preview.targetDli.toFixed(2)} mol·m⁻²·d⁻¹.`);
+  }
+  if (preview.aiSuggestion) {
+    notes.push(preview.aiSuggestion);
+  }
+  const notesHtml = notes.length
+    ? `<div class="tiny text-muted">${notes.map((note) => escapeHtml(note)).join('<br>')}</div>`
+    : '';
   previewEl.innerHTML = `
     <div><strong>Today →</strong> ${escapeHtml(dayLabel)}</div>
     <div class="tiny">Stage: <strong>${escapeHtml(stage)}</strong></div>
@@ -1154,6 +1270,7 @@ function updateGroupsV2Preview() {
     <div class="tiny">Photoperiod: <strong>${escapeHtml(photoperiodLabel)}</strong>${basePhotoperiodLabel ? ` <span class="text-muted">(${escapeHtml(basePhotoperiodLabel)})</span>` : ''}</div>
     <div class="tiny">DLI: <strong>${escapeHtml(dliLabel)}</strong></div>
     ${gradientHtml}
+    ${notesHtml}
   `;
 }
 
@@ -1216,40 +1333,32 @@ function initializeGroupsV2Form() {
     });
   });
   const defaultSchedule = createDefaultGroupsV2Schedule();
-  [
-    { index: 0, onId: 'groupsV2Cycle1On', hoursId: 'groupsV2Cycle1Hours' },
-    { index: 1, onId: 'groupsV2Cycle2On', hoursId: 'groupsV2Cycle2Hours' },
-  ].forEach(({ index, onId, hoursId }) => {
-    const onInput = document.getElementById(onId);
-    if (onInput) {
-      const handleOnChange = (event) => {
-        const schedule = ensureGroupsV2ScheduleState();
-        const fallback = defaultSchedule.cycles[index] || defaultSchedule.cycles[0];
-        const value = event.target.value || fallback.on;
-        const nextCycle = normalizeGroupsV2Cycle({ ...schedule.cycles[index], on: value }, fallback);
-        schedule.cycles[index] = nextCycle;
-        groupsV2FormState.schedule = schedule;
-        updateGroupsV2ScheduleUI();
-        updateGroupsV2Preview();
-      };
-      onInput.addEventListener('change', handleOnChange);
-      onInput.addEventListener('input', handleOnChange);
-    }
-    const hoursInput = document.getElementById(hoursId);
-    if (hoursInput) {
-      hoursInput.addEventListener('input', (event) => {
-        const schedule = ensureGroupsV2ScheduleState();
-        const fallback = defaultSchedule.cycles[index] || defaultSchedule.cycles[0];
-        const value = normalizeCycleHours(event.target.value);
-        const nextCycle = normalizeGroupsV2Cycle({ ...schedule.cycles[index], hours: value }, fallback);
-        schedule.cycles[index] = nextCycle;
-        groupsV2FormState.schedule = schedule;
-        hoursInput.value = formatCycleHoursValue(nextCycle.hours);
-        updateGroupsV2ScheduleUI();
-        updateGroupsV2Preview();
-      });
-    }
-  });
+  const c1OnInput = document.getElementById('groupsV2Cycle1On');
+  if (c1OnInput) {
+    const handleStartChange = (event) => {
+      const schedule = ensureGroupsV2ScheduleState();
+      const fallback = defaultSchedule.startTime || defaultSchedule.cycles[0]?.on || '08:00';
+      const value = normalizeTimeString(event.target.value, fallback);
+      schedule.startTime = value;
+      groupsV2FormState.schedule = schedule;
+      updateGroupsV2ScheduleUI();
+      updateGroupsV2Preview();
+    };
+    c1OnInput.addEventListener('change', handleStartChange);
+    c1OnInput.addEventListener('input', handleStartChange);
+  }
+  const c1HoursInput = document.getElementById('groupsV2Cycle1Hours');
+  if (c1HoursInput) {
+    c1HoursInput.addEventListener('input', (event) => {
+      const schedule = ensureGroupsV2ScheduleState();
+      const value = normalizePhotoperiodHours(event.target.value);
+      schedule.photoperiodHours = value;
+      groupsV2FormState.schedule = schedule;
+      c1HoursInput.value = formatCycleHoursValue(value);
+      updateGroupsV2ScheduleUI();
+      updateGroupsV2Preview();
+    });
+  }
   const gradientMap = {
     groupsV2GradientPpfd: 'ppfd',
     groupsV2GradientBlue: 'blue',
@@ -1891,6 +2000,7 @@ function normalizePlanLightDay(entry) {
     day: entry.d ?? entry.day ?? entry.dayStart ?? null,
     stage: entry.stage ?? entry.label ?? '',
     ppfd: toNumberOrNull(entry.ppfd),
+    dli: toNumberOrNull(entry.dli ?? entry.targetDli ?? entry.dliTarget),
     photoperiod: firstNonEmpty(entry.photoperiod, entry.hours, entry.photoperiodHours),
     mix: {
       cw: cw ?? 0,
