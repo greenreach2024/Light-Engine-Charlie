@@ -6020,6 +6020,323 @@ function computeWeightedSPD(mix, opts = {}) {
     deviceCount: deviceIds.length,
   };
 }
+// ===== Spectra helpers (Plan vs Light) =====
+function ensureSpectraState() {
+  if (!window.__spectraState) {
+    window.__spectraState = { selectedPlan: null, selectedLights: [] };
+  }
+  return window.__spectraState;
+}
+
+function ensureSpdFromMix(mix, deviceIds = []) {
+  if (!mix) return null;
+  try {
+    const computed = computeWeightedSPD(mix, { deviceIds });
+    if (computed && Array.isArray(computed.wavelengths) && computed.wavelengths.length) {
+      const wavelengths = computed.wavelengths.map(Number);
+      const baseSamples = Array.isArray(computed.samples) && computed.samples.length ? computed.samples : computed.display;
+      const samples = Array.isArray(baseSamples) ? baseSamples.map((value) => Number(value) || 0) : [];
+      return { wavelengths, samples };
+    }
+  } catch (err) {
+    console.debug('SPD mix fallback engaged', err);
+  }
+  const safeMix = {
+    bl: Number(mix.bl ?? mix.blue ?? 0),
+    cw: Number(mix.cw ?? mix.cool ?? 0),
+    ww: Number(mix.ww ?? mix.warm ?? 0),
+    rd: Number(mix.rd ?? mix.red ?? 0),
+  };
+  const points = [
+    { nm: 400, val: safeMix.bl },
+    { nm: 450, val: safeMix.bl },
+    { nm: 520, val: safeMix.cw },
+    { nm: 560, val: safeMix.ww },
+    { nm: 620, val: safeMix.rd },
+    { nm: 700, val: safeMix.rd * 0.85 },
+  ];
+  return {
+    wavelengths: points.map((point) => point.nm),
+    samples: points.map((point) => point.val),
+  };
+}
+
+function resolveSpd(curve, deviceIds = []) {
+  if (!curve) return null;
+  if (Array.isArray(curve.wavelengths) && Array.isArray(curve.samples)) {
+    return {
+      wavelengths: curve.wavelengths.map(Number),
+      samples: curve.samples.map((value, index) => Number(value ?? (Array.isArray(curve.display) ? curve.display[index] : 0)) || 0),
+    };
+  }
+  if (Array.isArray(curve.wavelengths) && Array.isArray(curve.display) && !Array.isArray(curve.samples)) {
+    return {
+      wavelengths: curve.wavelengths.map(Number),
+      samples: curve.display.map((value) => Number(value) || 0),
+    };
+  }
+  if (Array.isArray(curve) && curve.length && typeof curve[0] === 'object' && curve[0]) {
+    if ('nm' in curve[0]) {
+      const sorted = curve.slice().sort((a, b) => Number(a.nm) - Number(b.nm));
+      return {
+        wavelengths: sorted.map((point) => Number(point.nm)),
+        samples: sorted.map((point) => Number(point.val ?? point.value ?? 0)),
+      };
+    }
+  }
+  if (typeof curve === 'object') {
+    const numericKeys = Object.keys(curve).filter((key) => !Number.isNaN(Number(key)));
+    if (numericKeys.length) {
+      const sortedKeys = numericKeys.map(Number).sort((a, b) => a - b);
+      return {
+        wavelengths: sortedKeys,
+        samples: sortedKeys.map((nm) => Number(curve[nm]) || 0),
+      };
+    }
+  }
+  return ensureSpdFromMix(curve, deviceIds);
+}
+
+// Ensure we work with 400–700 nm domain (1 nm resolution)
+function sampleSpectrum(curve, nmStart = 400, nmEnd = 700) {
+  if (!curve) return [];
+  let spectrumArray = [];
+  if (Array.isArray(curve.wavelengths) && Array.isArray(curve.samples)) {
+    spectrumArray = curve.wavelengths.map((nm, index) => ({
+      nm: Number(nm),
+      val: Number(curve.samples[index] ?? 0),
+    }));
+  } else if (Array.isArray(curve)) {
+    if (curve.length && typeof curve[0] === 'object' && curve[0]) {
+      spectrumArray = curve.map((point) => ({
+        nm: Number(point.nm ?? point.wavelength ?? 0),
+        val: Number(point.val ?? point.value ?? 0),
+      }));
+    } else if (curve.length && typeof curve[0] === 'number') {
+      spectrumArray = curve.map((value, index) => ({
+        nm: nmStart + index,
+        val: Number(value) || 0,
+      }));
+    }
+  } else if (typeof curve === 'object') {
+    if (Array.isArray(curve.wavelengths) && Array.isArray(curve.display)) {
+      spectrumArray = curve.wavelengths.map((nm, index) => ({
+        nm: Number(nm),
+        val: Number(curve.display[index] ?? 0),
+      }));
+    } else {
+      const numericKeys = Object.keys(curve).filter((key) => !Number.isNaN(Number(key)));
+      if (numericKeys.length) {
+        spectrumArray = numericKeys.map((key) => ({
+          nm: Number(key),
+          val: Number(curve[key]) || 0,
+        }));
+      }
+    }
+  }
+  if (!spectrumArray.length) return [];
+  spectrumArray = spectrumArray.filter((point) => Number.isFinite(point.nm)).sort((a, b) => a.nm - b.nm);
+  const out = [];
+  for (let nm = nmStart; nm <= nmEnd; nm++) {
+    let lo = 0;
+    let hi = spectrumArray.length - 1;
+    let value = 0;
+    let found = false;
+    while (lo <= hi) {
+      const mid = (lo + hi) >> 1;
+      const diff = spectrumArray[mid].nm - nm;
+      if (diff === 0) {
+        value = spectrumArray[mid].val;
+        found = true;
+        break;
+      }
+      if (diff < 0) lo = mid + 1;
+      else hi = mid - 1;
+    }
+    if (!found) {
+      const candidates = [];
+      if (lo < spectrumArray.length) candidates.push(spectrumArray[lo]);
+      if (hi >= 0) candidates.push(spectrumArray[hi]);
+      if (candidates.length) {
+        candidates.sort((a, b) => Math.abs(a.nm - nm) - Math.abs(b.nm - nm));
+        value = candidates[0].val;
+      }
+    }
+    out.push({ nm, val: value });
+  }
+  return out;
+}
+
+function normalizeSpectrum(samples) {
+  const total = samples.reduce((acc, point) => acc + Number(point.val || 0), 0) || 1;
+  return samples.map((point) => ({ nm: point.nm, val: point.val / total }));
+}
+
+const BAND_RANGES = {
+  blue: [400, 500],
+  mid: [500, 600],
+  red: [600, 700],
+};
+
+function bandIntegrals(normSamples) {
+  const acc = { blue: 0, mid: 0, red: 0 };
+  normSamples.forEach((point) => {
+    if (point.nm >= 400 && point.nm < 500) acc.blue += point.val;
+    else if (point.nm >= 500 && point.nm < 600) acc.mid += point.val;
+    else if (point.nm >= 600 && point.nm <= 700) acc.red += point.val;
+  });
+  return acc;
+}
+
+function deltaBands(planBands, lightBands) {
+  const out = {};
+  ['blue', 'mid', 'red'].forEach((band) => {
+    const base = planBands[band];
+    const safeBase = Math.abs(base) < 1e-9 ? 1e-9 : base;
+    out[band] = ((lightBands[band] - planBands[band]) / safeBase) * 100;
+  });
+  return out;
+}
+
+function renderSpectraCanvas(canvas, samples, options = {}) {
+  if (!canvas || !canvas.getContext) return;
+  const ctx = canvas.getContext('2d');
+  const width = canvas.clientWidth || canvas.width || 320;
+  const height = canvas.clientHeight || canvas.height || 120;
+  canvas.width = width;
+  canvas.height = height;
+  ctx.clearRect(0, 0, width, height);
+
+  const padL = 24;
+  const padR = 8;
+  const padT = 8;
+  const padB = 18;
+
+  const xs = (nm) => padL + ((nm - 400) / 300) * (width - padL - padR);
+  const maxY = Math.max(...samples.map((sample) => sample.val), 0) || 1;
+  const ys = (value) => height - padB - (value / maxY) * (height - padT - padB);
+
+  ctx.strokeStyle = '#bbb';
+  ctx.lineWidth = 1;
+  ctx.beginPath();
+  ctx.moveTo(padL, height - padB);
+  ctx.lineTo(width - padR, height - padB);
+  ctx.moveTo(padL, height - padB);
+  ctx.lineTo(padL, padT);
+  ctx.stroke();
+
+  ctx.fillStyle = '#666';
+  ctx.font = '11px system-ui, sans-serif';
+  [400, 500, 600, 700].forEach((nm) => {
+    const x = xs(nm);
+    ctx.beginPath();
+    ctx.moveTo(x, height - padB);
+    ctx.lineTo(x, height - padB + 4);
+    ctx.stroke();
+    ctx.fillText(String(nm), x - 10, height - 4);
+  });
+
+  ctx.strokeStyle = options.stroke || '#111';
+  ctx.lineWidth = 1.5;
+  ctx.beginPath();
+  samples.forEach((point, index) => {
+    const x = xs(point.nm);
+    const y = ys(point.val);
+    if (index === 0) ctx.moveTo(x, y);
+    else ctx.lineTo(x, y);
+  });
+  ctx.stroke();
+}
+
+function getSelectedPlanSpectrum() {
+  return ensureSpectraState().selectedPlan?.spectrum || null;
+}
+
+function getSelectedLights() {
+  return ensureSpectraState().selectedLights || [];
+}
+
+function renderSelectedLightsSpectraUnderPlan() {
+  const planSpd = getSelectedPlanSpectrum();
+  const host = document.getElementById('light-spectra-graphs');
+  const deltaHost = document.getElementById('light-plan-delta');
+  if (!host || !deltaHost) return;
+  host.innerHTML = '';
+  deltaHost.innerHTML = '';
+  if (!planSpd) return;
+
+  const planSamples = normalizeSpectrum(sampleSpectrum(planSpd));
+  if (!planSamples.length) return;
+  const planBands = bandIntegrals(planSamples);
+
+  const lights = getSelectedLights();
+  if (!lights || !lights.length) return;
+
+  const table = document.createElement('table');
+  table.innerHTML = `
+    <thead>
+      <tr><th>Light</th><th>Blue Δ%</th><th>Mid (Green) Δ%</th><th>Red Δ%</th></tr>
+    </thead>
+    <tbody></tbody>`;
+  const tbody = table.querySelector('tbody');
+
+  lights.forEach((light) => {
+    const lightCurve = light.isDynamic ? planSpd : light.manufacturerSpectrum;
+    if (!lightCurve) return;
+    const lightSamples = normalizeSpectrum(sampleSpectrum(lightCurve));
+    if (!lightSamples.length) return;
+    const lightBands = bandIntegrals(lightSamples);
+    const deltas = deltaBands(planBands, lightBands);
+
+    const card = document.createElement('div');
+    card.className = 'spectra-card';
+    card.innerHTML = `
+      <div class="spectra-title">${light.name || light.id || 'Light'}</div>
+      <canvas class="spectra-canvas" aria-label="Spectrum plot"></canvas>
+    `;
+    host.appendChild(card);
+    const canvas = card.querySelector('canvas');
+    renderSpectraCanvas(canvas, lightSamples, { stroke: light.isDynamic ? '#333' : '#111' });
+
+    const fmt = (value) => {
+      const text = `${value >= 0 ? '+' : ''}${value.toFixed(1)}%`;
+      const cls = value >= 0 ? 'delta-pos' : 'delta-neg';
+      return `<span class="${cls}">${text}</span>`;
+    };
+    const row = document.createElement('tr');
+    row.innerHTML = `
+      <td style="text-align:left">${light.name || light.id || 'Light'}</td>
+      <td>${fmt(deltas.blue)}</td>
+      <td>${fmt(deltas.mid)}</td>
+      <td>${fmt(deltas.red)}</td>
+    `;
+    tbody.appendChild(row);
+  });
+
+  if (tbody.children.length) {
+    deltaHost.appendChild(table);
+  }
+}
+
+let __spectraRenderScheduled = false;
+function scheduleSelectedSpectraRender() {
+  if (__spectraRenderScheduled) return;
+  __spectraRenderScheduled = true;
+  const raf = window.requestAnimationFrame || ((cb) => setTimeout(cb, 0));
+  raf(() => {
+    __spectraRenderScheduled = false;
+    renderSelectedLightsSpectraUnderPlan();
+  });
+}
+
+document.addEventListener('plan:changed', scheduleSelectedSpectraRender);
+document.addEventListener('lights:changed', scheduleSelectedSpectraRender);
+window.addEventListener('DOMContentLoaded', () => {
+  ensureSpectraState();
+  scheduleSelectedSpectraRender();
+});
+// ===== End Spectra helpers =====
+
 // Global farm normalization stub
 function normalizeFarmDoc(farm) {
   // TODO: Replace with real normalization logic if needed
@@ -14506,29 +14823,30 @@ function wireGlobalEvents() {
   }
 
   function updateGroupPlanInfoCard(group) {
+    const spectraState = ensureSpectraState();
     const card = document.getElementById('groupPlanInfoCard');
-    if (!card) return;
     const title = document.getElementById('groupPlanInfoTitle');
     const subtitle = document.getElementById('groupPlanInfoSubtitle');
     const canvas = document.getElementById('groupPlanInfoCanvas');
     const metrics = document.getElementById('groupPlanInfoMetrics');
     const plan = group ? STATE.plans.find((p) => p.id === group.plan) : null;
+
     if (!plan) {
-      card.classList.add('is-empty');
-      if (title) title.textContent = 'Plan information';
-      if (subtitle) subtitle.textContent = 'Select a plan to view spectrum targets.';
-      if (metrics) metrics.innerHTML = '';
+      const hadPlan = !!spectraState.selectedPlan;
+      spectraState.selectedPlan = null;
+      if (hadPlan) document.dispatchEvent(new Event('plan:changed'));
+      if (card) {
+        card.classList.add('is-empty');
+        if (title) title.textContent = 'Plan information';
+        if (subtitle) subtitle.textContent = 'Select a plan to view spectrum targets.';
+        if (metrics) metrics.innerHTML = '';
+      }
       clearCanvas(canvas);
       return;
     }
-    card.classList.remove('is-empty');
-    if (title) title.textContent = `Plan: ${plan.name || 'Untitled'}`;
+
     const derived = plan._derived || derivePlanRuntime(plan);
     const cropStage = [plan.crop, plan.stage].filter(Boolean).join(' • ');
-    if (subtitle) {
-      const desc = plan.description || (derived?.notes?.length ? derived.notes.join(' • ') : 'Spectrum targets from the selected plan.');
-      subtitle.textContent = cropStage || desc;
-    }
     const spectrum = plan.spectrum || derived?.spectrum || { cw: 45, ww: 45, bl: 0, rd: 0 };
     const { percentages } = computeChannelPercentages(spectrum);
     const ppfd = getPlanPPFD(plan);
@@ -14539,73 +14857,109 @@ function wireGlobalEvents() {
     const photoperiodLabel = Number.isFinite(photoperiodHours) && photoperiodHours > 0
       ? `${photoperiodHours.toFixed(1)} h`
       : formatPlanPhotoperiodDisplay(firstNonEmpty(plan.photoperiod, derived?.photoperiod, plan.defaults?.photoperiod));
-    const roomSel = document.getElementById('groupRoomDropdown');
-    const zoneSel = document.getElementById('groupZoneDropdown');
-    const targets = resolveEnvironmentTargets(roomSel?.value || '', zoneSel?.value || '');
-    if (metrics) {
-      const items = [
-        { label: 'Cool white', value: `${percentages.cw.toFixed(0)}%` },
-        { label: 'Warm white', value: `${percentages.ww.toFixed(0)}%` },
-        { label: 'Blue', value: `${percentages.bl.toFixed(0)}%` },
-        { label: 'Red', value: `${percentages.rd.toFixed(0)}%` },
-        { label: 'PPFD', value: hasPpfd ? `${ppfd.toFixed(0)} µmol·m⁻²·s⁻¹` : '—' },
-        { label: 'Photoperiod', value: photoperiodLabel && photoperiodLabel !== '—' ? photoperiodLabel : '—' },
-        { label: 'DLI', value: hasDli ? `${dli.toFixed(2)} mol·m⁻²·d⁻¹` : '—' },
-      ];
-      if (targets?.temp) {
-        items.push({ label: 'Temp target', value: formatSetpointRange(targets.temp, '°C') });
+
+    const members = getActiveGroupMembers(group) || [];
+    const deviceIds = members.map((entry) => entry.id).filter(Boolean);
+    const mix = { cw: Number(spectrum.cw || 0), ww: Number(spectrum.ww || 0), bl: Number(spectrum.bl || 0), rd: Number(spectrum.rd || 0) };
+    const planSpd = resolveSpd(mix, deviceIds);
+
+    spectraState.selectedPlan = {
+      id: plan.id || plan.name || '',
+      name: plan.name || 'Untitled',
+      spectrum: planSpd,
+      deviceIds,
+    };
+    document.dispatchEvent(new Event('plan:changed'));
+
+    if (card) {
+      card.classList.remove('is-empty');
+      if (title) title.textContent = `Plan: ${plan.name || 'Untitled'}`;
+      if (subtitle) {
+        const desc = plan.description || (derived?.notes?.length ? derived.notes.join(' • ') : 'Spectrum targets from the selected plan.');
+        subtitle.textContent = cropStage || desc;
       }
-      if (targets?.rh) {
-        items.push({ label: 'Humidity target', value: formatSetpointRange(targets.rh, '%') });
+      const roomSel = document.getElementById('groupRoomDropdown');
+      const zoneSel = document.getElementById('groupZoneDropdown');
+      const targets = resolveEnvironmentTargets(roomSel?.value || '', zoneSel?.value || '');
+      if (metrics) {
+        const items = [
+          { label: 'Cool white', value: `${percentages.cw.toFixed(0)}%` },
+          { label: 'Warm white', value: `${percentages.ww.toFixed(0)}%` },
+          { label: 'Blue', value: `${percentages.bl.toFixed(0)}%` },
+          { label: 'Red', value: `${percentages.rd.toFixed(0)}%` },
+          { label: 'PPFD', value: hasPpfd ? `${ppfd.toFixed(0)} µmol·m⁻²·s⁻¹` : '—' },
+          { label: 'Photoperiod', value: photoperiodLabel && photoperiodLabel !== '—' ? photoperiodLabel : '—' },
+          { label: 'DLI', value: hasDli ? `${dli.toFixed(2)} mol·m⁻²·d⁻¹` : '—' },
+        ];
+        if (targets?.temp) {
+          items.push({ label: 'Temp target', value: formatSetpointRange(targets.temp, '°C') });
+        }
+        if (targets?.rh) {
+          items.push({ label: 'Humidity target', value: formatSetpointRange(targets.rh, '%') });
+        }
+        metrics.innerHTML = items
+          .map((item) => `<dt>${escapeHtml(item.label)}</dt><dd>${escapeHtml(item.value)}</dd>`)
+          .join('');
       }
-      metrics.innerHTML = items
-        .map((item) => `<dt>${escapeHtml(item.label)}</dt><dd>${escapeHtml(item.value)}</dd>`)
-        .join('');
     }
+
     if (canvas && typeof renderSpectrumCanvas === 'function') {
-      const mix = { cw: Number(spectrum.cw || 0), ww: Number(spectrum.ww || 0), bl: Number(spectrum.bl || 0), rd: Number(spectrum.rd || 0) };
-      const members = getActiveGroupMembers(group);
-      const deviceIds = members.map((entry) => entry.id).filter(Boolean);
-      const spd = computeWeightedSPD(mix, { deviceIds });
-      renderSpectrumCanvas(canvas, spd, { width: canvas.width, height: canvas.height });
+      if (planSpd) {
+        renderSpectrumCanvas(canvas, planSpd, { width: canvas.width, height: canvas.height });
+      } else {
+        clearCanvas(canvas);
+      }
     }
   }
 
   function updateGroupLightInfoCard(group) {
+    const spectraState = ensureSpectraState();
     const card = document.getElementById('groupLightInfoCard');
-    if (!card) return;
     const title = document.getElementById('groupLightInfoTitle');
     const subtitle = document.getElementById('groupLightInfoSubtitle');
     const canvas = document.getElementById('groupLightInfoCanvas');
     const metrics = document.getElementById('groupLightInfoMetrics');
     const modeLabel = document.getElementById('groupLightInfoMode');
+
     if (!group) {
-      card.classList.add('is-empty');
-      if (title) title.textContent = 'Current mix';
-      if (subtitle) subtitle.textContent = 'Select a group to preview live control options.';
-      if (metrics) metrics.innerHTML = '';
-      if (modeLabel) modeLabel.textContent = 'Control mode: Locked until lights are assigned.';
+      const hadLights = Array.isArray(spectraState.selectedLights) && spectraState.selectedLights.length > 0;
+      spectraState.selectedLights = [];
+      if (hadLights) document.dispatchEvent(new Event('lights:changed'));
+      if (card) {
+        card.classList.add('is-empty');
+        if (title) title.textContent = 'Current mix';
+        if (subtitle) subtitle.textContent = 'Select a group to preview live control options.';
+        if (metrics) metrics.innerHTML = '';
+        if (modeLabel) modeLabel.textContent = 'Control mode: Locked until lights are assigned.';
+      }
       clearCanvas(canvas);
       setHudLocked(true);
       return;
     }
+
     const activeLights = getActiveGroupMembers(group);
     if (!activeLights.length) {
-      card.classList.add('is-empty');
-      if (title) title.textContent = 'Current mix';
-      if (subtitle) {
-        const { rawRoom, zone } = typeof getSelectedGroupRoomZone === 'function' ? getSelectedGroupRoomZone() : { rawRoom: '', zone: '' };
-        const missingSelection = !String(rawRoom || '').trim() || !String(zone || '').trim();
-        subtitle.textContent = missingSelection
-          ? 'Select a room and zone to preview live control options.'
-          : 'No lights assigned for this room and zone.';
+      const hadLights = Array.isArray(spectraState.selectedLights) && spectraState.selectedLights.length > 0;
+      spectraState.selectedLights = [];
+      if (hadLights) document.dispatchEvent(new Event('lights:changed'));
+      if (card) {
+        card.classList.add('is-empty');
+        if (title) title.textContent = 'Current mix';
+        if (subtitle) {
+          const { rawRoom, zone } = typeof getSelectedGroupRoomZone === 'function' ? getSelectedGroupRoomZone() : { rawRoom: '', zone: '' };
+          const missingSelection = !String(rawRoom || '').trim() || !String(zone || '').trim();
+          subtitle.textContent = missingSelection
+            ? 'Select a room and zone to preview live control options.'
+            : 'No lights assigned for this room and zone.';
+        }
+        if (metrics) metrics.innerHTML = '';
+        if (modeLabel) modeLabel.textContent = 'Control mode: Locked until lights are assigned.';
       }
-      if (metrics) metrics.innerHTML = '';
-      if (modeLabel) modeLabel.textContent = 'Control mode: Locked until lights are assigned.';
       clearCanvas(canvas);
       setHudLocked(true);
       return;
     }
+
     const resolvedLights = activeLights.map((entry) => {
       const meta = getDeviceMeta(entry.id) || {};
       const setup = findSetupFixtureById(entry.id);
@@ -14623,6 +14977,16 @@ function wireGlobalEvents() {
         source: setup ? 'setup' : (meta.vendor || meta.model ? 'device' : 'unknown')
       };
     });
+
+    const selectedLightRecords = resolvedLights.map((light) => ({
+      id: light.id,
+      name: light.name,
+      isDynamic: light.dynamic,
+      manufacturerSpectrum: light.dynamic ? null : resolveSpd(light.spectrum, [light.id]),
+    }));
+    spectraState.selectedLights = selectedLightRecords;
+    document.dispatchEvent(new Event('lights:changed'));
+
     const dynamicCount = resolvedLights.filter((light) => light.dynamic).length;
     const staticCount = resolvedLights.length - dynamicCount;
     const mixInfo = computeMixAndHex(group);
@@ -14641,12 +15005,12 @@ function wireGlobalEvents() {
     const activePhotoperiod = Number.isFinite(planPhotoperiod) ? planPhotoperiod : 0;
     const actualPpfd = planPpfd ? planPpfd * intensityScale : 0;
     const actualDli = actualPpfd > 0 && activePhotoperiod > 0 ? (actualPpfd * 3600 * activePhotoperiod) / 1e6 : 0;
-    card.classList.remove('is-empty');
+
+    if (card) card.classList.remove('is-empty');
     if (title) title.textContent = `Current mix • ${resolvedLights.length} light${resolvedLights.length === 1 ? '' : 's'}`;
     if (subtitle) {
       const primary = resolvedLights[0];
       if (primary) {
-        // Show both manufacturer/vendor and model if available
         let label = '';
         if (primary.vendor) label += primary.vendor + ' ';
         if (primary.model) label += primary.model + ' ';
