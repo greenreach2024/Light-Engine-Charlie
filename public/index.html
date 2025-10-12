@@ -11,18 +11,18 @@
 <body>
   <template id="aiAutomationClusterTemplate">
     <div class="ai-automation-cluster" role="group" aria-label="AI, Automation, and SpectraSync controls">
-      <button type="button" class="chip" data-control="ai">
-        <span class="icon ai" aria-hidden="true"></span>
+      <div class="chip" data-control="ai">
+        <span data-icon-slot="ai" data-icon-label="AI" data-icon-control="ai"></span>
         <span class="chip__status" data-status></span>
-      </button>
-      <button type="button" class="chip" data-control="automation">
-        <span class="icon auto" aria-hidden="true"></span>
+      </div>
+      <div class="chip" data-control="automation">
+        <span data-icon-slot="auto" data-icon-label="Automation" data-icon-control="automation"></span>
         <span class="chip__status" data-status></span>
-      </button>
-      <button type="button" class="chip" data-control="spectra">
-        <span class="icon spectra" aria-hidden="true"></span>
+      </div>
+      <div class="chip" data-control="spectra">
+        <span data-icon-slot="spectra" data-icon-label="SpectraSync" data-icon-control="spectra"></span>
         <span class="chip__status" data-status></span>
-      </button>
+      </div>
       <span class="chip chip--tour-lock" data-role="tour-lock" hidden>Tour Lock</span>
     </div>
   </template>
@@ -130,8 +130,8 @@
 
 
     <div class="dashboard-content">
-      <main class="dashboard-main">
-      <section id="environmentalAiCard" class="card card--feature hud-shell">
+      <main class="dashboard-main gr-grid">
+      <section id="environmentalAiCard" class="card card--feature hud-shell gr-card">
               <div class="row row--between row--center mb-md hud-shell__header">
                 <h2 class="section-title hud-shell__title">Environmental & AI Features</h2>
                 <span class="tiny text-muted">Autonomous Growing Intelligence</span>
@@ -141,17 +141,7 @@
             <!-- SpectraSync Feature -->
             <div class="ai-feature-card active" id="spectraSyncFeature" data-feature="spectrasync">
               <div class="ai-feature-icon spectrasync-icon">
-                <svg width="20" height="20" viewBox="0 0 24 24" fill="none">
-                  <path d="M3 12L6 8L9 14L12 6L15 12L18 4L21 12" stroke="url(#spectrumGradient)" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"/>
-                  <defs>
-                    <linearGradient id="spectrumGradient" x1="0%" y1="0%" x2="100%" y2="0%">
-                      <stop offset="0%" style="stop-color:#EF4444"/>
-                      <stop offset="33%" style="stop-color:#3B82F6"/>
-                      <stop offset="66%" style="stop-color:#E0F2FE"/>
-                      <stop offset="100%" style="stop-color:#FEF3C7"/>
-                    </linearGradient>
-                  </defs>
-                </svg>
+                <span data-icon-slot="spectra" data-icon-label="SpectraSync" data-icon-static="true"></span>
               </div>
               <div class="ai-feature-content">
                 <h3>SpectraSync®</h3>
@@ -229,7 +219,7 @@
 
       <div class="dashboard-stage" data-role="panel-stage" hidden></div>
 
-        <section id="roomAutomationCard" class="card hud-shell std automation-card" aria-labelledby="automationCardTitle" data-panel="automation">
+        <section id="roomAutomationCard" class="card hud-shell std automation-card gr-card" aria-labelledby="automationCardTitle" data-panel="automation">
           <header class="automation-card__header">
             <div>
               <h2 id="automationCardTitle" class="section-title hud-shell__title">Grow Room Automation</h2>
@@ -249,7 +239,7 @@
           </footer>
         </section>
 
-        <section id="aiAdvisoryCard" class="card hud-shell std ai-advisory-card" aria-labelledby="aiAdvisoryTitle">
+        <section id="aiAdvisoryCard" class="card hud-shell std ai-advisory-card gr-card" aria-labelledby="aiAdvisoryTitle">
           <header class="ai-advisory-card__header">
             <div>
               <h2 id="aiAdvisoryTitle" class="section-title hud-shell__title">AI Copilot Advisory</h2>
@@ -263,7 +253,7 @@
 
   <!-- Current Lights Status card removed -->
     <!-- Overview hero (now below lights status) -->
-    <section class="dashboard-panel dashboard-panel--overview is-active" data-panel="overview">
+      <section class="dashboard-panel dashboard-panel--overview is-active" data-panel="overview">
       <section id="overview" class="overview" aria-labelledby="overviewTitle">
         <header class="overview__hdr">
           <div>
@@ -271,9 +261,9 @@
             <p class="overview__subtitle">Tour-ready status for every grow room</p>
           </div>
           <div class="overview__legend" aria-label="Status legend">
-            <span class="overview__legend-item"><span class="icon ai" aria-hidden="true"></span>AI</span>
-            <span class="overview__legend-item"><span class="icon auto" aria-hidden="true"></span>Automation</span>
-            <span class="overview__legend-item"><span class="icon spectra" aria-hidden="true"></span>SpectraSync</span>
+            <span class="overview__legend-item"><span data-icon-slot="ai" data-icon-label="AI status" data-icon-static="true"></span>AI</span>
+            <span class="overview__legend-item"><span data-icon-slot="auto" data-icon-label="Automation status" data-icon-static="true"></span>Automation</span>
+            <span class="overview__legend-item"><span data-icon-slot="spectra" data-icon-label="SpectraSync status" data-icon-static="true"></span>SpectraSync</span>
             <div class="overview__demo" role="group" aria-label="Demo mode controls">
               <label for="demoRoom">Room</label>
               <select id="demoRoom" name="demoRoom" aria-label="Demo room"></select>
@@ -287,7 +277,7 @@
         <div id="overviewGrid" class="overview__grid" aria-live="polite"></div>
       </section>
     </section>
-      <section id="farmPanel" class="card card--compact hud-shell" data-panel="farm-registration">
+      <section id="farmPanel" class="card card--compact hud-shell gr-card" data-panel="farm-registration">
               <header class="panel-header">
                 <div>
                   <h2>Farm Registration</h2>
@@ -307,7 +297,7 @@
                 <!-- <button id="btnStartDeviceSetup" type="button" class="ghost is-hidden">Continue device setup</button> -->
               </div>
             </section>
-      <section id="roomsPanel" class="card card--compact hud-shell" data-panel="grow-rooms">
+      <section id="roomsPanel" class="card card--compact hud-shell gr-card" data-panel="grow-rooms">
               <header class="panel-header">
                 <div>
                   <h2>Grow Rooms</h2>
@@ -319,7 +309,7 @@
                 <div id="roomsList"></div>
               </div>
             </section>
-      <section id="lightsPanel" class="card card--compact hud-shell" data-panel="light-setup">
+      <section id="lightsPanel" class="card card--compact hud-shell gr-card" data-panel="light-setup">
               <header class="panel-header">
                 <div>
                   <h2>Light Setup</h2>
@@ -335,7 +325,7 @@
               </div>
             </section>
 
-<section id="pairDevicesPanel" class="card hud-shell" data-panel="pair-devices">
+<section id="pairDevicesPanel" class="card hud-shell gr-card" data-panel="pair-devices">
   <div class="row row--between row--center hud-shell__header">
     <div>
       <h2 class="section-title hud-shell__title">Pair Devices</h2>
@@ -363,7 +353,7 @@
     <button id="btnPairWizardDocs" type="button" class="ghost">Pairing checklist</button>
   </div>
 </section>
-          <section id="smartControllersPanel" class="card hud-shell" data-panel="smart-controllers">
+          <section id="smartControllersPanel" class="card hud-shell gr-card" data-panel="smart-controllers">
             <div class="row row--between row--center hud-shell__header">
               <h2 class="hud-shell__title">
                 Smart Controllers
@@ -392,7 +382,7 @@
                   </div>
                 </div>
               </div>
-              <div id="smartControllersSetupCard" class="card" style="display:none;margin:16px 0 0 0;padding:20px 24px 16px 24px;background:#f8fafc;border:1px solid #e5e7eb;border-radius:12px;">
+              <div id="smartControllersSetupCard" class="card gr-card" style="display:none;margin:16px 0 0 0;padding:20px 24px 16px 24px;background:#f8fafc;border:1px solid #e5e7eb;border-radius:12px;">
                 <div style="display:flex;flex-direction:column;gap:4px;margin-bottom:12px;">
                   <span class="tiny text-muted" style="letter-spacing:0.02em;text-transform:uppercase;font-weight:600;">Device setup options</span>
                   <p class="tiny" style="margin:0;color:#475569;">Choose an ecosystem to start configuration for new hardware integrations.</p>
@@ -434,7 +424,7 @@
             </div>
           </section>
 
-          <section id="smartPlugsPanel" class="card hud-shell" data-panel="smart-plugs">
+          <section id="smartPlugsPanel" class="card hud-shell gr-card" data-panel="smart-plugs">
             <div class="row row--between row--center hud-shell__header">
               <h2 class="hud-shell__title">Smart Plugs</h2>
               <div class="row row--gap-xs">
@@ -449,7 +439,7 @@
             <div class="table" id="smartPlugsTable" role="region" aria-live="polite"></div>
           </section>
 
-          <section id="controllerAssignmentsPanel" class="card card--panel hud-shell" data-panel="control-assignments">
+          <section id="controllerAssignmentsPanel" class="card card--panel hud-shell gr-card" data-panel="control-assignments">
             <div class="row row--between row--center hud-shell__header">
               <h2 class="section-title hud-shell__title">
                 Controller Assignments
@@ -466,7 +456,7 @@
               <!-- Table will be populated by JavaScript -->
             </div>
           </section>
-      <section id="plansPanel" class="card hud-shell" data-panel="plans">
+      <section id="plansPanel" class="card hud-shell gr-card" data-panel="plans">
             <div class="row row--between row--center hud-shell__header">
               <h2 class="section-title hud-shell__title">
                 Plans (Grow recipes)
@@ -484,7 +474,7 @@
             <div id="plansList" class="grid cols-2 gap-sm" aria-live="polite"></div>
           </section>
       <!-- <section id="schedulesPanel" class="card" data-panel="schedules" style="display:none"> ...original schedule setup card hidden after embedding in Group V2... </section> -->
-      <section id="calibrationPanel" class="card hud-shell" data-panel="calibration">
+      <section id="calibrationPanel" class="card hud-shell gr-card" data-panel="calibration">
             <div class="row row--between row--center hud-shell__header">
               <h2 class="hud-shell__title">
                 Calibration
@@ -500,7 +490,7 @@
             <div id="calibrationRegistry" class="cal-registry"></div>
           </section>
 
-<section id="profilePanel" class="card hud-shell" data-panel="profile">
+<section id="profilePanel" class="card hud-shell gr-card" data-panel="profile">
   <div class="row row--between row--center hud-shell__header">
     <h2 class="hud-shell__title">Profile</h2>
     <span id="profileStatus" class="tiny" aria-live="polite"></span>
@@ -528,13 +518,13 @@
       </main>
 
       <!-- Groups V2 Panel -->
-      <section id="groupsV2Panel" class="card hud-shell" data-panel="groups-v2" data-card-prefix="GR" data-card-code="GV2" hidden>
+      <section id="groupsV2Panel" class="card hud-shell gr-card" data-panel="groups-v2" data-card-prefix="GR" data-card-code="GV2" hidden>
       <div class="row row--between row--center hud-shell__header">
         <h2 class="hud-shell__title">Group V2 Setup</h2>
         <span id="groupsV2Status" class="tiny" aria-live="polite"></span>
       </div>
-      <div class="panel-body">
-  <div class="row group-v2-builder" style="margin-bottom:16px; align-items: flex-end; gap: 16px; flex-wrap: wrap; border: 1.5px solid #cbd5e1; background: linear-gradient(90deg, #f8fafc 80%, #e0f2fe 100%); border-radius: 10px; box-shadow: 0 2px 8px 0 rgba(100, 199, 199, 0.07); padding: 18px 18px 10px 18px;">
+      <div class="panel-body gr-grid">
+  <div class="row group-v2-builder gr-card" style="margin-bottom:16px; align-items: flex-end; gap: 16px; flex-wrap: wrap; border: 1.5px solid #cbd5e1; background: linear-gradient(90deg, #f8fafc 80%, #e0f2fe 100%); border-radius: 10px; box-shadow: 0 2px 8px 0 rgba(100, 199, 199, 0.07); padding: 18px 18px 10px 18px;">
           <label for="groupsV2RoomSelect" style="margin-right:8px">Select Room:</label>
           <select id="groupsV2RoomSelect" style="margin-right:16px">
             <option value="GreenReach">GreenReach</option>
@@ -563,7 +553,7 @@
             <!-- Saved groups will be populated here by JS -->
           </select>
         </div>
-        <div id="groupsV2PlanForm" style="margin-bottom:18px; border: 1.5px solid #cbd5e1; background: linear-gradient(90deg, #f8fafc 80%, #e0f2fe 100%); border-radius: 10px; box-shadow: 0 2px 8px 0 rgba(100, 199, 199, 0.07); padding: 18px 18px 16px 18px;">
+        <div id="groupsV2PlanForm" class="gr-card" style="margin-bottom:18px; border: 1.5px solid #cbd5e1; background: linear-gradient(90deg, #f8fafc 80%, #e0f2fe 100%); border-radius: 10px; box-shadow: 0 2px 8px 0 rgba(100, 199, 199, 0.07); padding: 18px 18px 16px 18px;">
           <div id="groupsV2PlanControls" style="margin-bottom:18px; padding:0 0 8px; border-bottom:1px dashed #bae6fd; display:flex; flex-direction:column; gap:12px;">
             <div style="display:flex; flex-wrap:wrap; gap:16px; align-items:flex-end;">
               <label class="tiny" style="display:flex; flex-direction:column; min-width:220px;">
@@ -658,7 +648,7 @@
             <div class="tiny text-muted">Select a plan to preview today’s stage, PPFD, photoperiod, and DLI.</div>
           </div>
         </div>
-        <div class="group-v2-card" data-card-code="UE" style="margin-bottom:18px; border: 1.5px solid #cbd5e1; background: linear-gradient(90deg, #f8fafc 80%, #e0f2fe 100%); border-radius: 10px; box-shadow: 0 2px 8px 0 rgba(100, 199, 199, 0.07); padding: 0; width:100%; font-family: var(--gr-font, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif);">
+        <div class="group-v2-card gr-card" data-card-code="UE" style="margin-bottom:18px; border: 1.5px solid #cbd5e1; background: linear-gradient(90deg, #f8fafc 80%, #e0f2fe 100%); border-radius: 10px; box-shadow: 0 2px 8px 0 rgba(100, 199, 199, 0.07); padding: 0; width:100%; font-family: var(--gr-font, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif);">
           <div style="display:flex; flex-direction:column; width:100%; min-height:100px; background:#f6f8fa; border-radius:8px 8px 0 0; padding:18px 18px 10px 18px;">
             <h4 style="margin:0 0 8px 0; font-size:1.1em; color:#334155; font-weight:600;">Unassigned Equipment</h4>
             <div style="display:flex; align-items:center; gap:8px; flex-wrap:wrap;">
@@ -670,7 +660,7 @@
             </div>
           </div>
         </div>
-        <div class="group-v2-card" data-card-code="AE" style="margin-bottom:18px; border: 1.5px solid #cbd5e1; background: linear-gradient(90deg, #f8fafc 80%, #e0f2fe 100%); border-radius: 10px; box-shadow: 0 2px 8px 0 rgba(100, 199, 199, 0.07); padding: 0; width:100%; font-family: var(--gr-font, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif);">
+        <div class="group-v2-card gr-card" data-card-code="AE" style="margin-bottom:18px; border: 1.5px solid #cbd5e1; background: linear-gradient(90deg, #f8fafc 80%, #e0f2fe 100%); border-radius: 10px; box-shadow: 0 2px 8px 0 rgba(100, 199, 199, 0.07); padding: 0; width:100%; font-family: var(--gr-font, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif);">
           <div style="display:flex; flex-direction:column; width:100%; min-height:100px; background:#e0f7fa; border-radius:8px 8px 0 0; padding:18px 18px 10px 18px;">
             <h4 style="margin:0 0 8px 0; font-size:1.1em; color:#334155; font-weight:600;">Assigned Equipment</h4>
             <select id="assignedEquipSelect" multiple size="3" style="min-width:180px; font-size:1em; margin-bottom:10px;">
@@ -679,7 +669,7 @@
             <ul id="assignedEquipList" style="display:none;"></ul>
           </div>
         </div>
-        <div class="group-v2-card" data-card-code="UL" style="margin-bottom:18px; border: 1.5px solid #cbd5e1; background: linear-gradient(90deg, #f8fafc 80%, #e0f2fe 100%); border-radius: 10px; box-shadow: 0 2px 8px 0 rgba(100, 199, 199, 0.07); padding: 0; width:100%; font-family: var(--gr-font, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif);">
+        <div class="group-v2-card gr-card" data-card-code="UL" style="margin-bottom:18px; border: 1.5px solid #cbd5e1; background: linear-gradient(90deg, #f8fafc 80%, #e0f2fe 100%); border-radius: 10px; box-shadow: 0 2px 8px 0 rgba(100, 199, 199, 0.07); padding: 0; width:100%; font-family: var(--gr-font, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif);">
           <div style="display:flex; flex-direction:column; width:100%; min-height:100px; background:#f1f5f9; border-radius:8px 8px 0 0; padding:18px 18px 10px 18px;">
             <h4 style="margin:0 0 8px 0; font-size:1.1em; color:#334155; font-weight:600;">Unassigned Lights</h4>
             <div style="display:flex; align-items:center; gap:8px; flex-wrap:wrap;">
@@ -695,7 +685,7 @@
             </div>
           </div>
         </div>
-        <div class="group-v2-card" data-card-code="AL" style="margin-bottom:18px; border: 1.5px solid #cbd5e1; background: linear-gradient(90deg, #f8fafc 80%, #e0f2fe 100%); border-radius: 10px; box-shadow: 0 2px 8px 0 rgba(100, 199, 199, 0.07); padding: 0; width:100%; font-family: var(--gr-font, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif);">
+        <div class="group-v2-card gr-card" data-card-code="AL" style="margin-bottom:18px; border: 1.5px solid #cbd5e1; background: linear-gradient(90deg, #f8fafc 80%, #e0f2fe 100%); border-radius: 10px; box-shadow: 0 2px 8px 0 rgba(100, 199, 199, 0.07); padding: 0; width:100%; font-family: var(--gr-font, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif);">
           <div style="display:flex; flex-direction:column; width:100%; min-height:100px; background:#e0f7fa; border-radius:8px 8px 0 0; padding:18px 18px 10px 18px;">
             <h4 style="margin:0 0 8px 0; font-size:1.1em; color:#334155; font-weight:600;">Assigned Lights</h4>
             <select id="assignedLightsSelect" multiple size="6" style="min-width:320px; max-width:600px; height:176px; margin-bottom:10px; font-size:1em;">
