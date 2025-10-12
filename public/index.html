@@ -110,9 +110,6 @@
         <button type="button" class="sidebar-link" data-sidebar-link data-group="grow-management" data-target="plans">
           Plans (Grow Recipes)
         </button>
-        <button type="button" class="sidebar-link" data-sidebar-link data-group="grow-management" data-target="schedules">
-          Schedules
-        </button>
       </div>
     </div>
   </nav>
@@ -874,66 +871,6 @@
             <div class="tiny text-muted">Select a plan to preview today’s stage, PPFD, photoperiod, and DLI.</div>
           </div>
         </div>
-        <!-- Embedded Schedule Setup Card -->
-        <section id="schedulesPanel-embedded" class="card" data-card-code="SS" style="margin-bottom:18px;">
-          <div class="row row--between row--center">
-            <h3 style="margin:0">Schedule Setup</h3>
-            <span id="schedStatus-embedded" class="tiny" aria-live="polite"></span>
-          </div>
-          <div class="schedule-editor">
-            <div class="schedule-editor__col">
-              <div class="row row--gap-sm row--wrap mt-sm mb-sm">
-                <!-- Name field removed -->
-                <label class="row row--gap-xs"><span>Timezone</span>
-                  <select id="schedTz-embedded">
-                    <option value="America/Toronto">America/Toronto</option>
-                  </select>
-                </label>
-                <button id="applySchedToGroupBtn" type="button" class="primary" style="margin-left:8px;">Apply to Current Group</button>
-              </div>
-              <div class="schedule-mode" role="radiogroup" aria-label="Schedule mode">
-                <span class="tiny">Mode</span>
-                <label class="chip-option"><input type="radio" name="schedMode-embedded" value="one" checked><span>One cycle</span></label>
-                <label class="chip-option"><input type="radio" name="schedMode-embedded" value="two"><span>Two cycles</span></label>
-              </div>
-              <div class="schedule-cycle" data-cycle="1">
-                <div class="tiny">Cycle 1</div>
-                <label><span>Start</span><input id="schedCycle1On-embedded" type="time" value="08:00"></label>
-                <label><span>Photoperiod (h)</span><input id="schedC1Hours-embedded" type="number" min="0" max="24" step="0.5" value="12"></label>
-                <div class="tiny" id="schedC1End-embedded">End: 20:00</div>
-                <div class="tiny" style="color:#475569">Repeated daily</div>
-              </div>
-              <div class="schedule-cycle" data-cycle="2">
-                <div class="tiny">Cycle 2</div>
-                <label><span>Start</span><input id="schedCycle2On-embedded" type="time" value="00:00"></label>
-                <label><span>Photoperiod (h)</span><input id="schedC2Hours-embedded" type="number" min="0" max="24" step="0.5" value="12"></label>
-                <div class="tiny" id="schedC2End-embedded">End: 12:00</div>
-                <div class="tiny" style="color:#475569">Repeated daily</div>
-              </div>
-            </div>
-            <div class="schedule-editor__col schedule-editor__col--preview">
-              <div class="schedule-math" aria-live="polite">
-                <div><strong>ON total</strong><span id="schedOnTotal-embedded">--</span></div>
-                <div><strong>OFF total</strong><span id="schedOffTotal-embedded">--</span></div>
-                <div><strong>Δ vs 24h</strong><span id="schedDelta-embedded">--</span></div>
-              </div>
-              <div id="schedMathWarning-embedded" class="schedule-warning" role="alert" aria-live="polite" style="display:none"></div>
-              <div class="schedule-preview schedule-preview--editor">
-                <div class="schedule-preview__bar" id="schedEditorBar-embedded"></div>
-                <div class="schedule-preview__legend">
-                  <span class="tiny">24h preview</span>
-                  <span class="schedule-preview__dst" id="schedEditorDst-embedded" style="display:none">DST</span>
-                </div>
-                <div class="schedule-preview__transitions" id="schedEditorTransitions-embedded"></div>
-              </div>
-            </div>
-          </div>
-          <div class="row row--gap-sm row--wrap mt-sm mb-sm">
-            <button id="btnSaveSched-embedded" type="button" class="primary">Save Schedule</button>
-            <button id="btnDeleteSched-embedded" type="button" class="ghost">Delete Schedule</button>
-            <button id="btnReloadSched-embedded" type="button" class="ghost">Reload Schedules</button>
-          </div>
-        </section>
         <div class="group-v2-card" data-card-code="UE" style="margin-bottom:18px; border: 1.5px solid #cbd5e1; background: linear-gradient(90deg, #f8fafc 80%, #e0f2fe 100%); border-radius: 10px; box-shadow: 0 2px 8px 0 rgba(100, 199, 199, 0.07); padding: 0; width:100%; font-family: var(--gr-font, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif);">
           <div style="display:flex; flex-direction:column; width:100%; min-height:100px; background:#f6f8fa; border-radius:8px 8px 0 0; padding:18px 18px 10px 18px;">
             <h4 style="margin:0 0 8px 0; font-size:1.1em; color:#334155; font-weight:600;">Unassigned Equipment</h4>
