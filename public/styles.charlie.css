@@ -639,6 +639,45 @@ h3 { font-size: 1.125rem; }
   font-size: 0.85rem;
 }
 
+/* Layout helpers */
+.gr-grid {
+  display: grid;
+  grid-template-columns: repeat(12, minmax(0, 1fr));
+  gap: 16px;
+}
+
+.gr-card {
+  background: #fff;
+  border: 1px solid #e5e7eb;
+  border-radius: 12px;
+  padding: 12px;
+}
+
+/* Full-width (span all columns) */
+.gr-full {
+  grid-column: 1 / -1;
+}
+
+/* If a legacy flex wrapper exists, ensure full width still works */
+.gr-card.gr-full {
+  width: 100%;
+}
+
+.gr-icon-img {
+  display: inline-block;
+  vertical-align: middle;
+  width: 18px;
+  height: 18px;
+  margin-right: 6px;
+}
+
+.gr-status-badges {
+  display: flex;
+  gap: 10px;
+  align-items: center;
+  flex-wrap: wrap;
+}
+
 .overview__grid {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));

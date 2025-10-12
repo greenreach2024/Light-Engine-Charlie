@@ -149,14 +149,31 @@ function escapeAttribute(value) {
   return String(value ?? '').replace(/"/g, '&quot;');
 }
 
+// Centralized icon helper — NO emojis, use standard images
+function grIconImg(name, label) {
+  const key = typeof name === 'string' ? name.toLowerCase() : '';
+  const map = {
+    spectrasync: '/assets/icons/spectrasync.svg',
+    'evie-training': '/assets/icons/evie-training.svg',
+    'ia-assist-ei2': '/assets/icons/ia-assist-ei2.svg',
+    ai: '/assets/icons/ia-assist-ei2.svg',
+    auto: '/assets/icons/evie-training.svg',
+    spectra: '/assets/icons/spectrasync.svg'
+  };
+  const src = map[key] || '/assets/icons/generic.svg';
+  const safeLabel = label ? String(label) : '';
+  const labelAttr = safeLabel ? ` aria-label="${escapeAttribute(safeLabel)}"` : '';
+  const titleAttr = safeLabel ? ` title="${escapeAttribute(safeLabel)}"` : '';
+  return `<img class="gr-icon-img" src="${escapeAttribute(src)}" alt=""${labelAttr}${titleAttr} loading="lazy">`;
+}
+
 function grIcon(name, label) {
-  const glyphMap = { ai: '🤖', auto: '⚙️', spectra: '🌈' };
-  const glyph = glyphMap[name] || '•';
   const safeLabel = label ? String(label) : '';
   const titleAttr = safeLabel ? ` title="${escapeAttribute(safeLabel)}"` : '';
   const ariaAttr = safeLabel ? ` aria-label="${escapeAttribute(safeLabel)}"` : '';
   const dataAttr = name ? ` data-role="${escapeAttribute(name)}"` : '';
-  return `<button type="button" class="gr-icon"${dataAttr}${titleAttr}${ariaAttr}>${glyph}</button>`;
+  const iconMarkup = grIconImg(name, '');
+  return `<button type="button" class="gr-icon"${dataAttr}${titleAttr}${ariaAttr}>${iconMarkup}</button>`;
 }
 
 function hydrateIconHost(host) {
@@ -4900,7 +4917,7 @@ window.openSwitchBotManager = function() {
     // Optionally reload iframe for fresh data
     // document.getElementById('switchBotIframe').src = './switchbot.html';
   } else {
-    showToast({ title: 'SwitchBot Manager', msg: 'SwitchBot manager UI not found.', kind: 'error', icon: '🤖' });
+    showToast({ title: 'SwitchBot Manager', msg: 'SwitchBot manager UI not found.', kind: 'error', icon: grIconImg('generic', 'SwitchBot Manager') });
   }
 };
 
@@ -8418,7 +8435,7 @@ class DeviceManagerWindow {
     this.filterButtons.forEach(btn => btn.addEventListener('click', () => this.setFilter(btn.dataset.filter)));
     this.automationBtn?.addEventListener('click', () => {
       focusAutomationCard();
-      showToast({ title: 'Automation card', msg: 'Scroll to Grow Room Automation for live advisories.', kind: 'info', icon: '⚙️' }, 4000);
+      showToast({ title: 'Automation card', msg: 'Scroll to Grow Room Automation for live advisories.', kind: 'info', icon: grIconImg('evie-training', 'Automation status') }, 4000);
     });
   }
 
@@ -12656,7 +12673,7 @@ function mountAutomationCard(container, roomId) {
     try {
       setBusy(refs.runBtn, true);
       if (typeof showToast === 'function') {
-        showToast({ title: 'Automation', msg: `Evaluating policy for ${roomId}…`, kind: 'info', icon: '⚙️' }, 2500);
+        showToast({ title: 'Automation', msg: `Evaluating policy for ${roomId}…`, kind: 'info', icon: grIconImg('evie-training', 'Automation status') }, 2500);
       }
       const response = await api('/automation/run', {
         method: 'POST',
@@ -14071,7 +14088,7 @@ async function applyAutomationSuggestion(roomId, suggestionId, button) {
     btn.classList.add('is-loading');
   }
   try {
-    showToast({ title: 'Automation', msg: 'Sending advisory action…', kind: 'info', icon: '⚙️' }, 2500);
+    showToast({ title: 'Automation', msg: 'Sending advisory action…', kind: 'info', icon: grIconImg('evie-training', 'Automation status') }, 2500);
     const payload = await api(`/env/rooms/${encodeURIComponent(roomId)}/actions`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -16907,7 +16924,7 @@ class DevicePairWizard {
       console.warn('AI Assist request failed', err);
       if (!this.aiNotifiedFailure && stage === 'start') {
         this.aiNotifiedFailure = true;
-        showToast({ title: 'IA Assist', msg: 'Unable to fetch pairing suggestions right now.', kind: 'info', icon: '🤖' }, 5000);
+        showToast({ title: 'IA Assist', msg: 'Unable to fetch pairing suggestions right now.', kind: 'info', icon: grIconImg('ia-assist-ei2', 'IA Assist E.i2') }, 5000);
       }
       return null;
     }
@@ -16956,7 +16973,7 @@ class DevicePairWizard {
         button.textContent = 'Suggestion applied';
       }
     }
-    showToast({ title: 'IA Assist', msg: `Transport set to ${String(transport).toUpperCase()}.`, kind: 'info', icon: '🤖' }, 5000);
+    showToast({ title: 'IA Assist', msg: `Transport set to ${String(transport).toUpperCase()}.`, kind: 'info', icon: grIconImg('ia-assist-ei2', 'IA Assist E.i2') }, 5000);
     this.updateReview();
   }
 
@@ -17005,7 +17022,7 @@ class DevicePairWizard {
         button.textContent = 'Suggestion applied';
       }
     }
-    showToast({ title: 'IA Assist', msg: 'Applied Wi‑Fi configuration suggestions.', kind: 'info', icon: '🤖' }, 5000);
+    showToast({ title: 'IA Assist', msg: 'Applied Wi‑Fi configuration suggestions.', kind: 'info', icon: grIconImg('ia-assist-ei2', 'IA Assist E.i2') }, 5000);
     this.updateReview();
   }
 
@@ -17046,7 +17063,7 @@ class DevicePairWizard {
         button.textContent = 'Suggestion applied';
       }
     }
-    showToast({ title: 'IA Assist', msg: 'Bluetooth pairing details filled in.', kind: 'info', icon: '🤖' }, 5000);
+    showToast({ title: 'IA Assist', msg: 'Bluetooth pairing details filled in.', kind: 'info', icon: grIconImg('ia-assist-ei2', 'IA Assist E.i2') }, 5000);
     this.updateReview();
   }
 
@@ -17115,9 +17132,9 @@ class DevicePairWizard {
         this.aiFollowUp = followUp;
         const steps = Array.isArray(followUp.next_steps) ? followUp.next_steps : [];
         if (steps.length) {
-          showToast({ title: 'IA Assist', msg: steps.join(' • '), kind: 'info', icon: '🤖' }, 8000);
+          showToast({ title: 'IA Assist', msg: steps.join(' • '), kind: 'info', icon: grIconImg('ia-assist-ei2', 'IA Assist E.i2') }, 8000);
         } else if (followUp.summary) {
-          showToast({ title: 'IA Assist', msg: followUp.summary, kind: 'info', icon: '🤖' }, 6000);
+          showToast({ title: 'IA Assist', msg: followUp.summary, kind: 'info', icon: grIconImg('ia-assist-ei2', 'IA Assist E.i2') }, 6000);
         }
       }
     }
@@ -17991,7 +18008,7 @@ function handleAiControlClick(entry) {
       title: `${entry.roomLabel} • AI`,
       msg,
       kind: entry.ai.status === 'off' ? 'warn' : 'info',
-      icon: '🤖'
+      icon: grIconImg('ia-assist-ei2', 'IA Assist E.i2')
     });
   }
   const card = document.getElementById('environmentalAiCard');
@@ -18033,7 +18050,7 @@ function handleAutomationControlClick(entry) {
       title: `${entry.roomLabel} • Automation`,
       msg,
       kind: entry.automation.status === 'on' ? 'success' : entry.automation.paused ? 'warn' : 'info',
-      icon: '⚙️'
+      icon: grIconImg('evie-training', 'EVIE · training')
     });
   }
   focusAutomationCard();
@@ -18047,7 +18064,7 @@ function handleSpectraControlClick(entry) {
       title: `${entry.roomLabel} • SpectraSync`,
       msg,
       kind: entry.spectra.status === 'active' ? 'success' : entry.spectra.paused ? 'warn' : 'info',
-      icon: '🌈'
+      icon: grIconImg('spectrasync', 'SpectraSync')
     });
   }
   const card = document.getElementById('spectraSyncFeature');

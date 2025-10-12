@@ -10,7 +10,7 @@
 </head>
 <body>
   <template id="aiAutomationClusterTemplate">
-    <div class="ai-automation-cluster" role="group" aria-label="AI, Automation, and SpectraSync controls">
+    <div class="ai-automation-cluster gr-status-badges" role="group" aria-label="AI, Automation, and SpectraSync controls">
       <div class="chip" data-control="ai">
         <span data-icon-slot="ai" data-icon-label="AI" data-icon-control="ai"></span>
         <span class="chip__status" data-status></span>
@@ -131,7 +131,7 @@
 
     <div class="dashboard-content">
       <main class="dashboard-main gr-grid">
-      <section id="environmentalAiCard" class="card card--feature hud-shell gr-card">
+      <section id="environmentalAiCard" class="card card--feature hud-shell gr-card gr-full">
               <div class="row row--between row--center mb-md hud-shell__header">
                 <h2 class="section-title hud-shell__title">Environmental & AI Features</h2>
                 <span class="tiny text-muted">Autonomous Growing Intelligence</span>
@@ -239,7 +239,7 @@
           </footer>
         </section>
 
-        <section id="aiAdvisoryCard" class="card hud-shell std ai-advisory-card gr-card" aria-labelledby="aiAdvisoryTitle">
+        <section id="aiAdvisoryCard" class="card hud-shell std ai-advisory-card gr-card gr-full" aria-labelledby="aiAdvisoryTitle">
           <header class="ai-advisory-card__header">
             <div>
               <h2 id="aiAdvisoryTitle" class="section-title hud-shell__title">AI Copilot Advisory</h2>
