@@ -1557,13 +1557,17 @@ function populateGroupsV2PlanDropdown(filterQuery) {
 function renderGroupsV2PlanCard(plan) {
   let card = document.getElementById('groupsV2PlanCard');
   if (!card) {
-    // Insert after the plan select row
-    const planRow = document.querySelector('.group-v2-plansched');
+    const planControls = document.getElementById('groupsV2PlanControls');
+    const planForm = document.getElementById('groupsV2PlanForm');
     card = document.createElement('section');
     card.id = 'groupsV2PlanCard';
     card.className = 'group-info-card';
     card.style.margin = '12px 0 18px 0';
-    planRow.parentNode.insertBefore(card, planRow.nextSibling);
+    if (planControls && planControls.parentNode) {
+      planControls.parentNode.insertBefore(card, planControls.nextSibling);
+    } else if (planForm) {
+      planForm.appendChild(card);
+    }
   }
   if (!plan) {
     card.innerHTML = '<div class="tiny text-muted">Select a plan to view spectrum, DLI, and PPFD targets.</div>';

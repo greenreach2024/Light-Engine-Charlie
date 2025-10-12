@@ -563,28 +563,32 @@
             <!-- Saved groups will be populated here by JS -->
           </select>
         </div>
-        <div class="row group-v2-plansched" style="margin-bottom:18px; gap: 24px; align-items: flex-end; border: 1.5px solid #cbd5e1; background: linear-gradient(90deg, #f8fafc 80%, #e0f2fe 100%); border-radius: 10px; box-shadow: 0 2px 8px 0 rgba(100, 199, 199, 0.07); padding: 18px 18px 10px 18px;">
-          <label for="groupsV2PlanSelect" style="margin-right:8px">Plan:</label>
-          <select id="groupsV2PlanSelect">
-            <option value="">(none)</option>
-            <!-- Plans will be populated by JS -->
-          </select>
-          <button id="applyPlanToGroupBtn" type="button" class="primary" style="margin-left:8px;">Apply to Current Plan</button>
-        </div>
         <div id="groupsV2PlanForm" style="margin-bottom:18px; border: 1.5px solid #cbd5e1; background: linear-gradient(90deg, #f8fafc 80%, #e0f2fe 100%); border-radius: 10px; box-shadow: 0 2px 8px 0 rgba(100, 199, 199, 0.07); padding: 18px 18px 16px 18px;">
-          <div style="display:flex; flex-wrap:wrap; gap:16px; align-items:flex-end;">
-            <label class="tiny" style="display:flex; flex-direction:column; min-width:220px;">
-              Search plan
-              <select id="groupsV2PlanSearch" style="margin-top:4px; padding:6px 8px; border-radius:6px; border:1px solid #cbd5e1; min-height:34px;">
-                <option value="">All plans</option>
-              </select>
-            </label>
-            <div class="tiny" style="display:flex; flex-wrap:wrap; gap:8px; align-items:center;">
-              <span style="font-weight:600;">Anchor:</span>
-              <label class="chip-option" style="margin-right:4px;"><input type="radio" name="groupsV2AnchorMode" value="seedDate" checked><span>Seed Date</span></label>
-              <input id="groupsV2SeedDate" type="date" placeholder="YYYY-MM-DD" style="min-width:150px; padding:6px 8px; border-radius:6px; border:1px solid #cbd5e1;">
-              <label class="chip-option" style="margin:0 4px 0 12px;"><input type="radio" name="groupsV2AnchorMode" value="dps"><span>DPS</span></label>
-              <input id="groupsV2Dps" type="number" min="0" step="1" value="1" style="width:90px; padding:6px 8px; border-radius:6px; border:1px solid #cbd5e1;">
+          <div id="groupsV2PlanControls" style="margin-bottom:18px; padding:0 0 8px; border-bottom:1px dashed #bae6fd; display:flex; flex-direction:column; gap:12px;">
+            <div style="display:flex; flex-wrap:wrap; gap:16px; align-items:flex-end;">
+              <label class="tiny" style="display:flex; flex-direction:column; min-width:220px;">
+                Plan
+                <select id="groupsV2PlanSelect" style="margin-top:4px; padding:6px 8px; border-radius:6px; border:1px solid #cbd5e1; min-height:34px;">
+                  <option value="">(none)</option>
+                  <!-- Plans will be populated by JS -->
+                </select>
+              </label>
+              <button id="applyPlanToGroupBtn" type="button" class="primary" style="margin-left:8px;">Apply to Current Plan</button>
+            </div>
+            <div style="display:flex; flex-wrap:wrap; gap:16px; align-items:flex-end;">
+              <label class="tiny" style="display:flex; flex-direction:column; min-width:220px;">
+                Search plan
+                <select id="groupsV2PlanSearch" style="margin-top:4px; padding:6px 8px; border-radius:6px; border:1px solid #cbd5e1; min-height:34px;">
+                  <option value="">All plans</option>
+                </select>
+              </label>
+              <div class="tiny" style="display:flex; flex-wrap:wrap; gap:8px; align-items:center;">
+                <span style="font-weight:600;">Anchor:</span>
+                <label class="chip-option" style="margin-right:4px;"><input type="radio" name="groupsV2AnchorMode" value="seedDate" checked><span>Seed Date</span></label>
+                <input id="groupsV2SeedDate" type="date" placeholder="YYYY-MM-DD" style="min-width:150px; padding:6px 8px; border-radius:6px; border:1px solid #cbd5e1;">
+                <label class="chip-option" style="margin:0 4px 0 12px;"><input type="radio" name="groupsV2AnchorMode" value="dps"><span>DPS</span></label>
+                <input id="groupsV2Dps" type="number" min="0" step="1" value="1" style="width:90px; padding:6px 8px; border-radius:6px; border:1px solid #cbd5e1;">
+              </div>
             </div>
           </div>
           <div style="margin-top:12px; display:flex; flex-direction:column; gap:12px;">
