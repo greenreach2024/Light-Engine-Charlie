@@ -8,7 +8,7 @@
   <link rel="stylesheet" href="./styles.charlie.css?v=charlie-0.5">
   <script src="./app.charlie.js?v=charlie-0.5" defer></script>
 </head>
-<body>
+<body class="gr-shell">
   <template id="aiAutomationClusterTemplate">
     <div class="ai-automation-cluster gr-status-badges" role="group" aria-label="AI, Automation, and SpectraSync controls">
       <div class="chip" data-control="ai">
@@ -26,36 +26,7 @@
       <span class="chip chip--tour-lock" data-role="tour-lock" hidden>Tour Lock</span>
     </div>
   </template>
-  <header id="mainHeader" class="dashboard-header">
-    <section id="topCard" class="card card--hero top-card">
-      <div class="row row--between row--center top-card__content">
-        <!-- Left side: Farm branding -->
-        <div class="row row--center row--gap-md flex-1">
-          <img id="farmLogo" src="" alt="Farm logo" class="farm-logo" onerror="this.style.display='none'">
-          <div id="farmBrandingSection" class="farm-branding">
-            <h1 id="farmName" class="farm-name"></h1>
-            <div id="farmTagline" class="tiny farm-tagline"></div>
-          </div>
-        </div>
-        <!-- Right side: Light Engine Charlie and controls -->
-        <div class="row row--gap-lg row--center top-card__status">
-          <div class="text-right">
-            <h1 id="lightEngineTitle" class="top-card__title">Light Engine Charlie</h1>
-            <div class="automation-indicator" id="automationIndicator" aria-live="polite">
-              <span class="automation-indicator__dot" aria-hidden="true"></span>
-              <span class="automation-indicator__label">Centralized Automation</span>
-              <span class="automation-indicator__status" id="automationIndicatorStatus">Idle</span>
-            </div>
-            <div id="communicationStatus" class="tiny text-muted top-card__status-text">System Online</div>
-          </div>
-        </div>
-      </div>
-    </section>
-  </header>
-
-  <div class="dashboard-shell">
-
-<aside class="dashboard-sidebar" aria-label="Setup and management navigation">
+  <aside id="sidebar" class="dashboard-sidebar sidebar" aria-label="Setup and management navigation">
   <div class="sidebar-header">
     <h2 class="sidebar-title">Setup &amp; Management</h2>
     <p class="tiny text-muted">Organize farm setup, device control, and daily grow operations.</p>
@@ -127,10 +98,36 @@
   </div>
 </aside>
 
+  <main class="main">
+  <header id="mainHeader" class="dashboard-header">
+    <section id="topCard" class="card card--hero top-card gr-card">
+      <div class="row row--between row--center top-card__content">
+        <!-- Left side: Farm branding -->
+        <div class="row row--center row--gap-md flex-1">
+          <img id="farmLogo" src="" alt="Farm logo" class="farm-logo" onerror="this.style.display='none'">
+          <div id="farmBrandingSection" class="farm-branding">
+            <h1 id="farmName" class="farm-name"></h1>
+            <div id="farmTagline" class="tiny farm-tagline"></div>
+          </div>
+        </div>
+        <!-- Right side: Light Engine Charlie and controls -->
+        <div class="row row--gap-lg row--center top-card__status">
+          <div class="text-right">
+            <h1 id="lightEngineTitle" class="top-card__title">Light Engine Charlie</h1>
+            <div class="automation-indicator" id="automationIndicator" aria-live="polite">
+              <span class="automation-indicator__dot" aria-hidden="true"></span>
+              <span class="automation-indicator__label">Centralized Automation</span>
+              <span class="automation-indicator__status" id="automationIndicatorStatus">Idle</span>
+            </div>
+            <div id="communicationStatus" class="tiny text-muted top-card__status-text">System Online</div>
+          </div>
+        </div>
+      </div>
+    </section>
+  </header>
 
-
-    <div class="dashboard-content">
-      <main class="dashboard-main gr-grid">
+      <div class="dashboard-content">
+      <div id="dashboard" class="dashboard-main cards">
       <section id="environmentalAiCard" class="card card--feature hud-shell gr-card gr-full">
               <div class="row row--between row--center mb-md hud-shell__header">
                 <h2 class="section-title hud-shell__title">Environmental & AI Features</h2>
@@ -254,7 +251,7 @@
   <!-- Current Lights Status card removed -->
     <!-- Overview hero (now below lights status) -->
       <section class="dashboard-panel dashboard-panel--overview is-active" data-panel="overview">
-      <section id="overview" class="overview" aria-labelledby="overviewTitle">
+      <section id="overview" class="overview gr-card" aria-labelledby="overviewTitle">
         <header class="overview__hdr">
           <div>
             <h1 id="overviewTitle">Overview</h1>
@@ -514,8 +511,8 @@
       <button id="profileReset" type="button" class="ghost">Reset</button>
     </div>
   </form>
-</section>
-      </main>
+      </section>
+      </div>
 
       <!-- Groups V2 Panel -->
       <section id="groupsV2Panel" class="card hud-shell gr-card" data-panel="groups-v2" data-card-prefix="GR" data-card-code="GV2" hidden>
@@ -710,7 +707,7 @@
 
     </div>
 
-  </div>
+  </main>
 
   <!-- NEW FRESH Light Setup Modal -->
   <div id="freshLightModal" class="fresh-light-modal" aria-hidden="true">
