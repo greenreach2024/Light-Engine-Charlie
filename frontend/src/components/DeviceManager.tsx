@@ -3,6 +3,32 @@ import { Device, DeviceAssignment, useDevices } from "../store/devices";
 
 const DEVICE_METRIC_STYLE_ID = "device-manager-metrics";
 const DEVICE_METRIC_STYLES = `
+  .device-manager__grid {
+    counter-reset: device-card-counter;
+  }
+
+  .device-card::before {
+    position: absolute;
+    top: 10px;
+    left: 10px;
+    min-width: 22px;
+    padding: 2px 8px;
+    border-radius: 999px;
+    background: rgba(15, 23, 42, 0.85);
+    color: #fff;
+    font-size: 0.7rem;
+    font-weight: 600;
+    line-height: 1;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    pointer-events: none;
+    box-shadow: 0 2px 6px rgba(15, 23, 42, 0.2);
+    counter-increment: device-card-counter;
+    content: counter(device-card-counter);
+    z-index: 2;
+  }
+
   .device-card__metrics {
     display: flex;
     flex-wrap: wrap;
