@@ -65,8 +65,23 @@
         <button type="button" class="sidebar-link" data-sidebar-link data-group="control-devices" data-target="control-assignments">
           Control Assignments
         </button>
-        <button type="button" class="sidebar-link" data-sidebar-link data-group="control-devices" data-target="automation" data-feature="automation" hidden>
-          Automation
+      </div>
+    </div>
+
+    <div class="sidebar-group" data-group="automation" data-feature="automation" hidden aria-hidden="true">
+      <button class="sidebar-group__trigger" type="button" aria-expanded="false">
+        <span>Automation</span>
+        <span class="sidebar-group__icon" aria-hidden="true"></span>
+      </button>
+      <div class="sidebar-group__items" role="menu" hidden>
+        <button type="button" class="sidebar-link" data-sidebar-link data-group="automation" data-target="automation" data-feature="automation" data-automation-section="smart-controllers">
+          Smart Plugs &amp; Controllers
+        </button>
+        <button type="button" class="sidebar-link" data-sidebar-link data-group="automation" data-target="automation" data-feature="automation" data-automation-section="rules">
+          Automation Rules
+        </button>
+        <button type="button" class="sidebar-link" data-sidebar-link data-group="automation" data-target="automation" data-feature="automation" data-automation-section="ai">
+          AI Copilot Advisory
         </button>
       </div>
     </div>
