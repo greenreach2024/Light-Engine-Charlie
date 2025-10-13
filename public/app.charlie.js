@@ -497,37 +497,22 @@ function updateGroupsv2Spectragraph(ids, mix) {
   renderGroupsv2SpectragraphState();
 }
 
-function mountSpectragraph(targetSelector) {
-  const host = resolveCardMount(targetSelector, 'spectragraph');
-  if (!host) return;
-
-  if (host.dataset.hydrated === 'true') {
-    groupsv2SpectragraphState.body = host.querySelector('#GVPFLSW29');
-    renderGroupsv2SpectragraphState();
-    return;
+function ensureTarget(sel) {
+  if (!sel && sel !== 0) {
+    console.warn('missing mount target', sel);
+    return null;
   }
-
-  host.innerHTML = `
-    <article class="groupsv2-spectra-card gr-card">
-      <header class="groupsv2-spectra-card__header">
-        <h3>Spectragraph</h3>
-        <p class="tiny text-muted">Average spectrum for the previewed fixtures.</p>
-      </header>
-      <div class="groupsv2-spectra-card__body">
-        <div id="GVPFLSW29" class="spectra" aria-live="polite"></div>
-      </div>
-    </article>
-  `;
-  host.dataset.hydrated = 'true';
-  groupsv2SpectragraphState.body = host.querySelector('#GVPFLSW29');
-  renderGroupsv2SpectragraphState();
+  const el = typeof sel === 'string' ? document.querySelector(sel) : sel;
+  if (!el) {
+    console.warn('missing mount target', sel);
+    return null;
+  }
+  return el;
 }
 
-function mountDehumidifierSetup(targetSelector) {
-  const host = resolveCardMount(targetSelector, 'dehum-setup');
-  if (!host || host.dataset.hydrated === 'true') return;
-
-  host.innerHTML = `
+function renderDehumMicroForm(root) {
+  if (!root) return;
+  root.innerHTML = `
     <article class="equip-micro equip-micro--dehum">
       <header class="equip-micro__header">
         <h3 class="equip-micro__title">Dehumidifier Setup</h3>
@@ -545,21 +530,18 @@ function mountDehumidifierSetup(targetSelector) {
       </div>
     </article>
   `;
-  host.dataset.hydrated = 'true';
 }
 
-async function mountUnassignedLights(targetSelector) {
+async function renderUnassignedLights(root) {
+  if (!root) return;
   try {
-    const host = resolveCardMount(targetSelector, 'unassigned-lights');
-    if (!host) return;
-
-    let unassignedRoot = host.querySelector('#GRUL32');
-    let activeRoot = host.querySelector('#GRACB28');
-    let applyBtn = host.querySelector('#GRUL32-apply');
-    let clearBtn = host.querySelector('#GRUL32-clear');
+    let unassignedRoot = root.querySelector('#GRUL32');
+    let activeRoot = root.querySelector('#GRACB28');
+    let applyBtn = root.querySelector('#GRUL32-apply');
+    let clearBtn = root.querySelector('#GRUL32-clear');
 
     if (!unassignedRoot || !activeRoot || !applyBtn || !clearBtn) {
-      host.innerHTML = '';
+      root.innerHTML = '';
       const wrapper = document.createElement('article');
       wrapper.className = 'groupsv2-unassigned-card gr-card';
       wrapper.innerHTML = `
@@ -579,7 +561,7 @@ async function mountUnassignedLights(targetSelector) {
           <div id="GRACB28" class="cards grid groupsv2-unassigned-card__active-cards" aria-live="polite"></div>
         </div>
       `;
-      host.appendChild(wrapper);
+      root.appendChild(wrapper);
       unassignedRoot = wrapper.querySelector('#GRUL32');
       activeRoot = wrapper.querySelector('#GRACB28');
       applyBtn = wrapper.querySelector('#GRUL32-apply');
@@ -588,7 +570,7 @@ async function mountUnassignedLights(targetSelector) {
 
     if (!unassignedRoot || !activeRoot || !applyBtn || !clearBtn) return;
 
-    host.dataset.hydrated = 'true';
+    root.dataset.hydrated = 'true';
 
     const fetchJson = async (path) => {
       const response = await fetch(resolveApiUrl(path));
@@ -656,46 +638,55 @@ async function mountUnassignedLights(targetSelector) {
       };
     };
 
-    unassignedRoot.innerHTML = '';
-    unassigned.forEach((device) => {
-      const row = document.createElement('label');
-      row.className = 'groupsv2-unassigned-card__row';
-      row.innerHTML = `
-        <input type="checkbox" class="gr-pick" value="${device.id}">
-        <span class="mono">${device.deviceName || '(unnamed)'} · ${device.id}</span>`;
-      unassignedRoot.appendChild(row);
-    });
-
-    const picks = () => [...unassignedRoot.querySelectorAll('.gr-pick:checked')].map((input) => input.value);
+    const renderList = () => {
+      const lights = unassigned
+        .slice()
+        .sort((a, b) => String(a.name || a.id || '').localeCompare(String(b.name || b.id || '')));
+      unassignedRoot.innerHTML = '';
+      lights.forEach((light) => {
+        const id = String(light.id || '');
+        const item = document.createElement('label');
+        item.className = 'gr-item';
+        item.innerHTML = `
+          <input type="checkbox" class="gr-pick" value="${id}">
+          <span class="gr-item__title">${light.name || id || 'Light'}</span>
+          <span class="gr-item__meta">${light.room || light.roomId || 'Unknown room'}</span>
+        `;
+        unassignedRoot.appendChild(item);
+      });
+    };
 
     const renderActive = (ids) => {
       activeRoot.innerHTML = '';
       if (!ids.length) {
         const empty = document.createElement('p');
         empty.className = 'tiny text-muted groupsv2-unassigned-card__empty';
-        empty.textContent = 'Select lights to preview their details here.';
+        empty.textContent = 'No lights selected.';
         activeRoot.appendChild(empty);
         return;
       }
 
       ids.forEach((id) => {
-        const device = devices.find((entry) => String(entry.id) === String(id));
-        const card = document.createElement('div');
-        card.className = 'card groupsv2-active-card';
-        card.dataset.id = id;
+        const light = unassigned.find((item) => String(item.id) === String(id));
+        const card = document.createElement('article');
+        card.className = 'groupsv2-unassigned-card__active-card';
         card.innerHTML = `
-          <div class="row space-between groupsv2-active-card__header">
-            <strong>${(device && device.deviceName) || '(unnamed)'}</strong>
-            <span class="mono">ID ${id}</span>
-          </div>
-          <div class="mini mix" data-hex="${deviceMixHex(id)}"></div>
-          <button class="btn-ghost remove" data-id="${id}" type="button">Remove</button>`;
+          <header>
+            <h4>${light?.name || id || 'Light'}</h4>
+            <p class="tiny text-muted">${light?.room || light?.roomId || 'Unknown room'}</p>
+          </header>
+          <footer>
+            <button class="ghost remove" type="button" data-id="${id}">Remove</button>
+          </footer>
+        `;
         activeRoot.appendChild(card);
       });
     };
 
+    renderList();
+
     const apply = () => {
-      const ids = picks();
+      const ids = Array.from(unassignedRoot.querySelectorAll('.gr-pick:checked')).map((el) => el.value);
       renderActive(ids);
       updateGroupsv2Spectragraph(ids, averageMix(ids));
     };
@@ -722,9 +713,72 @@ async function mountUnassignedLights(targetSelector) {
 
     clear();
   } catch (error) {
-    console.warn('Failed to mount Unassigned Lights card', error);
+    console.warn('Failed to render Unassigned Lights card', error);
   }
 }
+
+function renderPlanSpectragraph(root, planSelect) {
+  if (!root) return;
+  if (!root.querySelector('#GVPFLSW29')) {
+    root.innerHTML = `
+      <article class="groupsv2-spectra-card gr-card">
+        <header class="groupsv2-spectra-card__header">
+          <h3>Spectragraph</h3>
+          <p class="tiny text-muted">Average spectrum for the previewed fixtures.</p>
+        </header>
+        <div class="groupsv2-spectra-card__body">
+          <div id="GVPFLSW29" class="spectra" aria-live="polite"></div>
+        </div>
+      </article>
+    `;
+  }
+  root.dataset.hydrated = 'true';
+  groupsv2SpectragraphState.body = root.querySelector('#GVPFLSW29');
+  renderGroupsv2SpectragraphState();
+  if (planSelect) {
+    planSelect.addEventListener('change', renderGroupsv2SpectragraphState);
+  }
+}
+
+function mountSpectragraph(targetSel) {
+  const target = ensureTarget(targetSel);
+  if (!target) return;
+  target
+    .querySelectorAll('[data-card="spectragraph"][data-mounted="1"]')
+    .forEach((node) => node.remove());
+  const root = document.createElement('div');
+  root.setAttribute('data-card', 'spectragraph');
+  root.setAttribute('data-mounted', '1');
+  target.appendChild(root);
+  renderPlanSpectragraph(root, document.getElementById('plan-select'));
+}
+
+function mountDehumidifierSetup(targetSel) {
+  const target = ensureTarget(targetSel);
+  if (!target) return;
+  target
+    .querySelectorAll('[data-card="dehum-setup"][data-mounted="1"]')
+    .forEach((node) => node.remove());
+  const root = document.createElement('div');
+  root.setAttribute('data-card', 'dehum-setup');
+  root.setAttribute('data-mounted', '1');
+  target.appendChild(root);
+  renderDehumMicroForm(root);
+}
+
+async function mountUnassignedLights(targetSel) {
+  const target = ensureTarget(targetSel);
+  if (!target) return;
+  target
+    .querySelectorAll('[data-card="unassigned-lights"][data-mounted="1"]')
+    .forEach((node) => node.remove());
+  const root = document.createElement('div');
+  root.setAttribute('data-card', 'unassigned-lights');
+  root.setAttribute('data-mounted', '1');
+  target.appendChild(root);
+  await renderUnassignedLights(root);
+}
+
 
 // Ensure lights from lightSetups are always in window.STATE.lights and update unassigned lights
 window.addEventListener('lightSetupsChanged', () => {
