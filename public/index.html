@@ -121,6 +121,7 @@
             </div>
             <div id="communicationStatus" class="tiny text-muted top-card__status-text">System Online</div>
           </div>
+          <button id="btn-ia-assist" aria-label="AI Assist" class="ia-assist" title="AI Assist" type="button"></button>
         </div>
       </div>
     </section>
@@ -224,39 +225,40 @@
 
       <div class="dashboard-stage" data-role="panel-stage" hidden></div>
 
-      <section id="AAC09" class="card hud-shell std ai-advisory-card gr-card gr-full" aria-labelledby="aiAdvisoryTitle" data-panel="AAC09">
-        <header class="ai-advisory-card__header">
-          <div>
-            <h2 id="aiAdvisoryTitle" class="section-title hud-shell__title">AI Copilot Advisory</h2>
-            <p class="tiny text-muted">Narrative insights from Temp · RH · VPD · PPFD vs. energy draw.</p>
-          </div>
-          <div class="ai-advisory-card__actions">
-            <button type="button" class="ghost" data-role="ai-copilot-close">Back to Overview</button>
-            <span class="badge badge--ai">Advisory</span>
-          </div>
-        </header>
-        <p class="ai-advisory-card__summary" data-role="ai-summary">Loading Copilot narrative…</p>
-        <div class="ai-advisory-card__body" data-role="ai-rooms"></div>
-      </section>
-
-        <section id="roomAutomationCard" class="card hud-shell std automation-card gr-card" aria-labelledby="automationCardTitle" data-panel="automation">
-          <header class="automation-card__header">
-            <div>
-              <h2 id="automationCardTitle" class="section-title hud-shell__title">Grow Room Automation</h2>
-              <p class="tiny text-muted">Advisory guardrails for climate, spectrum, and air handling.</p>
-            </div>
-            <div class="automation-card__mode" role="group" aria-label="Automation mode">
-              <span class="automation-card__mode-label" data-role="automation-mode-label">Advisory</span>
-              <div class="automation-card__mode-toggle">
-                <button type="button" class="automation-mode-btn is-active" data-mode="advisory">Advisory</button>
-                <button type="button" class="automation-mode-btn" data-mode="autopilot" aria-disabled="true" data-tip="Autopilot coming soon">Autopilot</button>
+        <section id="automationPanel" class="dashboard-panel dashboard-panel--automation" data-panel="automation">
+          <section id="roomAutomationCard" class="card hud-shell std automation-card gr-card" aria-labelledby="automationCardTitle">
+            <header class="automation-card__header">
+              <div>
+                <h2 id="automationCardTitle" class="section-title hud-shell__title">Grow Room Automation</h2>
+                <p class="tiny text-muted">Advisory guardrails for climate, spectrum, and air handling.</p>
               </div>
-            </div>
-          </header>
-          <div class="automation-card__body" data-role="automation-body"></div>
-          <footer class="automation-card__footer">
-            <span class="tiny text-muted" data-role="automation-status">Loading…</span>
-          </footer>
+              <div class="automation-card__mode" role="group" aria-label="Automation mode">
+                <span class="automation-card__mode-label" data-role="automation-mode-label">Advisory</span>
+                <div class="automation-card__mode-toggle">
+                  <button type="button" class="automation-mode-btn is-active" data-mode="advisory">Advisory</button>
+                  <button type="button" class="automation-mode-btn" data-mode="autopilot" aria-disabled="true" data-tip="Autopilot coming soon">Autopilot</button>
+                </div>
+              </div>
+            </header>
+            <div class="automation-card__body" data-role="automation-body"></div>
+            <footer class="automation-card__footer">
+              <span class="tiny text-muted" data-role="automation-status">Loading…</span>
+            </footer>
+          </section>
+          <section id="aiAdvisoryCard" class="card hud-shell std ai-advisory-card gr-card gr-full" aria-labelledby="aiAdvisoryTitle">
+            <header class="ai-advisory-card__header">
+              <div>
+                <h2 id="aiAdvisoryTitle" class="section-title hud-shell__title">AI Copilot Advisory</h2>
+                <p class="tiny text-muted">Narrative insights from Temp · RH · VPD · PPFD vs. energy draw.</p>
+              </div>
+              <div class="ai-advisory-card__actions">
+                <button type="button" class="ghost" data-role="ai-copilot-close">Back to Overview</button>
+                <span class="badge badge--ai">Advisory</span>
+              </div>
+            </header>
+            <p class="ai-advisory-card__summary" data-role="ai-summary">Loading Copilot narrative…</p>
+            <div class="ai-advisory-card__body" data-role="ai-rooms"></div>
+          </section>
         </section>
 
   <!-- Current Lights Status card removed -->

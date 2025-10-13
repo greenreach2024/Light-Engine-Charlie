@@ -2297,6 +2297,25 @@ h3 { font-size: 1.125rem; }
   text-align: right;
 }
 
+.ia-assist {
+  border: 0;
+  width: 28px;
+  height: 28px;
+  background: var(--icon-ia) no-repeat center/contain;
+  opacity: .7;
+  transition: opacity .2s ease, box-shadow .2s ease;
+}
+
+.ia-assist:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+.ia-assist.glow {
+  box-shadow: 0 0 8px var(--accent);
+  opacity: 1;
+}
+
 .farm-logo {
   width: 48px;
   height: 48px;

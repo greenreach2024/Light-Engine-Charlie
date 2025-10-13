@@ -14779,7 +14779,7 @@ function buildLearningInsights(analytics, daily) {
 }
 
 function renderAiAdvisoryCard() {
-  const card = document.getElementById('AAC09') || document.getElementById('aiAdvisoryCard');
+  const card = document.getElementById('aiAdvisoryCard');
   if (!card) return;
   const summaryEl = card.querySelector('[data-role="ai-summary"]');
   const listEl = card.querySelector('[data-role="ai-rooms"]');
@@ -18941,20 +18941,21 @@ function handleAiControlClick(entry) {
   }
 }
 
-function focusAutomationCard() {
+function openAutomationDrawer(section = '') {
   if (typeof setActivePanel === 'function') {
     setActivePanel('automation');
   }
 
-  const card = document.getElementById('roomAutomationCard');
-  if (!card) return;
+  const targetId = section === 'ai' ? 'aiAdvisoryCard' : 'roomAutomationCard';
+  const target = document.getElementById(targetId) || document.getElementById('roomAutomationCard');
+  if (!target) return;
 
   const spotlight = () => {
-    if (typeof card.scrollIntoView === 'function') {
-      card.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    if (typeof target.scrollIntoView === 'function') {
+      target.scrollIntoView({ behavior: 'smooth', block: 'center' });
     }
-    card.classList.add('card--spotlight');
-    setTimeout(() => card.classList.remove('card--spotlight'), 1200);
+    target.classList.add('card--spotlight');
+    setTimeout(() => target.classList.remove('card--spotlight'), 1200);
   };
 
   if (typeof requestAnimationFrame === 'function') {
@@ -18962,6 +18963,10 @@ function focusAutomationCard() {
   } else {
     spotlight();
   }
+}
+
+function focusAutomationCard() {
+  openAutomationDrawer();
 }
 
 function handleAutomationControlClick(entry) {
@@ -18994,6 +18999,17 @@ function handleSpectraControlClick(entry) {
     card.scrollIntoView({ behavior: 'smooth', block: 'center' });
     card.classList.add('card--spotlight');
     setTimeout(() => card.classList.remove('card--spotlight'), 1200);
+  }
+}
+
+async function pollIAState() {
+  try {
+    const response = await fetch('/ui/ai/state');
+    const payload = response.ok ? await response.json() : { hasReco: false };
+    document.getElementById('btn-ia-assist')?.classList.toggle('glow', !!payload.hasReco);
+  } catch (error) {
+    console.warn('Failed to poll IA Assist state', error);
+    document.getElementById('btn-ia-assist')?.classList.remove('glow');
   }
 }
 
@@ -19819,11 +19835,17 @@ document.addEventListener('DOMContentLoaded', async () => {
   const aiCopilotBtn = document.getElementById('btnOpenAiCopilot');
   if (aiCopilotBtn) {
     aiCopilotBtn.addEventListener('click', () => {
-      if (typeof setActivePanel === 'function') {
-        setActivePanel('AAC09');
-      }
+      openAutomationDrawer('ai');
     });
   }
+  const iaAssistBtn = document.getElementById('btn-ia-assist');
+  if (iaAssistBtn) {
+    iaAssistBtn.addEventListener('click', () => {
+      openAutomationDrawer('ai');
+    });
+  }
+  pollIAState();
+  setInterval(pollIAState, 30000);
   const aiCopilotCloseBtn = document.querySelector('[data-role="ai-copilot-close"]');
   if (aiCopilotCloseBtn) {
     aiCopilotCloseBtn.addEventListener('click', () => {
