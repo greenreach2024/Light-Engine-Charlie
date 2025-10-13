@@ -27,6 +27,7 @@ const RUNNING_UNDER_NODE_TEST = process.argv.some((arg) =>
 );
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
+const PUBLIC_DIR = path.join(__dirname, 'public');
 
 // --- CORS guardrail: always answer OPTIONS and echo request headers ---
 app.use((req, res, next) => {
@@ -5422,6 +5423,57 @@ app.options('/api/*', (req, res) => {
   res.setHeader('Access-Control-Allow-Methods', 'GET,POST,PATCH,DELETE,OPTIONS');
   res.setHeader('Access-Control-Allow-Headers', req.headers['access-control-request-headers'] || 'Content-Type, Authorization, X-Requested-With');
   res.status(204).end();
+});
+
+// Phase 9 testing guardrails: serve the live files from disk
+app.get('/tmp/live.index.html', (req, res) => {
+  const filePath = path.join(PUBLIC_DIR, 'index.html');
+  if (!fs.existsSync(filePath)) return res.status(404).send('index.html not found');
+  res.set('Cache-Control', 'no-store');
+  res.type('html').send(fs.readFileSync(filePath, 'utf8'));
+});
+
+app.get('/tmp/live.app.new.js', (req, res) => {
+  const filePath = path.join(PUBLIC_DIR, 'app.charlie.js');
+  if (!fs.existsSync(filePath)) return res.status(404).send('app.charlie.js not found');
+  res.set('Cache-Control', 'no-store');
+  res.type('application/javascript').send(fs.readFileSync(filePath, 'utf8'));
+});
+
+const CONTROLLER_BASE = () => getController().replace(/\/+$/, '');
+
+// Targeted proxies for controller device data
+app.get('/api/devicedatas', async (req, res) => {
+  const target = `${CONTROLLER_BASE()}/api/devicedatas`;
+  try {
+    const response = await fetch(target, { signal: AbortSignal.timeout(5000) });
+    const body = await response.text();
+    res
+      .status(response.status)
+      .type(response.headers.get('content-type') || 'application/json')
+      .send(body);
+  } catch (error) {
+    res.status(502).json({ error: 'proxy_error', target, detail: String(error) });
+  }
+});
+
+app.patch('/api/devicedatas/device/:id', express.json(), async (req, res) => {
+  const target = `${CONTROLLER_BASE()}/api/devicedatas/device/${encodeURIComponent(req.params.id)}`;
+  try {
+    const response = await fetch(target, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(req.body || {}),
+      signal: AbortSignal.timeout(5000)
+    });
+    const body = await response.text();
+    res
+      .status(response.status)
+      .type(response.headers.get('content-type') || 'application/json')
+      .send(body);
+  } catch (error) {
+    res.status(502).json({ error: 'proxy_error', target, detail: String(error) });
+  }
 });
 
 // STRICT pass-through: client calls /api/* → controller receives /api/*
