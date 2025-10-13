@@ -5740,6 +5740,41 @@ app.patch('/api/devicedatas/device/:id', pinGuard, express.json(), async (req, r
 
 // STRICT pass-through: client calls /api/* → controller receives /api/*
 // Express strips the mount "/api", so add it back via pathRewrite.
+app.use('/py', async (req, res) => {
+  try {
+    const targetUrl = 'http://127.0.0.1:8000' + req.originalUrl.replace(/^\/py/, '');
+    const method = req.method || 'GET';
+    let body;
+    if (['POST', 'PUT', 'PATCH', 'DELETE'].includes(method)) {
+      const candidate = req.body;
+      if (candidate !== undefined && candidate !== null) {
+        if (typeof candidate === 'string' || candidate instanceof Buffer) {
+          body = candidate;
+        } else {
+          body = JSON.stringify(candidate);
+        }
+      }
+    }
+
+    const response = await fetch(targetUrl, {
+      method,
+      headers: {
+        'Content-Type': req.header('Content-Type') || 'application/json',
+      },
+      body,
+      signal: AbortSignal.timeout(5000),
+    });
+
+    const text = await response.text();
+    res
+      .status(response.status)
+      .type(response.headers.get('content-type') || 'application/json')
+      .send(text);
+  } catch (error) {
+    res.status(502).json({ error: 'proxy_error', target: 'fastapi', detail: String(error) });
+  }
+});
+
 app.use('/api', proxyCorsMiddleware, createProxyMiddleware({
   // Initial target is required; router() will be consulted per-request
   target: getController(),
