@@ -244,8 +244,10 @@ function mountAutomationDrawer() {
   ensureFeatureElementVisible(panel);
   panel.dataset.featureMounted = 'true';
 
-  const navLink = document.querySelector('[data-sidebar-link][data-target="automation"]');
-  ensureFeatureElementVisible(navLink);
+  const navLinks = document.querySelectorAll('[data-sidebar-link][data-target="automation"]');
+  navLinks.forEach((link) => ensureFeatureElementVisible(link));
+  const automationGroup = document.querySelector('[data-group="automation"][data-feature="automation"]');
+  ensureFeatureElementVisible(automationGroup);
 }
 
 function mountSmartPlugsCard(selector) {
@@ -4891,6 +4893,7 @@ document.addEventListener('DOMContentLoaded', function() {
 });
 // Sidebar panel state (fixes ReferenceError in strict mode)
 let ACTIVE_PANEL = 'overview';
+let ACTIVE_AUTOMATION_SECTION = 'rules';
 const PANEL_PLACEMENTS = new WeakMap();
 let PANEL_STAGE_ELEMENT = null;
 
@@ -19144,6 +19147,9 @@ function openAutomationDrawer(section = '') {
     return;
   }
 
+  const nextSection = section || ACTIVE_AUTOMATION_SECTION || 'rules';
+  ACTIVE_AUTOMATION_SECTION = nextSection;
+
   if (!document.getElementById('automation-drawer')) {
     mountAutomationDrawer();
     if (window.FEATURES.smartPlugs) {
@@ -19158,6 +19164,15 @@ function openAutomationDrawer(section = '') {
     setActivePanel('automation');
   }
 
+  const automationGroup = document.querySelector('[data-group="automation"]');
+  if (automationGroup) {
+    automationGroup.classList.add('is-expanded');
+    const trigger = automationGroup.querySelector('.sidebar-group__trigger');
+    const items = automationGroup.querySelector('.sidebar-group__items');
+    if (trigger) trigger.setAttribute('aria-expanded', 'true');
+    if (items) items.hidden = false;
+  }
+
   const sectionTargets = {
     ai: 'aiAdvisoryCard',
     rules: 'roomAutomationCard',
@@ -19165,7 +19180,7 @@ function openAutomationDrawer(section = '') {
     'smart-controllers': 'smartControllersPanel',
     'smart-devices': 'smartControllersPanel'
   };
-  const targetId = sectionTargets[section] || 'roomAutomationCard';
+  const targetId = sectionTargets[nextSection] || 'roomAutomationCard';
   const target = document.getElementById(targetId) || document.getElementById('roomAutomationCard');
   if (!target) return;
 
@@ -19973,7 +19988,11 @@ function setActivePanel(panelId = 'overview') {
     link.removeAttribute('aria-hidden');
 
     const target = link.getAttribute('data-target');
-    const isActive = target === panelId;
+    let isActive = target === panelId;
+    if (target === 'automation') {
+      const section = link.getAttribute('data-automation-section') || '';
+      isActive = panelId === 'automation' && (!section || section === ACTIVE_AUTOMATION_SECTION);
+    }
     link.classList.toggle('is-active', isActive);
     link.setAttribute('aria-current', isActive ? 'page' : 'false');
   });
@@ -20047,6 +20066,11 @@ function initializeSidebarNavigation() {
       const target = link.getAttribute('data-target') || 'overview';
       if (target === 'overview') {
         setActivePanel('overview');
+        return;
+      }
+      if (target === 'automation') {
+        const section = link.getAttribute('data-automation-section') || '';
+        openAutomationDrawer(section);
         return;
       }
       if (target === 'smart-plugs' || target === 'smart-controllers') {
