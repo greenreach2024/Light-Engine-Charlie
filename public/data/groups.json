@@ -24,33 +24,6 @@
       ],
       "plan": "GR-Propagation-BL55",
       "schedule": "group:group:PropagationBay:PropagationNorth:Demo"
-    },
-    {
-      "id": "group:FlowerBay:FlowerEast:Demo",
-      "name": "Flower East — Demo",
-      "label": "Flower East — Demo",
-      "room": "Flower Bay",
-      "zone": "Flower East",
-      "match": {
-        "room": "Flower Bay",
-        "zone": "Flower East"
-      },
-      "members": [
-        "light-003",
-        "light-004",
-        "light-005"
-      ],
-      "lights": [
-        {
-          "id": "light-003"
-        },
-        {
-          "id": "light-004"
-        },
-        {
-          "id": "light-005"
-        }
-      ]
     }
   ]
 }

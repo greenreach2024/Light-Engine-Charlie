@@ -43,48 +43,6 @@
         "fr": 0,
         "uv": 0
       }
-    },
-    "light-003": {
-      "farm": "GreenReach Farms",
-      "room": "Flower Bay",
-      "zone": "Flower East",
-      "module": "Flower Rack A",
-      "level": "Upper",
-      "side": "East",
-      "manufacturer": "GROW3",
-      "model": "TopLight MH Model-300W-22G12",
-      "serial": "22G12-003",
-      "watts": 300,
-      "spectrumMode": "dynamic",
-      "transport": "wifi"
-    },
-    "light-004": {
-      "farm": "GreenReach Farms",
-      "room": "Flower Bay",
-      "zone": "Flower East",
-      "module": "Flower Rack A",
-      "level": "Lower",
-      "side": "West",
-      "manufacturer": "GROW3",
-      "model": "TopLight MH Model-300W-22G12",
-      "serial": "22G12-004",
-      "watts": 300,
-      "spectrumMode": "dynamic",
-      "transport": "wifi"
-    },
-    "light-005": {
-      "farm": "GreenReach Farms",
-      "room": "Flower Bay",
-      "zone": "Flower East",
-      "module": "Flower Rack B",
-      "level": "Upper",
-      "side": "Center",
-      "manufacturer": "GROW3",
-      "model": "TopLight MH Model-300W-22G12",
-      "serial": "22G12-005",
-      "watts": 300,
-      "spectrumMode": "dynamic",
-      "transport": "wifi"
     }
   }
 }

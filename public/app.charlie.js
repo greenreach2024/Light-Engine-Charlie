@@ -2917,9 +2917,6 @@ async function seedDemo(plans, devices, farm) {
 
   const ID1 = findId('light-001') || findId('22G12-001');
   const ID2 = findId('light-002') || findId('22G12-002');
-  const ID3 = findId('light-003') || findId('22G12-003');
-  const ID4 = findId('light-004') || findId('22G12-004');
-  const ID5 = findId('light-005') || findId('22G12-005');
 
   const gProp = {
     id: 'group:PropagationBay:PropagationNorth:Demo',
@@ -2929,16 +2926,8 @@ async function seedDemo(plans, devices, farm) {
     members: [ID1, ID2].filter(Boolean),
     plan: 'GR-Propagation-BL55',
   };
-  const gFlow = {
-    id: 'group:FlowerBay:FlowerEast:Demo',
-    label: 'Flower East — Demo',
-    room: 'Flower Bay',
-    zone: 'Flower East',
-    members: [ID3, ID4, ID5].filter(Boolean),
-    plan: 'GR-Flower-RD60',
-  };
 
-  const demoGroups = [gProp, gFlow]
+  const demoGroups = [gProp]
     .filter((group) => Array.isArray(group.members) && group.members.length)
     .map((group) => ({
       id: group.id,

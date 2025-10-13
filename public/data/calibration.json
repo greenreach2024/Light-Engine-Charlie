@@ -8,8 +8,13 @@
       "targetId": "light-001",
       "method": "controller",
       "gains": {
-        "light-002": { "cw": 1.02, "ww": 0.98, "bl": 1.05, "rd": 0.96, "intensity": 1.0 },
-        "light-003": { "cw": 0.97, "ww": 1.03, "bl": 0.99, "rd": 1.02, "intensity": 1.0 }
+        "light-002": {
+          "cw": 1.02,
+          "ww": 0.98,
+          "bl": 1.05,
+          "rd": 0.96,
+          "intensity": 1.0
+        }
       },
       "applied": true,
       "timestamp": "2025-09-20T14:30:00Z"
