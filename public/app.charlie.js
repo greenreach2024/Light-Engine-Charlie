@@ -19144,12 +19144,59 @@ function handleAiControlClick(entry) {
   openAutomationDrawer('ai');
 }
 
+function getAutomationDrawerElement() {
+  return document.getElementById('automation-drawer');
+}
+
+function hideAutomationDrawerCard(card, track = false) {
+  if (!(card instanceof HTMLElement)) {
+    return;
+  }
+  if (track) {
+    card.dataset.aiHidden = 'true';
+  }
+  card.setAttribute('hidden', '');
+  card.setAttribute('aria-hidden', 'true');
+  card.style.display = 'none';
+}
+
+function showAutomationDrawerCard(card) {
+  if (!(card instanceof HTMLElement)) {
+    return;
+  }
+  card.removeAttribute('hidden');
+  card.removeAttribute('aria-hidden');
+  card.style.display = '';
+  if (card.dataset.aiHidden) {
+    delete card.dataset.aiHidden;
+  }
+}
+
+function restoreAutomationDrawerCards() {
+  const drawer = getAutomationDrawerElement();
+  if (!drawer) {
+    return;
+  }
+  drawer.querySelectorAll('.automation-drawer__card').forEach((card) => {
+    const featureKey = card.getAttribute('data-feature-section');
+    const featureEnabled = !featureKey || window.FEATURES?.[featureKey];
+    if (!featureEnabled) {
+      hideAutomationDrawerCard(card);
+      return;
+    }
+    showAutomationDrawerCard(card);
+  });
+}
+
 function openAutomationDrawer(section = '') {
   if (!window.FEATURES?.automation) {
     return;
   }
 
-  const nextSection = section || ACTIVE_AUTOMATION_SECTION || 'rules';
+  let nextSection = section || ACTIVE_AUTOMATION_SECTION || 'rules';
+  if (!section && nextSection === 'ai') {
+    nextSection = 'rules';
+  }
   ACTIVE_AUTOMATION_SECTION = nextSection;
 
   if (!document.getElementById('automation-drawer')) {
@@ -19186,12 +19233,45 @@ function openAutomationDrawer(section = '') {
   const target = document.getElementById(targetId) || document.getElementById('roomAutomationCard');
   if (!target) return;
 
+  const drawer = getAutomationDrawerElement();
+  if (drawer) {
+    drawer.dataset.activeSection = nextSection;
+    const cards = drawer.querySelectorAll('.automation-drawer__card');
+    const isAiSection = nextSection === 'ai';
+    cards.forEach((card) => {
+      const featureKey = card.getAttribute('data-feature-section');
+      const featureEnabled = !featureKey || window.FEATURES?.[featureKey];
+      if (!featureEnabled) {
+        hideAutomationDrawerCard(card);
+        return;
+      }
+      if (isAiSection) {
+        if (card === target) {
+          showAutomationDrawerCard(card);
+        } else {
+          hideAutomationDrawerCard(card, true);
+        }
+        return;
+      }
+      showAutomationDrawerCard(card);
+    });
+  }
+
   const spotlight = () => {
     if (typeof target.scrollIntoView === 'function') {
       target.scrollIntoView({ behavior: 'smooth', block: 'center' });
     }
     target.classList.add('card--spotlight');
     setTimeout(() => target.classList.remove('card--spotlight'), 1200);
+    if (typeof target.setAttribute === 'function') {
+      target.setAttribute('tabindex', '-1');
+      if (typeof target.focus === 'function') {
+        target.focus({ preventScroll: true });
+      }
+      target.addEventListener('blur', () => {
+        target.removeAttribute('tabindex');
+      }, { once: true });
+    }
   };
 
   if (typeof requestAnimationFrame === 'function') {
@@ -20156,6 +20236,12 @@ document.addEventListener('DOMContentLoaded', async () => {
   const aiCopilotCloseBtn = document.querySelector('[data-role="ai-copilot-close"]');
   if (aiCopilotCloseBtn) {
     aiCopilotCloseBtn.addEventListener('click', () => {
+      restoreAutomationDrawerCards();
+      ACTIVE_AUTOMATION_SECTION = 'rules';
+      const drawer = getAutomationDrawerElement();
+      if (drawer) {
+        drawer.dataset.activeSection = 'rules';
+      }
       if (typeof setActivePanel === 'function') {
         setActivePanel('overview');
       }
