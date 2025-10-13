@@ -4,15 +4,23 @@
       "id": "room-prop",
       "name": "Propagation Bay",
       "location": "Main Campus",
-      "hardwareCats": ["light", "dehumidifier"],
-      "hardwareOrder": ["light", "dehumidifier"],
+      "hardwareCats": [
+        "light",
+        "dehumidifier"
+      ],
+      "hardwareOrder": [
+        "light",
+        "dehumidifier"
+      ],
       "layout": {
         "type": "benches",
         "rows": 2,
         "racks": 1,
         "levels": 1
       },
-      "zones": ["Propagation North"],
+      "zones": [
+        "Propagation North"
+      ],
       "fixtures": [
         {
           "id": "fixture-prop-toplight",
@@ -24,15 +32,29 @@
       ],
       "controlMethod": "local",
       "devices": [
-        { "id": "light-001", "type": "light" },
-        { "id": "light-002", "type": "light" }
+        {
+          "id": "light-001",
+          "type": "light"
+        },
+        {
+          "id": "light-002",
+          "type": "light"
+        }
       ],
       "sensors": {
-        "categories": ["environment"],
+        "categories": [
+          "environment"
+        ],
         "placements": {
           "environment": [
-            { "type": "Temp/Humidity", "location": "center canopy" },
-            { "type": "CO2", "location": "north aisle" }
+            {
+              "type": "Temp/Humidity",
+              "location": "center canopy"
+            },
+            {
+              "type": "CO2",
+              "location": "north aisle"
+            }
           ]
         }
       },
@@ -47,12 +69,18 @@
         "cloudTenant": "SwitchBot"
       },
       "roles": {
-        "admin": ["alex.nguyen"],
-        "operator": ["samantha.hughes"],
+        "admin": [
+          "alex.nguyen"
+        ],
+        "operator": [
+          "samantha.hughes"
+        ],
         "viewer": []
       },
       "grouping": {
-        "groups": ["propagation-north"],
+        "groups": [
+          "propagation-north"
+        ],
         "planId": "propagation-daylight",
         "scheduleId": "schedule-prop-18h"
       },
@@ -122,36 +150,48 @@
       "id": "room-flower",
       "name": "Flower Bay",
       "location": "Main Campus",
-      "hardwareCats": ["light", "hvac"],
-      "hardwareOrder": ["light", "hvac"],
+      "hardwareCats": [
+        "light",
+        "hvac"
+      ],
+      "hardwareOrder": [
+        "light",
+        "hvac"
+      ],
       "layout": {
         "type": "racks",
         "rows": 3,
         "racks": 2,
         "levels": 2
       },
-      "zones": ["Flower East"],
+      "zones": [
+        "Flower East"
+      ],
       "fixtures": [
         {
           "id": "fixture-flower-toplight",
           "vendor": "GROW3",
           "model": "TopLight MH Model-300W-22G12",
-          "count": 3,
+          "count": 0,
           "zone": "Flower East"
         }
       ],
       "controlMethod": "controller",
-      "devices": [
-        { "id": "light-003", "type": "light" },
-        { "id": "light-004", "type": "light" },
-        { "id": "light-005", "type": "light" }
-      ],
+      "devices": [],
       "sensors": {
-        "categories": ["environment"],
+        "categories": [
+          "environment"
+        ],
         "placements": {
           "environment": [
-            { "type": "Temp/Humidity", "location": "center canopy" },
-            { "type": "PPFD", "location": "south rack" }
+            {
+              "type": "Temp/Humidity",
+              "location": "center canopy"
+            },
+            {
+              "type": "PPFD",
+              "location": "south rack"
+            }
           ]
         }
       },
@@ -166,12 +206,20 @@
         "cloudTenant": "GrowLink"
       },
       "roles": {
-        "admin": ["alex.nguyen"],
-        "operator": ["maria.lopez"],
-        "viewer": ["samantha.hughes"]
+        "admin": [
+          "alex.nguyen"
+        ],
+        "operator": [
+          "maria.lopez"
+        ],
+        "viewer": [
+          "samantha.hughes"
+        ]
       },
       "grouping": {
-        "groups": ["flower-east"],
+        "groups": [
+          "flower-east"
+        ],
         "planId": "flower-full-cycle",
         "scheduleId": "schedule-flower-12h"
       },
@@ -183,13 +231,13 @@
               "category": "light",
               "vendor": "GROW3",
               "model": "TopLight MH Model-300W-22G12",
-              "count": 3,
+              "count": 0,
               "zone": "Flower East"
             }
           ],
           "wifi": true,
           "wired": false,
-          "count": 3,
+          "count": 0,
           "manufacturer": "GROW3",
           "model": "TopLight MH Model-300W-22G12"
         },
@@ -217,7 +265,7 @@
               "category": "light",
               "vendor": "GROW3",
               "model": "TopLight MH Model-300W-22G12",
-              "count": 3,
+              "count": 0,
               "zone": "Flower East"
             }
           ]

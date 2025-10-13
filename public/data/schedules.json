@@ -11,18 +11,6 @@
       "rampUpMin": 10,
       "rampDownMin": 10,
       "planKey": "GR-Propagation-BL55"
-    },
-    {
-      "id": "group:FlowerBay:FlowerEast:Demo",
-      "period": "1d",
-      "photoperiod": [
-        "12/12"
-      ],
-      "start": "18:00",
-      "durationHours": 12,
-      "rampUpMin": 10,
-      "rampDownMin": 10,
-      "planKey": "GR-Flower-RD60"
     }
   ]
 }

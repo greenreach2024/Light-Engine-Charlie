@@ -27,39 +27,6 @@ const devices = new Map([
       channels: 'CW/WW/Blue/Red'
     }
   }],
-  ['light-003', {
-    id: 'light-003',
-    deviceName: 'GreenReach Demo Fixture · Flower · light-003',
-    status: 'off',
-    value: '000000000000',
-    meta: {
-      room: 'Flower Bay',
-      zone: 'Flower East',
-      channels: 'CW/WW/Blue/Red'
-    }
-  }],
-  ['light-004', {
-    id: 'light-004',
-    deviceName: 'GreenReach Demo Fixture · Flower · light-004',
-    status: 'off',
-    value: '000000000000',
-    meta: {
-      room: 'Flower Bay',
-      zone: 'Flower East',
-      channels: 'CW/WW/Blue/Red'
-    }
-  }],
-  ['light-005', {
-    id: 'light-005',
-    deviceName: 'GreenReach Demo Fixture · Flower · light-005',
-    status: 'off',
-    value: '000000000000',
-    meta: {
-      room: 'Flower Bay',
-      zone: 'Flower East',
-      channels: 'CW/WW/Blue/Red'
-    }
-  }]
 ]);
 
 function serializeDevice(device) {
