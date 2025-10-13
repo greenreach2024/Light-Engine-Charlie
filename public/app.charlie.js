@@ -6038,11 +6038,36 @@ function computeWeightedSPD(mix, opts = {}) {
   };
 }
 // ===== Spectra helpers (Plan vs Light) =====
+function ensureGlobalAppState() {
+  if (!window.__state) window.__state = {};
+  if (!window.__state.gral29) window.__state.gral29 = { selected: [] };
+  return window.__state;
+}
+
 function ensureSpectraState() {
+  const state = ensureGlobalAppState();
   if (!window.__spectraState) {
     window.__spectraState = { selectedPlan: null, selectedLights: [] };
   }
+  const selection = Array.isArray(state.gral29?.selected) ? state.gral29.selected : [];
+  window.__spectraState.selectedLights = selection;
   return window.__spectraState;
+}
+
+function onGRAL29SelectionChange(selectedLights) {
+  const state = ensureGlobalAppState();
+  const normalized = Array.isArray(selectedLights) ? selectedLights.slice() : [];
+  const previous = Array.isArray(state.gral29.selected) ? state.gral29.selected : [];
+  const sameLength = previous.length === normalized.length;
+  const same = sameLength && previous.every((entry, index) => entry === normalized[index]);
+  state.gral29.selected = normalized;
+  const spectraState = ensureSpectraState();
+  spectraState.selectedLights = normalized;
+  if (!same) {
+    document.dispatchEvent(
+      new CustomEvent('gral29:changed', { detail: { selectedLights: normalized } })
+    );
+  }
 }
 
 function ensureSpdFromMix(mix, deviceIds = []) {
@@ -6270,7 +6295,9 @@ function getSelectedPlanSpectrum() {
 }
 
 function getSelectedLights() {
-  return ensureSpectraState().selectedLights || [];
+  const state = ensureGlobalAppState();
+  const selection = state.gral29?.selected;
+  return Array.isArray(selection) ? selection : [];
 }
 
 function renderSelectedLightsSpectraUnderPlan() {
@@ -6347,7 +6374,7 @@ function scheduleSelectedSpectraRender() {
 }
 
 document.addEventListener('plan:changed', scheduleSelectedSpectraRender);
-document.addEventListener('lights:changed', scheduleSelectedSpectraRender);
+document.addEventListener('gral29:changed', scheduleSelectedSpectraRender);
 window.addEventListener('DOMContentLoaded', () => {
   ensureSpectraState();
   scheduleSelectedSpectraRender();
@@ -14939,9 +14966,7 @@ function wireGlobalEvents() {
     const modeLabel = document.getElementById('groupLightInfoMode');
 
     if (!group) {
-      const hadLights = Array.isArray(spectraState.selectedLights) && spectraState.selectedLights.length > 0;
-      spectraState.selectedLights = [];
-      if (hadLights) document.dispatchEvent(new Event('lights:changed'));
+      onGRAL29SelectionChange([]);
       if (card) {
         card.classList.add('is-empty');
         if (title) title.textContent = 'Current mix';
@@ -14956,9 +14981,7 @@ function wireGlobalEvents() {
 
     const activeLights = getActiveGroupMembers(group);
     if (!activeLights.length) {
-      const hadLights = Array.isArray(spectraState.selectedLights) && spectraState.selectedLights.length > 0;
-      spectraState.selectedLights = [];
-      if (hadLights) document.dispatchEvent(new Event('lights:changed'));
+      onGRAL29SelectionChange([]);
       if (card) {
         card.classList.add('is-empty');
         if (title) title.textContent = 'Current mix';
@@ -15001,8 +15024,7 @@ function wireGlobalEvents() {
       isDynamic: light.dynamic,
       manufacturerSpectrum: light.dynamic ? null : resolveSpd(light.spectrum, [light.id]),
     }));
-    spectraState.selectedLights = selectedLightRecords;
-    document.dispatchEvent(new Event('lights:changed'));
+    onGRAL29SelectionChange(selectedLightRecords);
 
     const dynamicCount = resolvedLights.filter((light) => light.dynamic).length;
     const staticCount = resolvedLights.length - dynamicCount;
