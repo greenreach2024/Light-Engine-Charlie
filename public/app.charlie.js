@@ -145,12 +145,15 @@
   }
 })();
 
-// runtime flags (safe defaults)
+// Runtime feature flags (extend, don't overwrite)
 window.FEATURES = Object.assign({
   researchMode: localStorage.getItem('gr.researchMode') === '1',
   automation: true,          // renders the Automation drawer in sidebar
   smartPlugs: true,          // enables Smart Plugs inside Automation (not main)
-  wizards: false             // hides setup wizards unless explicitly enabled
+  wizards: false,            // hides setup wizards unless explicitly enabled
+  dehumOnMain: false,        // turn OFF main-page duplicates
+  unassignedOnMain: false,
+  spectragraphOnMain: false
 }, window.FEATURES || {});
 
 function escapeAttribute(value) {
@@ -419,6 +422,307 @@ async function hydrateEquipmentCounters() {
     });
   } catch (error) {
     console.warn('Failed to hydrate equipment counters', error);
+  }
+}
+
+function resolveCardMount(targetSelector, cardKey) {
+  if (!targetSelector || !cardKey) return null;
+  const root = typeof targetSelector === 'string' ? document.querySelector(targetSelector) : targetSelector;
+  if (!root) return null;
+  if (root.matches(`[data-card='${cardKey}']`)) return root;
+  let mount = root.querySelector(`[data-card='${cardKey}']`);
+  if (!mount) {
+    mount = document.createElement('div');
+    mount.dataset.card = cardKey;
+    root.appendChild(mount);
+  }
+  return mount;
+}
+
+const groupsv2SpectragraphState = {
+  ids: [],
+  mix: null,
+  body: null
+};
+
+function renderGroupsv2SpectragraphState() {
+  const body = groupsv2SpectragraphState.body;
+  if (!body) return;
+
+  body.innerHTML = '';
+  const ids = Array.isArray(groupsv2SpectragraphState.ids) ? groupsv2SpectragraphState.ids : [];
+  const mix = groupsv2SpectragraphState.mix;
+
+  if (!ids.length || !mix) {
+    const empty = document.createElement('p');
+    empty.className = 'tiny text-muted groupsv2-spectra-card__empty';
+    empty.textContent = 'No lights selected for spectral preview.';
+    body.appendChild(empty);
+    return;
+  }
+
+  const normalized = {
+    cw: Number(mix.cw) || 0,
+    ww: Number(mix.ww) || 0,
+    bl: Number(mix.bl) || 0,
+    rd: Number(mix.rd) || 0
+  };
+  const total = (normalized.cw + normalized.ww + normalized.bl + normalized.rd) || 1;
+  const cwW = (normalized.cw / total) * 100;
+  const wwW = (normalized.ww / total) * 100;
+  const blW = (normalized.bl / total) * 100;
+  const rdW = (normalized.rd / total) * 100;
+
+  const bar = document.createElement('div');
+  bar.className = 'spectra-bar';
+  bar.style.background = `linear-gradient(to right,
+     #BBD5FF 0% ${cwW}%,
+     #FFE4B5 ${cwW}% ${cwW + wwW}%,
+     #9EC9FF ${cwW + wwW}% ${cwW + wwW + blW}%,
+     #FF9999 ${cwW + wwW + blW}% 100%)`;
+  bar.title = `CW ${normalized.cw}% · WW ${normalized.ww}% · Blue ${normalized.bl}% · Red ${normalized.rd}%`;
+  body.appendChild(bar);
+}
+
+function updateGroupsv2Spectragraph(ids, mix) {
+  groupsv2SpectragraphState.ids = Array.isArray(ids) ? ids.slice() : [];
+  groupsv2SpectragraphState.mix = mix && typeof mix === 'object'
+    ? {
+        cw: Number(mix.cw) || 0,
+        ww: Number(mix.ww) || 0,
+        bl: Number(mix.bl) || 0,
+        rd: Number(mix.rd) || 0
+      }
+    : null;
+  renderGroupsv2SpectragraphState();
+}
+
+function mountSpectragraph(targetSelector) {
+  const host = resolveCardMount(targetSelector, 'spectragraph');
+  if (!host) return;
+
+  if (host.dataset.hydrated === 'true') {
+    groupsv2SpectragraphState.body = host.querySelector('#GVPFLSW29');
+    renderGroupsv2SpectragraphState();
+    return;
+  }
+
+  host.innerHTML = `
+    <article class="groupsv2-spectra-card gr-card">
+      <header class="groupsv2-spectra-card__header">
+        <h3>Spectragraph</h3>
+        <p class="tiny text-muted">Average spectrum for the previewed fixtures.</p>
+      </header>
+      <div class="groupsv2-spectra-card__body">
+        <div id="GVPFLSW29" class="spectra" aria-live="polite"></div>
+      </div>
+    </article>
+  `;
+  host.dataset.hydrated = 'true';
+  groupsv2SpectragraphState.body = host.querySelector('#GVPFLSW29');
+  renderGroupsv2SpectragraphState();
+}
+
+function mountDehumidifierSetup(targetSelector) {
+  const host = resolveCardMount(targetSelector, 'dehum-setup');
+  if (!host || host.dataset.hydrated === 'true') return;
+
+  host.innerHTML = `
+    <article class="equip-micro equip-micro--dehum">
+      <header class="equip-micro__header">
+        <h3 class="equip-micro__title">Dehumidifier Setup</h3>
+        <p class="tiny text-muted equip-micro__hint">Quickly adjust counts for each grow room.</p>
+      </header>
+      <div class="equip-micro__body">
+        <div class="equip-micro__row">
+          <span class="equip-micro__label">Room 1</span>
+          <div class="equip-row" data-equip="dehum" data-room="room1">
+            <button type="button" data-op="dec" data-target="dehum:room1" aria-label="Decrease Room 1 dehumidifiers">–</button>
+            <input data-input="dehum:room1" value="0" inputmode="numeric" aria-label="Room 1 dehumidifier count" />
+            <button type="button" data-op="inc" data-target="dehum:room1" aria-label="Increase Room 1 dehumidifiers">+</button>
+          </div>
+        </div>
+      </div>
+    </article>
+  `;
+  host.dataset.hydrated = 'true';
+}
+
+async function mountUnassignedLights(targetSelector) {
+  try {
+    const host = resolveCardMount(targetSelector, 'unassigned-lights');
+    if (!host) return;
+
+    let unassignedRoot = host.querySelector('#GRUL32');
+    let activeRoot = host.querySelector('#GRACB28');
+    let applyBtn = host.querySelector('#GRUL32-apply');
+    let clearBtn = host.querySelector('#GRUL32-clear');
+
+    if (!unassignedRoot || !activeRoot || !applyBtn || !clearBtn) {
+      host.innerHTML = '';
+      const wrapper = document.createElement('article');
+      wrapper.className = 'groupsv2-unassigned-card gr-card';
+      wrapper.innerHTML = `
+        <header class="groupsv2-unassigned-card__header">
+          <h3>Unassigned Lights</h3>
+          <p class="tiny text-muted">Select fixtures to preview their plan coverage and spectra.</p>
+        </header>
+        <div class="groupsv2-unassigned-card__body">
+          <div id="GRUL32" class="gr-list groupsv2-unassigned-card__list" aria-live="polite"></div>
+          <div class="groupsv2-unassigned-card__actions" role="group" aria-label="Preview controls">
+            <button id="GRUL32-apply" type="button" class="primary">Preview Selection</button>
+            <button id="GRUL32-clear" type="button" class="ghost">Clear</button>
+          </div>
+        </div>
+        <div class="groupsv2-unassigned-card__active">
+          <h4 class="groupsv2-unassigned-card__active-title">Previewed Lights</h4>
+          <div id="GRACB28" class="cards grid groupsv2-unassigned-card__active-cards" aria-live="polite"></div>
+        </div>
+      `;
+      host.appendChild(wrapper);
+      unassignedRoot = wrapper.querySelector('#GRUL32');
+      activeRoot = wrapper.querySelector('#GRACB28');
+      applyBtn = wrapper.querySelector('#GRUL32-apply');
+      clearBtn = wrapper.querySelector('#GRUL32-clear');
+    }
+
+    if (!unassignedRoot || !activeRoot || !applyBtn || !clearBtn) return;
+
+    host.dataset.hydrated = 'true';
+
+    const fetchJson = async (path) => {
+      const response = await fetch(resolveApiUrl(path));
+      if (!response.ok) throw new Error(`HTTP ${response.status}`);
+      return response.json();
+    };
+
+    let devsRaw = { data: [] };
+    try {
+      devsRaw = await fetchJson('/api/devicedatas');
+    } catch (error) {
+      console.warn('Failed to load device data', error);
+    }
+
+    const groups = await fetchJson('/groups').catch((error) => {
+      console.warn('Failed to load groups', error);
+      return { items: [] };
+    });
+    const sched = await fetchJson('/sched').catch((error) => {
+      console.warn('Failed to load schedules', error);
+      return { items: [] };
+    });
+
+    const devices = Array.isArray(devsRaw?.data) ? devsRaw.data : [];
+    const groupMembers = new Set(
+      (groups.items || []).flatMap((g) => (g.members || [])).map((id) => (id || '').replace(/^dev:/, ''))
+    );
+    const unassigned = devices.filter((device) => !groupMembers.has(String(device.id)));
+
+    const HEX12_TO_PCTS = (hex12) => {
+      if (!hex12 || hex12.length < 8) return { cw: 0, ww: 0, bl: 0, rd: 0 };
+      const h = hex12.toLowerCase();
+      const toPct = (v) => Math.round((parseInt(v, 16) / 0x64) * 100);
+      return {
+        cw: toPct(h.slice(0, 2)),
+        ww: toPct(h.slice(2, 4)),
+        bl: toPct(h.slice(4, 6)),
+        rd: toPct(h.slice(6, 8))
+      };
+    };
+
+    const deviceMixHex = (devId) => {
+      const scheduleItem = (sched.items || []).find((item) => item.id === `dev:${devId}`);
+      if (scheduleItem && scheduleItem.mix) return (scheduleItem.mix || '').trim();
+      const device = devices.find((entry) => String(entry.id) === String(devId));
+      if (device && device.value) return (device.value || '').trim();
+      return '000000000000';
+    };
+
+    const averageMix = (ids) => {
+      if (!ids.length) return { cw: 0, ww: 0, bl: 0, rd: 0 };
+      const sum = ids.reduce((acc, id) => {
+        const parts = HEX12_TO_PCTS(deviceMixHex(id));
+        acc.cw += parts.cw;
+        acc.ww += parts.ww;
+        acc.bl += parts.bl;
+        acc.rd += parts.rd;
+        return acc;
+      }, { cw: 0, ww: 0, bl: 0, rd: 0 });
+      return {
+        cw: Math.round(sum.cw / ids.length),
+        ww: Math.round(sum.ww / ids.length),
+        bl: Math.round(sum.bl / ids.length),
+        rd: Math.round(sum.rd / ids.length)
+      };
+    };
+
+    unassignedRoot.innerHTML = '';
+    unassigned.forEach((device) => {
+      const row = document.createElement('label');
+      row.className = 'groupsv2-unassigned-card__row';
+      row.innerHTML = `
+        <input type="checkbox" class="gr-pick" value="${device.id}">
+        <span class="mono">${device.deviceName || '(unnamed)'} · ${device.id}</span>`;
+      unassignedRoot.appendChild(row);
+    });
+
+    const picks = () => [...unassignedRoot.querySelectorAll('.gr-pick:checked')].map((input) => input.value);
+
+    const renderActive = (ids) => {
+      activeRoot.innerHTML = '';
+      if (!ids.length) {
+        const empty = document.createElement('p');
+        empty.className = 'tiny text-muted groupsv2-unassigned-card__empty';
+        empty.textContent = 'Select lights to preview their details here.';
+        activeRoot.appendChild(empty);
+        return;
+      }
+
+      ids.forEach((id) => {
+        const device = devices.find((entry) => String(entry.id) === String(id));
+        const card = document.createElement('div');
+        card.className = 'card groupsv2-active-card';
+        card.dataset.id = id;
+        card.innerHTML = `
+          <div class="row space-between groupsv2-active-card__header">
+            <strong>${(device && device.deviceName) || '(unnamed)'}</strong>
+            <span class="mono">ID ${id}</span>
+          </div>
+          <div class="mini mix" data-hex="${deviceMixHex(id)}"></div>
+          <button class="btn-ghost remove" data-id="${id}" type="button">Remove</button>`;
+        activeRoot.appendChild(card);
+      });
+    };
+
+    const apply = () => {
+      const ids = picks();
+      renderActive(ids);
+      updateGroupsv2Spectragraph(ids, averageMix(ids));
+    };
+
+    const clear = () => {
+      unassignedRoot.querySelectorAll('.gr-pick').forEach((checkbox) => {
+        checkbox.checked = false;
+      });
+      renderActive([]);
+      updateGroupsv2Spectragraph([], { cw: 0, ww: 0, bl: 0, rd: 0 });
+    };
+
+    applyBtn.addEventListener('click', apply);
+    clearBtn.addEventListener('click', clear);
+    activeRoot.addEventListener('click', (event) => {
+      const target = event.target?.closest('.remove');
+      if (!target) return;
+      const id = String(target.dataset.id || '');
+      if (!id) return;
+      const checkbox = unassignedRoot.querySelector(`.gr-pick[value="${id}"]`);
+      if (checkbox) checkbox.checked = false;
+      apply();
+    });
+
+    clear();
+  } catch (error) {
+    console.warn('Failed to mount Unassigned Lights card', error);
   }
 }
 
@@ -20230,28 +20534,14 @@ document.addEventListener('DOMContentLoaded', async () => {
       }
     }
   });
-  const dehumHost = document.getElementById('equip-dehum-setup');
-  if (dehumHost && dehumHost.dataset.hydrated !== 'true') {
-    dehumHost.innerHTML = `
-      <article class="equip-micro equip-micro--dehum">
-        <header class="equip-micro__header">
-          <h3 class="equip-micro__title">Dehumidifier Setup</h3>
-          <p class="tiny text-muted equip-micro__hint">Quickly adjust counts for each grow room.</p>
-        </header>
-        <div class="equip-micro__body">
-          <div class="equip-micro__row">
-            <span class="equip-micro__label">Room 1</span>
-            <div class="equip-row" data-equip="dehum" data-room="room1">
-              <button type="button" data-op="dec" data-target="dehum:room1" aria-label="Decrease Room 1 dehumidifiers">–</button>
-              <input data-input="dehum:room1" value="0" inputmode="numeric" aria-label="Room 1 dehumidifier count" />
-              <button type="button" data-op="inc" data-target="dehum:room1" aria-label="Increase Room 1 dehumidifiers">+</button>
-            </div>
-          </div>
-        </div>
-      </article>
-    `;
-    dehumHost.dataset.hydrated = 'true';
-  }
+  const dehumTarget = window.FEATURES.dehumOnMain ? '#main-cards' : '#equip-dehum-setup';
+  mountDehumidifierSetup(dehumTarget);
+
+  const unassignedTarget = window.FEATURES.unassignedOnMain ? '#main-cards' : '#groupsv2-unassigned';
+  mountUnassignedLights(unassignedTarget);
+
+  const spectragraphTarget = window.FEATURES.spectragraphOnMain ? '#main-cards' : '#groupsv2-spectragraph';
+  mountSpectragraph(spectragraphTarget);
   hydrateEquipmentCounters();
   pollIAState();
   setInterval(pollIAState, 30000);
@@ -20323,208 +20613,6 @@ document.addEventListener('DOMContentLoaded', async () => {
 
     document.getElementById('btnRefreshSmartPlugs')?.addEventListener('click', () => loadSmartPlugs());
     document.getElementById('btnDiscoverSmartPlugs')?.addEventListener('click', () => discoverSmartPlugs());
-
-    // --- Unassigned lights → Active cards → Spectragraph ---
-    try {
-      const unassignedMount = document.getElementById('groupsv2-unassigned');
-      const spectragraphMount = document.getElementById('groupsv2-spectragraph');
-      if (!unassignedMount || !spectragraphMount) return;
-
-      let unassignedRoot = unassignedMount.querySelector('#GRUL32');
-      let activeRoot = unassignedMount.querySelector('#GRACB28');
-      let applyBtn = unassignedMount.querySelector('#GRUL32-apply');
-      let clearBtn = unassignedMount.querySelector('#GRUL32-clear');
-
-      if (!unassignedRoot || !activeRoot || !applyBtn || !clearBtn) {
-        unassignedMount.innerHTML = '';
-        const wrapper = document.createElement('article');
-        wrapper.className = 'groupsv2-unassigned-card gr-card';
-        wrapper.innerHTML = `
-          <header class="groupsv2-unassigned-card__header">
-            <h3>Unassigned Lights</h3>
-            <p class="tiny text-muted">Select fixtures to preview their plan coverage and spectra.</p>
-          </header>
-          <div class="groupsv2-unassigned-card__body">
-            <div id="GRUL32" class="gr-list groupsv2-unassigned-card__list" aria-live="polite"></div>
-            <div class="groupsv2-unassigned-card__actions" role="group" aria-label="Preview controls">
-              <button id="GRUL32-apply" type="button" class="primary">Preview Selection</button>
-              <button id="GRUL32-clear" type="button" class="ghost">Clear</button>
-            </div>
-          </div>
-          <div class="groupsv2-unassigned-card__active">
-            <h4 class="groupsv2-unassigned-card__active-title">Previewed Lights</h4>
-            <div id="GRACB28" class="cards grid groupsv2-unassigned-card__active-cards" aria-live="polite"></div>
-          </div>
-        `;
-        unassignedMount.appendChild(wrapper);
-        unassignedRoot = wrapper.querySelector('#GRUL32');
-        activeRoot = wrapper.querySelector('#GRACB28');
-        applyBtn = wrapper.querySelector('#GRUL32-apply');
-        clearBtn = wrapper.querySelector('#GRUL32-clear');
-      }
-
-      let spectraRoot = spectragraphMount.querySelector('#GVPFLSW29');
-      if (!spectraRoot) {
-        spectragraphMount.innerHTML = '';
-        const spectraCard = document.createElement('article');
-        spectraCard.className = 'groupsv2-spectra-card gr-card';
-        spectraCard.innerHTML = `
-          <header class="groupsv2-spectra-card__header">
-            <h3>Spectragraph</h3>
-            <p class="tiny text-muted">Average spectrum for the previewed fixtures.</p>
-          </header>
-          <div class="groupsv2-spectra-card__body">
-            <div id="GVPFLSW29" class="spectra" aria-live="polite"></div>
-          </div>
-        `;
-        spectragraphMount.appendChild(spectraCard);
-        spectraRoot = spectraCard.querySelector('#GVPFLSW29');
-      }
-
-      if (!unassignedRoot || !activeRoot || !applyBtn || !clearBtn || !spectraRoot) return;
-
-      // Boot only if our new containers exist
-      const API = (window.API_BASE || ''); // per Charlie guardrails
-      const jget = async (p) => (await fetch(`${API}${p}`)).json();
-
-      // Fetch canonical devices, groups (for membership), schedules (for HEX12 mix)
-      const devsRaw = await jget('/api/devicedatas');
-      const groups = await jget('/groups').catch(() => ({ items: [] }));
-      const sched = await jget('/sched').catch(() => ({ items: [] }));
-
-      const devices = (devsRaw && devsRaw.data) ? devsRaw.data : [];
-      const groupMembers = new Set(
-        (groups.items || []).flatMap(g => (g.members || [])).map(x => (x || '').replace(/^dev:/, ''))
-      );
-
-      // Unassigned = devices with no group membership
-      const unassigned = devices.filter(d => !groupMembers.has(String(d.id)));
-
-      const HEX12_TO_PCTS = (hex12) => {
-        if (!hex12 || hex12.length < 8) return { cw: 0, ww: 0, bl: 0, rd: 0 };
-        const h = hex12.toLowerCase();
-        const toPct = v => Math.round((parseInt(v, 16) / 0x64) * 100);
-        return {
-          cw: toPct(h.slice(0, 2)),
-          ww: toPct(h.slice(2, 4)),
-          bl: toPct(h.slice(4, 6)),
-          rd: toPct(h.slice(6, 8)),
-        };
-      };
-
-      const deviceMixHex = (devId) => {
-        const si = (sched.items || []).find(it => (it.id === `dev:${devId}`));
-        if (si && si.mix) return (si.mix || '').trim();
-        const d = devices.find(x => String(x.id) === String(devId));
-        if (d && d.value) return (d.value || '').trim();
-        return '000000000000';
-      };
-
-      const averageMix = (ids) => {
-        if (!ids.length) return { cw: 0, ww: 0, bl: 0, rd: 0 };
-        let sum = { cw: 0, ww: 0, bl: 0, rd: 0 };
-        ids.forEach(id => {
-          const p = HEX12_TO_PCTS(deviceMixHex(id));
-          sum.cw += p.cw; sum.ww += p.ww; sum.bl += p.bl; sum.rd += p.rd;
-        });
-        return {
-          cw: Math.round(sum.cw / ids.length),
-          ww: Math.round(sum.ww / ids.length),
-          bl: Math.round(sum.bl / ids.length),
-          rd: Math.round(sum.rd / ids.length),
-        };
-      };
-
-      const renderActive = (ids) => {
-        activeRoot.innerHTML = '';
-        if (!ids.length) {
-          const empty = document.createElement('p');
-          empty.className = 'tiny text-muted groupsv2-unassigned-card__empty';
-          empty.textContent = 'Select lights to preview their details here.';
-          activeRoot.appendChild(empty);
-          return;
-        }
-        ids.forEach(id => {
-          const d = devices.find(x => String(x.id) === String(id));
-          const card = document.createElement('div');
-          card.className = 'card groupsv2-active-card';
-          card.dataset.id = id;
-          card.innerHTML =
-            `<div class="row space-between groupsv2-active-card__header">
-                <strong>${(d && d.deviceName) || '(unnamed)'}</strong>
-                <span class="mono">ID ${id}</span>
-              </div>
-              <div class="mini mix" data-hex="${deviceMixHex(id)}"></div>
-              <button class="btn-ghost remove" data-id="${id}" type="button">Remove</button>`;
-          activeRoot.appendChild(card);
-        });
-      };
-
-      const renderSpectra = (ids) => {
-        spectraRoot.innerHTML = '';
-        if (!ids.length) {
-          const empty = document.createElement('p');
-          empty.className = 'tiny text-muted groupsv2-spectra-card__empty';
-          empty.textContent = 'No lights selected for spectral preview.';
-          spectraRoot.appendChild(empty);
-          return;
-        }
-        const m = averageMix(ids);
-        const bar = document.createElement('div');
-        bar.className = 'spectra-bar';
-        const total = (m.cw + m.ww + m.bl + m.rd) || 1;
-        const cwW = (m.cw / total) * 100;
-        const wwW = (m.ww / total) * 100;
-        const blW = (m.bl / total) * 100;
-        const rdW = (m.rd / total) * 100;
-        bar.style.background = `linear-gradient(to right,
-           #BBD5FF 0% ${cwW}%,
-           #FFE4B5 ${cwW}% ${cwW + wwW}%,
-           #9EC9FF ${cwW + wwW}% ${cwW + wwW + blW}%,
-           #FF9999 ${cwW + wwW + blW}% 100%)`;
-        bar.title = `CW ${m.cw}% · WW ${m.ww}% · Blue ${m.bl}% · Red ${m.rd}%`;
-        spectraRoot.appendChild(bar);
-      };
-
-      const listEl = unassignedRoot;
-      listEl.innerHTML = '';
-      unassigned.forEach(d => {
-        const row = document.createElement('label');
-        row.className = 'groupsv2-unassigned-card__row';
-        row.innerHTML =
-          `<input type="checkbox" class="gr-pick" value="${d.id}">
-           <span class="mono">${d.deviceName || '(unnamed)'} · ${d.id}</span>`;
-        listEl.appendChild(row);
-      });
-
-      const picks = () => [...unassignedRoot.querySelectorAll('.gr-pick:checked')].map(x => x.value);
-      const apply = () => {
-        const ids = picks();
-        renderActive(ids);
-        renderSpectra(ids);
-      };
-      const clear = () => {
-        unassignedRoot.querySelectorAll('.gr-pick').forEach(cb => { cb.checked = false; });
-        renderActive([]);
-        renderSpectra([]);
-      };
-
-      applyBtn.addEventListener('click', apply);
-      clearBtn.addEventListener('click', clear);
-      activeRoot.addEventListener('click', (e) => {
-        const t = e.target.closest('.remove');
-        if (!t) return;
-        const id = String(t.dataset.id);
-        const cb = unassignedRoot.querySelector(`.gr-pick[value="${id}"]`);
-        if (cb) cb.checked = false;
-        apply();
-      });
-
-      renderActive([]);
-      renderSpectra([]);
-    } catch (err) {
-      console.error('[GR-UI] boot error', err);
-    }
 
     const smartPlugTable = document.getElementById('smartPlugsTable');
     if (smartPlugTable) {
