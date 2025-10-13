@@ -210,6 +210,39 @@ if (document.readyState === 'loading') {
   hydrateIconSlots(document);
 }
 
+const EQUIPMENT_KIND_PREFIX_MAP = {
+  dehum: 'dehumidifier',
+  humid: 'humidifier',
+  hvac: 'hvac',
+  fan: 'fan',
+  vent: 'vent',
+  pump: 'pump',
+  fert: 'fertigation',
+  light: 'light',
+  ctrl: 'controller',
+  env: 'environment',
+  sensor: 'sensor'
+};
+
+function resolveEquipmentKindFromId(targetId) {
+  if (!targetId) return 'equipment';
+  const prefix = String(targetId).split(':')[0]?.toLowerCase() || '';
+  return EQUIPMENT_KIND_PREFIX_MAP[prefix] || prefix || 'equipment';
+}
+
+function getEquipmentInputElement(key) {
+  if (!key) return null;
+  try {
+    if (window.CSS && typeof window.CSS.escape === 'function') {
+      return document.querySelector(`[data-input="${window.CSS.escape(key)}"]`);
+    }
+  } catch (error) {
+    console.warn('CSS.escape failed for equipment key', key, error);
+  }
+  const safe = String(key).replace(/"/g, '\"');
+  return document.querySelector(`[data-input="${safe}"]`);
+}
+
 // Global numeric stepper handler for equipment rows (supports dynamically added rows)
 document.addEventListener('click', async (ev) => {
   const btn = ev.target.closest('[data-op][data-target]');
@@ -219,17 +252,19 @@ document.addEventListener('click', async (ev) => {
   const id = btn.dataset.target;
   if (!op || !id) return;
 
-  const input = document.querySelector(`[data-input="${id}"]`);
+  const input = getEquipmentInputElement(id);
   if (!input) return;
 
   const cur = parseInt(input.value || '0', 10) || 0;
   const next = Math.max(0, cur + (op === 'inc' ? 1 : -1));
   if (next === cur) return;
 
+  const previous = cur;
   input.value = String(next);
 
   try {
-    const payload = { id, kind: 'dehumidifier', count: next };
+    const kind = resolveEquipmentKindFromId(id);
+    const payload = { id, kind, count: next };
     const response = await fetch('/ui/equip', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -238,11 +273,46 @@ document.addEventListener('click', async (ev) => {
     if (!response.ok) {
       const text = await response.text();
       console.warn('equip save failed', text);
+      input.value = String(previous);
+      return;
     }
+    const counts = STATE.equipmentCounts || (STATE.equipmentCounts = {});
+    counts[id] = { kind, count: next, ts: Date.now() };
   } catch (error) {
     console.warn('equip save failed', error);
+    input.value = String(previous);
   }
 });
+
+async function hydrateEquipmentCounters() {
+  try {
+    const response = await fetch(resolveApiUrl('/ui/equip'));
+    if (!response.ok) {
+      if (response.status !== 404) {
+        console.warn('Failed to load equipment counters', `HTTP ${response.status}`);
+      }
+      return;
+    }
+    const payload = await response.json();
+    if (!payload || typeof payload !== 'object') return;
+    const counts = STATE.equipmentCounts || (STATE.equipmentCounts = {});
+    Object.entries(payload).forEach(([key, value]) => {
+      if (!key) return;
+      const info = (value && typeof value === 'object') ? value : { count: value };
+      const parsed = Number.parseInt(info.count, 10);
+      if (!Number.isFinite(parsed)) return;
+      const safeCount = Math.max(0, parsed | 0);
+      const kind = info.kind || resolveEquipmentKindFromId(key);
+      counts[key] = { kind, count: safeCount, ts: info.ts || Date.now() };
+      const input = getEquipmentInputElement(key);
+      if (input) {
+        input.value = String(safeCount);
+      }
+    });
+  } catch (error) {
+    console.warn('Failed to hydrate equipment counters', error);
+  }
+}
 
 // Ensure lights from lightSetups are always in window.STATE.lights and update unassigned lights
 window.addEventListener('lightSetupsChanged', () => {
@@ -7030,6 +7100,9 @@ STATE.roomAutomation = STATE.roomAutomation || { rooms: [], meta: {} };
 STATE.aiAdvisory = STATE.aiAdvisory || { summary: '', rooms: [] };
 STATE.envReadings = Array.isArray(STATE.envReadings) ? STATE.envReadings : [];
 STATE.ctrlMap = (STATE.ctrlMap && typeof STATE.ctrlMap === 'object' && !Array.isArray(STATE.ctrlMap)) ? STATE.ctrlMap : {};
+STATE.equipmentCounts = (STATE.equipmentCounts && typeof STATE.equipmentCounts === 'object' && !Array.isArray(STATE.equipmentCounts))
+  ? STATE.equipmentCounts
+  : {};
 
 // ...existing code...
 class FarmWizard {
@@ -18934,12 +19007,7 @@ function handleAiControlClick(entry) {
       icon: grIconImg('ia-assist-ei2', 'IA Assist E.i2')
     });
   }
-  const card = document.getElementById('environmentalAiCard');
-  if (card && typeof card.scrollIntoView === 'function') {
-    card.scrollIntoView({ behavior: 'smooth', block: 'center' });
-    card.classList.add('card--spotlight');
-    setTimeout(() => card.classList.remove('card--spotlight'), 1200);
-  }
+  openAutomationDrawer('ai');
 }
 
 function openAutomationDrawer(section = '') {
@@ -19845,6 +19913,7 @@ document.addEventListener('DOMContentLoaded', async () => {
       openAutomationDrawer('ai');
     });
   }
+  hydrateEquipmentCounters();
   pollIAState();
   setInterval(pollIAState, 30000);
   const aiCopilotCloseBtn = document.querySelector('[data-role="ai-copilot-close"]');

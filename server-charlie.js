@@ -6546,6 +6546,21 @@ app.post('/ui/ctrlmap', pinGuard, express.json(), (req, res) => {
   res.json({ ok: true });
 });
 
+app.get('/ui/equip', (req, res) => {
+  setCors(req, res);
+  let existing = {};
+  try {
+    if (fs.existsSync(UI_EQUIP_PATH)) {
+      const raw = fs.readFileSync(UI_EQUIP_PATH, 'utf8');
+      existing = raw ? JSON.parse(raw) : {};
+    }
+  } catch (error) {
+    console.warn('[ui.equip] Failed to read existing data:', error?.message || error);
+    existing = {};
+  }
+  res.json(existing);
+});
+
 app.options('/ui/:resource', (req, res) => { setCors(req, res); res.status(204).end(); });
 
 app.get('/ui/:resource', (req, res) => {
