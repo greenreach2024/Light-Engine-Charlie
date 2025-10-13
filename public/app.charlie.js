@@ -4038,6 +4038,8 @@ function deriveDeviceId(device, fallbackIndex = 0) {
     return `device-${fallbackIndex + 1}`;
   }
   const candidates = [
+    device.controllerId,
+    device.controller_id,
     device.id,
     device.device_id,
     device.deviceId,

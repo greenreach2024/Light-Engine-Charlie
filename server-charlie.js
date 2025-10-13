@@ -36,9 +36,14 @@ app.use((req, res, next) => {
   res.setHeader('Vary', 'Origin'); // allow per-origin caching
   res.setHeader('Access-Control-Allow-Methods', 'GET,POST,PUT,PATCH,DELETE,OPTIONS');
   const reqHdrs = req.headers['access-control-request-headers'];
-  if (reqHdrs) res.setHeader('Access-Control-Allow-Headers', reqHdrs);
+  res.setHeader('Access-Control-Allow-Headers', reqHdrs || 'Content-Type, Authorization, X-Requested-With');
   if (req.method === 'OPTIONS') return res.sendStatus(204);
   next();
+});
+
+app.options('*', (req, res) => {
+  applyCorsHeaders(req, res, 'GET,POST,PUT,PATCH,DELETE,OPTIONS');
+  res.status(204).end();
 });
 
 // --- Health probe: refuse to start if CORS config is missing ---
@@ -757,8 +762,7 @@ app.get('/env', (req, res, next) => {
 });
 
 // POST /env → upsert full or partial (PIN)
-app.post('/env', (req, res) => {
-  if (needPin(req, res)) return;
+app.post('/env', pinGuard, (req, res) => {
   const cur = readEnv();
   const nxt = { ...cur, ...req.body };
   writeEnv(nxt);
@@ -766,8 +770,7 @@ app.post('/env', (req, res) => {
 });
 
 // POST /env/readings → append one reading (room, temp, rh, ts)
-app.post('/env/readings', (req, res) => {
-  if (needPin(req, res)) return;
+app.post('/env/readings', pinGuard, (req, res) => {
   const body = req.body || {};
   const room = body.room || body.scope || body.zone || null;
   if (!room) {
@@ -3223,7 +3226,7 @@ app.get('/env', async (req, res) => {
   }
 });
 
-app.post('/env', (req, res) => {
+app.post('/env', pinGuard, (req, res) => {
   try {
     setPreAutomationCors(req, res);
     const body = req.body || {};
@@ -3340,7 +3343,7 @@ app.post('/env', (req, res) => {
   }
 });
 
-app.patch('/env/rooms/:roomId', async (req, res) => {
+app.patch('/env/rooms/:roomId', pinGuard, async (req, res) => {
   try {
     setPreAutomationCors(req, res);
     const roomId = req.params.roomId;
@@ -3361,7 +3364,7 @@ app.patch('/env/rooms/:roomId', async (req, res) => {
   }
 });
 
-app.post('/env/rooms/:roomId/actions', async (req, res) => {
+app.post('/env/rooms/:roomId/actions', pinGuard, async (req, res) => {
   try {
     setPreAutomationCors(req, res);
     const roomId = req.params.roomId;
@@ -5485,19 +5488,34 @@ app.options('/api/*', (req, res) => {
   res.status(204).end();
 });
 
+function streamLiveFile(res, filePath, type) {
+  if (!fs.existsSync(filePath)) {
+    res.status(404).send(`${path.basename(filePath)} not found`);
+    return;
+  }
+  res.setHeader('Cache-Control', 'no-store');
+  if (type) res.type(type);
+  const stream = fs.createReadStream(filePath, { encoding: 'utf8' });
+  stream.on('error', (err) => {
+    console.error('[live-file] stream error', err);
+    if (!res.headersSent) {
+      res.status(500).send('Failed to read file');
+    } else {
+      res.end();
+    }
+  });
+  stream.pipe(res);
+}
+
 // Phase 9 testing guardrails: serve the live files from disk
 app.get('/tmp/live.index.html', (req, res) => {
   const filePath = path.join(PUBLIC_DIR, 'index.html');
-  if (!fs.existsSync(filePath)) return res.status(404).send('index.html not found');
-  res.set('Cache-Control', 'no-store');
-  res.type('html').send(fs.readFileSync(filePath, 'utf8'));
+  streamLiveFile(res, filePath, 'html');
 });
 
 app.get('/tmp/live.app.new.js', (req, res) => {
   const filePath = path.join(PUBLIC_DIR, 'app.charlie.js');
-  if (!fs.existsSync(filePath)) return res.status(404).send('app.charlie.js not found');
-  res.set('Cache-Control', 'no-store');
-  res.type('application/javascript').send(fs.readFileSync(filePath, 'utf8'));
+  streamLiveFile(res, filePath, 'application/javascript');
 });
 
 const CONTROLLER_BASE = () => getController().replace(/\/+$/, '');
