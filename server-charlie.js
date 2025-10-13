@@ -85,6 +85,7 @@ const UI_DATA_RESOURCES = new Map([
   ['plans', 'plans.json'],
   ['env', 'env.json']
 ]);
+const UI_EQUIP_PATH = path.join(PUBLIC_DIR, 'data', 'ui.equip.json');
 // Device DB (outside public): ./data/devices.nedb
 const DB_DIR = path.resolve('./data');
 const DB_PATH = path.join(DB_DIR, 'devices.nedb');
@@ -685,6 +686,11 @@ function needPin(req, res) {
   res.status(403).json({ ok: false, error: 'pin-required' });
   return true;
 }
+
+const pinGuard = (req, res, next) => {
+  if (needPin(req, res)) return;
+  next();
+};
 
 const readEnv = () => readJSON(envPath, { rooms: {}, targets: {}, control: {} }) || { rooms: {}, targets: {}, control: {} };
 const writeEnv = (obj) => writeJSON(envPath, obj);
@@ -6477,6 +6483,40 @@ app.get('/ui/:resource', (req, res) => {
     return res.status(404).json({ ok: false, error: `Unknown UI resource '${resource}'` });
   }
   return res.json({ ok: true, resource, data });
+});
+
+app.post('/ui/equip', pinGuard, express.json(), (req, res) => {
+  setCors(req, res);
+  const { id, kind, count } = req.body || {};
+  if (!id || !kind) {
+    return res.status(400).json({ error: 'id/kind required' });
+  }
+
+  const parsedCount = Number.parseInt(count, 10);
+  const safeCount = Math.max(0, Number.isFinite(parsedCount) ? parsedCount | 0 : 0);
+
+  let existing = {};
+  try {
+    if (fs.existsSync(UI_EQUIP_PATH)) {
+      const raw = fs.readFileSync(UI_EQUIP_PATH, 'utf8');
+      existing = raw ? JSON.parse(raw) : {};
+    }
+  } catch (error) {
+    console.warn('[ui.equip] Failed to read existing data:', error?.message || error);
+    existing = {};
+  }
+
+  existing[id] = { kind, count: safeCount, ts: Date.now() };
+
+  try {
+    fs.mkdirSync(path.dirname(UI_EQUIP_PATH), { recursive: true });
+    fs.writeFileSync(UI_EQUIP_PATH, JSON.stringify(existing, null, 2));
+  } catch (error) {
+    console.warn('[ui.equip] Failed to persist data:', error?.message || error);
+    return res.status(500).json({ error: 'failed to save' });
+  }
+
+  return res.json({ ok: true, id, count: safeCount });
 });
 
 app.post('/ui/:resource', (req, res) => {

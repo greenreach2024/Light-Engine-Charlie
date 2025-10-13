@@ -128,6 +128,14 @@
 
       <div class="dashboard-content">
       <div id="dashboard" class="dashboard-main cards">
+      <section id="dehumidifierSetupCard" class="card gr-card" data-role="dehumidifier-setup">
+        <h2 class="section-title">Dehumidifier Setup</h2>
+        <div class="equip-row" data-equip="dehum" data-room="room1">
+          <button type="button" data-op="dec" data-target="dehum:room1">–</button>
+          <input data-input="dehum:room1" value="0" inputmode="numeric" aria-label="Room 1 dehumidifier count" />
+          <button type="button" data-op="inc" data-target="dehum:room1">+</button>
+        </div>
+      </section>
       <section id="environmentalAiCard" class="card card--feature hud-shell gr-card gr-full">
               <div class="row row--between row--center mb-md hud-shell__header">
                 <h2 class="section-title hud-shell__title">Environmental & AI Features</h2>
