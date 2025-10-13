@@ -210,6 +210,40 @@ if (document.readyState === 'loading') {
   hydrateIconSlots(document);
 }
 
+// Global numeric stepper handler for equipment rows (supports dynamically added rows)
+document.addEventListener('click', async (ev) => {
+  const btn = ev.target.closest('[data-op][data-target]');
+  if (!btn) return;
+
+  const op = btn.dataset.op;
+  const id = btn.dataset.target;
+  if (!op || !id) return;
+
+  const input = document.querySelector(`[data-input="${id}"]`);
+  if (!input) return;
+
+  const cur = parseInt(input.value || '0', 10) || 0;
+  const next = Math.max(0, cur + (op === 'inc' ? 1 : -1));
+  if (next === cur) return;
+
+  input.value = String(next);
+
+  try {
+    const payload = { id, kind: 'dehumidifier', count: next };
+    const response = await fetch('/ui/equip', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload)
+    });
+    if (!response.ok) {
+      const text = await response.text();
+      console.warn('equip save failed', text);
+    }
+  } catch (error) {
+    console.warn('equip save failed', error);
+  }
+});
+
 // Ensure lights from lightSetups are always in window.STATE.lights and update unassigned lights
 window.addEventListener('lightSetupsChanged', () => {
   if (!window.STATE) window.STATE = {};
