@@ -1,3 +1,8 @@
+function toNumberOrNull(val) {
+  var n = Number(val);
+  return isNaN(n) ? null : n;
+}
+
 window.addEventListener('lightSetupsChanged', () => {
   if (!window.STATE) window.STATE = {};
   if (!Array.isArray(window.STATE.lights)) window.STATE.lights = [];
@@ -16,6 +21,21 @@ window.addEventListener('lightSetupsChanged', () => {
   document.dispatchEvent(new Event('lights-updated'));
 });
 document.addEventListener('DOMContentLoaded', () => {
+  // Populate the Zones dropdown with Zone 1-9
+  const zoneSelect = document.getElementById('groupsV2ZoneSelect');
+  if (zoneSelect) {
+    zoneSelect.innerHTML = '';
+    const noneOpt = document.createElement('option');
+    noneOpt.value = '';
+    noneOpt.textContent = '(none)';
+    zoneSelect.appendChild(noneOpt);
+    for (let i = 1; i <= 9; i++) {
+      const opt = document.createElement('option');
+      opt.value = String(i);
+      opt.textContent = `Zone ${i}`;
+      zoneSelect.appendChild(opt);
+    }
+  }
   // Wire up Apply to Current Plan button
   const applyPlanBtn = document.getElementById('applyPlanToGroupBtn');
   if (applyPlanBtn) {

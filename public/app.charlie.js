@@ -2329,6 +2329,7 @@ async function api(url, opts = {}) {
 }
 // Ensure STATE is globally defined
 var STATE = window.STATE = window.STATE || {};
+STATE.rooms = Array.isArray(STATE.rooms) ? STATE.rooms : [];
 
 const $ = (s, r=document)=>r.querySelector(s);
 const $$ = (s, r=document)=>r.querySelectorAll(s);
@@ -6298,7 +6299,7 @@ class RoomWizard {
             <input type="text" id="cat-other-manufacturer" placeholder="Search manufacturer..." value="${v(catData.manufacturer||'')}" style="width:200px">
           </label>
         </div>
-        <label class="tiny">Describe <input type="text" id="cat-other-notes" value="${v(catData.notes||'')}" placeholder="e.g., CO₂ burner" style="min-width:220px"></label>
+  <label class="tiny">Describe <input type="text" id="cat-other-notes" value="${v(catData.notes||'')}" placeholder="e.g., CO2 burner" style="min-width:220px"></label>
       `;
     }
     body.innerHTML = html;
@@ -6859,7 +6860,9 @@ class RoomWizard {
     const status = document.getElementById('roomHubStatus');
     if (status) status.textContent = 'Detecting hub…';
     try {
-      const resp = await fetch('/forwarder/healthz');
+  // const resp = await fetch('/forwarder/healthz');
+  // Forwarder health check disabled
+  const resp = { ok: false };
       if (resp.ok) {
         if (status) status.textContent = 'Controller reachable — hub likely online.';
         this.data.connectivity = this.data.connectivity || {};
@@ -6877,7 +6880,9 @@ class RoomWizard {
     const status = document.getElementById('roomHubStatus');
     if (status) status.textContent = 'Verifying Node-RED…';
     try {
-      const resp = await fetch('/forwarder/healthz');
+  // const resp = await fetch('/forwarder/healthz');
+  // Forwarder health check disabled
+  const resp = { ok: false };
       if (resp.ok) {
         if (status) status.textContent = 'Forwarder healthy — confirm Node-RED flows are running on the hub for edge control.';
       } else {
@@ -9078,7 +9083,7 @@ function renderGrowRoomOverview() {
   const metricKeys = [
     { key: 'tempC', label: 'Temp', unit: '°C', precision: 1 },
     { key: 'rh', label: 'Humidity', unit: '%', precision: 1 },
-    { key: 'co2', label: 'CO₂', unit: ' ppm', precision: 0 },
+  { key: 'co2', label: 'CO2', unit: ' ppm', precision: 0 },
     { key: 'vpd', label: 'VPD', unit: ' kPa', precision: 2 }
   ];
 
@@ -9756,7 +9761,9 @@ async function loadConfig(cfg) {
 let FORWARDER_POLL_TIMER = null;
 async function checkForwarderOnce() {
   try {
-    const r = await fetch('/forwarder/healthz');
+  // const r = await fetch('/forwarder/healthz');
+  // Forwarder health check disabled
+  const r = { ok: false, body: {} };
     if (!r.ok) throw new Error(`HTTP ${r.status}`);
     const body = await r.json();
     return { ok: true, body };
