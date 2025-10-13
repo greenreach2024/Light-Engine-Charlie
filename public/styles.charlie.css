@@ -498,6 +498,30 @@ h3 { font-size: 1.125rem; }
   margin-bottom: 8px;
 }
 
+.gr-card > .card-hd h3 {
+  margin: 0;
+}
+
+.gr-card > .card-hd .actions {
+  display: inline-flex;
+  gap: 8px;
+  align-items: center;
+}
+
+.gr-card .actions .btn.btn-danger {
+  border: 1px solid #c33;
+  background: #fff !important;
+  color: #c33 !important;
+  padding: 6px 10px;
+  border-radius: 8px;
+  font-size: 0.875rem;
+  line-height: 1.2;
+}
+
+.gr-card .actions .btn.btn-danger:hover {
+  background: #fee !important;
+}
+
 .gr-card > .card-bd {
   display: block;
 }
@@ -733,6 +757,80 @@ h3 { font-size: 1.125rem; }
   border: 1px solid #e5e7eb;
   border-radius: 12px;
   padding: 12px;
+}
+
+/* GRAL29 selected lights list */
+#GRAL29 .gral29-list {
+  overflow-x: auto;
+}
+
+#GRAL29 .gral29-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.9rem;
+}
+
+#GRAL29 .gral29-table th,
+#GRAL29 .gral29-table td {
+  padding: 8px 10px;
+  border-bottom: 1px solid #e2e8f0;
+  text-align: left;
+  vertical-align: middle;
+}
+
+#GRAL29 .gral29-table th.col-select,
+#GRAL29 .gral29-table td.col-select {
+  width: 52px;
+  text-align: center;
+}
+
+#GRAL29 .gral29-table tbody tr:hover {
+  background: #f8fafc;
+}
+
+#GRAL29 .gral29-name {
+  font-weight: 600;
+  color: #1f2937;
+}
+
+#GRAL29 .gral29-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 2px;
+  font-size: 0.75rem;
+  color: #64748b;
+}
+
+#GRAL29 .gral29-mode,
+#GRAL29 .gral29-source {
+  display: inline-flex;
+  align-items: center;
+  padding: 2px 6px;
+  border-radius: 999px;
+  background: #e2e8f0;
+}
+
+#GRAL29 .gral29-mode.is-dynamic {
+  background: #dcfce7;
+  color: #166534;
+}
+
+#GRAL29 .gral29-mode.is-static {
+  background: #fee2e2;
+  color: #991b1b;
+}
+
+#GRAL29 .gral29-source {
+  background: #e0f2fe;
+  color: #075985;
+}
+
+#GRAL29 .gral29-empty {
+  margin: 0;
+  padding: 12px 0;
+  color: #64748b;
+  font-style: italic;
 }
 
 /* Full-width (span all columns) */

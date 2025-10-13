@@ -6040,7 +6040,9 @@ function computeWeightedSPD(mix, opts = {}) {
 // ===== Spectra helpers (Plan vs Light) =====
 function ensureGlobalAppState() {
   if (!window.__state) window.__state = {};
-  if (!window.__state.gral29) window.__state.gral29 = { selected: [] };
+  if (!window.__state.gral29) window.__state.gral29 = { selected: [], available: [] };
+  if (!Array.isArray(window.__state.gral29.selected)) window.__state.gral29.selected = [];
+  if (!Array.isArray(window.__state.gral29.available)) window.__state.gral29.available = [];
   return window.__state;
 }
 
@@ -6054,7 +6056,7 @@ function ensureSpectraState() {
   return window.__spectraState;
 }
 
-function onGRAL29SelectionChange(selectedLights) {
+function onGRAL29SelectionChange(selectedLights, opts = {}) {
   const state = ensureGlobalAppState();
   const normalized = Array.isArray(selectedLights) ? selectedLights.slice() : [];
   const previous = Array.isArray(state.gral29.selected) ? state.gral29.selected : [];
@@ -6063,11 +6065,173 @@ function onGRAL29SelectionChange(selectedLights) {
   state.gral29.selected = normalized;
   const spectraState = ensureSpectraState();
   spectraState.selectedLights = normalized;
-  if (!same) {
+  const force = opts && opts.force;
+  if (!same || force) {
     document.dispatchEvent(
       new CustomEvent('gral29:changed', { detail: { selectedLights: normalized } })
     );
   }
+}
+
+function setGRAL29Lights(lights) {
+  const state = ensureGlobalAppState();
+  const normalized = Array.isArray(lights) ? lights.slice() : [];
+  const prevAvailable = Array.isArray(state.gral29.available) ? state.gral29.available : [];
+  const summarize = (entry) => {
+    if (!entry || typeof entry !== 'object') {
+      return { id: String(entry ?? ''), name: '', dynamic: false, source: '' };
+    }
+    return {
+      id: String(entry.id ?? entry.serial ?? entry.name ?? ''),
+      name: String(entry.name ?? ''),
+      dynamic: !!entry.isDynamic,
+      source: String(entry.source ?? ''),
+    };
+  };
+  const prevSignature = JSON.stringify(prevAvailable.map(summarize));
+  const nextSignature = JSON.stringify(normalized.map(summarize));
+  const availableChanged = prevSignature !== nextSignature;
+  state.gral29.available = normalized;
+  onGRAL29SelectionChange(normalized, { force: availableChanged });
+}
+
+function renderGRAL29LightList() {
+  const container = document.getElementById('gral29-light-list');
+  if (!container) return;
+  const state = ensureGlobalAppState();
+  const available = Array.isArray(state.gral29?.available) ? state.gral29.available : [];
+  const selected = Array.isArray(state.gral29?.selected) ? state.gral29.selected : [];
+  const keyFor = (entry) => {
+    if (!entry || typeof entry !== 'object') return String(entry ?? '');
+    return String(entry.id ?? entry.serial ?? entry.name ?? '');
+  };
+  const selectedIds = new Set(selected.map(keyFor));
+
+  if (!available.length) {
+    container.innerHTML = '<p class="gral29-empty">No lights selected.</p>';
+    return;
+  }
+
+  const rows = available
+    .map((light) => {
+      const id = keyFor(light);
+      const name =
+        light && typeof light === 'object'
+          ? light.name || light.id || 'Light'
+          : String(light || 'Light');
+      const modeLabel =
+        light && typeof light === 'object' && Object.prototype.hasOwnProperty.call(light, 'isDynamic')
+          ? light.isDynamic
+            ? 'Dynamic'
+            : 'Static'
+          : '';
+      const sourceLabel =
+        light && typeof light === 'object' && light.source ? String(light.source) : '';
+      const nameHtml = escapeHtml(name);
+      const idHtml = escapeHtml(id);
+      const modeHtml = modeLabel
+        ? `<span class="gral29-mode ${light.isDynamic ? 'is-dynamic' : 'is-static'}">${escapeHtml(modeLabel)}</span>`
+        : '';
+      const sourceHtml = sourceLabel
+        ? `<span class="gral29-source">${escapeHtml(sourceLabel)}</span>`
+        : '';
+      return `
+        <tr data-light-id="${idHtml}">
+          <td class="col-select">
+            <input type="checkbox" class="gral29-select" value="${idHtml}" ${selectedIds.has(id) ? 'checked' : ''} aria-label="Select ${nameHtml}">
+          </td>
+          <td class="col-name">
+            <div class="gral29-name">${nameHtml}</div>
+            <div class="gral29-meta">${modeHtml}${sourceHtml}</div>
+          </td>
+        </tr>
+      `;
+    })
+    .join('');
+
+  container.innerHTML = `
+    <table class="gral29-table">
+      <thead>
+        <tr>
+          <th scope="col" class="col-select">Select</th>
+          <th scope="col" class="col-name">Light</th>
+        </tr>
+      </thead>
+      <tbody>${rows}</tbody>
+    </table>
+  `;
+
+  const checkboxes = container.querySelectorAll('.gral29-select');
+  checkboxes.forEach((input) => {
+    input.addEventListener('change', () => {
+      const checkedIds = new Set(
+        Array.from(container.querySelectorAll('.gral29-select:checked')).map((cb) => cb.value)
+      );
+      const nextSelection = available.filter((entry) => checkedIds.has(keyFor(entry)));
+      onGRAL29SelectionChange(nextSelection);
+    });
+  });
+}
+
+function deleteSelectedLightsGRAL29() {
+  const state = ensureGlobalAppState();
+  const current = Array.isArray(state.gral29?.selected) ? state.gral29.selected : [];
+  if (!current.length) return;
+
+  const toKey = (entry) => {
+    if (!entry || typeof entry !== 'object') return String(entry ?? '');
+    return String(entry.id ?? entry.serial ?? entry.name ?? '');
+  };
+  const ids = current.map(toKey).filter(Boolean);
+  if (!ids.length) return;
+
+  const escapeSelector = (value) => {
+    const str = String(value ?? '');
+    if (typeof CSS !== 'undefined' && CSS.escape) return CSS.escape(str);
+    return str.replace(/["'\\]/g, '\\$&');
+  };
+  ids.forEach((id) => {
+    const selector = `[data-light-id="${escapeSelector(id)}"]`;
+    document.querySelectorAll(selector).forEach((node) => node.remove());
+  });
+
+  const idSet = new Set(ids);
+  const available = Array.isArray(state.gral29.available) ? state.gral29.available : [];
+  state.gral29.available = available.filter((entry) => !idSet.has(toKey(entry)));
+
+  if (typeof window.STATE === 'object' && window.STATE) {
+    const groups = Array.isArray(window.STATE.groups) ? window.STATE.groups : [];
+    groups.forEach((group) => {
+      if (!group || !Array.isArray(group.lights)) return;
+      group.lights = group.lights.filter((entry) => !idSet.has(toKey(entry)));
+    });
+    if (window.STATE.currentGroup && Array.isArray(window.STATE.currentGroup.lights)) {
+      window.STATE.currentGroup.lights = window.STATE.currentGroup.lights.filter(
+        (entry) => !idSet.has(toKey(entry))
+      );
+    }
+    if (Array.isArray(window.STATE.lights)) {
+      window.STATE.lights.forEach((light) => {
+        const lightId = toKey(light);
+        if (lightId && idSet.has(lightId)) {
+          light.zoneId = null;
+        }
+      });
+    }
+    document.dispatchEvent(new Event('groups-updated'));
+    document.dispatchEvent(new Event('lights-updated'));
+    if (typeof updateGroupUI === 'function' && window.STATE.currentGroup) {
+      try { updateGroupUI(window.STATE.currentGroup); } catch (err) { console.warn('Failed to refresh group UI after delete', err); }
+    }
+  }
+
+  onGRAL29SelectionChange([]);
+
+  fetch('/ui/groups', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ op: 'removeLights', ids }),
+  }).catch(() => {});
 }
 
 function ensureSpdFromMix(mix, deviceIds = []) {
@@ -6375,9 +6539,23 @@ function scheduleSelectedSpectraRender() {
 
 document.addEventListener('plan:changed', scheduleSelectedSpectraRender);
 document.addEventListener('gral29:changed', scheduleSelectedSpectraRender);
+document.addEventListener('gral29:changed', renderGRAL29LightList);
 window.addEventListener('DOMContentLoaded', () => {
   ensureSpectraState();
   scheduleSelectedSpectraRender();
+});
+document.addEventListener('DOMContentLoaded', () => {
+  ['EAC02', 'TC01'].forEach((id) => {
+    const node = document.getElementById(id);
+    if (node) {
+      node.classList.add('gr-card', 'gr-full');
+    }
+  });
+
+  const deleteBtn = document.getElementById('gral29-delete');
+  if (deleteBtn) deleteBtn.addEventListener('click', deleteSelectedLightsGRAL29);
+
+  renderGRAL29LightList();
 });
 // ===== End Spectra helpers =====
 
@@ -14966,7 +15144,7 @@ function wireGlobalEvents() {
     const modeLabel = document.getElementById('groupLightInfoMode');
 
     if (!group) {
-      onGRAL29SelectionChange([]);
+      setGRAL29Lights([]);
       if (card) {
         card.classList.add('is-empty');
         if (title) title.textContent = 'Current mix';
@@ -14981,7 +15159,7 @@ function wireGlobalEvents() {
 
     const activeLights = getActiveGroupMembers(group);
     if (!activeLights.length) {
-      onGRAL29SelectionChange([]);
+      setGRAL29Lights([]);
       if (card) {
         card.classList.add('is-empty');
         if (title) title.textContent = 'Current mix';
@@ -15024,7 +15202,7 @@ function wireGlobalEvents() {
       isDynamic: light.dynamic,
       manufacturerSpectrum: light.dynamic ? null : resolveSpd(light.spectrum, [light.id]),
     }));
-    onGRAL29SelectionChange(selectedLightRecords);
+    setGRAL29Lights(selectedLightRecords);
 
     const dynamicCount = resolvedLights.filter((light) => light.dynamic).length;
     const staticCount = resolvedLights.length - dynamicCount;

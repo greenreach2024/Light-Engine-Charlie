@@ -644,6 +644,19 @@
         <div id="groupsV2PlanPreview" class="gr-card" style="margin-top:14px; padding:12px 14px; background:linear-gradient(90deg, #f0f9ff 0%, #e0f2fe 100%); border:1px dashed #38bdf8; border-radius:8px; font-size:0.9em; line-height:1.5;">
           <div class="tiny text-muted">Select a plan to preview today’s stage, PPFD, photoperiod, and DLI.</div>
         </div>
+        <!-- GRAL29: Selected lights list with delete action -->
+        <section id="GRAL29" class="gr-card">
+          <div class="card-hd">
+            <h3>Lights (GRAL29)</h3>
+            <div class="actions">
+              <button id="gral29-delete" type="button" class="btn btn-danger" title="Delete selected lights">Delete Selected</button>
+            </div>
+          </div>
+          <div class="card-bd">
+            <div id="gral29-light-list" class="gral29-list" aria-live="polite"></div>
+          </div>
+        </section>
+
         <!-- Selected Light(s) Spectra (renders under the Plan Spectra) -->
         <section id="light-spectra-wrap" class="gr-card">
           <h3>Selected Light Spectra</h3>
