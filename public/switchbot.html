@@ -498,7 +498,7 @@
       <details>
         <summary>Available Data Fields</summary>
         <div>
-          <strong>Environmental:</strong> Temperature, Humidity, CO₂, Light Level, Motion Detection<br>
+          <strong>Environmental:</strong> Temperature, Humidity, CO2, Light Level, Motion Detection<br>
           <strong>Power:</strong> On/Off Status, Voltage, Current, Daily Usage, Power Consumption<br>
           <strong>Device:</strong> Battery Level, Signal Strength, Firmware Version, Connection Type<br>
           <strong>Management:</strong> Zone Assignment, Farm Location, Equipment Control
@@ -557,6 +557,10 @@
   </div>
 
   <script>
+function toNumberOrNull(val) {
+  var n = Number(val);
+  return isNaN(n) ? null : n;
+}
     let devices = [];
     let syncInterval = null;
     let environmentData = [];
@@ -673,7 +677,7 @@
       if (!normalized) return null;
       if (['temp', 'temperature', 'temp_c', 'tempc', 'tempf', 'temp_f'].includes(normalized)) return 'temp';
       if (['humidity', 'rh', 'relative_humidity', 'relative-humidity'].includes(normalized)) return 'rh';
-      if (['co2', 'co₂', 'co2ppm', 'co2_ppm', 'carbon_dioxide', 'carbon-dioxide'].includes(normalized)) return 'co2';
+  if (['co2', 'co2ppm', 'co2_ppm', 'carbon_dioxide', 'carbon-dioxide'].includes(normalized)) return 'co2';
       if (['vpd', 'vapour_pressure_deficit', 'vapor_pressure_deficit', 'vapour-pressure-deficit'].includes(normalized)) return 'vpd';
       return null;
     }
@@ -718,7 +722,7 @@
           normalizedSource.co2 !== undefined ||
           normalizedSource.co2ppm !== undefined ||
           normalizedSource.co2Ppm !== undefined ||
-          normalizedSource.co₂ !== undefined
+          normalizedSource.co2 !== undefined
         ) {
           metrics.add('co2');
         }
@@ -2670,17 +2674,18 @@
         return '<p class="tiny" style="color: #64748b; text-align: center; margin: 12px 0;">No readings available</p>';
       }
 
-      const content = items.map(item => {
-        const toneAttr = item.tone ? ` data-tone="${item.tone}"` : '';
-        return `
-          <div class="reading-item"${toneAttr}>
+      const chips = items
+        .map(item => {
+          const toneClass = item.tone ? ` tone-${item.tone}` : '';
+          return `
+          <div class="reading-item${toneClass}">
             <div class="reading-value">${escapeHtml(String(item.value))}</div>
             <div class="reading-label">${escapeHtml(item.label)}</div>
           </div>
         `;
-      }).join('');
-
-      return `<div class="reading-grid">${content}</div>`;
+        })
+        .join('');
+      return `<div class="reading-grid">${chips}</div>`;
     }
 
     function createDeviceControls(device) {
@@ -2911,7 +2916,7 @@
         readingItems.push(`
           <div class="reading-item">
             <div class="reading-value">${formatReading(reading.co2, ' ppm')}</div>
-            <div class="reading-label">CO₂</div>
+            <div class="reading-label">CO2</div>
           </div>
         `);
       }
@@ -2933,1025 +2938,1371 @@
       return `<div class="reading-grid">${readingItems.join('')}</div>`;
     }
 
-    function renderDevicesFromAPI() {
-      const container = document.getElementById('devicesContainer');
+    function createDeviceControls(device) {
+      const deviceType = String(device.deviceType || '').toLowerCase();
+      const safeDeviceIdAttr = escapeAttribute(device.deviceId);
 
-      if (devices.length === 0) {
-        container.innerHTML = '<p style="text-align: center; color: #64748b; grid-column: 1 / -1;">No SwitchBot devices found</p>';
-        return;
+      if (deviceType.includes('plug') || deviceType.includes('switch')) {
+        return `
+          <div class="row" style="gap: 4px;">
+            <button class="ghost tiny" onclick="sendDeviceCommand('${safeDeviceIdAttr}', 'turnOn')">ON</button>
+            <button class="ghost tiny" onclick="sendDeviceCommand('${safeDeviceIdAttr}', 'turnOff')">OFF</button>
+          </div>
+        `;
       }
+
+      if (deviceType.includes('bot')) {
+        return `
+          <button class="ghost tiny" onclick="sendDeviceCommand('${safeDeviceIdAttr}', 'press')">Press</button>
+        `;
+      }
+
+      return '<span class="tiny" style="color: #64748b;">Read-only</span>';
+    }
+
+    async function loadDevices() {
+      try {
+        clearError();
+        document.getElementById('loadingContainer').style.display = 'block';
+        updateSyncStatus('Checking SwitchBot connection...');
+
+        await loadDeviceMetadataIfNeeded().catch(error => {
+          console.warn('Device metadata preload failed:', error);
+        });
+
+        // First try to get real SwitchBot devices from your farm
+        try {
+          const realDevices = await fetchSwitchBotDevices();
+          if (realDevices && realDevices.length > 0) {
+            updateSyncStatus(`Connected to ${realDevices.length} real SwitchBot devices from your farm`);
+            devices = realDevices.map(device => ({
+              ...device,
+              isRealDevice: true,
+              lastReading: {
+                // Real devices get status separately via individual API calls
+                lastUpdate: new Date().toISOString(),
+                deviceType: device.deviceType,
+                battery: device.battery || null,
+                // Note: Temperature, humidity, etc. require separate status API calls
+                message: "Click refresh to get current readings"
+              }
+            }));
+            applyMetadataToAllDevices();
+            renderDevicesFromAPI();
+            document.getElementById('deviceCount').textContent = `${devices.length} real devices`;
+
+            // Auto-fetch initial status data for a few devices only to avoid API limits
+            setTimeout(() => {
+              // Only fetch status for first 3 devices to avoid overloading API
+              const devicesToFetch = devices.slice(0, 3);
+              devicesToFetch.forEach((device, index) => {
+                setTimeout(() => {
+                  refreshDeviceData(device.deviceId);
+                }, index * 2000); // Stagger requests by 2 seconds each
+              });
+            }, 2000); // Wait 2 seconds to avoid API rate limits
+            
+            return; // Success with real API
+          }
+        } catch (realApiError) {
+          console.warn('Real SwitchBot API failed, falling back to environment data:', realApiError);
+        }
+
+        // Fallback to environment data
+        updateSyncStatus('Loading environment data...');
+        await fetchServerStatus();
+
+        try {
+          await ensureEnvironmentData(true);
+        } catch (envError) {
+          console.warn('Environment data fetch failed:', envError);
+        }
+
+        const sourceData = Array.isArray(environmentData) ? environmentData : [];
+        const switchbotEnvData = sourceData.filter(zone =>
+          zone.source === 'switchbot' ||
+          (zone.sensors && (zone.sensors.tempC || zone.sensors.rh || zone.sensors.co2))
+        );
+
+        if (switchbotEnvData.length > 0) {
+          updateSyncStatus(`Found ${switchbotEnvData.length} environmental devices`);
+
+          devices = switchbotEnvData.map(zone => ({
+            deviceId: zone.id || zone.name || zone.zoneId,
+            deviceName: zone.name || zone.id || zone.zoneId,
+            deviceType: zone.source === 'switchbot' ? 'SwitchBot Environmental Sensor' : 'Environmental Sensor',
+            lastReading: zone.source === 'switchbot' ? zone : convertZoneToReading(zone)
+          }));
+
+          applyMetadataToAllDevices();
+          renderDevicesFromEnvironment();
+          document.getElementById('deviceCount').textContent = `${devices.length} devices`;
+
+        } else {
+          updateSyncStatus('No environmental data found');
+          devices = [];
+          renderDevicesFromEnvironment();
+          document.getElementById('deviceCount').textContent = 'No devices found';
+          
+          showInfo('No environmental devices found. Configure Azure integration or start local polling to collect data.');
+        }
+        
+      } catch (error) {
+        console.error('Failed to load devices:', error);
+        showError(`Failed to load environment data: ${error.message}`);
+        updateSyncStatus('Connection failed', true);
+      } finally {
+        document.getElementById('loadingContainer').style.display = 'none';
+      }
+    }
+
+    function convertZoneToReading(zone) {
+      // Convert zone format to reading format for consistency
+      const reading = {
+        timestamp: zone.meta?.lastUpdated || new Date().toISOString(),
+        battery: zone.meta?.battery,
+        rssi: zone.meta?.rssi
+      };
+
+      if (zone.sensors?.tempC?.current !== undefined) {
+        reading.temperature = zone.sensors.tempC.current;
+      }
+      if (zone.sensors?.rh?.current !== undefined) {
+        reading.humidity = zone.sensors.rh.current;
+      }
+      if (zone.sensors?.co2?.current !== undefined) {
+        reading.co2 = zone.sensors.co2.current;
+      }
+      if (zone.sensors?.vpd?.current !== undefined) {
+        reading.vpd = zone.sensors.vpd.current;
+      }
+
+      return enrichReading(reading);
+    }
+
+    function renderDevicesFromEnvironment() {
+      const container = document.getElementById('devicesContainer');
 
       applyMetadataToAllDevices();
 
+      if (devices.length === 0) {
+        container.innerHTML = '<p style="text-align: center; color: #64748b; grid-column: 1 / -1;">No SwitchBot devices found in environment data</p>';
+        return;
+      }
+      
       container.innerHTML = devices.map(device => {
         const reading = device.lastReading;
-        const isOnline = reading && reading.lastUpdate &&
-          (Date.now() - new Date(reading.lastUpdate).getTime()) < 5 * 60 * 1000; // 5 minutes
-
-        return createAPIDeviceCard(device, reading, isOnline);
+        const isOnline = reading && reading.timestamp && 
+          (Date.now() - new Date(reading.timestamp).getTime()) < 5 * 60 * 1000; // 5 minutes
+        
+        return createEnvironmentDeviceCard(device, reading, isOnline);
       }).join('');
     }
 
-    function createAPIDeviceCard(device, reading, isOnline) {
-      const metadata = getDeviceMetadata(getCanonicalDeviceId(device));
-      enrichDeviceReading(device);
-      const currentReading = device.lastReading || reading || {};
-      const statusColor = isOnline ? '#0f9b74' : '#d14343';
-      const statusText = isOnline ? 'ONLINE' : 'OFFLINE';
-      const lastUpdate = currentReading?.lastUpdate ? new Date(currentReading.lastUpdate).toLocaleString() : 'Never';
-      const deviceAvatar = getDeviceAvatar(device);
-      const deviceCategory = getDeviceCategory(device.deviceType);
-      const displayName = escapeHtml(device.displayName || device.deviceName || device.deviceId);
-      const safeDeviceType = escapeHtml(device.deviceType || 'SwitchBot Device');
-      const safeDeviceIdAttr = escapeAttribute(device.deviceId);
-      const safeDeviceIdLabel = escapeHtml(device.deviceId);
-      const zoneSelection = getZoneSelection(metadata, device);
-      const roomSelection = getRoomSelection(metadata, device);
-      const zoneOptionsHtml = renderSelectOptions(availableZones, zoneSelection.value, zoneSelection.label, 'Select Zone');
-      const roomOptionsHtml = renderSelectOptions(availableRooms, roomSelection.value, roomSelection.label, 'Select Location');
-      const isPlug = isPlugDevice(device.deviceType);
-      const powerState = getPowerState(currentReading);
-      const summaryHtml = createDeviceSummary(device, currentReading);
-      const batteryLevel = currentReading?.battery;
-      const hasBattery = Number.isFinite(Number(batteryLevel));
-      const batteryDisplay = hasBattery ? `${formatNumber(batteryLevel, 0)}%` : 'Mains Power';
-      const batteryTone = hasBattery ? getBatteryTone(batteryLevel) : 'neutral';
-      const batteryLabel = hasBattery ? formatBatteryLabel(batteryLevel) : 'External Power';
-      const batteryMarkup = `<span class="status-badge tone-${batteryTone}" title="${escapeAttribute(batteryLabel)}">${escapeHtml(batteryDisplay)}</span>`;
-      const connectivityLabel = currentReading?.hubDeviceId ? 'Hub Connected' : 'Direct Connection';
-      const safeConnectivity = escapeHtml(connectivityLabel);
-      const statusBadge = `<span class="status-badge ${isOnline ? 'tone-positive' : 'tone-critical'}">${statusText}</span>`;
-      const powerBadge = isPlug && powerState
-        ? `<span class="status-badge ${powerState === 'on' ? 'tone-positive' : 'tone-warning'}">${escapeHtml(powerState.toUpperCase())}</span>`
-        : '';
-      const managedEquipmentValue = device.managedEquipment || '';
-      const safeManagedEquipmentValue = escapeAttribute(managedEquipmentValue);
-      const sourceBadge = device.isRealDevice
-        ? '<span class="status-badge tone-positive">Real Farm Device</span>'
-        : '<span class="status-badge tone-neutral">Live Demo API</span>';
-      const placement = device.placement || {};
-      const levelSelection = {
-        value: firstString(placement.level?.value, placement.level?.id),
-        label: placement.level?.name || ''
-      };
-      const sideSelection = {
-        value: firstString(placement.side?.value, placement.side?.id),
-        label: placement.side?.name || ''
-      };
-      const levelOptionsHtml = renderSelectOptions(availableLevels, levelSelection.value, levelSelection.label, 'Select Level');
-      const sideOptionsHtml = renderSelectOptions(availableSides, sideSelection.value, sideSelection.label, 'Select Side');
-      const isSensor = device.role === 'sensor';
-      const safeDomId = domSafeId(device.deviceId || device.device_id || device.deviceId);
-      const sensorStats = isSensor ? computeZoneWeightStats(device) : null;
-      const defaultSensorWeight = sensorStats ? (sensorStats.count > 0 ? 1 / sensorStats.count : 0) : 0;
-      const sensorWeightValue = isSensor ? clampWeight(device.weight, defaultSensorWeight) ?? defaultSensorWeight : 0;
-      if (isSensor && device.weight !== sensorWeightValue) {
-        device.weight = sensorWeightValue;
-      }
-      const sensorWeightPreview = isSensor ? renderSensorWeightPreview(device) : '';
-      const sensorWeightPreviewId = `sensorWeightPreview-${safeDomId}`;
-      const sensorPrimary = Boolean(device.primary);
-      const controlledOptions = CONTROLLED_TYPE_OPTIONS.map(option => ({
-        id: option,
-        value: option,
-        name: option.charAt(0).toUpperCase() + option.slice(1)
-      }));
-      const controlledType = device.controlledType || '';
-      const controlledLabel = controlledOptions.find(option => option.value === controlledType)?.name || controlledType;
-      const controlledOptionsHtml = renderSelectOptions(controlledOptions, controlledType, controlledLabel, 'Controlled type');
-      const energyOptions = ENERGY_TELEMETRY_OPTIONS.map(option => ({
-        id: option,
-        value: option,
-        name:
-          option === 'plug_builtin'
-            ? 'Plug built-in'
-            : option === 'branch_meter'
-            ? 'Branch meter'
-            : 'No telemetry'
-      }));
-      const energyTelemetry = device.energyTelemetry || 'none';
-      const energyTelemetryLabel = energyOptions.find(option => option.value === energyTelemetry)?.name || energyTelemetry;
-      const energyOptionsHtml = renderSelectOptions(energyOptions, energyTelemetry, energyTelemetryLabel, 'Energy source');
-      const signalLevel = coalesceNumeric(
-        currentReading?.rssi,
-        currentReading?.signal,
-        currentReading?.version?.rssi,
-        device.identity?.signal
-      );
-      const signalLabel = formatSignalLabel(signalLevel);
-      let signalTone = 'neutral';
-      if (signalLevel !== null) {
-        if (signalLevel >= -67) {
-          signalTone = 'positive';
-        } else if (signalLevel >= -80) {
-          signalTone = 'warning';
-        } else {
-          signalTone = 'critical';
-        }
-      }
-      const lastSeenIso = firstString(device.identity?.lastSeen, currentReading?.lastUpdate, currentReading?.timestamp);
-      const lastSeenRelative = formatRelativeTime(lastSeenIso);
-      const lastSeenExact = lastSeenIso ? new Date(lastSeenIso).toLocaleString() : 'Never';
-      const lightGroupValue = device.groupAssignments?.light || '';
-      const lightGroupLabel = device.groupAssignmentLabels?.light || '';
-      const equipGroupValue = device.groupAssignments?.equip || '';
-      const equipGroupLabel = device.groupAssignmentLabels?.equip || '';
-      const lightGroupOptions = buildGroupOptionsForDevice(device, 'light');
-      const equipGroupOptions = buildGroupOptionsForDevice(device, 'equip');
-      const lightGroupOptionsHtml = renderSelectOptions(lightGroupOptions, lightGroupValue, lightGroupLabel, 'Select Light Group');
-      const equipGroupOptionsHtml = renderSelectOptions(equipGroupOptions, equipGroupValue, equipGroupLabel, 'Select Equip Group');
+    function createEnvironmentDeviceCard(device, reading, isOnline) {
+      const lastUpdate = reading?.timestamp ? new Date(reading.timestamp).toLocaleString() : 'Never';
+      const hasBatteryLevel = Number.isFinite(Number(reading?.battery));
+      const batteryTone = hasBatteryLevel ? getBatteryTone(reading.battery) : 'neutral';
+      const batteryValue = hasBatteryLevel ? `${formatNumber(reading.battery, 0)}%` : 'Mains Power';
+      const batteryLabel = hasBatteryLevel ? formatBatteryLabel(reading.battery) : 'External Power';
+      const batteryBadge = `<span class="status-badge tone-${batteryTone}" title="${escapeAttribute(batteryLabel)}">${escapeHtml(batteryValue)}</span>`;
 
       return `
-        <div class="device-card" style="border-left: 4px solid ${statusColor}; opacity: ${isOnline ? 1 : 0.7};">
-          <div class="device-header" style="display: flex; flex-direction: column; gap: 8px;">
-            <div style="display: flex; justify-content: space-between; gap: 16px; align-items: flex-start;">
-              <div style="display: flex; align-items: flex-start; gap: 12px; flex: 1; min-width: 0;">
-                ${deviceAvatar}
-                <div style="flex: 1; min-width: 0; overflow: hidden;">
-                  <div style="display: flex; align-items: center; gap: 8px; flex-wrap: wrap;">
-                    <div class="device-status ${isOnline ? 'status-online' : 'status-offline'}"></div>
-                    <h4 style="margin: 0; color: #1e293b; font-size: 16px; font-weight: 600; cursor: pointer; line-height: 1.2; word-break: break-word;"
-                        onclick="editDeviceName('${safeDeviceIdAttr}')"
-                        title="Click to edit device name">
-                      ${displayName}
-                    </h4>
-                  </div>
-                  <div style="display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin-top: 4px; color: #64748b; font-size: 11px; line-height: 1.3;">
-                    ${statusBadge}
-                    ${powerBadge}
-                    <span>${escapeHtml(deviceCategory)}</span>
-                    <span>${safeConnectivity}</span>
-                  </div>
-                </div>
+        <div class="device-card">
+          <div class="row" style="justify-content: space-between; align-items: flex-start; margin-bottom: 12px;">
+            <div>
+              <div class="row" style="align-items: center; margin-bottom: 4px;">
+                <div class="device-status ${isOnline ? 'status-online' : 'status-offline'}"></div>
+                <h3 style="margin: 0; font-size: 16px;">${device.deviceName}</h3>
               </div>
-              <div style="display: flex; flex-direction: column; align-items: flex-end; gap: 6px; min-width: 180px;">
-                <div style="display: flex; gap: 6px; flex-wrap: wrap; justify-content: flex-end;">
-                  ${batteryMarkup}
-                  <span class="status-badge tone-${signalTone}" title="Signal strength">${escapeHtml(signalLabel)}</span>
-                </div>
-                <div class="tiny" style="color: #64748b;" title="${escapeAttribute(lastSeenExact)}">
-                  Last seen: ${escapeHtml(lastSeenRelative)}
-                </div>
-                <button onclick="refreshDeviceData('${safeDeviceIdAttr}')"
-                        class="control-button secondary"
-                        style="padding: 6px 12px; font-size: 12px;">
-                  Refresh
-                </button>
-              </div>
+              <p class="tiny" style="margin: 0; color: #64748b;">${device.deviceType}</p>
+              <p class="tiny" style="margin: 2px 0 0; color: #64748b;">ID: ${device.deviceId}</p>
+            </div>
+            <div style="text-align: right;">
+              ${batteryBadge}
+              <button class="ghost tiny" onclick="refreshEnvironmentData()" style="margin-top: 8px;">Refresh</button>
             </div>
           </div>
 
-          ${summaryHtml ? summaryHtml : ''}
-
-          <div class="device-controls" style="margin: 12px 0;">
-            ${createDeviceControls(device)}
-          </div>
-
-          <div class="device-info">
-            <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); gap: 12px; margin-bottom: 12px;">
-              <label class="tiny" style="color: #64748b; display: block;">
-                <span style="display: block; margin-bottom: 4px;">Zone Assignment</span>
-                <select onchange="updateDeviceZone('${safeDeviceIdAttr}', this.value)"
-                        style="width: 100%; padding: 4px 8px; border: 1px solid #d1d5db; border-radius: 4px; font-size: 12px;">
-                  ${zoneOptionsHtml}
-                </select>
-              </label>
-              <label class="tiny" style="color: #64748b; display: block;">
-                <span style="display: block; margin-bottom: 4px;">Room / Location</span>
-                <select onchange="updateDeviceLocation('${safeDeviceIdAttr}', this.value)"
-                        style="width: 100%; padding: 4px 8px; border: 1px solid #d1d5db; border-radius: 4px; font-size: 12px;">
-                  ${roomOptionsHtml}
-                </select>
-              </label>
-              <label class="tiny" style="color: #64748b; display: block;">
-                <span style="display: block; margin-bottom: 4px;">Level</span>
-                <select onchange="updateDeviceLevel('${safeDeviceIdAttr}', this.value)"
-                        style="width: 100%; padding: 4px 8px; border: 1px solid #d1d5db; border-radius: 4px; font-size: 12px;">
-                  ${levelOptionsHtml}
-                </select>
-              </label>
-              <label class="tiny" style="color: #64748b; display: block;">
-                <span style="display: block; margin-bottom: 4px;">Side</span>
-                <select onchange="updateDeviceSide('${safeDeviceIdAttr}', this.value)"
-                        style="width: 100%; padding: 4px 8px; border: 1px solid #d1d5db; border-radius: 4px; font-size: 12px;">
-                  ${sideOptionsHtml}
-                </select>
-              </label>
-            </div>
-
-            ${!isSensor ? '' : `
-            <div style="display: flex; flex-wrap: wrap; gap: 16px; margin-bottom: 12px; align-items: flex-end;">
-              <label class="tiny" style="color: #64748b; display: flex; align-items: center; gap: 8px;">
-                <input type="checkbox" ${sensorPrimary ? 'checked' : ''}
-                       onchange="updateSensorPrimary('${safeDeviceIdAttr}', this.checked)" />
-                Primary sensor
-              </label>
-              <div style="flex: 1; min-width: 200px;">
-                <label class="tiny" style="color: #64748b; display: block; margin-bottom: 4px;">Weight</label>
-                <input type="range" min="0" max="1" step="0.05" value="${sensorWeightValue.toFixed(2)}"
-                       oninput="handleSensorWeightInput('${safeDeviceIdAttr}', this.value)"
-                       onchange="commitSensorWeight('${safeDeviceIdAttr}', this.value)"
-                       style="width: 100%;" />
-                <div class="tiny" id="${sensorWeightPreviewId}" style="color: #0f172a; margin-top: 4px;">
-                  ${escapeHtml(sensorWeightPreview)}
-                </div>
-              </div>
-            </div>
-            `}
-
-            ${!isPlug ? '' : `
-            <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); gap: 12px; margin-bottom: 12px;">
-              <label class="tiny" style="color: #64748b; display: block;">
-                <span style="display: block; margin-bottom: 4px;">Controlled Type</span>
-                <select onchange="updateControlledType('${safeDeviceIdAttr}', this.value)"
-                        style="width: 100%; padding: 4px 8px; border: 1px solid #d1d5db; border-radius: 4px; font-size: 12px;">
-                  ${controlledOptionsHtml}
-                </select>
-              </label>
-              <label class="tiny" style="color: #64748b; display: block;">
-                <span style="display: block; margin-bottom: 4px;">Energy Source</span>
-                <select onchange="updateEnergyTelemetry('${safeDeviceIdAttr}', this.value)"
-                        style="width: 100%; padding: 4px 8px; border: 1px solid #d1d5db; border-radius: 4px; font-size: 12px;">
-                  ${energyOptionsHtml}
-                </select>
-              </label>
-            </div>
-            <div style="margin-bottom: 12px;">
-              <label class="tiny" style="color: #64748b; display: block; margin-bottom: 4px;">Managed Equipment</label>
-              <input type="text"
-                     value="${safeManagedEquipmentValue}"
-                     onchange="updateManagedEquipment('${safeDeviceIdAttr}', this.value)"
-                     placeholder="e.g., Heater, Fan, Lights"
-                     style="width: 100%; padding: 4px 8px; border: 1px solid #d1d5db; border-radius: 4px; font-size: 12px;">
-            </div>
-            `}
-
-            <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); gap: 12px; margin-bottom: 12px;">
-              <label class="tiny" style="color: #64748b; display: block;">
-                <span style="display: block; margin-bottom: 4px;">Light Group</span>
-                <select onchange="updateDeviceGroupAssignment('${safeDeviceIdAttr}', this.value, 'light')"
-                        style="width: 100%; padding: 4px 8px; border: 1px solid #d1d5db; border-radius: 4px; font-size: 12px;">
-                  ${lightGroupOptionsHtml}
-                </select>
-              </label>
-              <label class="tiny" style="color: #64748b; display: block;">
-                <span style="display: block; margin-bottom: 4px;">Equip Group</span>
-                <select onchange="updateDeviceGroupAssignment('${safeDeviceIdAttr}', this.value, 'equip')"
-                        style="width: 100%; padding: 4px 8px; border: 1px solid #d1d5db; border-radius: 4px; font-size: 12px;">
-                  ${equipGroupOptionsHtml}
-                </select>
-              </label>
-            </div>
-
-            <div class="device-meta" style="background: #f8fafc; border-radius: 6px; padding: 10px; margin-bottom: 12px;">
-              <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 8px; font-size: 11px;">
-                <div><strong>Device ID:</strong><br><span style="word-break: break-all; font-size: 10px;">${safeDeviceIdLabel}</span></div>
-                <div><strong>Type:</strong><br><span style="font-size: 10px;">${safeDeviceType}</span></div>
-                <div><strong>MAC:</strong><br><span style="font-size: 10px;">${escapeHtml(device.macAddress || 'N/A')}</span></div>
-                <div><strong>Cloud:</strong><br><span style="font-size: 10px;">${escapeHtml(device.cloudService || 'SwitchBot')}</span></div>
-              </div>
-            </div>
-
-            ${createAPIReadingsGrid(currentReading)}
-          </div>
-
-          <div style="display: flex; justify-content: space-between; align-items: center; margin-top: 12px; flex-wrap: wrap; gap: 8px; border-top: 1px solid #e2e8f0; padding-top: 8px;">
-            <span class="tiny" style="color: #64748b; font-size: 10px;">
-              Last updated: ${escapeHtml(lastUpdate)}
+          ${createEnvironmentReadingsGrid(reading)}
+          
+          <div class="row" style="justify-content: space-between; align-items: center; margin-top: 12px;">
+            <span class="tiny" style="color: #64748b;">
+              Last updated: ${lastUpdate}
             </span>
-            ${sourceBadge}
+            <span class="tiny" style="color: #64748b;">Environment Data</span>
           </div>
         </div>
       `;
     }
 
-    function createAPIReadingsGrid(reading) {
-      if (!reading) return '<p class="tiny" style="color: #64748b; text-align: center; margin: 12px 0;">No readings available - click refresh to get data</p>';
-      
-      // Handle real device messages
-      if (reading.message) {
-        const safeMessage = escapeHtml(reading.message);
-        return `
-          <div class="live-indicator">
-            <span class="pulse-dot"></span>
-            <span>${safeMessage}</span>
-          </div>
-          <p class="tiny" style="margin: 6px 0 12px; color: #0f9b74;">
-            This is a real device from your farm. Use the Refresh action to capture the latest sensor readings.
-          </p>
-        `;
-      }
+    function createEnvironmentReadingsGrid(reading) {
+      if (!reading) return '<p class="tiny" style="color: #64748b; text-align: center; margin: 12px 0;">No readings available</p>';
       
       const readingItems = [];
       
-      // Show all available data fields with enhanced formatting
-      Object.keys(reading).forEach(key => {
-        if (key === 'lastUpdate' || key === 'message' || key === 'deviceId') return;
-        
-        const value = reading[key];
-        if (value === undefined || value === null) return;
-        
-        const normalizedKey = key.toLowerCase();
-        let displayValue = value;
-        let unit = '';
-        let label = '';
-        let tone = '';
-
-        switch (normalizedKey) {
-          case 'temperature':
-            unit = '°C';
-            label = 'Temperature';
-            break;
-          case 'humidity':
-            unit = '%';
-            label = 'Humidity';
-            break;
-          case 'vpd':
-            unit = ' kPa';
-            label = 'VPD';
-            displayValue = formatNumber(value, 2);
-            break;
-          case 'co2':
-            unit = ' ppm';
-            label = 'CO₂';
-            if (Number(value) > 1200) tone = 'warning';
-            break;
-          case 'power':
-            unit = typeof value === 'number' ? 'W' : '';
-            label = 'Power';
-            if (typeof value === 'string') {
-              const normalized = getPowerState({ power: value });
-              displayValue = normalized ? normalized.toUpperCase() : value.toUpperCase();
-              tone = normalized === 'on' ? 'positive' : normalized === 'off' ? 'warning' : tone;
-            }
-            break;
-          case 'voltage':
-            unit = 'V';
-            label = 'Voltage';
-            break;
-          case 'electriccurrent':
-          case 'current':
-            unit = 'A';
-            label = 'Current';
-            break;
-          case 'electricityofday':
-            unit = 'kWh';
-            label = 'Daily Usage';
-            break;
-          case 'weight':
-            unit = 'W';
-            label = 'Wattage';
-            break;
-          case 'battery':
-            unit = '%';
-            label = 'Battery';
-            tone = getBatteryTone(value);
-            break;
-          case 'position':
-            unit = '%';
-            label = 'Position';
-            break;
-          case 'version':
-            label = 'Firmware';
-            displayValue = typeof value === 'object' ? value.BLE || value.WiFi || JSON.stringify(value) : value;
-            break;
-          case 'openstate':
-            label = 'Status';
-            displayValue = value === 'open' ? 'OPEN' : 'CLOSED';
-            break;
-          case 'movedetected':
-            label = 'Motion';
-            displayValue = value ? 'DETECTED' : 'NONE';
-            tone = value ? 'positive' : '';
-            break;
-          case 'brightness':
-            label = 'Brightness';
-            unit = '%';
-            break;
-          case 'lightlevel':
-          case 'lightintensity':
-            label = 'Illuminance';
-            unit = 'lux';
-            break;
-          case 'volume':
-            label = 'Volume';
-            unit = Number(value) > 1 ? 'dB' : '';
-            break;
-          case 'scale':
-            label = 'Weight';
-            unit = 'kg';
-            break;
-          case 'doorstate':
-            label = 'Door';
-            displayValue = Number(value) === 1 ? 'OPEN' : 'CLOSED';
-            break;
-          case 'calibration':
-            label = 'Calibration';
-            displayValue = value ? 'YES' : 'NO';
-            break;
-          case 'lackpower':
-            label = 'Power Status';
-            displayValue = value ? 'LOW POWER' : 'OK';
-            tone = value ? 'critical' : 'positive';
-            break;
-          default:
-            label = key.charAt(0).toUpperCase() + key.slice(1).replace(/([A-Z])/g, ' $1');
-        }
-
-        const toneAttr = tone ? ` data-tone="${tone}"` : '';
-        const formattedValue = formatReading(displayValue, unit);
+      // Temperature
+      if (reading.temperature !== undefined) {
         readingItems.push(`
-          <div class="reading-item"${toneAttr}>
-            <div class="reading-value">${escapeHtml(String(formattedValue))}</div>
-            <div class="reading-label">${escapeHtml(label)}</div>
+          <div class="reading-item">
+            <div class="reading-value">${formatReading(reading.temperature, '°C')}</div>
+            <div class="reading-label">Temperature</div>
           </div>
         `);
-      });
+      }
+      
+      // Humidity
+      if (reading.humidity !== undefined) {
+        readingItems.push(`
+          <div class="reading-item">
+            <div class="reading-value">${formatReading(reading.humidity, '%')}</div>
+            <div class="reading-label">Humidity</div>
+          </div>
+        `);
+      }
+      
+      // CO2
+      if (reading.co2 !== undefined) {
+        readingItems.push(`
+          <div class="reading-item">
+            <div class="reading-value">${formatReading(reading.co2, ' ppm')}</div>
+            <div class="reading-label">CO2</div>
+          </div>
+        `);
+      }
+      
+      // RSSI (signal strength)
+      if (reading.rssi !== undefined) {
+        readingItems.push(`
+          <div class="reading-item">
+            <div class="reading-value">${formatReading(reading.rssi, ' dBm')}</div>
+            <div class="reading-label">Signal</div>
+          </div>
+        `);
+      }
       
       if (readingItems.length === 0) {
-        return '<p class="tiny" style="color: #64748b; text-align: center; margin: 12px 0;">No sensor data available - click refresh to get readings</p>';
+        return '<p class="tiny" style="color: #64748b; text-align: center; margin: 12px 0;">No sensor readings available</p>';
       }
       
       return `<div class="reading-grid">${readingItems.join('')}</div>`;
     }
 
-    async function refreshEnvironmentData() {
+    function createDeviceControls(device) {
+      const deviceType = String(device.deviceType || '').toLowerCase();
+      const safeDeviceIdAttr = escapeAttribute(device.deviceId);
+
+      if (deviceType.includes('plug') || deviceType.includes('switch')) {
+        return `
+          <div class="row" style="gap: 4px;">
+            <button class="ghost tiny" onclick="sendDeviceCommand('${safeDeviceIdAttr}', 'turnOn')">ON</button>
+            <button class="ghost tiny" onclick="sendDeviceCommand('${safeDeviceIdAttr}', 'turnOff')">OFF</button>
+          </div>
+        `;
+      }
+
+      if (deviceType.includes('bot')) {
+        return `
+          <button class="ghost tiny" onclick="sendDeviceCommand('${safeDeviceIdAttr}', 'press')">Press</button>
+        `;
+      }
+
+      return '<span class="tiny" style="color: #64748b;">Read-only</span>';
+    }
+
+    async function loadDevices() {
       try {
-        updateSyncStatus('Refreshing environment data...');
+        clearError();
+        document.getElementById('loadingContainer').style.display = 'block';
+        updateSyncStatus('Checking SwitchBot connection...');
+
+        await loadDeviceMetadataIfNeeded().catch(error => {
+          console.warn('Device metadata preload failed:', error);
+        });
+
+        // First try to get real SwitchBot devices from your farm
+        try {
+          const realDevices = await fetchSwitchBotDevices();
+          if (realDevices && realDevices.length > 0) {
+            updateSyncStatus(`Connected to ${realDevices.length} real SwitchBot devices from your farm`);
+            devices = realDevices.map(device => ({
+              ...device,
+              isRealDevice: true,
+              lastReading: {
+                // Real devices get status separately via individual API calls
+                lastUpdate: new Date().toISOString(),
+                deviceType: device.deviceType,
+                battery: device.battery || null,
+                // Note: Temperature, humidity, etc. require separate status API calls
+                message: "Click refresh to get current readings"
+              }
+            }));
+            applyMetadataToAllDevices();
+            renderDevicesFromAPI();
+            document.getElementById('deviceCount').textContent = `${devices.length} real devices`;
+
+            // Auto-fetch initial status data for a few devices only to avoid API limits
+            setTimeout(() => {
+              // Only fetch status for first 3 devices to avoid overloading API
+              const devicesToFetch = devices.slice(0, 3);
+              devicesToFetch.forEach((device, index) => {
+                setTimeout(() => {
+                  refreshDeviceData(device.deviceId);
+                }, index * 2000); // Stagger requests by 2 seconds each
+              });
+            }, 2000); // Wait 2 seconds to avoid API rate limits
+            
+            return; // Success with real API
+          }
+        } catch (realApiError) {
+          console.warn('Real SwitchBot API failed, falling back to environment data:', realApiError);
+        }
+
+        // Fallback to environment data
+        updateSyncStatus('Loading environment data...');
+        await fetchServerStatus();
+
         try {
           await ensureEnvironmentData(true);
-        } catch (error) {
-          console.warn('Environment refresh failed:', error);
+        } catch (envError) {
+          console.warn('Environment data fetch failed:', envError);
         }
 
         const sourceData = Array.isArray(environmentData) ? environmentData : [];
-        const switchbotData = sourceData.filter(zone => zone.source === 'switchbot');
+        const switchbotEnvData = sourceData.filter(zone =>
+          zone.source === 'switchbot' ||
+          (zone.sensors && (zone.sensors.tempC || zone.sensors.rh || zone.sensors.co2))
+        );
 
-        if (switchbotData.length > 0) {
-          devices = switchbotData.map(zone => ({
+        if (switchbotEnvData.length > 0) {
+          updateSyncStatus(`Found ${switchbotEnvData.length} environmental devices`);
+
+          devices = switchbotEnvData.map(zone => ({
             deviceId: zone.id || zone.name || zone.zoneId,
             deviceName: zone.name || zone.id || zone.zoneId,
             deviceType: zone.source === 'switchbot' ? 'SwitchBot Environmental Sensor' : 'Environmental Sensor',
-            lastReading: zone
+            lastReading: zone.source === 'switchbot' ? zone : convertZoneToReading(zone)
           }));
+
           applyMetadataToAllDevices();
           renderDevicesFromEnvironment();
-          updateSyncStatus(`Refreshed ${devices.length} devices`);
-          document.getElementById('deviceCount').textContent = `${devices.length} devices from environment data`;
+          document.getElementById('deviceCount').textContent = `${devices.length} devices`;
+
         } else {
-          updateSyncStatus('No SwitchBot data in environment');
+          updateSyncStatus('No environmental data found');
           devices = [];
           renderDevicesFromEnvironment();
           document.getElementById('deviceCount').textContent = 'No devices found';
+          
+          showInfo('No environmental devices found. Configure Azure integration or start local polling to collect data.');
         }
-      } catch (error) {
-        console.error('Failed to refresh environment data:', error);
-        updateSyncStatus('Refresh failed', true);
-      }
-    }
-
-    function startAutoRefresh() {
-      if (syncInterval) clearInterval(syncInterval);
-      syncInterval = setInterval(refreshEnvironmentData, 30000);
-    }
-
-    function stopAutoRefresh() {
-      if (syncInterval) {
-        clearInterval(syncInterval);
-        syncInterval = null;
-      }
-    }
-
-    function showInfo(message) {
-      const container = document.getElementById('infoContainer');
-      container.innerHTML = `<div class="info-message"><strong>Info:</strong> ${message}</div>`;
-    }
-
-    function clearError() {
-      document.getElementById('errorContainer').innerHTML = '';
-      document.getElementById('infoContainer').innerHTML = '';
-    }
-
-    function startSwitchBotPolling() {
-      const button = document.getElementById('btnStartPolling');
-      if (button.textContent === 'Start Polling') {
-        // Start polling
-        showInfo('<strong>Starting SwitchBot polling...</strong><br>Collecting device data from local mock API...');
-        button.textContent = 'Stop Polling';
-        button.style.backgroundColor = '#dc3545';
         
-        // Start the polling interval
-        window.switchBotPollingInterval = setInterval(async () => {
-          try {
-            // Instead of loading all devices, just update the device list without fetching all statuses
-            const realDevices = await fetchSwitchBotDevices();
-            if (realDevices && realDevices.length > 0) {
-              devices = realDevices.map(device => ({
-                ...device,
-                isRealDevice: true,
-                lastReading: devices.find(d => d.deviceId === device.deviceId)?.lastReading || {
-                  lastUpdate: new Date().toISOString(),
-                  message: "Click refresh to get current readings"
-                }
-              }));
-              applyMetadataToAllDevices();
-              renderDevicesFromAPI();
-              showInfo(`<strong>Polling active</strong><br>Last update: ${new Date().toLocaleTimeString()}<br>Device list refreshed. Click refresh on cards for live data.`);
-            }
-          } catch (error) {
-            showError(`Polling error: ${error.message}`);
-          }
-        }, 30000); // Poll every 30 seconds instead of 10
-        
-        // Immediate first poll
-        loadDevices();
-        
-      } else {
-        // Stop polling
-        if (window.switchBotPollingInterval) {
-          clearInterval(window.switchBotPollingInterval);
-          window.switchBotPollingInterval = null;
-        }
-        button.textContent = 'Start Polling';
-        button.style.backgroundColor = '#007bff';
-        showInfo('<strong>⏹️ Polling stopped</strong><br>Click "Start Polling" to resume data collection.');
-      }
-    }
-
-    function getSwitchBotToken() {
-      return "4e6fc805b4a0dd7ed693af1dcf89d9731113d4706b2d796759aafe09cf8f07aed370d35bab4fb4799e1bda57d03c0aed";
-    }
-
-    function getSwitchBotSecret() {
-      return "141c0bc9906ab1f4f73dd9f0c298046b";
-    }
-
-    async function fetchServerStatus() {
-      try {
-        const response = await fetch('/status');
-        if (response.ok) {
-          const status = await response.json();
-          const configSpan = document.getElementById('currentConfig');
-          if (configSpan) {
-            configSpan.innerHTML = `
-              <strong>Environment Source:</strong> ${status.envSource || 'local'}<br>
-              ${status.azureLatestUrl ? `<strong>Azure URL:</strong> ${status.azureLatestUrl}<br>` : ''}
-              <strong>Server:</strong> ${status.controller || 'unknown'}
-            `;
-          }
-        }
       } catch (error) {
-        console.error('Failed to fetch server status:', error);
+        console.error('Failed to load devices:', error);
+        showError(`Failed to load environment data: ${error.message}`);
+        updateSyncStatus('Connection failed', true);
+      } finally {
+        document.getElementById('loadingContainer').style.display = 'none';
       }
     }
 
-    // Global functions for onclick handlers
-    window.refreshEnvironmentData = refreshEnvironmentData;
-    window.startSwitchBotPolling = startSwitchBotPolling;
+    function convertZoneToReading(zone) {
+      // Convert zone format to reading format for consistency
+      const reading = {
+        timestamp: zone.meta?.lastUpdated || new Date().toISOString(),
+        battery: zone.meta?.battery,
+        rssi: zone.meta?.rssi
+      };
 
-    // Event listeners
-    document.addEventListener('DOMContentLoaded', async () => {
-      document.getElementById('btnRefresh').addEventListener('click', refreshEnvironmentData);
-      document.getElementById('btnStartPolling').addEventListener('click', startSwitchBotPolling);
-      document.getElementById('btnOpenMain').addEventListener('click', () => {
-        window.open('/', '_blank');
-      });
-
-      try {
-        await loadReferenceData();
-      } catch (error) {
-        console.warn('Initial reference data load failed:', error);
+      if (zone.sensors?.tempC?.current !== undefined) {
+        reading.temperature = zone.sensors.tempC.current;
+      }
+      if (zone.sensors?.rh?.current !== undefined) {
+        reading.humidity = zone.sensors.rh.current;
+      }
+      if (zone.sensors?.co2?.current !== undefined) {
+        reading.co2 = zone.sensors.co2.current;
+      }
+      if (zone.sensors?.vpd?.current !== undefined) {
+        reading.vpd = zone.sensors.vpd.current;
       }
 
-      await loadDevices();
-      // Disabled auto-refresh to prevent conflicts - use manual refresh instead
-      // startAutoRefresh();
-    });
-
-    window.addEventListener('beforeunload', () => {
-      stopAutoRefresh();
-      // Stop any polling intervals
-      if (window.switchBotPollingInterval) {
-        clearInterval(window.switchBotPollingInterval);
-      }
-    });
-
-    // Helper functions for device management
-    function getDeviceAvatar(device) {
-      const type = String(device?.deviceType || '').toLowerCase();
-      let toneClass = '';
-      let label = 'SB';
-
-      if (type.includes('meter') || type.includes('sensor') || type.includes('monitor')) {
-        label = 'ENV';
-      } else if (type.includes('plug') || type.includes('switch')) {
-        label = 'PWR';
-        toneClass = 'tone-energy';
-      } else if (type.includes('bot')) {
-        label = 'BOT';
-        toneClass = 'tone-automation';
-      } else if (type.includes('hub')) {
-        label = 'HUB';
-        toneClass = 'tone-energy';
-      } else if (type.includes('camera')) {
-        label = 'CAM';
-        toneClass = 'tone-safety';
-      } else if (type.includes('lock')) {
-        label = 'LOCK';
-        toneClass = 'tone-safety';
-      } else {
-        const fallbackName = String(device?.displayName || device?.deviceName || device?.deviceId || 'SB');
-        const initials = fallbackName
-          .split(/\s+/)
-          .filter(Boolean)
-          .map(part => part[0])
-          .join('')
-          .slice(0, 3)
-          .toUpperCase();
-        label = initials || 'SB';
-      }
-
-      const tone = toneClass ? ` ${toneClass}` : '';
-      return `<span class="device-avatar${tone}">${escapeHtml(label)}</span>`;
+      return enrichReading(reading);
     }
 
-    function getDeviceCategory(deviceType) {
-      const type = String(deviceType || '').toLowerCase();
-      if (type.includes('meter') || type.includes('sensor') || type.includes('monitor')) {
-        return 'Environmental Monitoring';
-      } else if (type.includes('plug') || type.includes('switch')) {
-        return 'Power Control';
-      } else if (type.includes('bot')) {
-        return 'Mechanical Control';
-      } else if (type.includes('hub')) {
-        return 'Central Hub';
-      } else {
-        return 'Smart Device';
-      }
-    }
+    function renderDevicesFromEnvironment() {
+      const container = document.getElementById('devicesContainer');
 
-    // Device editing functions
-    async function editDeviceName(deviceId) {
-      const device = devices.find(d => d.deviceId === deviceId);
-      if (!device) return;
+      applyMetadataToAllDevices();
 
-      const currentName = device.displayName || device.deviceName || deviceId;
-      const newName = prompt('Enter new device name:', currentName);
-      if (!newName || newName === currentName) {
+      if (devices.length === 0) {
+        container.innerHTML = '<p style="text-align: center; color: #64748b; grid-column: 1 / -1;">No SwitchBot devices found in environment data</p>';
         return;
       }
-
-      try {
-        const metadata = await persistDeviceMetadata(device, { name: newName, deviceName: newName });
-        if (metadata) {
-          applyMetadataToDevice(device, metadata);
-        } else {
-          device.displayName = newName;
-        }
-        renderDevicesFromAPI();
-        showInfo(`Updated device name to ${escapeHtml(newName)}.`);
-      } catch (error) {
-        console.error('Failed to update device name:', error);
-        showError(`Failed to update device name: ${escapeHtml(error.message || 'Unknown error')}`);
-      }
+      
+      container.innerHTML = devices.map(device => {
+        const reading = device.lastReading;
+        const isOnline = reading && reading.timestamp && 
+          (Date.now() - new Date(reading.timestamp).getTime()) < 5 * 60 * 1000; // 5 minutes
+        
+        return createEnvironmentDeviceCard(device, reading, isOnline);
+      }).join('');
     }
 
-    async function updateDeviceLocation(deviceId, locationValue) {
-      const device = devices.find(d => d.deviceId === deviceId);
-      if (!device) return;
+    function createEnvironmentDeviceCard(device, reading, isOnline) {
+      const lastUpdate = reading?.timestamp ? new Date(reading.timestamp).toLocaleString() : 'Never';
+      const hasBatteryLevel = Number.isFinite(Number(reading?.battery));
+      const batteryTone = hasBatteryLevel ? getBatteryTone(reading.battery) : 'neutral';
+      const batteryValue = hasBatteryLevel ? `${formatNumber(reading.battery, 0)}%` : 'Mains Power';
+      const batteryLabel = hasBatteryLevel ? formatBatteryLabel(reading.battery) : 'External Power';
+      const batteryBadge = `<span class="status-badge tone-${batteryTone}" title="${escapeAttribute(batteryLabel)}">${escapeHtml(batteryValue)}</span>`;
 
-      const option = findRoomOption(locationValue);
-      const locationName = option ? option.name : '';
+      return `
+        <div class="device-card">
+          <div class="row" style="justify-content: space-between; align-items: flex-start; margin-bottom: 12px;">
+            <div>
+              <div class="row" style="align-items: center; margin-bottom: 4px;">
+                <div class="device-status ${isOnline ? 'status-online' : 'status-offline'}"></div>
+                <h3 style="margin: 0; font-size: 16px;">${device.deviceName}</h3>
+              </div>
+              <p class="tiny" style="margin: 0; color: #64748b;">${device.deviceType}</p>
+              <p class="tiny" style="margin: 2px 0 0; color: #64748b;">ID: ${device.deviceId}</p>
+            </div>
+            <div style="text-align: right;">
+              ${batteryBadge}
+              <button class="ghost tiny" onclick="refreshEnvironmentData()" style="margin-top: 8px;">Refresh</button>
+            </div>
+          </div>
 
+          ${createEnvironmentReadingsGrid(reading)}
+          
+          <div class="row" style="justify-content: space-between; align-items: center; margin-top: 12px;">
+            <span class="tiny" style="color: #64748b;">
+              Last updated: ${lastUpdate}
+            </span>
+            <span class="tiny" style="color: #64748b;">Environment Data</span>
+          </div>
+        </div>
+      `;
+    }
+
+    function createEnvironmentReadingsGrid(reading) {
+      if (!reading) return '<p class="tiny" style="color: #64748b; text-align: center; margin: 12px 0;">No readings available</p>';
+      
+      const readingItems = [];
+      
+      // Temperature
+      if (reading.temperature !== undefined) {
+        readingItems.push(`
+          <div class="reading-item">
+            <div class="reading-value">${formatReading(reading.temperature, '°C')}</div>
+            <div class="reading-label">Temperature</div>
+          </div>
+        `);
+      }
+      
+      // Humidity
+      if (reading.humidity !== undefined) {
+        readingItems.push(`
+          <div class="reading-item">
+            <div class="reading-value">${formatReading(reading.humidity, '%')}</div>
+            <div class="reading-label">Humidity</div>
+          </div>
+        `);
+      }
+      
+      // CO2
+      if (reading.co2 !== undefined) {
+        readingItems.push(`
+          <div class="reading-item">
+            <div class="reading-value">${formatReading(reading.co2, ' ppm')}</div>
+            <div class="reading-label">CO2</div>
+          </div>
+        `);
+      }
+      
+      // RSSI (signal strength)
+      if (reading.rssi !== undefined) {
+        readingItems.push(`
+          <div class="reading-item">
+            <div class="reading-value">${formatReading(reading.rssi, ' dBm')}</div>
+            <div class="reading-label">Signal</div>
+          </div>
+        `);
+      }
+      
+      if (readingItems.length === 0) {
+        return '<p class="tiny" style="color: #64748b; text-align: center; margin: 12px 0;">No sensor readings available</p>';
+      }
+      
+      return `<div class="reading-grid">${readingItems.join('')}</div>`;
+    }
+
+    function createDeviceControls(device) {
+      const deviceType = String(device.deviceType || '').toLowerCase();
+      const safeDeviceIdAttr = escapeAttribute(device.deviceId);
+
+      if (deviceType.includes('plug') || deviceType.includes('switch')) {
+        return `
+          <div class="row" style="gap: 4px;">
+            <button class="ghost tiny" onclick="sendDeviceCommand('${safeDeviceIdAttr}', 'turnOn')">ON</button>
+            <button class="ghost tiny" onclick="sendDeviceCommand('${safeDeviceIdAttr}', 'turnOff')">OFF</button>
+          </div>
+        `;
+      }
+
+      if (deviceType.includes('bot')) {
+        return `
+          <button class="ghost tiny" onclick="sendDeviceCommand('${safeDeviceIdAttr}', 'press')">Press</button>
+        `;
+      }
+
+      return '<span class="tiny" style="color: #64748b;">Read-only</span>';
+    }
+
+    async function loadDevices() {
       try {
-        const metadata = await persistDeviceMetadata(device, {
-          room: locationName || null,
-          roomName: locationName || null,
-          roomId: option ? option.id || option.value : null,
-          roomSlug: option ? option.value : null,
-          location: locationName || null
+        clearError();
+        document.getElementById('loadingContainer').style.display = 'block';
+        updateSyncStatus('Checking SwitchBot connection...');
+
+        await loadDeviceMetadataIfNeeded().catch(error => {
+          console.warn('Device metadata preload failed:', error);
         });
-        if (metadata) {
-          applyMetadataToDevice(device, metadata);
-        } else {
-          device.farmLocation = locationName;
-          device.farmLocationId = option ? option.value : '';
-          syncDeviceCardSchema(device);
-          recalculateSensorWeights();
+
+        // First try to get real SwitchBot devices from your farm
+        try {
+          const realDevices = await fetchSwitchBotDevices();
+          if (realDevices && realDevices.length > 0) {
+            updateSyncStatus(`Connected to ${realDevices.length} real SwitchBot devices from your farm`);
+            devices = realDevices.map(device => ({
+              ...device,
+              isRealDevice: true,
+              lastReading: {
+                // Real devices get status separately via individual API calls
+                lastUpdate: new Date().toISOString(),
+                deviceType: device.deviceType,
+                battery: device.battery || null,
+                // Note: Temperature, humidity, etc. require separate status API calls
+                message: "Click refresh to get current readings"
+              }
+            }));
+            applyMetadataToAllDevices();
+            renderDevicesFromAPI();
+            document.getElementById('deviceCount').textContent = `${devices.length} real devices`;
+
+            // Auto-fetch initial status data for a few devices only to avoid API limits
+            setTimeout(() => {
+              // Only fetch status for first 3 devices to avoid overloading API
+              const devicesToFetch = devices.slice(0, 3);
+              devicesToFetch.forEach((device, index) => {
+                setTimeout(() => {
+                  refreshDeviceData(device.deviceId);
+                }, index * 2000); // Stagger requests by 2 seconds each
+              });
+            }, 2000); // Wait 2 seconds to avoid API rate limits
+            
+            return; // Success with real API
+          }
+        } catch (realApiError) {
+          console.warn('Real SwitchBot API failed, falling back to environment data:', realApiError);
         }
-        renderDevicesFromAPI();
-        const safeDeviceName = escapeHtml(device.displayName || device.deviceName || deviceId);
-        if (locationName) {
-          showInfo(`Updated location for ${safeDeviceName} to ${escapeHtml(locationName)}.`);
-        } else {
-          showInfo(`Cleared farm location for ${safeDeviceName}.`);
+
+        // Fallback to environment data
+        updateSyncStatus('Loading environment data...');
+        await fetchServerStatus();
+
+        try {
+          await ensureEnvironmentData(true);
+        } catch (envError) {
+          console.warn('Environment data fetch failed:', envError);
         }
-      } catch (error) {
-        console.error('Failed to update device location:', error);
-        showError(`Failed to update device location: ${escapeHtml(error.message || 'Unknown error')}`);
-        applyMetadataToDevice(device);
-        renderDevicesFromAPI();
-      }
-    }
 
-    async function updateDeviceZone(deviceId, zoneValue) {
-      const device = devices.find(d => d.deviceId === deviceId);
-      if (!device) return;
-
-      const option = findZoneOption(zoneValue);
-      const zoneName = option ? option.name : '';
-
-      try {
-        const metadata = await persistDeviceMetadata(device, {
-          zone: zoneName || null,
-          zoneName: zoneName || null,
-          zoneId: option ? option.id || option.value : null,
-          zoneSlug: option ? option.value : null
-        });
-        if (metadata) {
-          applyMetadataToDevice(device, metadata);
-        } else {
-          device.zoneName = zoneName;
-          device.zoneId = option ? option.value : '';
-          syncDeviceCardSchema(device);
-          recalculateSensorWeights();
-        }
-        renderDevicesFromAPI();
-        const safeDeviceName = escapeHtml(device.displayName || device.deviceName || deviceId);
-        if (zoneName) {
-          showInfo(`Assigned ${safeDeviceName} to ${escapeHtml(zoneName)}.`);
-        } else {
-          showInfo(`Cleared zone assignment for ${safeDeviceName}.`);
-        }
-      } catch (error) {
-        console.error('Failed to update device zone:', error);
-        showError(`Failed to update zone: ${escapeHtml(error.message || 'Unknown error')}`);
-        applyMetadataToDevice(device);
-        renderDevicesFromAPI();
-      }
-    }
-
-    async function updateManagedEquipment(deviceId, equipment) {
-      const device = devices.find(d => d.deviceId === deviceId);
-      if (!device) return;
-
-      const trimmed = equipment && equipment.trim().length > 0 ? equipment.trim() : '';
-
-      try {
-        const metadata = await persistDeviceMetadata(device, {
-          managedEquipment: trimmed || null,
-          equipment: trimmed || null
-        });
-        if (metadata) {
-          applyMetadataToDevice(device, metadata);
-        } else {
-          device.managedEquipment = trimmed;
-          syncDeviceCardSchema(device);
-        }
-        renderDevicesFromAPI();
-        const safeDeviceName = escapeHtml(device.displayName || device.deviceName || deviceId);
-        if (trimmed) {
-          showInfo(`Updated managed equipment for ${safeDeviceName}: ${escapeHtml(trimmed)}.`);
-        } else {
-          showInfo(`Cleared managed equipment for ${safeDeviceName}.`);
-        }
-      } catch (error) {
-        console.error('Failed to update managed equipment:', error);
-        showError(`Failed to update managed equipment: ${escapeHtml(error.message || 'Unknown error')}`);
-        applyMetadataToDevice(device);
-        renderDevicesFromAPI();
-      }
-    }
-
-    async function updateDeviceLevel(deviceId, levelValue) {
-      const device = devices.find(d => d.deviceId === deviceId);
-      if (!device) return;
-      const option = findLevelOption(levelValue);
-      const levelName = option ? option.name : firstString(levelValue);
-
-      try {
-        const metadata = await persistDeviceMetadata(device, {
-          level: levelName || null,
-          levelId: option ? option.id || option.value : null
-        });
-        if (metadata) {
-          applyMetadataToDevice(device, metadata);
-        } else {
-          device.placement = device.placement || {};
-          device.placement.level = buildPlacementEntry(option, levelName);
-          syncDeviceCardSchema(device);
-        }
-        renderDevicesFromAPI();
-        const safeDeviceName = escapeHtml(device.displayName || device.deviceName || deviceId);
-        if (levelName) {
-          showInfo(`Updated level for ${safeDeviceName} to ${escapeHtml(levelName)}.`);
-        } else {
-          showInfo(`Cleared level for ${safeDeviceName}.`);
-        }
-      } catch (error) {
-        console.error('Failed to update device level:', error);
-        showError(`Failed to update level: ${escapeHtml(error.message || 'Unknown error')}`);
-        applyMetadataToDevice(device);
-        renderDevicesFromAPI();
-      }
-    }
-
-    async function updateDeviceSide(deviceId, sideValue) {
-      const device = devices.find(d => d.deviceId === deviceId);
-      if (!device) return;
-      const option = findSideOption(sideValue);
-      const sideName = option ? option.name : firstString(sideValue);
-
-      try {
-        const metadata = await persistDeviceMetadata(device, {
-          side: sideName || null,
-          sideId: option ? option.id || option.value : null
-        });
-        if (metadata) {
-          applyMetadataToDevice(device, metadata);
-        } else {
-          device.placement = device.placement || {};
-          device.placement.side = buildPlacementEntry(option, sideName);
-          syncDeviceCardSchema(device);
-        }
-        renderDevicesFromAPI();
-        const safeDeviceName = escapeHtml(device.displayName || device.deviceName || deviceId);
-        if (sideName) {
-          showInfo(`Updated side for ${safeDeviceName} to ${escapeHtml(sideName)}.`);
-        } else {
-          showInfo(`Cleared side for ${safeDeviceName}.`);
-        }
-      } catch (error) {
-        console.error('Failed to update device side:', error);
-        showError(`Failed to update side: ${escapeHtml(error.message || 'Unknown error')}`);
-        applyMetadataToDevice(device);
-        renderDevicesFromAPI();
-      }
-    }
-
-    async function updateSensorPrimary(deviceId, isPrimary) {
-      const device = devices.find(d => d.deviceId === deviceId);
-      if (!device) return;
-
-      const desired = Boolean(isPrimary);
-      const safeDeviceName = escapeHtml(device.displayName || device.deviceName || deviceId);
-
-      try {
-        const metadata = await persistDeviceMetadata(device, { primary: desired });
-        if (metadata) {
-          applyMetadataToDevice(device, metadata);
-        } else {
-          device.primary = desired;
-        }
-        recalculateSensorWeights();
-        renderDevicesFromAPI();
-        showInfo(
-          desired
-            ? `${safeDeviceName} set as primary sensor.`
-            : `${safeDeviceName} marked as secondary.`
+        const sourceData = Array.isArray(environmentData) ? environmentData : [];
+        const switchbotEnvData = sourceData.filter(zone =>
+          zone.source === 'switchbot' ||
+          (zone.sensors && (zone.sensors.tempC || zone.sensors.rh || zone.sensors.co2))
         );
-      } catch (error) {
-        console.error('Failed to update primary sensor flag:', error);
-        showError(`Failed to update primary flag: ${escapeHtml(error.message || 'Unknown error')}`);
-        applyMetadataToDevice(device);
-        renderDevicesFromAPI();
-      }
-    }
 
-    function handleSensorWeightInput(deviceId, rawValue) {
-      const device = devices.find(d => d.deviceId === deviceId);
-      if (!device) return;
-      const numeric = clampWeight(rawValue, device.weight ?? 0);
-      if (numeric !== null) {
-        device.weight = numeric;
-      }
-      const previewElement = document.getElementById(`sensorWeightPreview-${domSafeId(deviceId)}`);
-      if (previewElement) {
-        previewElement.textContent = renderSensorWeightPreview(device);
-      }
-    }
+        if (switchbotEnvData.length > 0) {
+          updateSyncStatus(`Found ${switchbotEnvData.length} environmental devices`);
 
-    async function commitSensorWeight(deviceId, rawValue) {
-      const device = devices.find(d => d.deviceId === deviceId);
-      if (!device) return;
-      const numeric = clampWeight(rawValue, device.weight ?? 0);
-      if (numeric === null) return;
+          devices = switchbotEnvData.map(zone => ({
+            deviceId: zone.id || zone.name || zone.zoneId,
+            deviceName: zone.name || zone.id || zone.zoneId,
+            deviceType: zone.source === 'switchbot' ? 'SwitchBot Environmental Sensor' : 'Environmental Sensor',
+            lastReading: zone.source === 'switchbot' ? zone : convertZoneToReading(zone)
+          }));
 
-      const rounded = Number(numeric.toFixed(3));
-      device.weight = rounded;
-      const previewElement = document.getElementById(`sensorWeightPreview-${domSafeId(deviceId)}`);
-      if (previewElement) {
-        previewElement.textContent = renderSensorWeightPreview(device);
-      }
+          applyMetadataToAllDevices();
+          renderDevicesFromEnvironment();
+          document.getElementById('deviceCount').textContent = `${devices.length} devices`;
 
-      try {
-        const metadata = await persistDeviceMetadata(device, { weight: rounded });
-        if (metadata) {
-          applyMetadataToDevice(device, metadata);
+        } else {
+          updateSyncStatus('No environmental data found');
+          devices = [];
+          renderDevicesFromEnvironment();
+          document.getElementById('deviceCount').textContent = 'No devices found';
+          
+          showInfo('No environmental devices found. Configure Azure integration or start local polling to collect data.');
         }
-        recalculateSensorWeights();
-        renderDevicesFromAPI();
-        const safeDeviceName = escapeHtml(device.displayName || device.deviceName || deviceId);
-        showInfo(`Updated weight for ${safeDeviceName} to ${formatWeightPercent(rounded)}.`);
+        
       } catch (error) {
-        console.error('Failed to update sensor weight:', error);
-        showError(`Failed to update sensor weight: ${escapeHtml(error.message || 'Unknown error')}`);
-        applyMetadataToDevice(device);
-        renderDevicesFromAPI();
+        console.error('Failed to load devices:', error);
+        showError(`Failed to load environment data: ${error.message}`);
+        updateSyncStatus('Connection failed', true);
+      } finally {
+        document.getElementById('loadingContainer').style.display = 'none';
       }
     }
 
-    async function updateControlledType(deviceId, controlledType) {
-      const device = devices.find(d => d.deviceId === deviceId);
-      if (!device) return;
-      const normalized = normalizeControlledType(controlledType) || '';
+    function convertZoneToReading(zone) {
+      // Convert zone format to reading format for consistency
+      const reading = {
+        timestamp: zone.meta?.lastUpdated || new Date().toISOString(),
+        battery: zone.meta?.battery,
+        rssi: zone.meta?.rssi
+      };
 
+      if (zone.sensors?.tempC?.current !== undefined) {
+        reading.temperature = zone.sensors.tempC.current;
+      }
+      if (zone.sensors?.rh?.current !== undefined) {
+        reading.humidity = zone.sensors.rh.current;
+      }
+      if (zone.sensors?.co2?.current !== undefined) {
+        reading.co2 = zone.sensors.co2.current;
+      }
+      if (zone.sensors?.vpd?.current !== undefined) {
+        reading.vpd = zone.sensors.vpd.current;
+      }
+
+      return enrichReading(reading);
+    }
+
+    function renderDevicesFromEnvironment() {
+      const container = document.getElementById('devicesContainer');
+
+      applyMetadataToAllDevices();
+
+      if (devices.length === 0) {
+        container.innerHTML = '<p style="text-align: center; color: #64748b; grid-column: 1 / -1;">No SwitchBot devices found in environment data</p>';
+        return;
+      }
+      
+      container.innerHTML = devices.map(device => {
+        const reading = device.lastReading;
+        const isOnline = reading && reading.timestamp && 
+          (Date.now() - new Date(reading.timestamp).getTime()) < 5 * 60 * 1000; // 5 minutes
+        
+        return createEnvironmentDeviceCard(device, reading, isOnline);
+      }).join('');
+    }
+
+    function createEnvironmentDeviceCard(device, reading, isOnline) {
+      const lastUpdate = reading?.timestamp ? new Date(reading.timestamp).toLocaleString() : 'Never';
+      const hasBatteryLevel = Number.isFinite(Number(reading?.battery));
+      const batteryTone = hasBatteryLevel ? getBatteryTone(reading.battery) : 'neutral';
+      const batteryValue = hasBatteryLevel ? `${formatNumber(reading.battery, 0)}%` : 'Mains Power';
+      const batteryLabel = hasBatteryLevel ? formatBatteryLabel(reading.battery) : 'External Power';
+      const batteryBadge = `<span class="status-badge tone-${batteryTone}" title="${escapeAttribute(batteryLabel)}">${escapeHtml(batteryValue)}</span>`;
+
+      return `
+        <div class="device-card">
+          <div class="row" style="justify-content: space-between; align-items: flex-start; margin-bottom: 12px;">
+            <div>
+              <div class="row" style="align-items: center; margin-bottom: 4px;">
+                <div class="device-status ${isOnline ? 'status-online' : 'status-offline'}"></div>
+                <h3 style="margin: 0; font-size: 16px;">${device.deviceName}</h3>
+              </div>
+              <p class="tiny" style="margin: 0; color: #64748b;">${device.deviceType}</p>
+              <p class="tiny" style="margin: 2px 0 0; color: #64748b;">ID: ${device.deviceId}</p>
+            </div>
+            <div style="text-align: right;">
+              ${batteryBadge}
+              <button class="ghost tiny" onclick="refreshEnvironmentData()" style="margin-top: 8px;">Refresh</button>
+            </div>
+          </div>
+
+          ${createEnvironmentReadingsGrid(reading)}
+          
+          <div class="row" style="justify-content: space-between; align-items: center; margin-top: 12px;">
+            <span class="tiny" style="color: #64748b;">
+              Last updated: ${lastUpdate}
+            </span>
+            <span class="tiny" style="color: #64748b;">Environment Data</span>
+          </div>
+        </div>
+      `;
+    }
+
+    function createEnvironmentReadingsGrid(reading) {
+      if (!reading) return '<p class="tiny" style="color: #64748b; text-align: center; margin: 12px 0;">No readings available</p>';
+      
+      const readingItems = [];
+      
+      // Temperature
+      if (reading.temperature !== undefined) {
+        readingItems.push(`
+          <div class="reading-item">
+            <div class="reading-value">${formatReading(reading.temperature, '°C')}</div>
+            <div class="reading-label">Temperature</div>
+          </div>
+        `);
+      }
+      
+      // Humidity
+      if (reading.humidity !== undefined) {
+        readingItems.push(`
+          <div class="reading-item">
+            <div class="reading-value">${formatReading(reading.humidity, '%')}</div>
+            <div class="reading-label">Humidity</div>
+          </div>
+        `);
+      }
+      
+      // CO2
+      if (reading.co2 !== undefined) {
+        readingItems.push(`
+          <div class="reading-item">
+            <div class="reading-value">${formatReading(reading.co2, ' ppm')}</div>
+            <div class="reading-label">CO2</div>
+          </div>
+        `);
+      }
+      
+      // RSSI (signal strength)
+      if (reading.rssi !== undefined) {
+        readingItems.push(`
+          <div class="reading-item">
+            <div class="reading-value">${formatReading(reading.rssi, ' dBm')}</div>
+            <div class="reading-label">Signal</div>
+          </div>
+        `);
+      }
+      
+      if (readingItems.length === 0) {
+        return '<p class="tiny" style="color: #64748b; text-align: center; margin: 12px 0;">No sensor readings available</p>';
+      }
+      
+      return `<div class="reading-grid">${readingItems.join('')}</div>`;
+    }
+
+    function createDeviceControls(device) {
+      const deviceType = String(device.deviceType || '').toLowerCase();
+      const safeDeviceIdAttr = escapeAttribute(device.deviceId);
+
+      if (deviceType.includes('plug') || deviceType.includes('switch')) {
+        return `
+          <div class="row" style="gap: 4px;">
+            <button class="ghost tiny" onclick="sendDeviceCommand('${safeDeviceIdAttr}', 'turnOn')">ON</button>
+            <button class="ghost tiny" onclick="sendDeviceCommand('${safeDeviceIdAttr}', 'turnOff')">OFF</button>
+          </div>
+        `;
+      }
+
+      if (deviceType.includes('bot')) {
+        return `
+          <button class="ghost tiny" onclick="sendDeviceCommand('${safeDeviceIdAttr}', 'press')">Press</button>
+        `;
+      }
+
+      return '<span class="tiny" style="color: #64748b;">Read-only</span>';
+    }
+
+    async function loadDevices() {
       try {
-        const metadata = await persistDeviceMetadata(device, {
-          controlledType: normalized || null
+        clearError();
+        document.getElementById('loadingContainer').style.display = 'block';
+        updateSyncStatus('Checking SwitchBot connection...');
+
+        await loadDeviceMetadataIfNeeded().catch(error => {
+          console.warn('Device metadata preload failed:', error);
         });
-        if (metadata) {
-          applyMetadataToDevice(device, metadata);
-        } else {
-          device.controlledType = normalized;
-          syncDeviceCardSchema(device);
+
+        // First try to get real SwitchBot devices from your farm
+        try {
+          const realDevices = await fetchSwitchBotDevices();
+          if (realDevices && realDevices.length > 0) {
+            updateSyncStatus(`Connected to ${realDevices.length} real SwitchBot devices from your farm`);
+            devices = realDevices.map(device => ({
+              ...device,
+              isRealDevice: true,
+              lastReading: {
+                // Real devices get status separately via individual API calls
+                lastUpdate: new Date().toISOString(),
+                deviceType: device.deviceType,
+                battery: device.battery || null,
+                // Note: Temperature, humidity, etc. require separate status API calls
+                message: "Click refresh to get current readings"
+              }
+            }));
+            applyMetadataToAllDevices();
+            renderDevicesFromAPI();
+            document.getElementById('deviceCount').textContent = `${devices.length} real devices`;
+
+            // Auto-fetch initial status data for a few devices only to avoid API limits
+            setTimeout(() => {
+              // Only fetch status for first 3 devices to avoid overloading API
+              const devicesToFetch = devices.slice(0, 3);
+              devicesToFetch.forEach((device, index) => {
+                setTimeout(() => {
+                  refreshDeviceData(device.deviceId);
+                }, index * 2000); // Stagger requests by 2 seconds each
+              });
+            }, 2000); // Wait 2 seconds to avoid API rate limits
+            
+            return; // Success with real API
+          }
+        } catch (realApiError) {
+          console.warn('Real SwitchBot API failed, falling back to environment data:', realApiError);
         }
-        renderDevicesFromAPI();
-        const safeName = escapeHtml(device.displayName || device.deviceName || deviceId);
-        if (normalized) {
-          showInfo(`Controlled type for ${safeName} set to ${escapeHtml(normalized)}.`);
-        } else {
-          showInfo(`Cleared controlled type for ${safeName}.`);
+
+        // Fallback to environment data
+        updateSyncStatus('Loading environment data...');
+        await fetchServerStatus();
+
+        try {
+          await ensureEnvironmentData(true);
+        } catch (envError) {
+          console.warn('Environment data fetch failed:', envError);
         }
+
+        const sourceData = Array.isArray(environmentData) ? environmentData : [];
+        const switchbotEnvData = sourceData.filter(zone =>
+          zone.source === 'switchbot' ||
+          (zone.sensors && (zone.sensors.tempC || zone.sensors.rh || zone.sensors.co2))
+        );
+
+        if (switchbotEnvData.length > 0) {
+          updateSyncStatus(`Found ${switchbotEnvData.length} environmental devices`);
+
+          devices = switchbotEnvData.map(zone => ({
+            deviceId: zone.id || zone.name || zone.zoneId,
+            deviceName: zone.name || zone.id || zone.zoneId,
+            deviceType: zone.source === 'switchbot' ? 'SwitchBot Environmental Sensor' : 'Environmental Sensor',
+            lastReading: zone.source === 'switchbot' ? zone : convertZoneToReading(zone)
+          }));
+
+          applyMetadataToAllDevices();
+          renderDevicesFromEnvironment();
+          document.getElementById('deviceCount').textContent = `${devices.length} devices`;
+
+        } else {
+          updateSyncStatus('No environmental data found');
+          devices = [];
+          renderDevicesFromEnvironment();
+          document.getElementById('deviceCount').textContent = 'No devices found';
+          
+          showInfo('No environmental devices found. Configure Azure integration or start local polling to collect data.');
+        }
+        
       } catch (error) {
-        console.error('Failed to update controlled type:', error);
-        showError(`Failed to update controlled type: ${escapeHtml(error.message || 'Unknown error')}`);
-        applyMetadataToDevice(device);
-        renderDevicesFromAPI();
+        console.error('Failed to load devices:', error);
+        showError(`Failed to load environment data: ${error.message}`);
+        updateSyncStatus('Connection failed', true);
+      } finally {
+        document.getElementById('loadingContainer').style.display = 'none';
       }
     }
 
-    async function updateEnergyTelemetry(deviceId, telemetry) {
-      const device = devices.find(d => d.deviceId === deviceId);
-      if (!device) return;
-      const normalized = normalizeEnergyTelemetry(telemetry) || 'none';
+    function convertZoneToReading(zone) {
+      // Convert zone format to reading format for consistency
+      const reading = {
+        timestamp: zone.meta?.lastUpdated || new Date().toISOString(),
+        battery: zone.meta?.battery,
+        rssi: zone.meta?.rssi
+      };
 
+      if (zone.sensors?.tempC?.current !== undefined) {
+        reading.temperature = zone.sensors.tempC.current;
+      }
+      if (zone.sensors?.rh?.current !== undefined) {
+        reading.humidity = zone.sensors.rh.current;
+      }
+      if (zone.sensors?.co2?.current !== undefined) {
+        reading.co2 = zone.sensors.co2.current;
+      }
+      if (zone.sensors?.vpd?.current !== undefined) {
+        reading.vpd = zone.sensors.vpd.current;
+      }
+
+      return enrichReading(reading);
+    }
+
+    function renderDevicesFromEnvironment() {
+      const container = document.getElementById('devicesContainer');
+
+      applyMetadataToAllDevices();
+
+      if (devices.length === 0) {
+        container.innerHTML = '<p style="text-align: center; color: #64748b; grid-column: 1 / -1;">No SwitchBot devices found in environment data</p>';
+        return;
+      }
+      
+      container.innerHTML = devices.map(device => {
+        const reading = device.lastReading;
+        const isOnline = reading && reading.timestamp && 
+          (Date.now() - new Date(reading.timestamp).getTime()) < 5 * 60 * 1000; // 5 minutes
+        
+        return createEnvironmentDeviceCard(device, reading, isOnline);
+      }).join('');
+    }
+
+    function createEnvironmentDeviceCard(device, reading, isOnline) {
+      const lastUpdate = reading?.timestamp ? new Date(reading.timestamp).toLocaleString() : 'Never';
+      const hasBatteryLevel = Number.isFinite(Number(reading?.battery));
+      const batteryTone = hasBatteryLevel ? getBatteryTone(reading.battery) : 'neutral';
+      const batteryValue = hasBatteryLevel ? `${formatNumber(reading.battery, 0)}%` : 'Mains Power';
+      const batteryLabel = hasBatteryLevel ? formatBatteryLabel(reading.battery) : 'External Power';
+      const batteryBadge = `<span class="status-badge tone-${batteryTone}" title="${escapeAttribute(batteryLabel)}">${escapeHtml(batteryValue)}</span>`;
+
+      return `
+        <div class="device-card">
+          <div class="row" style="justify-content: space-between; align-items: flex-start; margin-bottom: 12px;">
+            <div>
+              <div class="row" style="align-items: center; margin-bottom: 4px;">
+                <div class="device-status ${isOnline ? 'status-online' : 'status-offline'}"></div>
+                <h3 style="margin: 0; font-size: 16px;">${device.deviceName}</h3>
+              </div>
+              <p class="tiny" style="margin: 0; color: #64748b;">${device.deviceType}</p>
+              <p class="tiny" style="margin: 2px 0 0; color: #64748b;">ID: ${device.deviceId}</p>
+            </div>
+            <div style="text-align: right;">
+              ${batteryBadge}
+              <button class="ghost tiny" onclick="refreshEnvironmentData()" style="margin-top: 8px;">Refresh</button>
+            </div>
+          </div>
+
+          ${createEnvironmentReadingsGrid(reading)}
+          
+          <div class="row" style="justify-content: space-between; align-items: center; margin-top: 12px;">
+            <span class="tiny" style="color: #64748b;">
+              Last updated: ${lastUpdate}
+            </span>
+            <span class="tiny" style="color: #64748b;">Environment Data</span>
+          </div>
+        </div>
+      `;
+    }
+
+    function createEnvironmentReadingsGrid(reading) {
+      if (!reading) return '<p class="tiny" style="color: #64748b; text-align: center; margin: 12px 0;">No readings available</p>';
+      
+      const readingItems = [];
+      
+      // Temperature
+      if (reading.temperature !== undefined) {
+        readingItems.push(`
+          <div class="reading-item">
+            <div class="reading-value">${formatReading(reading.temperature, '°C')}</div>
+            <div class="reading-label">Temperature</div>
+          </div>
+        `);
+      }
+      
+      // Humidity
+      if (reading.humidity !== undefined) {
+        readingItems.push(`
+          <div class="reading-item">
+            <div class="reading-value">${formatReading(reading.humidity, '%')}</div>
+            <div class="reading-label">Humidity</div>
+          </div>
+        `);
+      }
+      
+      // CO2
+      if (reading.co2 !== undefined) {
+        readingItems.push(`
+          <div class="reading-item">
+            <div class="reading-value">${formatReading(reading.co2, ' ppm')}</div>
+            <div class="reading-label">CO2</div>
+          </div>
+        `);
+      }
+      
+      // RSSI (signal strength)
+      if (reading.rssi !== undefined) {
+        readingItems.push(`
+          <div class="reading-item">
+            <div class="reading-value">${formatReading(reading.rssi, ' dBm')}</div>
+            <div class="reading-label">Signal</div>
+          </div>
+        `);
+      }
+      
+      if (readingItems.length === 0) {
+        return '<p class="tiny" style="color: #64748b; text-align: center; margin: 12px 0;">No sensor readings available</p>';
+      }
+      
+      return `<div class="reading-grid">${readingItems.join('')}</div>`;
+    }
+
+    function createDeviceControls(device) {
+      const deviceType = String(device.deviceType || '').toLowerCase();
+      const safeDeviceIdAttr = escapeAttribute(device.deviceId);
+
+      if (deviceType.includes('plug') || deviceType.includes('switch')) {
+        return `
+          <div class="row" style="gap: 4px;">
+            <button class="ghost tiny" onclick="sendDeviceCommand('${safeDeviceIdAttr}', 'turnOn')">ON</button>
+            <button class="ghost tiny" onclick="sendDeviceCommand('${safeDeviceIdAttr}', 'turnOff')">OFF</button>
+          </div>
+        `;
+      }
+
+      if (deviceType.includes('bot')) {
+        return `
+          <button class="ghost tiny" onclick="sendDeviceCommand('${safeDeviceIdAttr}', 'press')">Press</button>
+        `;
+      }
+
+      return '<span class="tiny" style="color: #64748b;">Read-only</span>';
+    }
+
+    async function loadDevices() {
       try {
-        const metadata = await persistDeviceMetadata(device, {
-          energyTelemetry: normalized
+        clearError();
+        document.getElementById('loadingContainer').style.display = 'block';
+        updateSyncStatus('Checking SwitchBot connection...');
+
+        await loadDeviceMetadataIfNeeded().catch(error => {
+          console.warn('Device metadata preload failed:', error);
         });
-        if (metadata) {
-          applyMetadataToDevice(device, metadata);
-        } else {
-          device.energyTelemetry = normalized;
-          syncDeviceCardSchema(device);
+
+        // First try to get real SwitchBot devices from your farm
+        try {
+          const realDevices = await fetchSwitchBotDevices();
+          if (realDevices && realDevices.length > 0) {
+            updateSyncStatus(`Connected to ${realDevices.length} real SwitchBot devices from your farm`);
+            devices = realDevices.map(device => ({
+              ...device,
+              isRealDevice: true,
+              lastReading: {
+                // Real devices get status separately via individual API calls
+                lastUpdate: new Date().toISOString(),
+                deviceType: device.deviceType,
+                battery: device.battery || null,
+                // Note: Temperature, humidity, etc. require separate status API calls
+                message: "Click refresh to get current readings"
+              }
+            }));
+            applyMetadataToAllDevices();
+            renderDevicesFromAPI();
+            document.getElementById('deviceCount').textContent = `${devices.length} real devices`;
+
+            // Auto-fetch initial status data for a few devices only to avoid API limits
+            setTimeout(() => {
+              // Only fetch status for first 3 devices to avoid overloading API
+              const devicesToFetch = devices.slice(0, 3);
+              devicesToFetch.forEach((device, index) => {
+                setTimeout(() => {
+                  refreshDeviceData(device.deviceId);
+                }, index * 2000); // Stagger requests by 2 seconds each
+              });
+            }, 2000); // Wait 2 seconds to avoid API rate limits
+            
+            return; // Success with real API
+          }
+        } catch (realApiError) {
+          console.warn('Real SwitchBot API failed, falling back to environment data:', realApiError);
         }
-        renderDevicesFromAPI();
-        const safeName = escapeHtml(device.displayName || device.deviceName || deviceId);
-        showInfo(`Energy telemetry for ${safeName} set to ${escapeHtml(normalized)}.`);
+
+        // Fallback to environment data
+        updateSyncStatus('Loading environment data...');
+        await fetchServerStatus();
+
+        try {
+          await ensureEnvironmentData(true);
+        } catch (envError) {
+          console.warn('Environment data fetch failed:', envError);
+        }
+
+        const sourceData = Array.isArray(environmentData) ? environmentData : [];
+        const switchbotEnvData = sourceData.filter(zone =>
+          zone.source === 'switchbot' ||
+          (zone.sensors && (zone.sensors.tempC || zone.sensors.rh || zone.sensors.co2))
+        );
+
+        if (switchbotEnvData.length > 0) {
+          updateSyncStatus(`Found ${switchbotEnvData.length} environmental devices`);
+
+          devices = switchbotEnvData.map(zone => ({
+            deviceId: zone.id || zone.name || zone.zoneId,
+            deviceName: zone.name || zone.id || zone.zoneId,
+            deviceType: zone.source === 'switchbot' ? 'SwitchBot Environmental Sensor' : 'Environmental Sensor',
+            lastReading: zone.source === 'switchbot' ? zone : convertZoneToReading(zone)
+          ));
+
+          applyMetadataToAllDevices();
+          renderDevicesFromEnvironment();
+          document.getElementById('deviceCount').textContent = `${devices.length} devices`;
+
+        } else {
+          updateSyncStatus('No environmental data found');
+          devices = [];
+          renderDevicesFromEnvironment();
+          document.getElementById('deviceCount').textContent = 'No devices found';
+          
+          showInfo('No environmental devices found. Configure Azure integration or start local polling to collect data.');
+        }
+        
       } catch (error) {
-        console.error('Failed to update energy telemetry:', error);
-        showError(`Failed to update energy telemetry: ${escapeHtml(error.message || 'Unknown error')}`);
-        applyMetadataToDevice(device);
-        renderDevicesFromAPI();
+        console.error('Failed to load devices:', error);
+        showError(`Failed to load environment data: ${error.message}`);
+        updateSyncStatus('Connection failed', true);
+      } finally {
+        document.getElementById('loadingContainer').style.display = 'none';
       }
     }
 
-    async function updateDeviceGroupAssignment(deviceId, groupValue, kind) {
-      const device = devices.find(d => d.deviceId === deviceId);
-      if (!device) return;
-      const normalizedKind = normalizeGroupKind(kind);
-      if (!normalizedKind) return;
-      const trimmedValue = firstString(groupValue);
-      const option = trimmedValue ? findGroupById(trimmedValue) : null;
-      const payload = {};
-      const assignmentKey = normalizedKind === 'light' ? 'light' : 'equip';
-      const metadataKey = normalizedKind === 'light' ? 'lightGroupId' : 'equipGroupId';
-      payload[metadataKey] = option ? option.id : trimmedValue || null;
+    function convertZoneToReading(zone) {
+      // Convert zone format to reading format for consistency
+      const reading = {
+        timestamp: zone.meta?.lastUpdated || new Date().toISOString(),
+        battery: zone.meta?.battery,
+        rssi: zone.meta?.rssi
+      };
 
+      if (zone.sensors?.tempC?.current !== undefined) {
+        reading.temperature = zone.sensors.tempC.current;
+      }
+      if (zone.sensors?.rh?.current !== undefined) {
+        reading.humidity = zone.sensors.rh.current;
+      }
+      if (zone.sensors?.co2?.current !== undefined) {
+        reading.co2 = zone.sensors.co2.current;
+      }
+      if (zone.sensors?.vpd?.current !== undefined) {
+        reading.vpd = zone.sensors.vpd.current;
+      }
+
+      return enrichReading(reading);
+    }
+
+    function renderDevicesFromEnvironment() {
+      const container = document.getElementById('devicesContainer');
+
+      applyMetadataToAllDevices();
+
+      if (devices.length === 0) {
+        container.innerHTML = '<p style="text-align: center; color: #64748b; grid-column: 1 / -1;">No SwitchBot devices found in environment data</p>';
+        return;
+      }
+      
+      container.innerHTML = devices.map(device => {
+        const reading = device.lastReading;
+        const isOnline = reading && reading.timestamp && 
+          (Date.now() - new Date(reading.timestamp).getTime()) < 5 * 60 * 1000; // 5 minutes
+        
+        return createEnvironmentDeviceCard(device, reading, isOnline);
+      }).join('');
+    }
+
+    function createEnvironmentDeviceCard(device, reading, isOnline) {
+      const lastUpdate = reading?.timestamp ? new Date(reading.timestamp).toLocaleString() : 'Never';
+      const hasBatteryLevel = Number.isFinite(Number(reading?.battery));
+      const batteryTone = hasBatteryLevel ? getBatteryTone(reading.battery) : 'neutral';
+      const batteryValue = hasBatteryLevel ? `${formatNumber(reading.battery, 0)}%` : 'Mains Power';
+      const batteryLabel = hasBatteryLevel ? formatBatteryLabel(reading.battery) : 'External Power';
+      const batteryBadge = `<span class="status-badge tone-${batteryTone}" title="${escapeAttribute(batteryLabel)}">${escapeHtml(batteryValue)}</span>`;
+
+      return `
+        <div class="device-card">
+          <div class="row" style="justify-content: space-between; align-items: flex-start; margin-bottom: 12px;">
+            <div>
+              <div class="row" style="align-items: center; margin-bottom: 4px;">
+                <div class="device-status ${isOnline ? 'status-online' : 'status-offline'}"></div>
+                <h3 style="margin: 0; font-size: 16px;">${device.deviceName}</h3>
+              </div>
+              <p class="tiny" style="margin: 0; color: #64748b;">${device.deviceType}</p>
+              <p class="tiny" style="margin: 2px 0 0; color: #64748b;">ID: ${device.deviceId}</p>
+            </div>
+            <div style="text-align: right;">
+              ${batteryBadge}
+              <button class="ghost tiny" onclick="refreshEnvironmentData()" style="margin-top: 8px;">Refresh</button>
+            </div>
+          </div>
+
+          ${createEnvironmentReadingsGrid(reading)}
+          
+          <div class="row" style="justify-content: space-between; align-items: center; margin-top: 12px;">
+            <span class="tiny" style="color: #64748b;">
+              Last updated: ${lastUpdate}
+            </span>
+            <span class="tiny" style="color: #64748b;">Environment Data</span>
+          </div>
+        </div>
+      `;
+    }
+
+    function createEnvironmentReadingsGrid(reading) {
+      if (!reading) return '<p class="tiny" style="color: #64748b; text-align: center; margin: 12px 0;">No readings available</p>';
+      
+      const readingItems = [];
+      
+      // Temperature
+      if (reading.temperature !== undefined) {
+        readingItems.push(`
+          <div class="reading-item">
+            <div class="reading-value">${formatReading(reading.temperature, '°C')}</div>
+            <div class="reading-label">Temperature</div>
+          </div>
+        `);
+      }
+      
+      // Humidity
+      if (reading.humidity !== undefined) {
+        readingItems.push(`
+          <div class="reading-item">
+            <div class="reading-value">${formatReading(reading.humidity, '%')}</div>
+            <div class="reading-label">Humidity</div>
+          </div>
+        `);
+      }
+      
+      // CO2
+      if (reading.co2 !== undefined) {
+        readingItems.push(`
+          <div class="reading-item">
+            <div class="reading-value">${formatReading(reading.co2, ' ppm')}</div>
+            <div class="reading-label">CO2</div>
+          </div>
+        `);
+      }
+      
+      // RSSI (signal strength)
+      if (reading.rssi !== undefined) {
+        readingItems.push(`
+          <div class="reading-item">
+            <div class="reading-value">${formatReading(reading.rssi, ' dBm')}</div>
+            <div class="reading-label">Signal</div>
+          </div>
+        `);
+      }
+      
+      if (readingItems.length === 0) {
+        return '<p class="tiny" style="color: #64748b; text-align: center; margin: 12px 0;">No sensor readings available</p>';
+      }
+      
+      return `<div class="reading-grid">${readingItems.join('')}</div>`;
+    }
+
+    function createDeviceControls(device) {
+      const deviceType = String(device.deviceType || '').toLowerCase();
+      const safeDeviceIdAttr = escapeAttribute(device.deviceId);
+
+      if (deviceType.includes('plug') || deviceType.includes('switch')) {
+        return `
+          <div class="row" style="gap: 4px;">
+            <button class="ghost tiny" onclick="sendDeviceCommand('${safeDeviceIdAttr}', 'turnOn')">ON</button>
+            <button class="ghost tiny" onclick="sendDeviceCommand('${safeDeviceIdAttr}', 'turnOff')">OFF</button>
+          </div>
+        `;
+      }
+
+      if (deviceType.includes('bot')) {
+        return `
+          <button class="ghost tiny" onclick="sendDeviceCommand('${safeDeviceIdAttr}', 'press')">Press</button>
+        `;
+      }
+
+      return '<span class="tiny" style="color: #64748b;">Read-only</span>';
+    }
+
+    async function loadDevices() {
       try {
-        const metadata = await persistDeviceMetadata(device, payload);
-        if (metadata) {
-          applyMetadataToDevice(device, metadata);
-        } else {
-          device.groupAssignments = device.groupAssignments || { light: '', equip: '' };
-          device.groupAssignmentLabels = device.groupAssignmentLabels || { light: '', equip: '' };
-          device.groupAssignments[assignmentKey] = trimmedValue || '';
-          device.groupAssignmentLabels[assignmentKey] = option ? option.name : '';
-          syncDeviceCardSchema(device);
+        clearError();
+        document.getElementById('loadingContainer').style.display = 'block';
+        updateSyncStatus('Checking SwitchBot connection...');
+
+        await loadDeviceMetadataIfNeeded().catch(error => {
+          console.warn('Device metadata preload failed:', error);
+        });
+
+        // First try to get real SwitchBot devices from your farm
+        try {
+          const realDevices = await fetchSwitchBotDevices();
+          if (realDevices && realDevices.length > 0) {
+            updateSyncStatus(`Connected to ${realDevices.length} real SwitchBot devices from your farm`);
+            devices = realDevices.map(device => ({
+              ...device,
+              isRealDevice: true,
+              lastReading: {
+                // Real devices get status separately via individual API calls
+                lastUpdate: new Date().toISOString(),
+                deviceType: device.deviceType,
+                battery: device.battery || null,
+                // Note: Temperature, humidity, etc. require separate status API calls
+                message: "Click refresh to get current readings"
+              }
+            }));
+            applyMetadataToAllDevices();
+            renderDevicesFromAPI();
+            document.getElementById('deviceCount').textContent = `${devices.length} real devices`;
+
+            // Auto-fetch initial status data for a few devices only to avoid API limits
+            setTimeout(() => {
+              // Only fetch status for first 3 devices to avoid overloading API
+              const devicesToFetch = devices.slice(0, 3);
+              devicesToFetch.forEach((device, index) => {
+                setTimeout(() => {
+                  refreshDeviceData(device.deviceId);
+                }, index * 2000); // Stagger requests by 2 seconds each
+              });
+            }, 2000); // Wait 2 seconds to avoid API rate limits
+            
+            return; // Success with real API
+          }
+        } catch (realApiError) {
+          console.warn('Real SwitchBot API failed, falling back to environment data:', realApiError);
         }
-        renderDevicesFromAPI();
-        const safeName = escapeHtml(device.displayName || device.deviceName || deviceId);
-        if (trimmedValue) {
-          showInfo(`Attached ${safeName} to ${escapeHtml(option?.name || trimmedValue)} ${normalizedKind} group.`);
-        } else {
-          showInfo(`Cleared ${normalizedKind} group for ${safeName}.`);
+
+        // Fallback to environment data
+        updateSyncStatus('Loading environment data...');
+        await fetchServerStatus();
+
+        try {
+          await ensureEnvironmentData(true);
+        } catch (envError) {
+          console.warn('Environment data fetch failed:', envError);
         }
+
+        const sourceData = Array.isArray(environmentData) ? environmentData : [];
+        const switchbotEnvData = sourceData.filter(zone =>
+          zone.source === 'switchbot' ||
+          (zone.sensors && (zone.sensors.tempC || zone.sensors.rh || zone.sensors.co2))
+        );
+
+        if (switchbotEnvData.length > 0) {
+          updateSyncStatus(`Found ${switchbotEnvData.length} environmental devices`);
+
+          devices = switchbotEnvData.map(zone => ({
+            deviceId: zone.id || zone.name || zone.zoneId,
+            deviceName: zone.name || zone.id || zone.zoneId,
+            deviceType: zone.source === 'switchbot' ? 'SwitchBot Environmental Sensor' : 'Environmental Sensor',
+            lastReading: zone.source === 'switchbot' ? zone : convertZoneToReading(zone)
+          ));
+
+          applyMetadataToAllDevices();
+          renderDevicesFromEnvironment();
+          document.getElementById('deviceCount').textContent = `${devices.length} devices`;
+
+        } else {
+          updateSyncStatus('No environmental data found');
+          devices = [];
+          renderDevicesFromEnvironment();
+          document.getElementById('deviceCount').textContent = 'No devices found';
+          
+          showInfo('No environmental devices found. Configure Azure integration or start local polling to collect data.');
+        }
+        
       } catch (error) {
-        console.error('Failed to update group assignment:', error);
-        showError(`Failed to update group assignment: ${escapeHtml(error.message || 'Unknown error')}`);
-        applyMetadataToDevice(device);
-        renderDevicesFromAPI();
+        console.error('Failed to load devices:', error);
+        showError(`Failed to load environment data: ${error.message}`);
+        updateSyncStatus('Connection failed', true);
+      } finally {
+        document.getElementById('loadingContainer').style.display = 'none';
       }
     }
 
