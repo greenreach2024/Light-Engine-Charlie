@@ -4643,26 +4643,46 @@ async function fetchSwitchBotDeviceStatus(deviceId, { force = false } = {}) {
   return entry.inFlight;
 }
 
+const SWITCHBOT_PROXY_CACHE = {
+  payload: null,
+  fetchedAt: 0,
+};
+
 app.get('/switchbot/devices', async (req, res) => {
   try {
     const token = process.env.SWITCHBOT_TOKEN;
     if (!token) {
       return res.status(500).json({ error: 'SWITCHBOT_TOKEN not configured' });
     }
-    const response = await fetch('https://api.switch-bot.com/v1.1/devices', {
-      headers: {
-        'Authorization': token,
-        'Content-Type': 'application/json'
-      }
-    });
 
-    if (!response.ok) {
-      const text = await response.text();
-      return res.status(response.status).send(text);
+    const now = Date.now();
+    const cacheTtlMs = 60_000;
+    if (SWITCHBOT_PROXY_CACHE.payload && (now - SWITCHBOT_PROXY_CACHE.fetchedAt) < cacheTtlMs) {
+      res.setHeader('X-Cache', 'hit');
+      res.setHeader('X-Cache-Freshness', 'fresh');
+      return res.json(SWITCHBOT_PROXY_CACHE.payload);
     }
 
-    const payload = await response.json();
-    res.json(payload);
+    try {
+      const result = await fetchSwitchBotDevices({ force: true });
+      const payload = result?.payload ?? null;
+      if (!payload) {
+        throw new Error('Empty SwitchBot response');
+      }
+      SWITCHBOT_PROXY_CACHE.payload = payload;
+      SWITCHBOT_PROXY_CACHE.fetchedAt = Date.now();
+      res.setHeader('X-Cache', result?.fromCache ? 'hit' : 'miss');
+      res.setHeader('X-Cache-Freshness', result?.stale ? 'stale' : 'fresh');
+      return res.json(payload);
+    } catch (fetchError) {
+      console.warn('[switchbot] Primary fetch failed, checking cache:', fetchError.message || fetchError);
+      if (SWITCHBOT_PROXY_CACHE.payload) {
+        res.setHeader('X-Cache', 'hit');
+        res.setHeader('X-Cache-Freshness', 'stale');
+        return res.status(200).json(SWITCHBOT_PROXY_CACHE.payload);
+      }
+      throw fetchError;
+    }
   } catch (error) {
     console.error('[switchbot] Proxy failed:', error);
     res.status(500).json({ error: String(error) });
@@ -5536,6 +5556,7 @@ app.get('/api/devicedatas', async (req, res) => {
       throw new Error(`upstream_non_json: ${err.message}`);
     }
     writeDeviceCache(parsed);
+    res.setHeader('X-Cache', 'miss');
     res
       .status(response.status)
       .type('application/json')
@@ -5556,20 +5577,111 @@ app.get('/api/devicedatas', async (req, res) => {
   }
 });
 
+function sanitizeControllerPatchPayload(rawBody) {
+  if (!rawBody || typeof rawBody !== 'object') {
+    return { ok: false, error: 'Request body required' };
+  }
+
+  const statusValue = typeof rawBody.status === 'string' ? rawBody.status.trim().toLowerCase() : '';
+  if (statusValue !== 'on' && statusValue !== 'off') {
+    return { ok: false, error: 'status must be "on" or "off"' };
+  }
+
+  const channelScale = loadChannelScaleConfig();
+  const allowedMax = Math.min(Math.max(channelScale.maxByte || 0, 0), 255) || 255;
+  const sanitized = { status: statusValue };
+
+  if (statusValue === 'off') {
+    sanitized.value = null;
+    return { ok: true, payload: sanitized, meta: { maxByte: allowedMax, channels: [0, 0, 0, 0] } };
+  }
+
+  const rawValue = typeof rawBody.value === 'string' ? rawBody.value.trim() : '';
+  if (!/^[0-9a-fA-F]{12}$/.test(rawValue)) {
+    return { ok: false, error: 'value must be a 12-character HEX string' };
+  }
+
+  const upper = rawValue.toUpperCase();
+  const pairs = upper.match(/.{2}/g) || [];
+  if (pairs.length < 6) {
+    return { ok: false, error: 'HEX payload must include 6 bytes' };
+  }
+
+  const channelPairs = pairs.slice(0, 4);
+  const channelValues = channelPairs.map((pair) => parseInt(pair, 16));
+  for (const value of channelValues) {
+    if (!Number.isFinite(value) || value < 0 || value > allowedMax) {
+      return { ok: false, error: `channel bytes must be between 00 and ${allowedMax.toString(16).toUpperCase().padStart(2, '0')}` };
+    }
+  }
+
+  sanitized.value = `${channelPairs.join('')}${pairs.slice(4).join('')}`;
+  return { ok: true, payload: sanitized, meta: { maxByte: allowedMax, channels: channelValues } };
+}
+
+function rescaleHexPayload(hex, fromMax, toMax) {
+  if (!hex || typeof hex !== 'string' || fromMax <= 0 || toMax <= 0) return null;
+  if (fromMax <= toMax) return null;
+  const pairs = hex.match(/.{2}/g);
+  if (!pairs || pairs.length < 6) return null;
+  const scaled = pairs.map((pair, index) => {
+    if (index >= 4) {
+      return index < 6 ? '00' : pair;
+    }
+    const value = parseInt(pair, 16);
+    if (!Number.isFinite(value)) return '00';
+    const scaledValue = Math.min(toMax, Math.max(0, Math.round((value / fromMax) * toMax)));
+    return scaledValue.toString(16).toUpperCase().padStart(2, '0');
+  });
+  return `${scaled.slice(0, 6).join('')}`;
+}
+
 app.patch('/api/devicedatas/device/:id', pinGuard, express.json(), async (req, res) => {
   const target = `${CONTROLLER_BASE()}/api/devicedatas/device/${encodeURIComponent(req.params.id)}`;
-  try {
-    const response = await fetch(target, {
+  const validation = sanitizeControllerPatchPayload(req.body || {});
+  if (!validation.ok) {
+    return res.status(400).json({ error: 'invalid_payload', detail: validation.error });
+  }
+
+  let payload = validation.payload;
+  const meta = validation.meta || { maxByte: 255 };
+  const attemptRequest = async (body) => {
+    return fetch(target, {
       method: 'PATCH',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(req.body || {}),
+      body: JSON.stringify(body || {}),
       signal: AbortSignal.timeout(5000)
     });
-    const body = await response.text();
+  };
+
+  try {
+    let response = await attemptRequest(payload);
+    let bodyText = await response.text();
+
+    const shouldRetry = () => {
+      if (response.status !== 400) return false;
+      if (typeof bodyText !== 'string' || !bodyText) return false;
+      return /power[-\s]?cap/i.test(bodyText) && /400/.test(bodyText);
+    };
+
+    if (!response.ok && shouldRetry()) {
+      const fallbackMax = 0x64; // 100 decimal → HEX 64
+      const scaledHex = payload.value ? rescaleHexPayload(payload.value, meta.maxByte || 255, fallbackMax) : null;
+      if (scaledHex && scaledHex !== payload.value) {
+        console.warn(`[proxy] Power cap triggered for device ${req.params.id}; autoscaling payload`);
+        payload = { ...payload, value: scaledHex };
+        response = await attemptRequest(payload);
+        bodyText = await response.text();
+        if (response.ok) {
+          res.setHeader('X-Autoscaled', 'power-cap-400');
+        }
+      }
+    }
+
     res
       .status(response.status)
       .type(response.headers.get('content-type') || 'application/json')
-      .send(body);
+      .send(bodyText);
   } catch (error) {
     res.status(502).json({ error: 'proxy_error', target, detail: String(error) });
   }
