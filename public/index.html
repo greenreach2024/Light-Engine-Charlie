@@ -138,12 +138,14 @@
 
       <div class="dashboard-content">
       <div id="dashboard" class="dashboard-main cards">
-      <section id="dehumidifierSetupCard" class="card gr-card" data-role="dehumidifier-setup">
-        <h2 class="section-title">Dehumidifier Setup</h2>
-        <div class="equip-row" data-equip="dehum" data-room="room1">
-          <button type="button" data-op="dec" data-target="dehum:room1">–</button>
-          <input data-input="dehum:room1" value="0" inputmode="numeric" aria-label="Room 1 dehumidifier count" />
-          <button type="button" data-op="inc" data-target="dehum:room1">+</button>
+      <section id="card-equipment-setup" class="card gr-card">
+        <header>
+          <h2>Equipment Setup</h2>
+        </header>
+        <div class="card-body">
+          <!-- Mount target for dehumidifier micro-form -->
+          <div id="equip-dehum-setup" data-card="dehum-setup"></div>
+          <!-- other equipment micro-forms remain here -->
         </div>
       </section>
       <section id="environmentalAiCard" class="card card--feature hud-shell gr-card gr-full">
@@ -688,6 +690,18 @@
         <div id="groupsV2PlanPreview" class="gr-card" style="margin-top:14px; padding:12px 14px; background:linear-gradient(90deg, #f0f9ff 0%, #e0f2fe 100%); border:1px dashed #38bdf8; border-radius:8px; font-size:0.9em; line-height:1.5;">
           <div class="tiny text-muted">Select a plan to preview today’s stage, PPFD, photoperiod, and DLI.</div>
         </div>
+        <!-- Mount target for Unassigned Lights -->
+        <div id="groupsv2-unassigned" data-card="unassigned-lights"></div>
+
+        <!-- Plan section with Spectragraph -->
+        <div id="groupsv2-plan" class="plan-block">
+          <div class="plan-header">
+            <label for="plan-select">Plan</label>
+            <select id="plan-select"></select>
+          </div>
+          <!-- Spectragraph goes under the plan section -->
+          <div id="groupsv2-spectragraph" data-card="spectragraph"></div>
+        </div>
         <!-- GRAL29: Selected lights list with delete action -->
         <section id="GRAL29" class="gr-card">
           <div class="card-hd">
@@ -732,44 +746,9 @@
             <ul id="assignedEquipList" style="display:none;"></ul>
           </div>
         </div>
-        <div class="group-v2-card gr-card" data-card-code="UL" style="margin-bottom:18px; border: 1.5px solid #cbd5e1; background: linear-gradient(90deg, #f8fafc 80%, #e0f2fe 100%); border-radius: 10px; box-shadow: 0 2px 8px 0 rgba(100, 199, 199, 0.07); padding: 0; width:100%; font-family: var(--gr-font, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif);">
-          <div style="display:flex; flex-direction:column; width:100%; min-height:100px; background:#f1f5f9; border-radius:8px 8px 0 0; padding:18px 18px 10px 18px;">
-            <h4 style="margin:0 0 8px 0; font-size:1.1em; color:#334155; font-weight:600;">Unassigned Lights</h4>
-            <div style="display:flex; align-items:center; gap:8px; flex-wrap:wrap;">
-              <label for="groupsV2UnassignedLightsSelect" style="margin-right:8px; font-size:1em; color:#334155;">Unassigned Lights:</label>
-              <select id="groupsV2UnassignedLightsSelect" multiple size="6" style="min-width:320px; max-width:600px; height:176px; font-size:1em;">
-                <!-- Lights will be populated by JS -->
-              </select>
-              <button id="assignLightsToGroupBtn" style="margin-left:16px; font-size:1em;">Assign to Group</button>
-            </div>
-            <div id="lightInfoCard" style="flex:1 1 auto; overflow-y:auto; display:none;">
-              <h4 id="lightInfoCardTitle" style="margin-top:0; margin-bottom:8px; font-size:1.1em; color:#334155; font-weight:600;">Light Info</h4>
-              <div id="lightInfoCardBody" style="font-size:0.98em; color:#334155;"></div>
-            </div>
-          </div>
-        </div>
         <p class="tiny" style="color:#475569">This is the new Groups V2 setup card. Add your new group management features here.</p>
         <!-- TODO: Add Groups V2 UI here -->
         </div>
-        </section>
-
-        <section id="gr-unassigned-panel" class="panel">
-          <h2>Unassigned Lights</h2>
-          <div id="GRUL32" class="gr-list"></div>
-          <div class="row gap8">
-            <button id="GRUL32-apply">Add →</button>
-            <button id="GRUL32-clear">Clear</button>
-          </div>
-        </section>
-
-        <section id="gr-active-cards" class="panel">
-          <h2>Active Cards</h2>
-          <div id="GRACB28" class="cards grid"></div>
-        </section>
-
-        <section id="gr-spectra" class="panel">
-          <h2>Spectragraph</h2>
-          <div id="GVPFLSW29" class="spectra"></div>
         </section>
 
       </div>
