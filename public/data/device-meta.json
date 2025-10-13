@@ -1,48 +1,5 @@
 {
   "devices": {
-    "light-001": {
-      "farm": "GreenReach Farms",
-      "room": "Propagation Bay",
-      "zone": "Propagation North",
-      "module": "Propagation Bench A",
-      "level": "Bench",
-      "side": "North",
-      "manufacturer": "GROW3",
-      "model": "TopLight MH Model-300W-22G12",
-      "serial": "22G12-001",
-      "watts": 300,
-      "spectrumMode": "dynamic",
-      "transport": "wifi",
-      "factorySpectrum": {
-        "cw": 45,
-        "ww": 45,
-        "bl": 0,
-        "rd": 100,
-        "fr": 0,
-        "uv": 0
-      }
-    },
-    "light-002": {
-      "farm": "GreenReach Farms",
-      "room": "Propagation Bay",
-      "zone": "Propagation North",
-      "module": "Propagation Bench B",
-      "level": "Bench",
-      "side": "South",
-      "manufacturer": "GROW3",
-      "model": "TopLight MH Model-300W-22G12",
-      "serial": "22G12-002",
-      "watts": 300,
-      "spectrumMode": "dynamic",
-      "transport": "wifi",
-      "factorySpectrum": {
-        "cw": 45,
-        "ww": 45,
-        "bl": 0,
-        "rd": 100,
-        "fr": 0,
-        "uv": 0
-      }
-    }
+      // Removed devices referencing Propagation Bay
   }
 }

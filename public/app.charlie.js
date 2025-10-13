@@ -1,3929 +1,3 @@
-// Global card identifier assignment to create stable, unique IDs for every card element
-(function setupGlobalCardIds() {
-  const CARD_SELECTOR = ":is(.card, [class$='-card'], [class*='-card '], [class*=' card-'], [class^='card-'])";
-  const EXCLUDE_CLASS_PATTERN = /card__/;
-  const CONTEXT_CODE_LENGTH = 4;
-  const CARD_CODE_LENGTH = 4;
-  const MAX_PREFIX_LENGTH = 8;
-  let cardSequence = 1;
-
-  const assignedElements = new WeakSet();
-
-  function isEligibleCard(element) {
-    if (!(element instanceof Element)) return false;
-    if (!element.matches(CARD_SELECTOR)) return false;
-    const classes = Array.from(element.classList || []);
-    return !classes.some((cls) => EXCLUDE_CLASS_PATTERN.test(cls));
-  }
-
-  function normalizeToCode(value, fallback = "", maxLength = CARD_CODE_LENGTH) {
-    if (value == null) return fallback;
-    const expanded = String(value)
-      .replace(/([a-z0-9])([A-Z])/g, "$1 $2")
-      .replace(/[^A-Za-z0-9]+/g, " ")
-      .trim();
-    if (!expanded) return fallback;
-    const parts = expanded.split(/\s+/);
-    let code = parts.map((part) => part[0]).join("");
-    if (code.length < 2) {
-      code = parts.map((part) => part.slice(0, Math.min(maxLength, 3))).join("");
-    }
-    code = code.toUpperCase().replace(/[^A-Z0-9]/g, "");
-    if (!code) return fallback;
-    return code.slice(0, maxLength) || fallback;
-  }
-
-  function deriveBaseCode(element) {
-    if (!element) return "";
-    const explicit = element.getAttribute("data-card-code");
-    if (explicit) return normalizeToCode(explicit, "", CARD_CODE_LENGTH);
-
-    const role = element.getAttribute("data-role");
-    if (role) {
-      const code = normalizeToCode(role, "", CARD_CODE_LENGTH);
-      if (code) return code;
-    }
-
-    const panel = element.getAttribute("data-panel");
-    if (panel) {
-      const code = normalizeToCode(panel, "", CARD_CODE_LENGTH);
-      if (code) return code;
-    }
-
-    if (element.id) {
-      const code = normalizeToCode(element.id, "", CARD_CODE_LENGTH);
-      if (code) return code;
-    }
-
-    const labelledBy = element.getAttribute("aria-labelledby");
-    if (labelledBy) {
-      const code = normalizeToCode(labelledBy, "", CARD_CODE_LENGTH);
-      if (code) return code;
-    }
-
-    const heading = element.querySelector("h1, h2, h3, h4, h5, h6");
-    if (heading && heading.textContent) {
-      const code = normalizeToCode(heading.textContent, "", CARD_CODE_LENGTH);
-      if (code) return code;
-    }
-
-    for (const cls of element.classList || []) {
-      if (cls === "card" || cls.includes("card")) {
-        const code = normalizeToCode(cls, "", CARD_CODE_LENGTH);
-        if (code) return code;
-      }
-    }
-
-    return "";
-  }
-
-  function findContextCode(element) {
-    let node = element?.parentElement || null;
-    while (node) {
-      if (isEligibleCard(node)) {
-        const explicit = node.getAttribute("data-card-prefix");
-        if (explicit) {
-          const code = normalizeToCode(explicit, "", CONTEXT_CODE_LENGTH);
-          if (code) return code;
-        }
-        const panel = node.getAttribute("data-panel");
-        if (panel) {
-          const code = normalizeToCode(panel, "", CONTEXT_CODE_LENGTH);
-          if (code) return code;
-        }
-        if (node.id) {
-          const code = normalizeToCode(node.id, "", CONTEXT_CODE_LENGTH);
-          if (code) return code;
-        }
-        const derived = deriveBaseCode(node);
-        if (derived) return normalizeToCode(derived, "", CONTEXT_CODE_LENGTH);
-      }
-      node = node.parentElement;
-    }
-    return "";
-  }
-
-  function assignCardId(element) {
-    if (!isEligibleCard(element) || assignedElements.has(element) || element.dataset.cardId) {
-      return;
-    }
-
-    const ownPrefix = element.getAttribute("data-card-prefix");
-    const contextCode = normalizeToCode(ownPrefix, "", CONTEXT_CODE_LENGTH) || findContextCode(element);
-    const baseCode = normalizeToCode(deriveBaseCode(element), "CARD", CARD_CODE_LENGTH);
-    const combinedPrefix = contextCode && !baseCode.startsWith(contextCode)
-      ? `${contextCode}${baseCode}`
-      : baseCode;
-    const prefix = (combinedPrefix || "CARD").slice(0, MAX_PREFIX_LENGTH);
-    const suffix = String(cardSequence++).padStart(2, "0");
-    element.dataset.cardId = `${prefix}${suffix}`;
-    assignedElements.add(element);
-  }
-
-  function scanNode(node) {
-    if (!(node instanceof Element)) return;
-    if (isEligibleCard(node)) assignCardId(node);
-    node.querySelectorAll(CARD_SELECTOR).forEach((el) => assignCardId(el));
-  }
-
-  function init() {
-    const root = document.body || document.documentElement;
-    if (!root) return;
-    scanNode(root);
-    const observer = new MutationObserver((mutations) => {
-      mutations.forEach((mutation) => {
-        mutation.addedNodes.forEach((added) => scanNode(added));
-      });
-    });
-    observer.observe(root, { childList: true, subtree: true });
-  }
-
-  if (document.readyState === "loading") {
-    document.addEventListener("DOMContentLoaded", init, { once: true });
-  } else {
-    init();
-  }
-})();
-
-// Runtime feature flags (extend, don't overwrite)
-window.FEATURES = Object.assign({
-  researchMode: localStorage.getItem('gr.researchMode') === '1',
-  automation: true,          // renders the Automation drawer in sidebar
-  smartPlugs: true,          // enables Smart Plugs inside Automation (not main)
-  wizards: false,            // hides setup wizards unless explicitly enabled
-  dehumOnMain: false,        // turn OFF main-page duplicates
-  unassignedOnMain: false,
-  spectragraphOnMain: false
-}, window.FEATURES || {});
-
-function escapeAttribute(value) {
-  return String(value ?? '').replace(/"/g, '&quot;');
-}
-
-// Centralized icon helper — NO emojis, use standard images
-function grIconImg(name, label) {
-  const key = typeof name === 'string' ? name.toLowerCase() : '';
-  const map = {
-    spectrasync: '/assets/icons/spectrasync.svg',
-    'evie-training': '/assets/icons/evie-training.svg',
-    'ia-assist-ei2': '/assets/icons/ia-assist-ei2.svg',
-    ai: '/assets/icons/ia-assist-ei2.svg',
-    auto: '/assets/icons/evie-training.svg',
-    spectra: '/assets/icons/spectrasync.svg'
-  };
-  const src = map[key] || '/assets/icons/generic.svg';
-  const safeLabel = label ? String(label) : '';
-  const labelAttr = safeLabel ? ` aria-label="${escapeAttribute(safeLabel)}"` : '';
-  const titleAttr = safeLabel ? ` title="${escapeAttribute(safeLabel)}"` : '';
-  return `<img class="gr-icon-img" src="${escapeAttribute(src)}" alt=""${labelAttr}${titleAttr} loading="lazy">`;
-}
-
-function grIcon(name, label) {
-  const safeLabel = label ? String(label) : '';
-  const titleAttr = safeLabel ? ` title="${escapeAttribute(safeLabel)}"` : '';
-  const ariaAttr = safeLabel ? ` aria-label="${escapeAttribute(safeLabel)}"` : '';
-  const dataAttr = name ? ` data-role="${escapeAttribute(name)}"` : '';
-  const iconMarkup = grIconImg(name, '');
-  return `<button type="button" class="gr-icon"${dataAttr}${titleAttr}${ariaAttr}>${iconMarkup}</button>`;
-}
-
-function hydrateIconHost(host) {
-  if (!(host instanceof Element) || host.dataset.iconHydrated === 'true') return null;
-  const slot = host.dataset.iconSlot;
-  if (!slot) return null;
-  const label = host.dataset.iconLabel || '';
-  host.innerHTML = grIcon(slot, label);
-  const iconEl = host.querySelector('.gr-icon');
-  if (!iconEl) return null;
-  if (host.dataset.iconControl) {
-    iconEl.dataset.control = host.dataset.iconControl;
-  }
-  if (host.dataset.iconStatic === 'true') {
-    iconEl.setAttribute('disabled', '');
-    iconEl.setAttribute('aria-hidden', 'true');
-  }
-  host.dataset.iconHydrated = 'true';
-  return iconEl;
-}
-
-function hydrateIconSlots(root = document) {
-  if (!root) return;
-  const hosts = root.querySelectorAll('[data-icon-slot]');
-  hosts.forEach((host) => {
-    if (host.dataset.iconHydrated === 'true') return;
-    hydrateIconHost(host);
-  });
-}
-
-if (document.readyState === 'loading') {
-  document.addEventListener('DOMContentLoaded', () => hydrateIconSlots(document), { once: true });
-} else {
-  hydrateIconSlots(document);
-}
-
-function ensureFeatureElementVisible(element) {
-  if (!(element instanceof HTMLElement)) return;
-  element.hidden = false;
-  element.removeAttribute('aria-hidden');
-  if (element.style) {
-    element.style.display = '';
-  }
-}
-
-function mountAutomationDrawer() {
-  const panel = document.getElementById('automationPanel');
-  if (!panel || panel.dataset.featureMounted === 'true') return;
-  const host = panel.querySelector('[data-role="automation-host"]');
-  const template = document.getElementById('automationDrawerTemplate');
-  if (!host || !template) return;
-
-  host.innerHTML = '';
-  host.appendChild(template.content.cloneNode(true));
-
-  if (typeof hydrateIconSlots === 'function') {
-    hydrateIconSlots(host);
-  }
-
-  ensureFeatureElementVisible(panel);
-  panel.dataset.featureMounted = 'true';
-
-  const navLinks = document.querySelectorAll('[data-sidebar-link][data-target="automation"]');
-  navLinks.forEach((link) => ensureFeatureElementVisible(link));
-  const automationGroup = document.querySelector('[data-group="automation"][data-feature="automation"]');
-  ensureFeatureElementVisible(automationGroup);
-}
-
-function mountSmartPlugsCard(selector) {
-  if (!document.getElementById('automation-drawer')) {
-    mountAutomationDrawer();
-  }
-  const host = typeof selector === 'string' ? document.querySelector(selector) : selector;
-  if (!host) return;
-
-  host.querySelectorAll('[data-feature-section="smart-plugs"]').forEach((section) => {
-    ensureFeatureElementVisible(section);
-  });
-}
-
-function triggerWizardShortcut(target) {
-  switch (target) {
-    case 'pair':
-      document.getElementById('btnLaunchPairWizard')?.click();
-      break;
-    case 'light':
-      if (window.freshLightWizard && typeof window.freshLightWizard.open === 'function') {
-        window.freshLightWizard.open();
-      } else {
-        document.getElementById('btnLaunchLightSetup')?.click();
-      }
-      break;
-    case 'kasa':
-      if (typeof window.showKasaWizard === 'function') {
-        window.showKasaWizard();
-      } else if (typeof showKasaWizard === 'function') {
-        showKasaWizard();
-      }
-      break;
-    case 'switchbot':
-      if (typeof window.showSwitchBotWizard === 'function') {
-        window.showSwitchBotWizard();
-      } else if (typeof showSwitchBotWizard === 'function') {
-        showSwitchBotWizard();
-      }
-      break;
-    default:
-      break;
-  }
-}
-
-function mountWizardEntry(selector) {
-  if (!document.getElementById('automation-drawer')) {
-    mountAutomationDrawer();
-  }
-  const host = typeof selector === 'string' ? document.querySelector(selector) : selector;
-  if (!host) return;
-
-  const card = host.querySelector('#automationWizardsCard');
-  if (!card) return;
-
-  ensureFeatureElementVisible(card);
-  if (card.dataset.wizardShortcutsBound === 'true') {
-    return;
-  }
-
-  card.querySelectorAll('[data-wizard-target]').forEach((btn) => {
-    btn.addEventListener('click', () => {
-      const target = btn.getAttribute('data-wizard-target');
-      triggerWizardShortcut(target);
-    });
-  });
-
-  card.dataset.wizardShortcutsBound = 'true';
-}
-
-const EQUIPMENT_KIND_PREFIX_MAP = {
-  dehum: 'dehumidifier',
-  humid: 'humidifier',
-  hvac: 'hvac',
-  fan: 'fan',
-  vent: 'vent',
-  pump: 'pump',
-  fert: 'fertigation',
-  light: 'light',
-  ctrl: 'controller',
-  env: 'environment',
-  sensor: 'sensor'
-};
-
-function resolveEquipmentKindFromId(targetId) {
-  if (!targetId) return 'equipment';
-  const prefix = String(targetId).split(':')[0]?.toLowerCase() || '';
-  return EQUIPMENT_KIND_PREFIX_MAP[prefix] || prefix || 'equipment';
-}
-
-function getEquipmentInputElement(key) {
-  if (!key) return null;
-  try {
-    if (window.CSS && typeof window.CSS.escape === 'function') {
-      return document.querySelector(`[data-input="${window.CSS.escape(key)}"]`);
-    }
-  } catch (error) {
-    console.warn('CSS.escape failed for equipment key', key, error);
-  }
-  const safe = String(key).replace(/"/g, '\"');
-  return document.querySelector(`[data-input="${safe}"]`);
-}
-
-// Global numeric stepper handler for equipment rows (supports dynamically added rows)
-document.addEventListener('click', async (ev) => {
-  const btn = ev.target.closest('[data-op][data-target]');
-  if (!btn) return;
-
-  const op = btn.dataset.op;
-  const id = btn.dataset.target;
-  if (!op || !id) return;
-
-  const input = getEquipmentInputElement(id);
-  if (!input) return;
-
-  const cur = parseInt(input.value || '0', 10) || 0;
-  const next = Math.max(0, cur + (op === 'inc' ? 1 : -1));
-  if (next === cur) return;
-
-  const previous = cur;
-  input.value = String(next);
-
-  try {
-    const kind = resolveEquipmentKindFromId(id);
-    const payload = { id, kind, count: next };
-    const response = await fetch('/ui/equip', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(payload)
-    });
-    if (!response.ok) {
-      const text = await response.text();
-      console.warn('equip save failed', text);
-      input.value = String(previous);
-      return;
-    }
-    const counts = STATE.equipmentCounts || (STATE.equipmentCounts = {});
-    counts[id] = { kind, count: next, ts: Date.now() };
-  } catch (error) {
-    console.warn('equip save failed', error);
-    input.value = String(previous);
-  }
-});
-
-async function hydrateEquipmentCounters() {
-  try {
-    const response = await fetch(resolveApiUrl('/ui/equip'));
-    if (!response.ok) {
-      if (response.status !== 404) {
-        console.warn('Failed to load equipment counters', `HTTP ${response.status}`);
-      }
-      return;
-    }
-    const payload = await response.json();
-    if (!payload || typeof payload !== 'object') return;
-    const counts = STATE.equipmentCounts || (STATE.equipmentCounts = {});
-    Object.entries(payload).forEach(([key, value]) => {
-      if (!key) return;
-      const info = (value && typeof value === 'object') ? value : { count: value };
-      const parsed = Number.parseInt(info.count, 10);
-      if (!Number.isFinite(parsed)) return;
-      const safeCount = Math.max(0, parsed | 0);
-      const kind = info.kind || resolveEquipmentKindFromId(key);
-      counts[key] = { kind, count: safeCount, ts: info.ts || Date.now() };
-      const input = getEquipmentInputElement(key);
-      if (input) {
-        input.value = String(safeCount);
-      }
-    });
-  } catch (error) {
-    console.warn('Failed to hydrate equipment counters', error);
-  }
-}
-
-function resolveCardMount(targetSelector, cardKey) {
-  if (!targetSelector || !cardKey) return null;
-  const root = typeof targetSelector === 'string' ? document.querySelector(targetSelector) : targetSelector;
-  if (!root) return null;
-  if (root.matches(`[data-card='${cardKey}']`)) return root;
-  let mount = root.querySelector(`[data-card='${cardKey}']`);
-  if (!mount) {
-    mount = document.createElement('div');
-    mount.dataset.card = cardKey;
-    root.appendChild(mount);
-  }
-  return mount;
-}
-
-const groupsv2SpectragraphState = {
-  body: null,
-  plan: null,
-  selection: {
-    ids: [],
-    mix: null,
-  },
-};
-
-function normalizeSpectraMix(mix) {
-  if (!mix || typeof mix !== 'object') return null;
-  const values = {
-    cw: Number(mix.cw) || 0,
-    ww: Number(mix.ww) || 0,
-    bl: Number(mix.bl) || 0,
-    rd: Number(mix.rd) || 0,
-  };
-  const total = values.cw + values.ww + values.bl + values.rd;
-  if (!(total > 0)) {
-    return {
-      weights: { cw: 0, ww: 0, bl: 0, rd: 0 },
-      display: { cw: 0, ww: 0, bl: 0, rd: 0 },
-    };
-  }
-  const toWeight = (value) => (value / total) * 100;
-  const format = (value) => {
-    const rounded = Math.round(value);
-    return Math.abs(value - rounded) < 0.1 ? rounded : Number(value.toFixed(1));
-  };
-  const weights = {
-    cw: toWeight(values.cw),
-    ww: toWeight(values.ww),
-    bl: toWeight(values.bl),
-    rd: toWeight(values.rd),
-  };
-  const display = {
-    cw: format(weights.cw),
-    ww: format(weights.ww),
-    bl: format(weights.bl),
-    rd: format(weights.rd),
-  };
-  return { weights, display };
-}
-
-function createSpectraBar(mixInfo) {
-  if (!mixInfo) return null;
-  const { weights, display } = mixInfo;
-  const cwStop = weights.cw;
-  const wwStop = cwStop + weights.ww;
-  const blStop = wwStop + weights.bl;
-  const bar = document.createElement('div');
-  bar.className = 'spectra-bar';
-  bar.style.background = `linear-gradient(to right,
-     #BBD5FF 0% ${cwStop}%,
-     #FFE4B5 ${cwStop}% ${wwStop}%,
-     #9EC9FF ${wwStop}% ${blStop}%,
-     #FF9999 ${blStop}% 100%)`;
-  bar.title = `CW ${display.cw}% · WW ${display.ww}% · Blue ${display.bl}% · Red ${display.rd}%`;
-  return bar;
-}
-
-function appendSpectraSection(root, heading, description, mixInfo) {
-  if (!root || !mixInfo) return;
-  const section = document.createElement('div');
-  section.className = 'groupsv2-spectra-card__section';
-
-  if (heading) {
-    const header = document.createElement('p');
-    header.className = 'groupsv2-spectra-card__section-title';
-    header.textContent = heading;
-    section.appendChild(header);
-  }
-
-  if (description) {
-    const note = document.createElement('p');
-    note.className = 'tiny text-muted groupsv2-spectra-card__section-desc';
-    note.textContent = description;
-    section.appendChild(note);
-  }
-
-  const bar = createSpectraBar(mixInfo);
-  if (bar) section.appendChild(bar);
-
-  const legend = document.createElement('p');
-  legend.className = 'tiny text-muted groupsv2-spectra-card__legend';
-  legend.textContent = `CW ${mixInfo.display.cw}% · WW ${mixInfo.display.ww}% · Blue ${mixInfo.display.bl}% · Red ${mixInfo.display.rd}%`;
-  section.appendChild(legend);
-
-  root.appendChild(section);
-}
-
-function renderGroupsv2SpectragraphState() {
-  const body = groupsv2SpectragraphState.body;
-  if (!body) return;
-
-  body.innerHTML = '';
-
-  const planInfo = groupsv2SpectragraphState.plan && groupsv2SpectragraphState.plan.mix
-    ? normalizeSpectraMix(groupsv2SpectragraphState.plan.mix)
-    : null;
-  if (planInfo) {
-    const planName = groupsv2SpectragraphState.plan.name || groupsv2SpectragraphState.plan.key || '';
-    appendSpectraSection(
-      body,
-      planName ? `Plan: ${planName}` : 'Plan spectrum',
-      'Day 1 mix',
-      planInfo,
-    );
-  }
-
-  const selection = groupsv2SpectragraphState.selection || {};
-  const ids = Array.isArray(selection.ids) ? selection.ids : [];
-  const selectionInfo = selection.mix ? normalizeSpectraMix(selection.mix) : null;
-  if (ids.length && selectionInfo) {
-    const label = ids.length === 1 ? '1 fixture selected' : `${ids.length} fixtures selected`;
-    appendSpectraSection(body, 'Selected fixtures', label, selectionInfo);
-  }
-
-  if (!planInfo && !(ids.length && selectionInfo)) {
-    const empty = document.createElement('p');
-    empty.className = 'tiny text-muted groupsv2-spectra-card__empty';
-    if (groupsv2SpectragraphState.plan) {
-      const planName = groupsv2SpectragraphState.plan.name || groupsv2SpectragraphState.plan.key || '';
-      empty.textContent = planName
-        ? `No spectral data found for ${planName}.`
-        : 'No spectral data found for the selected plan.';
-    } else {
-      empty.textContent = 'Select a plan to preview its spectrum.';
-    }
-    body.appendChild(empty);
-  }
-}
-
-function updateGroupsv2Spectragraph(ids, mix) {
-  groupsv2SpectragraphState.selection = {
-    ids: Array.isArray(ids) ? ids.slice() : [],
-    mix: mix && typeof mix === 'object'
-      ? {
-          cw: Number(mix.cw) || 0,
-          ww: Number(mix.ww) || 0,
-          bl: Number(mix.bl) || 0,
-          rd: Number(mix.rd) || 0,
-        }
-      : null,
-  };
-  renderGroupsv2SpectragraphState();
-}
-
-function hex12ToPercentMix(hex12) {
-  if (!hex12 || typeof hex12 !== 'string') return null;
-  const trimmed = hex12.trim();
-  if (trimmed.length < 8) return null;
-  const cleaned = trimmed.replace(/^0x/i, '');
-  if (cleaned.length < 8) return null;
-  const segment = (start) => cleaned.slice(start, start + 2);
-  const parseSegment = (start) => {
-    const part = segment(start);
-    if (!part) return null;
-    const value = Number.parseInt(part, 16);
-    if (!Number.isFinite(value)) return null;
-    const pct = Math.round((value / 0x64) * 100);
-    return Math.max(0, Math.min(100, pct));
-  };
-  const cw = parseSegment(0);
-  const ww = parseSegment(2);
-  const bl = parseSegment(4);
-  const rd = parseSegment(6);
-  if ([cw, ww, bl, rd].some((value) => value == null)) return null;
-  return { cw, ww, bl, rd };
-}
-
-function readMixChannel(source, keys) {
-  if (!source || typeof source !== 'object') return null;
-  for (const key of keys) {
-    if (!Object.prototype.hasOwnProperty.call(source, key)) continue;
-    const value = toNumberOrNull(source[key]);
-    if (value != null) return value;
-  }
-  return null;
-}
-
-function extractMixFromCandidate(candidate) {
-  if (!candidate) return null;
-  if (typeof candidate === 'string') {
-    return hex12ToPercentMix(candidate);
-  }
-  if (typeof candidate !== 'object') return null;
-
-  const hexCandidates = [
-    candidate.hex,
-    candidate.hex12,
-    candidate.mixHex,
-    candidate.mix_hex,
-    candidate.mix?.hex,
-    candidate.mix?.hex12,
-    candidate.mix?.hex_12,
-    candidate.raw?.hex,
-    candidate.raw?.hex12,
-  ];
-  for (const hex of hexCandidates) {
-    if (typeof hex !== 'string') continue;
-    const mix = hex12ToPercentMix(hex);
-    if (mix) return mix;
-  }
-
-  const mixSource = candidate.mix && typeof candidate.mix === 'object' ? candidate.mix : candidate;
-  const cw = readMixChannel(mixSource, ['cw', 'coolWhite', 'cool_white', 'coolwhite', 'cool']);
-  const ww = readMixChannel(mixSource, ['ww', 'warmWhite', 'warm_white', 'warmwhite', 'warm']);
-  const bl = readMixChannel(mixSource, ['bl', 'blue', 'bluePct', 'blue_pct']);
-  const rd = readMixChannel(mixSource, ['rd', 'red', 'redPct', 'red_pct']);
-
-  if ([cw, ww, bl, rd].every((value) => value == null)) return null;
-
-  return {
-    cw: cw != null ? cw : 0,
-    ww: ww != null ? ww : 0,
-    bl: bl != null ? bl : 0,
-    rd: rd != null ? rd : 0,
-  };
-}
-
-function extractPlanDayOneMix(plan) {
-  if (!plan || typeof plan !== 'object') return null;
-  const candidates = [];
-  const derived = plan._derived && typeof plan._derived === 'object' ? plan._derived : null;
-  if (derived) {
-    if (derived.firstDay && typeof derived.firstDay === 'object') {
-      candidates.push(derived.firstDay.mix);
-      candidates.push(derived.firstDay.raw?.mix);
-      candidates.push(derived.firstDay);
-    }
-    candidates.push(derived.spectrum);
-    if (Array.isArray(derived.lightDays) && derived.lightDays.length) {
-      candidates.push(derived.lightDays[0]?.mix);
-      candidates.push(derived.lightDays[0]);
-    }
-  }
-  if (Array.isArray(plan.light?.days) && plan.light.days.length) {
-    candidates.push(plan.light.days[0]?.mix);
-    candidates.push(plan.light.days[0]);
-  }
-  if (Array.isArray(plan.lightDays) && plan.lightDays.length) {
-    candidates.push(plan.lightDays[0]?.mix);
-    candidates.push(plan.lightDays[0]);
-  }
-  if (Array.isArray(plan.days) && plan.days.length) {
-    candidates.push(plan.days[0]?.mix);
-    candidates.push(plan.days[0]);
-  }
-  candidates.push(plan.spectrum, plan.mix, plan);
-  for (const candidate of candidates) {
-    const mix = extractMixFromCandidate(candidate);
-    if (mix) return mix;
-  }
-  return null;
-}
-
-function resolveSpectragraphBody(targetSel) {
-  if (!targetSel && targetSel !== 0) return groupsv2SpectragraphState.body;
-  const container = ensureTarget(targetSel);
-  if (!container) return groupsv2SpectragraphState.body;
-  const inner = container.querySelector('#GVPFLSW29')
-    || container.querySelector('.spectra')
-    || container;
-  return inner;
-}
-
-function updateSpectragraphFromPlan(targetSel, plan) {
-  const body = resolveSpectragraphBody(targetSel);
-  if (body) {
-    groupsv2SpectragraphState.body = body;
-  }
-  if (plan && typeof plan === 'object') {
-    const mix = extractPlanDayOneMix(plan);
-    groupsv2SpectragraphState.plan = {
-      key: plan.id || plan.key || plan.name || '',
-      name: plan.name || plan.label || plan.id || plan.key || '',
-      mix: mix || null,
-    };
-  } else {
-    groupsv2SpectragraphState.plan = null;
-  }
-  renderGroupsv2SpectragraphState();
-}
-
-async function ensurePlanMapLoaded() {
-  if (window.PLANS && typeof window.PLANS === 'object' && Object.keys(window.PLANS).length) {
-    return window.PLANS;
-  }
-  const statePlans = (window.STATE && Array.isArray(window.STATE.plans)) ? window.STATE.plans : [];
-  if (statePlans.length) {
-    const normalized = normalizePlanMap(statePlans);
-    window.PLANS = { ...(window.PLANS || {}), ...normalized };
-    return window.PLANS;
-  }
-  try {
-    const map = await getPlanMap();
-    if (map && typeof map === 'object') {
-      window.PLANS = { ...(window.PLANS || {}), ...map };
-      return window.PLANS;
-    }
-  } catch (error) {
-    console.warn('Failed to load plans for spectragraph', error);
-  }
-  return window.PLANS || {};
-}
-
-async function refreshPlanSpectragraphOptions(planSelect) {
-  if (!planSelect) return;
-  const previousValue = planSelect.value;
-  planSelect.disabled = true;
-  try {
-    const planMap = await ensurePlanMapLoaded();
-    const keys = Object.keys(planMap || {});
-    keys.sort((a, b) => {
-      const aName = planMap[a]?.name || a;
-      const bName = planMap[b]?.name || b;
-      return String(aName).localeCompare(String(bName));
-    });
-    planSelect.innerHTML = '';
-    const placeholder = document.createElement('option');
-    placeholder.value = '';
-    placeholder.textContent = keys.length ? 'Select a plan…' : '(no plans available)';
-    planSelect.appendChild(placeholder);
-    keys.forEach((key) => {
-      const plan = planMap[key];
-      const option = document.createElement('option');
-      option.value = key;
-      option.textContent = plan?.name || plan?.label || key;
-      planSelect.appendChild(option);
-    });
-    let nextValue = '';
-    if (previousValue && planMap[previousValue]) {
-      nextValue = previousValue;
-    } else if (planSelect.dataset.preferredPlan && planMap[planSelect.dataset.preferredPlan]) {
-      nextValue = planSelect.dataset.preferredPlan;
-    } else if (keys.length) {
-      nextValue = keys[0];
-    }
-    planSelect.value = nextValue;
-    planSelect.dataset.preferredPlan = nextValue || '';
-    const plan = nextValue ? planMap[nextValue] : null;
-    updateSpectragraphFromPlan('#groupsv2-spectragraph', plan || null);
-  } catch (error) {
-    console.warn('Failed to refresh plan spectragraph options', error);
-    updateSpectragraphFromPlan('#groupsv2-spectragraph', null);
-  } finally {
-    planSelect.disabled = false;
-  }
-}
-
-async function handlePlanSelectChange(event) {
-  const select = event?.currentTarget;
-  if (!select) return;
-  select.dataset.preferredPlan = select.value || '';
-  if (!select.value) {
-    updateSpectragraphFromPlan('#groupsv2-spectragraph', null);
-    return;
-  }
-  const planMap = await ensurePlanMapLoaded();
-  const plan = planMap[select.value] || null;
-  updateSpectragraphFromPlan('#groupsv2-spectragraph', plan);
-}
-
-async function initPlanSpectragraph(planSelect) {
-  if (!planSelect) {
-    await ensurePlanMapLoaded();
-    return;
-  }
-  if (!planSelect.dataset.spectragraphReady) {
-    planSelect.addEventListener('change', handlePlanSelectChange);
-    planSelect.dataset.spectragraphReady = '1';
-  }
-  await refreshPlanSpectragraphOptions(planSelect);
-}
-
-function ensureTarget(sel) {
-  if (!sel && sel !== 0) {
-    console.warn('missing mount target', sel);
-    return null;
-  }
-  const el = typeof sel === 'string' ? document.querySelector(sel) : sel;
-  if (!el) {
-    console.warn('missing mount target', sel);
-    return null;
-  }
-  return el;
-}
-
-function renderDehumMicroForm(root) {
-  if (!root) return;
-  root.innerHTML = `
-    <article class="equip-micro equip-micro--dehum">
-      <header class="equip-micro__header">
-        <h3 class="equip-micro__title">Dehumidifier Setup</h3>
-        <p class="tiny text-muted equip-micro__hint">Quickly adjust counts for each grow room.</p>
-      </header>
-      <div class="equip-micro__body">
-        <div class="equip-micro__row">
-          <span class="equip-micro__label">Room 1</span>
-          <div class="equip-row" data-equip="dehum" data-room="room1">
-            <button type="button" data-op="dec" data-target="dehum:room1" aria-label="Decrease Room 1 dehumidifiers">–</button>
-            <input data-input="dehum:room1" value="0" inputmode="numeric" aria-label="Room 1 dehumidifier count" />
-            <button type="button" data-op="inc" data-target="dehum:room1" aria-label="Increase Room 1 dehumidifiers">+</button>
-          </div>
-        </div>
-      </div>
-    </article>
-  `;
-}
-
-async function renderUnassignedLights(root) {
-  if (!root) return;
-  try {
-    let unassignedRoot = root.querySelector('#GRUL32');
-    let activeRoot = root.querySelector('#GRACB28');
-    let applyBtn = root.querySelector('#GRUL32-apply');
-    let clearBtn = root.querySelector('#GRUL32-clear');
-
-    if (!unassignedRoot || !activeRoot || !applyBtn || !clearBtn) {
-      root.innerHTML = '';
-      const wrapper = document.createElement('article');
-      wrapper.className = 'groupsv2-unassigned-card gr-card';
-      wrapper.innerHTML = `
-        <header class="groupsv2-unassigned-card__header">
-          <h3>Unassigned Lights</h3>
-          <p class="tiny text-muted">Select fixtures to preview their plan coverage and spectra.</p>
-        </header>
-        <div class="groupsv2-unassigned-card__body">
-          <div id="GRUL32" class="gr-list groupsv2-unassigned-card__list" aria-live="polite"></div>
-          <div class="groupsv2-unassigned-card__actions" role="group" aria-label="Preview controls">
-            <button id="GRUL32-apply" type="button" class="primary">Preview Selection</button>
-            <button id="GRUL32-clear" type="button" class="ghost">Clear</button>
-          </div>
-        </div>
-        <div class="groupsv2-unassigned-card__active">
-          <h4 class="groupsv2-unassigned-card__active-title">Previewed Lights</h4>
-          <div id="GRACB28" class="cards grid groupsv2-unassigned-card__active-cards" aria-live="polite"></div>
-        </div>
-      `;
-      root.appendChild(wrapper);
-      unassignedRoot = wrapper.querySelector('#GRUL32');
-      activeRoot = wrapper.querySelector('#GRACB28');
-      applyBtn = wrapper.querySelector('#GRUL32-apply');
-      clearBtn = wrapper.querySelector('#GRUL32-clear');
-    }
-
-    if (!unassignedRoot || !activeRoot || !applyBtn || !clearBtn) return;
-
-    root.dataset.hydrated = 'true';
-
-    const fetchJson = async (path) => {
-      const response = await fetch(resolveApiUrl(path));
-      if (!response.ok) throw new Error(`HTTP ${response.status}`);
-      return response.json();
-    };
-
-    let devsRaw = { data: [] };
-    try {
-      devsRaw = await fetchJson('/api/devicedatas');
-    } catch (error) {
-      console.warn('Failed to load device data', error);
-    }
-
-    const groups = await fetchJson('/groups').catch((error) => {
-      console.warn('Failed to load groups', error);
-      return { items: [] };
-    });
-    const sched = await fetchJson('/sched').catch((error) => {
-      console.warn('Failed to load schedules', error);
-      return { items: [] };
-    });
-
-    const devices = Array.isArray(devsRaw?.data) ? devsRaw.data : [];
-    const groupMembers = new Set(
-      (groups.items || []).flatMap((g) => (g.members || [])).map((id) => (id || '').replace(/^dev:/, ''))
-    );
-    const unassigned = devices.filter((device) => !groupMembers.has(String(device.id)));
-
-    const HEX12_TO_PCTS = (hex12) => {
-      if (!hex12 || hex12.length < 8) return { cw: 0, ww: 0, bl: 0, rd: 0 };
-      const h = hex12.toLowerCase();
-      const toPct = (v) => Math.round((parseInt(v, 16) / 0x64) * 100);
-      return {
-        cw: toPct(h.slice(0, 2)),
-        ww: toPct(h.slice(2, 4)),
-        bl: toPct(h.slice(4, 6)),
-        rd: toPct(h.slice(6, 8))
-      };
-    };
-
-    const deviceMixHex = (devId) => {
-      const scheduleItem = (sched.items || []).find((item) => item.id === `dev:${devId}`);
-      if (scheduleItem && scheduleItem.mix) return (scheduleItem.mix || '').trim();
-      const device = devices.find((entry) => String(entry.id) === String(devId));
-      if (device && device.value) return (device.value || '').trim();
-      return '000000000000';
-    };
-
-    const averageMix = (ids) => {
-      if (!ids.length) return { cw: 0, ww: 0, bl: 0, rd: 0 };
-      const sum = ids.reduce((acc, id) => {
-        const parts = HEX12_TO_PCTS(deviceMixHex(id));
-        acc.cw += parts.cw;
-        acc.ww += parts.ww;
-        acc.bl += parts.bl;
-        acc.rd += parts.rd;
-        return acc;
-      }, { cw: 0, ww: 0, bl: 0, rd: 0 });
-      return {
-        cw: Math.round(sum.cw / ids.length),
-        ww: Math.round(sum.ww / ids.length),
-        bl: Math.round(sum.bl / ids.length),
-        rd: Math.round(sum.rd / ids.length)
-      };
-    };
-
-    const renderList = () => {
-      const lights = unassigned
-        .slice()
-        .sort((a, b) => String(a.name || a.id || '').localeCompare(String(b.name || b.id || '')));
-      unassignedRoot.innerHTML = '';
-      lights.forEach((light) => {
-        const id = String(light.id || '');
-        const item = document.createElement('label');
-        item.className = 'gr-item';
-        item.innerHTML = `
-          <input type="checkbox" class="gr-pick" value="${id}">
-          <span class="gr-item__title">${light.name || id || 'Light'}</span>
-          <span class="gr-item__meta">${light.room || light.roomId || 'Unknown room'}</span>
-        `;
-        unassignedRoot.appendChild(item);
-      });
-    };
-
-    const renderActive = (ids) => {
-      activeRoot.innerHTML = '';
-      if (!ids.length) {
-        const empty = document.createElement('p');
-        empty.className = 'tiny text-muted groupsv2-unassigned-card__empty';
-        empty.textContent = 'No lights selected.';
-        activeRoot.appendChild(empty);
-        return;
-      }
-
-      ids.forEach((id) => {
-        const light = unassigned.find((item) => String(item.id) === String(id));
-        const card = document.createElement('article');
-        card.className = 'groupsv2-unassigned-card__active-card';
-        card.innerHTML = `
-          <header>
-            <h4>${light?.name || id || 'Light'}</h4>
-            <p class="tiny text-muted">${light?.room || light?.roomId || 'Unknown room'}</p>
-          </header>
-          <footer>
-            <button class="ghost remove" type="button" data-id="${id}">Remove</button>
-          </footer>
-        `;
-        activeRoot.appendChild(card);
-      });
-    };
-
-    renderList();
-
-    const apply = () => {
-      const ids = Array.from(unassignedRoot.querySelectorAll('.gr-pick:checked')).map((el) => el.value);
-      renderActive(ids);
-      updateGroupsv2Spectragraph(ids, averageMix(ids));
-    };
-
-    const clear = () => {
-      unassignedRoot.querySelectorAll('.gr-pick').forEach((checkbox) => {
-        checkbox.checked = false;
-      });
-      renderActive([]);
-      updateGroupsv2Spectragraph([], { cw: 0, ww: 0, bl: 0, rd: 0 });
-    };
-
-    applyBtn.addEventListener('click', apply);
-    clearBtn.addEventListener('click', clear);
-    activeRoot.addEventListener('click', (event) => {
-      const target = event.target?.closest('.remove');
-      if (!target) return;
-      const id = String(target.dataset.id || '');
-      if (!id) return;
-      const checkbox = unassignedRoot.querySelector(`.gr-pick[value="${id}"]`);
-      if (checkbox) checkbox.checked = false;
-      apply();
-    });
-
-    clear();
-  } catch (error) {
-    console.warn('Failed to render Unassigned Lights card', error);
-  }
-}
-
-function renderPlanSpectragraph(root, planSelect) {
-  if (!root) return;
-  if (!root.querySelector('#GVPFLSW29')) {
-    root.innerHTML = `
-      <article class="groupsv2-spectra-card gr-card">
-        <header class="groupsv2-spectra-card__header">
-          <h3>Spectragraph</h3>
-          <p class="tiny text-muted">Preview the selected plan spectrum and compare it with selected fixtures.</p>
-        </header>
-        <div class="groupsv2-spectra-card__body">
-          <div id="GVPFLSW29" class="spectra" aria-live="polite"></div>
-        </div>
-      </article>
-    `;
-  }
-  root.dataset.hydrated = 'true';
-  groupsv2SpectragraphState.body = root.querySelector('#GVPFLSW29');
-  renderGroupsv2SpectragraphState();
-  const select = planSelect || null;
-  if (select) {
-    initPlanSpectragraph(select).catch((error) => {
-      console.warn('Failed to initialize plan spectragraph selector', error);
-    });
-  } else {
-    ensurePlanMapLoaded()
-      .then((plans) => {
-        const keys = Object.keys(plans || {});
-        const firstKey = keys[0];
-        if (firstKey) {
-          updateSpectragraphFromPlan(root, plans[firstKey]);
-        } else {
-          updateSpectragraphFromPlan(root, null);
-        }
-      })
-      .catch((error) => {
-        console.warn('Failed to hydrate plan spectragraph', error);
-      });
-  }
-}
-
-function mountSpectragraph(targetSel) {
-  const target = ensureTarget(targetSel);
-  if (!target) return;
-  target
-    .querySelectorAll('[data-card="spectragraph"][data-mounted="1"]')
-    .forEach((node) => node.remove());
-  const root = document.createElement('div');
-  root.setAttribute('data-card', 'spectragraph');
-  root.setAttribute('data-mounted', '1');
-  target.appendChild(root);
-  renderPlanSpectragraph(root, document.getElementById('plan-select'));
-}
-
-function mountDehumidifierSetup(targetSel) {
-  const target = ensureTarget(targetSel);
-  if (!target) return;
-  target
-    .querySelectorAll('[data-card="dehum-setup"][data-mounted="1"]')
-    .forEach((node) => node.remove());
-  const root = document.createElement('div');
-  root.setAttribute('data-card', 'dehum-setup');
-  root.setAttribute('data-mounted', '1');
-  target.appendChild(root);
-  renderDehumMicroForm(root);
-}
-
-async function mountUnassignedLights(targetSel) {
-  const target = ensureTarget(targetSel);
-  if (!target) return;
-  target
-    .querySelectorAll('[data-card="unassigned-lights"][data-mounted="1"]')
-    .forEach((node) => node.remove());
-  const root = document.createElement('div');
-  root.setAttribute('data-card', 'unassigned-lights');
-  root.setAttribute('data-mounted', '1');
-  target.appendChild(root);
-  await renderUnassignedLights(root);
-}
-
-
-// Ensure lights from lightSetups are always in window.STATE.lights and update unassigned lights
-window.addEventListener('lightSetupsChanged', () => {
-  if (!window.STATE) window.STATE = {};
-  if (!Array.isArray(window.STATE.lights)) window.STATE.lights = [];
-  const setups = Array.isArray(window.STATE.lightSetups) ? window.STATE.lightSetups : [];
-  setups.forEach(setup => {
-    (setup.fixtures || []).forEach(fixture => {
-      if (!window.STATE.lights.some(l => l.id === fixture.id)) {
-        window.STATE.lights.push({
-          ...fixture,
-          roomId: setup.room,
-          zoneId: null // Unassigned by default
-        });
-      }
-    });
-  });
-  document.dispatchEvent(new Event('lights-updated'));
-});
-document.addEventListener('DOMContentLoaded', () => {
-  // Wire up Apply to Current Plan button
-  const applyPlanBtn = document.getElementById('applyPlanToGroupBtn');
-  if (applyPlanBtn) {
-    applyPlanBtn.addEventListener('click', () => {
-      const planSelect = document.getElementById('groupsV2PlanSelect');
-      const planId = groupsV2FormState.planId || (planSelect && planSelect.value);
-      if (!planId) {
-        alert('Select a plan to apply.');
-        return;
-      }
-      const plans = getGroupsV2Plans();
-      const plan = plans.find((p) => (p.id || p.name) === planId);
-      if (!plan) {
-        alert('Plan not found.');
-        return;
-      }
-      const groups = (window.STATE && Array.isArray(window.STATE.groups)) ? window.STATE.groups : [];
-      if (!groups.length) {
-        alert('No group to apply plan to.');
-        return;
-      }
-      const group = groups[groups.length - 1];
-      const targetPlanId = plan.id || plan.name || planId;
-      group.plan = targetPlanId ? String(targetPlanId) : '';
-      const config = buildGroupsV2PlanConfig(plan);
-      if (config) group.planConfig = config;
-      else delete group.planConfig;
-      groupsV2FormState.planId = group.plan;
-      document.dispatchEvent(new Event('groups-updated'));
-      updateGroupsV2Preview();
-      if (typeof showToast === 'function') {
-        const preview = computeGroupsV2PreviewData(plan);
-        const summary = preview && preview.stage
-          ? `Today: ${preview.stage} • ${Number.isFinite(preview.ppfd) ? `${Math.round(preview.ppfd)} µmol` : 'PPFD —'}`
-          : 'Plan applied to current group.';
-        showToast({ title: 'Plan Applied', msg: summary, kind: 'success', icon: '✅' });
-      }
-    });
-  }
-  const assignBtn = document.getElementById('assignLightsToGroupBtn');
-  if (assignBtn) {
-    assignBtn.addEventListener('click', () => {
-      const select = document.getElementById('groupsV2UnassignedLightsSelect');
-      if (!select) return;
-      const selectedIds = Array.from(select.selectedOptions).map(opt => opt.value).filter(Boolean);
-      if (!selectedIds.length) {
-        alert('Select at least one light to assign.');
-        return;
-      }
-      // Find the current group (last group for now)
-      const groups = (window.STATE && Array.isArray(window.STATE.groups)) ? window.STATE.groups : [];
-      if (!groups.length) {
-        alert('No group to assign to.');
-        return;
-      }
-      const group = groups[groups.length - 1];
-      if (!Array.isArray(group.lights)) group.lights = [];
-      // Add selected lights to group if not already present
-      selectedIds.forEach(id => {
-        if (!group.lights.some(l => l.id === id)) {
-          group.lights.push({ id });
-        }
-        // Update the light's zoneId to mark as assigned
-        const light = (window.STATE.lights || []).find(l => l.id === id);
-        if (light) {
-          light.zoneId = group.zone || 'assigned';
-        }
-      });
-      document.dispatchEvent(new Event('groups-updated'));
-      document.dispatchEvent(new Event('lights-updated'));
-    });
-  }
-});
-// Light spec for TopLight MH Model-300W-22G12
-const TOPLIGHT_MH_300W_SPEC = {
-  watts: 300,
-  ppf: 709,
-  ppe: 2.59,
-  powerInput: '100~277VAC 50/60Hz',
-  colorRange: '400-700',
-  uv: 'NO',
-  farRed: 'NO',
-  spectrumBooster: 'BLUE',
-  factoryDefaultRatio: '0.68:1',
-  bestRatioRange: '0.68:1~2:1',
-  dimming: 'YES',
-  controlBox: 'YES',
-  app: 'YES',
-  bluetooth: 'YES',
-  wifi: 'YES',
-  lynx3: 'YES',
-  smartune: 'YES',
-  cooling: 'PASSIVE, FANLESS COOLING',
-  dimensions: '1240mm x 140mm x 76 mm (48.4\" x 5.5\" x 3.0\")',
-  weight: '6.35 kg (14 lbs)',
-  ipRating: 'IP66',
-};
-
-function renderLightInfoCard(light) {
-  if (!light) return '';
-  // Try to find the full light object from STATE.lights by id or serial
-  const db = (window.STATE && Array.isArray(window.STATE.lights)) ? window.STATE.lights : [];
-  const dbLight = db.find(l => l.id === light.id || l.serial === light.serial) || light;
-  // Show all available fields
-  let html = '';
-  Object.entries(dbLight).forEach(([key, value]) => {
-    if (typeof value === 'object' && value !== null) return;
-    html += `<div><strong>${key.replace(/([A-Z])/g, ' $1').replace(/^./, s => s.toUpperCase())}:</strong> ${value ?? ''}</div>`;
-  });
-  // Add spectra graph if spectra breakdown is available
-  if (dbLight.spectrum || dbLight.spectra) {
-    const spectrum = dbLight.spectrum || dbLight.spectra;
-    html += '<div style="margin-top:10px;"><canvas id="lightInfoSpectrumCanvas" width="300" height="60" style="border-radius:6px; background:#f8fafc; box-shadow:0 1px 4px #0001;"></canvas></div>';
-    setTimeout(() => {
-      const canvas = document.getElementById('lightInfoSpectrumCanvas');
-      if (canvas && typeof renderSpectrumCanvas === 'function') {
-        // If spectrum is already SPD, use as is; else compute SPD
-        let spd = typeof computeWeightedSPD === 'function' ? computeWeightedSPD(spectrum) : spectrum;
-        renderSpectrumCanvas(canvas, spd, { width: canvas.width, height: canvas.height });
-      }
-    }, 0);
-  }
-  if (!html) html = '<em>No info available for this light.</em>';
-  return html;
-}
-
-// Show light info card when a light is highlighted in the unassigned lights field
-document.addEventListener('DOMContentLoaded', () => {
-  const unassignedSelect = document.getElementById('groupsV2UnassignedLightsSelect');
-  const card = document.getElementById('lightInfoCard');
-  const cardBody = document.getElementById('lightInfoCardBody');
-  if (!unassignedSelect || !card || !cardBody) return;
-  function updateCard() {
-    const lights = (window.STATE && Array.isArray(window.STATE.lights)) ? window.STATE.lights : [];
-    const selectedId = unassignedSelect.value;
-    const light = lights.find(l => l.id === selectedId || l.serial === selectedId);
-    if (light) {
-      cardBody.innerHTML = renderLightInfoCard(light);
-      card.style.display = '';
-    } else {
-      cardBody.innerHTML = '';
-      card.style.display = 'none';
-    }
-  }
-  unassignedSelect.addEventListener('change', updateCard);
-  unassignedSelect.addEventListener('focus', updateCard);
-  unassignedSelect.addEventListener('click', updateCard);
-  // Show info for first light if present
-  setTimeout(updateCard, 100);
-});
-// Hard code five lights for room GreenReach
-document.addEventListener('DOMContentLoaded', () => {
-  if (!window.STATE) window.STATE = {};
-  if (!Array.isArray(window.STATE.lights)) window.STATE.lights = [];
-  const greenReachLights = [
-    {
-      id: '22G12-001',
-      name: 'TopLight MH Model-300W-22G12',
-      serial: '22G12-001',
-      room: 'GreenReach',
-      roomId: 'GreenReach',
-      zoneId: undefined
-    },
-    {
-      id: '22G12-002',
-      name: 'TopLight MH Model-300W-22G12',
-      serial: '22G12-002',
-      room: 'GreenReach',
-      roomId: 'GreenReach',
-      zoneId: undefined
-    },
-    {
-      id: '22G12-003',
-      name: 'TopLight MH Model-300W-22G12',
-      serial: '22G12-003',
-      room: 'GreenReach',
-      roomId: 'GreenReach',
-      zoneId: undefined
-    },
-    {
-      id: '22G12-004',
-      name: 'TopLight MH Model-300W-22G12',
-      serial: '22G12-004',
-      room: 'GreenReach',
-      roomId: 'GreenReach',
-      zoneId: undefined
-    },
-    {
-      id: '22G12-005',
-      name: 'TopLight MH Model-300W-22G12',
-      serial: '22G12-005',
-      room: 'GreenReach',
-      roomId: 'GreenReach',
-      zoneId: undefined
-    },
-  ];
-  // Add if not already present
-  greenReachLights.forEach(light => {
-    if (!window.STATE.lights.some(l => l.id === light.id)) {
-      window.STATE.lights.push(light);
-    }
-  });
-  // Optionally trigger update event
-  document.dispatchEvent(new Event('lights-updated'));
-});
-// Handle Save New Group button for Groups V2 card
-document.addEventListener('DOMContentLoaded', () => {
-  const saveBtn = document.getElementById('groupsV2SaveGroup');
-  if (saveBtn) {
-    saveBtn.addEventListener('click', () => {
-      const nameInput = document.getElementById('groupsV2ZoneName');
-      const zoneSelect = document.getElementById('groupsV2ZoneSelect');
-      const roomSelect = document.getElementById('groupsV2RoomSelect');
-      if (!nameInput || !zoneSelect || !roomSelect) return;
-      const groupName = nameInput.value.trim();
-      const zone = zoneSelect.value;
-      const room = roomSelect.value;
-      if (!groupName || !zone || !room) {
-        alert('Enter a group name, select a room, and select a zone.');
-        return;
-      }
-      // Add to window.STATE.groups
-      if (!window.STATE) window.STATE = {};
-      if (!Array.isArray(window.STATE.groups)) window.STATE.groups = [];
-      // Generate a unique id
-      const id = `${room}:${zone}:${groupName}`;
-      // Check for existing group with same id
-      const exists = window.STATE.groups.find(g => (g.id === id || (g.room === room && g.zone === zone && g.name === groupName)));
-      if (exists) {
-        alert('A group with this name, room, and zone already exists.');
-        return;
-      }
-      const plan = getGroupsV2SelectedPlan();
-      const planId = groupsV2FormState.planId || plan?.id || plan?.name || '';
-      const groupRecord = { id, name: groupName, room, zone };
-      if (planId) groupRecord.plan = planId;
-      const config = buildGroupsV2PlanConfig(plan);
-      if (config) groupRecord.planConfig = config;
-      window.STATE.groups.push(groupRecord);
-      // Dispatch event to update dropdown
-      document.dispatchEvent(new Event('groups-updated'));
-      // Optionally clear the input
-      nameInput.value = '';
-      // Optionally show a toast
-      if (typeof showToast === 'function') {
-        const details = [`${groupName} (${room}:${zone})`];
-        if (planId) details.push(`Plan ${plan?.name || planId}`);
-        showToast({ title: 'Group Saved', msg: details.join(' • '), kind: 'success', icon: '✅' });
-      }
-    });
-  }
-});
-// Assign selected lights to the zone selected at the top
-document.addEventListener('DOMContentLoaded', () => {
-  // Removed zone assignment logic from light setup as per new process
-});
-
-// Assign selected equipment to the zone selected at the top
-document.addEventListener('DOMContentLoaded', () => {
-  // Removed zone assignment logic from equipment setup as per new process
-});
-// Populate Unassigned Lights dropdown from light setup wizard
-function populateGroupsV2UnassignedLightsDropdown() {
-  const select = document.getElementById('groupsV2UnassignedLightsSelect');
-  if (!select) return;
-  select.innerHTML = '';
-  const lights = (window.STATE && Array.isArray(window.STATE.lights)) ? window.STATE.lights : [];
-  // Only show lights assigned to a room but not yet assigned to a zone
-  const unassigned = lights.filter(light => light.roomId && !light.zoneId);
-  if (unassigned.length === 0) {
-    const opt = document.createElement('option');
-    opt.value = '';
-    opt.textContent = '(none)';
-    select.appendChild(opt);
-    return;
-  }
-  unassigned.forEach(light => {
-  const opt = document.createElement('option');
-  opt.value = light.id || light.name || '';
-  // Show name and S/N (ID) for clarity
-  const label = light.name ? `${light.name} (S/N: ${light.id || ''})` : (light.id || '(unnamed light)');
-  opt.textContent = label;
-  select.appendChild(opt);
-  });
-}
-
-document.addEventListener('DOMContentLoaded', () => {
-  // ...existing code...
-  populateGroupsV2UnassignedLightsDropdown();
-  document.addEventListener('lights-updated', populateGroupsV2UnassignedLightsDropdown);
-});
-
-// Assign selected lights to selected zone (in group card context)
-document.addEventListener('DOMContentLoaded', () => {
-  const assignBtn = document.getElementById('assignLightsToZoneBtn');
-  if (assignBtn) {
-    assignBtn.addEventListener('click', () => {
-      const lightsSelect = document.getElementById('groupsV2UnassignedLightsSelect');
-      const zoneSelect = document.getElementById('groupsV2ZoneSelect');
-      if (!lightsSelect || !zoneSelect) return;
-      const selectedLights = Array.from(lightsSelect.selectedOptions).map(opt => opt.value).filter(Boolean);
-      const selectedZone = zoneSelect.value;
-      if (!selectedZone || selectedLights.length === 0) {
-        alert('Select lights and a zone to assign.');
-        return;
-      }
-      // Dispatch a custom event to handle assignment logic elsewhere
-      const evt = new CustomEvent('assign-lights-to-zone', {
-        detail: { lightIds: selectedLights, zoneId: selectedZone }
-      });
-      document.dispatchEvent(evt);
-    });
-  }
-});
-// Populate Unassigned Equipment dropdown from equipment setup wizard
-function populateGroupsV2UnassignedEquipDropdown() {
-  const select = document.getElementById('groupsV2UnassignedEquipSelect');
-  if (!select) return;
-  select.innerHTML = '';
-  const equipment = (window.STATE && Array.isArray(window.STATE.equipment)) ? window.STATE.equipment : [];
-  // Only show equipment assigned to a room but not yet assigned to a zone
-  const unassigned = equipment.filter(eq => (eq.roomId || eq.room) && !eq.zoneId);
-  if (unassigned.length === 0) {
-    const opt = document.createElement('option');
-    opt.value = '';
-    opt.textContent = '(none)';
-    select.appendChild(opt);
-    return;
-  }
-  unassigned.forEach(eq => {
-    const opt = document.createElement('option');
-    opt.value = eq.id || eq.name || '';
-    opt.textContent = eq.name || eq.label || eq.id || '(unnamed equipment)';
-    select.appendChild(opt);
-  });
-}
-
-// Populate Assigned Equipment dropdown for Groups V2
-function populateGroupsV2AssignedEquipDropdown() {
-  const select = document.getElementById('assignedEquipSelect');
-  if (!select) return;
-  select.innerHTML = '';
-  const equipment = (window.STATE && Array.isArray(window.STATE.equipment)) ? window.STATE.equipment : [];
-  // Only show equipment assigned to a zone
-  const assigned = equipment.filter(eq => eq.zoneId);
-  if (assigned.length === 0) {
-    const opt = document.createElement('option');
-    opt.value = '';
-    opt.textContent = '(none)';
-    select.appendChild(opt);
-    return;
-  }
-  assigned.forEach(eq => {
-    const opt = document.createElement('option');
-    opt.value = eq.id || eq.name || '';
-    opt.textContent = eq.name || eq.label || eq.id || '(unnamed equipment)';
-    select.appendChild(opt);
-  });
-}
-
-document.addEventListener('DOMContentLoaded', () => {
-  // ...existing code...
-  populateGroupsV2UnassignedEquipDropdown();
-  populateGroupsV2AssignedEquipDropdown();
-  document.addEventListener('equipment-updated', populateGroupsV2UnassignedEquipDropdown);
-  document.addEventListener('equipment-updated', populateGroupsV2AssignedEquipDropdown);
-});
-
-// Assign selected equipment to selected zone (in group card context)
-document.addEventListener('DOMContentLoaded', () => {
-  const assignBtn = document.getElementById('assignEquipToZoneBtn');
-  if (assignBtn) {
-    assignBtn.addEventListener('click', () => {
-      const equipSelect = document.getElementById('groupsV2UnassignedEquipSelect');
-      const zoneSelect = document.getElementById('groupsV2ZoneSelect');
-      if (!equipSelect || !zoneSelect) return;
-      const selectedEquip = Array.from(equipSelect.selectedOptions).map(opt => opt.value).filter(Boolean);
-      const selectedZone = zoneSelect.value;
-      if (!selectedZone || selectedEquip.length === 0) {
-        alert('Select equipment and a zone to assign.');
-        return;
-      }
-      // Mark equipment as assigned by updating zoneId
-      (window.STATE.equipment || []).forEach(eq => {
-        if (selectedEquip.includes(eq.id)) {
-          eq.zoneId = selectedZone;
-        }
-      });
-      document.dispatchEvent(new Event('equipment-updated'));
-    });
-  }
-});
-
-const GROUPS_V2_DEFAULTS = {
-  schedule: {
-    mode: 'one',
-    timezone: 'America/Toronto',
-    startTime: '08:00',
-    photoperiodHours: 12,
-    cycles: [
-      { on: '08:00', hours: 12, off: '20:00' },
-      { on: '20:00', hours: 6, off: '02:00' },
-    ],
-    rampUpMin: 10,
-    rampDownMin: 10,
-  },
-  gradients: { ppfd: 0, blue: 0, tempC: 0, rh: 0 },
-};
-
-function normalizePhotoperiodHours(hours, maxHours = 24) {
-  const num = Number(hours);
-  if (!Number.isFinite(num)) return 0;
-  const safeMax = Number.isFinite(maxHours) ? Math.max(0, maxHours) : 24;
-  const clamped = Math.max(0, Math.min(safeMax, num));
-  return Math.round(clamped * 4) / 4;
-}
-
-function normalizeTimeString(value, fallback = '08:00') {
-  if (typeof value === 'string') {
-    const trimmed = value.trim();
-    if (/^\d{1,2}:\d{2}$/.test(trimmed)) {
-      const minutes = toMinutes(trimmed);
-      if (Number.isFinite(minutes)) {
-        return minutesToHHMM(minutes);
-      }
-    }
-  }
-  return typeof fallback === 'string' && fallback ? fallback : '08:00';
-}
-
-function distributeMinutes(total, parts) {
-  const safeTotal = Math.max(0, Math.round(Number(total) || 0));
-  const safeParts = Math.max(1, Math.round(Number(parts) || 1));
-  const base = Math.floor(safeTotal / safeParts);
-  const remainder = safeTotal - base * safeParts;
-  return Array.from({ length: safeParts }, (_, index) => base + (index < remainder ? 1 : 0));
-}
-
-function generateGroupsV2Cycles(mode, startTime, photoperiodHours) {
-  const normalizedMode = mode === 'two' ? 'two' : 'one';
-  const safeStart = normalizeTimeString(startTime, GROUPS_V2_DEFAULTS.schedule.startTime);
-  const normalizedHours = normalizePhotoperiodHours(photoperiodHours);
-  const totalOnMinutes = Math.max(0, Math.round(normalizedHours * 60));
-  const totalOffMinutes = Math.max(0, 1440 - totalOnMinutes);
-  const cycleCount = normalizedMode === 'two' ? 2 : 1;
-  const onMinutesParts = distributeMinutes(totalOnMinutes, cycleCount);
-  const offMinutesParts = distributeMinutes(totalOffMinutes, cycleCount);
-  let cursor = toMinutes(safeStart);
-  if (!Number.isFinite(cursor)) cursor = toMinutes(GROUPS_V2_DEFAULTS.schedule.startTime);
-  if (!Number.isFinite(cursor)) cursor = 0;
-  const cycles = [];
-  for (let i = 0; i < cycleCount; i += 1) {
-    const onMinutes = onMinutesParts[i];
-    const offMinutes = offMinutesParts[i];
-    const cycleOn = minutesToHHMM(cursor);
-    const cycleOff = minutesToHHMM(cursor + onMinutes);
-    cycles.push({ on: cycleOn, off: cycleOff, hours: onMinutes / 60 });
-    cursor = (cursor + onMinutes + offMinutes) % 1440;
-  }
-  return { startTime: safeStart, photoperiodHours: normalizedHours, cycles };
-}
-
-function computePhotoperiodFromCycles(rawCycles, mode, fallbackHours) {
-  if (Array.isArray(rawCycles) && rawCycles.length) {
-    const activeCount = mode === 'two' ? 2 : 1;
-    let total = 0;
-    for (let i = 0; i < activeCount; i += 1) {
-      const entry = rawCycles[i];
-      if (!entry) continue;
-      const directHours = toNumberOrNull(entry.hours);
-      if (Number.isFinite(directHours)) {
-        total += directHours;
-        continue;
-      }
-      const duration = computeCycleDuration(entry.on, entry.off) / 60;
-      if (Number.isFinite(duration)) total += duration;
-    }
-    if (total > 0) return total;
-  }
-  return Number.isFinite(fallbackHours) ? fallbackHours : GROUPS_V2_DEFAULTS.schedule.photoperiodHours;
-}
-
-function createDefaultGroupsV2Schedule() {
-  const defaults = GROUPS_V2_DEFAULTS.schedule;
-  const baseMode = defaults.mode === 'two' ? 'two' : 'one';
-  const start = normalizeTimeString(defaults.startTime, defaults.cycles[0]?.on || '08:00');
-  const photoperiod = normalizePhotoperiodHours(
-    Number.isFinite(defaults.photoperiodHours)
-      ? defaults.photoperiodHours
-      : computePhotoperiodFromCycles(defaults.cycles, baseMode, 12),
-  );
-  const generated = generateGroupsV2Cycles('two', start, photoperiod);
-  return {
-    mode: baseMode,
-    timezone: defaults.timezone,
-    startTime: generated.startTime,
-    photoperiodHours: generated.photoperiodHours,
-    cycles: generated.cycles,
-    rampUpMin: defaults.rampUpMin,
-    rampDownMin: defaults.rampDownMin,
-  };
-}
-
-function normalizeCycleHours(hours) {
-  const num = Number(hours);
-  if (!Number.isFinite(num)) return 0;
-  const clamped = Math.max(0, Math.min(24, num));
-  return Math.round(clamped * 2) / 2;
-}
-
-function computeGroupsV2CycleOff(on, hours) {
-  if (typeof on !== 'string' || !on) return null;
-  const match = on.match(/^(\d{1,2}):(\d{2})$/);
-  if (!match) return null;
-  const minutes = toMinutes(on);
-  if (!Number.isFinite(minutes)) return null;
-  const durationMinutes = Math.max(0, Math.round(normalizeCycleHours(hours) * 60));
-  return minutesToHHMM(minutes + durationMinutes);
-}
-
-function formatCycleHoursValue(hours) {
-  if (!Number.isFinite(hours)) return '';
-  const normalized = Math.max(0, Number(hours));
-  if (Math.abs(normalized - Math.round(normalized)) < 1e-6) {
-    return String(Math.round(normalized));
-  }
-  if (Math.abs(normalized * 10 - Math.round(normalized * 10)) < 1e-6) {
-    return (Math.round(normalized * 10) / 10).toFixed(1).replace(/\.0$/, '');
-  }
-  return (Math.round(normalized * 100) / 100)
-    .toFixed(2)
-    .replace(/\.00$/, '')
-    .replace(/(\.\d)0$/, '$1');
-}
-
-function normalizeGroupsV2Schedule(schedule) {
-  const defaults = createDefaultGroupsV2Schedule();
-  const base = schedule && typeof schedule === 'object' ? schedule : {};
-  const inferredCycles = base.cyclesSelected === 2 || base.mode === 'two' ? 2 : 1;
-  const mode = inferredCycles === 2 ? 'two' : 'one';
-  const timezone = typeof base.timezone === 'string' && base.timezone ? base.timezone : defaults.timezone;
-  const rampUpMin = toNumberOrNull(base.cycleA?.rampUpMin ?? base.rampUpMin) ?? defaults.rampUpMin;
-  const rampDownMin = toNumberOrNull(base.cycleA?.rampDownMin ?? base.rampDownMin) ?? defaults.rampDownMin;
-  const startCandidate = normalizeTimeString(
-    base.cycleA?.start
-      ?? base.startTime
-      ?? base.start
-      ?? (Array.isArray(base.cycles) && base.cycles[0]?.on),
-    defaults.startTime,
-  );
-  let providedPhotoperiod = toNumberOrNull(base.photoperiodHours ?? base.durationHours);
-  if (!Number.isFinite(providedPhotoperiod)) {
-    const cycleAOn = toNumberOrNull(base.cycleA?.onHours);
-    const cycleBOn = toNumberOrNull(base.cycleB?.onHours);
-    if (Number.isFinite(cycleAOn)) {
-      if (mode === 'two') {
-        if (Number.isFinite(cycleBOn)) providedPhotoperiod = Math.max(0, cycleAOn + cycleBOn);
-        else providedPhotoperiod = Math.max(0, cycleAOn * 2);
-      } else {
-        providedPhotoperiod = Math.max(0, cycleAOn);
-      }
-    }
-  }
-  const fallbackPhotoperiod = computePhotoperiodFromCycles(base.cycles, mode, defaults.photoperiodHours);
-  const photoperiodHours = normalizePhotoperiodHours(
-    Number.isFinite(providedPhotoperiod) ? providedPhotoperiod : fallbackPhotoperiod,
-  );
-  const generated = generateGroupsV2Cycles(mode, startCandidate, photoperiodHours);
-  const twoCycle = generateGroupsV2Cycles('two', generated.startTime, generated.photoperiodHours).cycles;
-  return {
-    mode,
-    timezone,
-    rampUpMin,
-    rampDownMin,
-    startTime: generated.startTime,
-    photoperiodHours: generated.photoperiodHours,
-    cycles: twoCycle,
-  };
-}
-
-function ensureGroupsV2ScheduleState() {
-  const normalized = normalizeGroupsV2Schedule(groupsV2FormState.schedule);
-  groupsV2FormState.schedule = normalized;
-  return normalized;
-}
-
-function hydrateGroupsV2ScheduleState(scheduleCfg) {
-  const defaults = createDefaultGroupsV2Schedule();
-  if (!scheduleCfg || typeof scheduleCfg !== 'object') return createDefaultGroupsV2Schedule();
-  const inferredCycles = scheduleCfg.cyclesSelected === 2 || scheduleCfg.mode === 'two' ? 2 : 1;
-  const mode = inferredCycles === 2 ? 'two' : 'one';
-  const timezone = typeof scheduleCfg.timezone === 'string' && scheduleCfg.timezone
-    ? scheduleCfg.timezone
-    : defaults.timezone;
-  const rampUpMin = toNumberOrNull(scheduleCfg.cycleA?.rampUpMin ?? scheduleCfg.rampUpMin) ?? defaults.rampUpMin;
-  const rampDownMin = toNumberOrNull(scheduleCfg.cycleA?.rampDownMin ?? scheduleCfg.rampDownMin) ?? defaults.rampDownMin;
-  const baseCycles = Array.isArray(scheduleCfg.cycles)
-    ? scheduleCfg.cycles.slice(0, 2).map((cycle) => ({ ...cycle }))
-    : [];
-  const cycleAStart = scheduleCfg.cycleA?.start
-    ?? scheduleCfg.startTime
-    ?? scheduleCfg.start
-    ?? (baseCycles[0]?.on ?? defaults.startTime);
-  const cycleAOn = toNumberOrNull(scheduleCfg.cycleA?.onHours);
-  const cycleBOn = toNumberOrNull(scheduleCfg.cycleB?.onHours);
-  let photoperiodHours = toNumberOrNull(scheduleCfg.photoperiodHours ?? scheduleCfg.durationHours);
-  if (!Number.isFinite(photoperiodHours) && Number.isFinite(cycleAOn)) {
-    if (mode === 'two') {
-      photoperiodHours = Number.isFinite(cycleBOn) ? cycleAOn + cycleBOn : cycleAOn * 2;
-    } else {
-      photoperiodHours = cycleAOn;
-    }
-  }
-  if (!baseCycles.length && typeof cycleAStart === 'string') {
-    const perCycle = Number.isFinite(cycleAOn)
-      ? cycleAOn
-      : mode === 'two'
-        ? normalizePhotoperiodHours(photoperiodHours ?? defaults.photoperiodHours, 24) / 2
-        : normalizePhotoperiodHours(photoperiodHours ?? defaults.photoperiodHours, 24);
-    const cycleAOff = computeGroupsV2CycleOff(cycleAStart, perCycle);
-    baseCycles.push({ on: cycleAStart, off: cycleAOff, hours: perCycle });
-    if (mode === 'two') {
-      const windowHours = Number.isFinite(scheduleCfg.constraints?.windowHours)
-        ? scheduleCfg.constraints.windowHours
-        : 12;
-      const startB = scheduleCfg.cycleB?.start
-        ?? minutesToHHMM((toMinutes(cycleAStart) + Math.max(0, Number(windowHours)) * 60) % 1440);
-      const perCycleB = Number.isFinite(cycleBOn) ? cycleBOn : perCycle;
-      const cycleBOff = computeGroupsV2CycleOff(startB, perCycleB);
-      baseCycles.push({ on: startB, off: cycleBOff, hours: perCycleB });
-    }
-  }
-  const base = {
-    mode,
-    timezone,
-    rampUpMin,
-    rampDownMin,
-    startTime: cycleAStart ?? defaults.startTime,
-    photoperiodHours,
-    cycles: baseCycles,
-    cyclesSelected: inferredCycles,
-    cycleA: scheduleCfg.cycleA,
-    cycleB: scheduleCfg.cycleB,
-    constraints: scheduleCfg.constraints,
-  };
-  return normalizeGroupsV2Schedule(base);
-}
-
-function buildGroupsV2ScheduleConfig() {
-  const scheduleState = ensureGroupsV2ScheduleState();
-  const defaults = createDefaultGroupsV2Schedule();
-  const mode = scheduleState.mode === 'two' ? 'two' : 'one';
-  const timezone = typeof scheduleState.timezone === 'string' && scheduleState.timezone
-    ? scheduleState.timezone
-    : defaults.timezone;
-  const startTime = normalizeTimeString(scheduleState.startTime, defaults.startTime);
-  const basePhotoperiod = Number.isFinite(scheduleState.photoperiodHours)
-    ? scheduleState.photoperiodHours
-    : defaults.photoperiodHours;
-  const cycleOnHours = mode === 'two'
-    ? normalizePhotoperiodHours(basePhotoperiod / 2, 12)
-    : normalizePhotoperiodHours(basePhotoperiod, 24);
-  const totalOnHours = mode === 'two' ? cycleOnHours * 2 : cycleOnHours;
-  let rampUpMin = toNumberOrNull(scheduleState.rampUpMin) ?? defaults.rampUpMin;
-  let rampDownMin = toNumberOrNull(scheduleState.rampDownMin) ?? defaults.rampDownMin;
-  rampUpMin = Math.max(0, Math.min(120, rampUpMin));
-  rampDownMin = Math.max(0, Math.min(120, rampDownMin));
-  const maxRampTotal = Math.max(0, cycleOnHours * 60);
-  if (rampUpMin + rampDownMin > maxRampTotal) {
-    if (rampUpMin >= maxRampTotal) {
-      rampUpMin = maxRampTotal;
-      rampDownMin = 0;
-    } else {
-      rampDownMin = maxRampTotal - rampUpMin;
-    }
-  }
-  const windowHours = mode === 'two' ? 12 : 24;
-  const startMinutes = toMinutes(startTime);
-  const cycleADurationMinutes = Math.max(0, Math.round(cycleOnHours * 60));
-  const cycleAOff = minutesToHHMM((startMinutes + cycleADurationMinutes) % 1440);
-  let cycleBStart = null;
-  let cycleBOff = null;
-  if (mode === 'two') {
-    const startBMinutes = (startMinutes + windowHours * 60) % 1440;
-    cycleBStart = minutesToHHMM(startBMinutes);
-    cycleBOff = minutesToHHMM((startBMinutes + cycleADurationMinutes) % 1440);
-  }
-  const selectedCycles = [
-    { on: startTime, off: cycleAOff, hours: cycleOnHours },
-  ];
-  if (mode === 'two' && cycleBStart) {
-    selectedCycles.push({ on: cycleBStart, off: cycleBOff, hours: cycleOnHours });
-  }
-  const scheduleConfig = {
-    period: 'photoperiod',
-    cyclesSelected: mode === 'two' ? 2 : 1,
-    timezone,
-    cycleA: { start: startTime, onHours: cycleOnHours, rampUpMin, rampDownMin },
-    cycleB: mode === 'two'
-      ? { start: cycleBStart, onHours: cycleOnHours, rampUpMin, rampDownMin }
-      : null,
-    mode,
-    startTime,
-    photoperiodHours: totalOnHours,
-    durationHours: totalOnHours,
-    rampUpMin,
-    rampDownMin,
-    cycles: selectedCycles,
-    totalOnHours,
-    totalOffHours: Math.max(0, 24 - totalOnHours),
-  };
-  if (mode === 'two') {
-    scheduleConfig.constraints = { windowHours };
-  }
-  return scheduleConfig;
-}
-
-function updateGroupsV2ScheduleUI() {
-  const scheduleState = ensureGroupsV2ScheduleState();
-  const defaults = createDefaultGroupsV2Schedule();
-  const mode = scheduleState.mode === 'two' ? 'two' : 'one';
-  const modeRadios = document.querySelectorAll('input[name="groupsV2ScheduleMode"]');
-  modeRadios.forEach((radio) => {
-    radio.checked = radio.value === mode;
-  });
-  const startTime = normalizeTimeString(scheduleState.startTime, defaults.startTime);
-  const photoperiodHours = normalizePhotoperiodHours(
-    Number.isFinite(scheduleState.photoperiodHours)
-      ? scheduleState.photoperiodHours
-      : defaults.photoperiodHours,
-  );
-  const singleCycle = generateGroupsV2Cycles('one', startTime, photoperiodHours).cycles[0];
-  const twoCycles = generateGroupsV2Cycles('two', startTime, photoperiodHours).cycles;
-
-  const c1OnInput = document.getElementById('groupsV2Cycle1On');
-  if (c1OnInput) c1OnInput.value = singleCycle?.on || startTime;
-  const c1HoursInput = document.getElementById('groupsV2Cycle1Hours');
-  if (c1HoursInput) {
-    const cycleHours = mode === 'two'
-      ? twoCycles[0]?.hours ?? photoperiodHours / 2
-      : singleCycle?.hours ?? photoperiodHours;
-    c1HoursInput.value = formatCycleHoursValue(cycleHours);
-    c1HoursInput.max = mode === 'two' ? '12' : '24';
-    c1HoursInput.setAttribute('max', mode === 'two' ? '12' : '24');
-  }
-  const c1End = document.getElementById('groupsV2Cycle1End');
-  if (c1End) {
-    const endLabel = mode === 'two' ? twoCycles[0]?.off : singleCycle?.off;
-    c1End.textContent = `End: ${endLabel || '--:--'}`;
-  }
-
-  const cycle2Container = document.getElementById('groupsV2Cycle2Container');
-  if (cycle2Container) {
-    const isTwo = mode === 'two';
-    cycle2Container.style.display = isTwo ? 'flex' : 'none';
-    const c2 = twoCycles[1] || twoCycles[0] || {
-      on: defaults.cycles[1]?.on || startTime,
-      off: defaults.cycles[1]?.off || startTime,
-      hours: defaults.cycles[1]?.hours ?? photoperiodHours / 2,
-    };
-    const c2OnInput = document.getElementById('groupsV2Cycle2On');
-    if (c2OnInput) {
-      c2OnInput.value = c2.on;
-      c2OnInput.readOnly = true;
-      c2OnInput.setAttribute('aria-readonly', 'true');
-      c2OnInput.disabled = !isTwo;
-    }
-    const c2HoursInput = document.getElementById('groupsV2Cycle2Hours');
-    if (c2HoursInput) {
-      c2HoursInput.value = formatCycleHoursValue(c2.hours);
-      c2HoursInput.readOnly = true;
-      c2HoursInput.setAttribute('aria-readonly', 'true');
-      c2HoursInput.disabled = !isTwo;
-    }
-    const c2End = document.getElementById('groupsV2Cycle2End');
-    if (c2End) c2End.textContent = `End: ${c2.off || '--:--'}`;
-  }
-  const summaryEl = document.getElementById('groupsV2ScheduleSummary');
-  if (summaryEl) {
-    const summaryConfig = buildGroupsV2ScheduleConfig();
-    const summaryText = scheduleSummary(summaryConfig);
-    summaryEl.textContent = summaryText && summaryText !== 'No schedule'
-      ? `Summary: ${summaryText}`
-      : '';
-  }
-}
-
-const groupsV2FormState = {
-  planId: '',
-  planSearch: '',
-  anchorMode: 'seedDate',
-  seedDate: formatDateInputValue(new Date()),
-  dps: 1,
-  schedule: createDefaultGroupsV2Schedule(),
-  gradients: { ...GROUPS_V2_DEFAULTS.gradients },
-};
-
-const MS_PER_DAY = 24 * 60 * 60 * 1000;
-
-function formatDateInputValue(date) {
-  if (!(date instanceof Date) || !Number.isFinite(date.getTime())) return '';
-  const year = date.getFullYear();
-  const month = String(date.getMonth() + 1).padStart(2, '0');
-  const day = String(date.getDate()).padStart(2, '0');
-  return `${year}-${month}-${day}`;
-}
-
-function parseLocalDateInput(value) {
-  if (!value || typeof value !== 'string') return null;
-  const trimmed = value.trim();
-  if (!trimmed) return null;
-  const parts = trimmed.split('-');
-  if (parts.length !== 3) return null;
-  const [y, m, d] = parts.map((part) => Number(part));
-  if (!Number.isFinite(y) || !Number.isFinite(m) || !Number.isFinite(d)) return null;
-  const date = new Date(y, m - 1, d);
-  if (!Number.isFinite(date.getTime())) return null;
-  date.setHours(0, 0, 0, 0);
-  return date;
-}
-
-function formatSigned(value, precision = 1) {
-  const num = Number(value);
-  if (!Number.isFinite(num) || Math.abs(num) < 1e-9) return '0';
-  const abs = Math.abs(num);
-  const formatted = abs % 1 === 0 ? abs.toFixed(0) : abs.toFixed(precision);
-  return `${num > 0 ? '+' : '-'}${formatted}`;
-}
-
-function getGroupsV2Plans() {
-  return (window.STATE && Array.isArray(window.STATE.plans)) ? window.STATE.plans : [];
-}
-
-function planMatchesSearch(plan, query) {
-  if (!query) return true;
-  const needle = query.toLowerCase();
-  if (!needle) return true;
-  const derived = plan?._derived;
-  const applies = derived?.appliesTo || plan?.meta?.appliesTo || {};
-  const haystack = [
-    plan?.id,
-    plan?.name,
-    plan?.label,
-    plan?.meta?.label,
-    plan?.kind,
-    plan?.crop,
-    ...(Array.isArray(plan?.meta?.category) ? plan.meta.category : []),
-    ...(Array.isArray(applies.category) ? applies.category : []),
-    ...(Array.isArray(applies.varieties) ? applies.varieties : []),
-    ...(Array.isArray(derived?.notes) ? derived.notes : []),
-  ];
-  return haystack.some((entry) => typeof entry === 'string' && entry.toLowerCase().includes(needle));
-}
-
-function getGroupsV2SelectedPlan() {
-  const plans = getGroupsV2Plans();
-  const id = groupsV2FormState.planId || '';
-  if (!id) return null;
-  return plans.find((plan) => (plan.id || plan.name) === id) || null;
-}
-
-function updateGroupsV2AnchorInputs() {
-  const seedInput = document.getElementById('groupsV2SeedDate');
-  const dpsInput = document.getElementById('groupsV2Dps');
-  const isSeed = groupsV2FormState.anchorMode !== 'dps';
-  if (seedInput) {
-    seedInput.disabled = !isSeed;
-    if (!isSeed) seedInput.setAttribute('aria-disabled', 'true');
-    else seedInput.removeAttribute('aria-disabled');
-  }
-  if (dpsInput) {
-    dpsInput.disabled = isSeed;
-    if (isSeed) dpsInput.setAttribute('aria-disabled', 'true');
-    else dpsInput.removeAttribute('aria-disabled');
-  }
-}
-
-function applyGroupsV2StateToInputs() {
-  const searchSelect = document.getElementById('groupsV2PlanSearch');
-  if (searchSelect) searchSelect.value = groupsV2FormState.planSearch || '';
-  const planSelect = document.getElementById('groupsV2PlanSelect');
-  if (planSelect) planSelect.value = groupsV2FormState.planId || '';
-  const seedInput = document.getElementById('groupsV2SeedDate');
-  if (seedInput) seedInput.value = groupsV2FormState.seedDate || '';
-  const dpsInput = document.getElementById('groupsV2Dps');
-  if (dpsInput) dpsInput.value = groupsV2FormState.dps != null ? String(groupsV2FormState.dps) : '';
-  updateGroupsV2ScheduleUI();
-  const gradientMap = {
-    groupsV2GradientPpfd: 'ppfd',
-    groupsV2GradientBlue: 'blue',
-    groupsV2GradientTemp: 'tempC',
-    groupsV2GradientRh: 'rh',
-  };
-  Object.entries(gradientMap).forEach(([id, key]) => {
-    const input = document.getElementById(id);
-    if (!input) return;
-    const value = groupsV2FormState.gradients[key];
-    const defaultValue = GROUPS_V2_DEFAULTS.gradients[key] ?? 0;
-    input.value = value != null ? String(value) : String(defaultValue);
-  });
-  const anchorRadios = document.querySelectorAll('input[name="groupsV2AnchorMode"]');
-  anchorRadios.forEach((radio) => { radio.checked = radio.value === groupsV2FormState.anchorMode; });
-}
-
-function getGroupsV2DayNumber() {
-  if (groupsV2FormState.anchorMode === 'dps') {
-    const dps = toNumberOrNull(groupsV2FormState.dps);
-    return dps != null ? Math.max(0, Math.round(dps)) : null;
-  }
-  const seed = parseLocalDateInput(groupsV2FormState.seedDate);
-  if (!seed) return null;
-  const today = new Date();
-  today.setHours(0, 0, 0, 0);
-  const diff = Math.floor((today.getTime() - seed.getTime()) / MS_PER_DAY);
-  return diff < 0 ? 0 : diff + 1;
-}
-
-function resolvePlanTargetsForDay(plan, dayNumber) {
-  if (!plan || typeof plan !== 'object') return null;
-  const derived = plan._derived || derivePlanRuntime(plan);
-  const lightDays = Array.isArray(derived?.lightDays) ? derived.lightDays.slice() : [];
-  if (!lightDays.length) {
-    const basePhotoperiod = firstNonEmpty(plan.photoperiod, derived?.photoperiod, plan.defaults?.photoperiod);
-    const photoperiodHours = readPhotoperiodHours(basePhotoperiod) ?? derived?.photoperiodHours ?? null;
-    return {
-      stage: plan.stage || '',
-      ppfd: toNumberOrNull(firstNonEmpty(plan.ppfd, derived?.ppfd)),
-      dli: toNumberOrNull(firstNonEmpty(plan.dli, derived?.dli)),
-      photoperiod: basePhotoperiod,
-      photoperiodHours,
-    };
-  }
-  const sorted = lightDays.slice().sort((a, b) => {
-    const aDay = Number.isFinite(a.day) ? a.day : 0;
-    const bDay = Number.isFinite(b.day) ? b.day : 0;
-    return aDay - bDay;
-  });
-  const effectiveDay = Math.max(1, Number.isFinite(dayNumber) ? dayNumber : 1);
-  let target = sorted[0];
-  for (const entry of sorted) {
-    const start = Number.isFinite(entry.day) ? entry.day : null;
-    if (start === null) {
-      if (!target) target = entry;
-      continue;
-    }
-    if (effectiveDay >= start) target = entry;
-    else break;
-  }
-  const photoperiodHours = readPhotoperiodHours(target?.photoperiod) ?? derived?.photoperiodHours ?? null;
-  const ppfd = toNumberOrNull(firstNonEmpty(target?.ppfd, derived?.ppfd, plan.ppfd));
-  const dli = toNumberOrNull(firstNonEmpty(target?.dli, plan.dli, derived?.dli));
-  return {
-    stage: target?.stage || plan.stage || '',
-    ppfd,
-    dli,
-    photoperiod: target?.photoperiod,
-    photoperiodHours,
-  };
-}
-
-function computeGroupsV2PreviewData(planOverride) {
-  const plan = planOverride || getGroupsV2SelectedPlan();
-  if (!plan) return null;
-  const dayNumber = getGroupsV2DayNumber();
-  const target = resolvePlanTargetsForDay(plan, dayNumber ?? 1) || {};
-  const scheduleConfig = buildGroupsV2ScheduleConfig();
-  const scheduleHours = Number.isFinite(scheduleConfig.durationHours) ? scheduleConfig.durationHours : null;
-  const basePhotoperiod = target.photoperiodHours ?? readPhotoperiodHours(firstNonEmpty(plan.photoperiod, plan.defaults?.photoperiod, plan._derived?.photoperiod));
-  const photoperiodHours = Number.isFinite(scheduleHours) && scheduleHours > 0 ? scheduleHours : basePhotoperiod;
-  const planPpfd = toNumberOrNull(firstNonEmpty(target.ppfd, plan.ppfd, plan._derived?.ppfd));
-  const gradientPpfd = toNumberOrNull(groupsV2FormState.gradients.ppfd) || 0;
-  const hours = Number.isFinite(photoperiodHours) ? Math.max(0, photoperiodHours) : null;
-  const targetDli = toNumberOrNull(firstNonEmpty(target.dli, plan.dli, plan._derived?.dli));
-  let basePpfd = Number.isFinite(planPpfd) ? planPpfd : null;
-  let ppfdAdjustedForDli = false;
-  let aiSuggestion = '';
-  if (Number.isFinite(targetDli) && hours != null && hours > 0) {
-    basePpfd = (targetDli * 1e6) / (3600 * hours);
-    ppfdAdjustedForDli = true;
-  }
-  if ((basePpfd == null || !Number.isFinite(basePpfd)) && hours != null && hours > 0) {
-    basePpfd = 200;
-    const recommendedDli = (basePpfd * 3600 * hours) / 1e6;
-    aiSuggestion = `AI Assist recommends starting at ${Math.round(basePpfd)} µmol·m⁻²·s⁻¹ (${recommendedDli.toFixed(1)} mol·m⁻²·d⁻¹) until plan targets are defined.`;
-  } else if ((basePpfd == null || !Number.isFinite(basePpfd)) && (!hours || hours === 0)) {
-    aiSuggestion = 'AI Assist recommends selecting a photoperiod to receive PPFD guidance.';
-  }
-  const adjustedPpfd = basePpfd != null ? basePpfd + gradientPpfd : null;
-  const safePpfd = adjustedPpfd != null ? Math.max(0, adjustedPpfd) : null;
-  const dli = safePpfd != null && hours != null ? (safePpfd * 3600 * hours) / 1e6 : null;
-  return {
-    planId: plan.id || plan.name || '',
-    day: dayNumber != null ? Math.max(0, dayNumber) : null,
-    stage: target.stage || '',
-    basePpfd,
-    ppfd: safePpfd,
-    basePhotoperiod,
-    photoperiodHours: hours,
-    dli,
-    targetDli: Number.isFinite(targetDli) ? targetDli : null,
-    ppfdAdjustedForDli,
-    aiSuggestion,
-    gradients: { ...groupsV2FormState.gradients },
-    schedule: scheduleConfig,
-    anchor: {
-      mode: groupsV2FormState.anchorMode,
-      seedDate: groupsV2FormState.anchorMode === 'seedDate' ? (groupsV2FormState.seedDate || null) : null,
-      dps: groupsV2FormState.anchorMode === 'dps' ? toNumberOrNull(groupsV2FormState.dps) : null,
-    },
-  };
-}
-
-function updateGroupsV2Preview() {
-  const previewEl = document.getElementById('groupsV2PlanPreview');
-  if (!previewEl) return;
-  const plan = getGroupsV2SelectedPlan();
-  if (!plan) {
-    previewEl.innerHTML = '<div class="tiny text-muted">Select a plan to preview today’s stage, PPFD, photoperiod, and DLI.</div>';
-    return;
-  }
-  const preview = computeGroupsV2PreviewData(plan);
-  if (!preview) {
-    previewEl.innerHTML = '<div class="tiny text-muted">Enter a seed date or DPS to preview today’s targets.</div>';
-    return;
-  }
-  const dayLabel = preview.day != null ? `Day ${preview.day}` : 'Day —';
-  const stage = preview.stage || '—';
-  const photoperiodLabel = Number.isFinite(preview.photoperiodHours) ? `${formatCycleHoursValue(preview.photoperiodHours)} h` : '—';
-  const ppfdLabel = Number.isFinite(preview.ppfd) ? `${Math.round(preview.ppfd)} µmol·m⁻²·s⁻¹` : '—';
-  const dliLabel = Number.isFinite(preview.dli) ? `${preview.dli.toFixed(2)} mol·m⁻²·d⁻¹` : '—';
-  const basePhotoperiodLabel = Number.isFinite(preview.basePhotoperiod) ? `${formatCycleHoursValue(preview.basePhotoperiod)} h plan` : '';
-  const basePpfdLabel = Number.isFinite(preview.basePpfd) ? `${Math.round(preview.basePpfd)} µmol plan` : '';
-  const gradients = preview.gradients || {};
-  const gradientParts = [];
-  const gradientPpfd = toNumberOrNull(gradients.ppfd);
-  const gradientBlue = toNumberOrNull(gradients.blue);
-  const gradientTemp = toNumberOrNull(gradients.tempC);
-  const gradientRh = toNumberOrNull(gradients.rh);
-  if (Number.isFinite(gradientPpfd) && gradientPpfd !== 0) gradientParts.push(`PPFD ${formatSigned(gradientPpfd, 0)} µmol`);
-  if (Number.isFinite(gradientBlue) && gradientBlue !== 0) gradientParts.push(`Blue ${formatSigned(gradientBlue, 1)}%`);
-  if (Number.isFinite(gradientTemp) && gradientTemp !== 0) gradientParts.push(`Temp ${formatSigned(gradientTemp, 1)}°C`);
-  if (Number.isFinite(gradientRh) && gradientRh !== 0) gradientParts.push(`RH ${formatSigned(gradientRh, 1)}%`);
-  const gradientHtml = gradientParts.length
-    ? `<div class="tiny text-muted">Gradients: ${gradientParts.map((part) => escapeHtml(part)).join(' • ')}</div>`
-    : '';
-  const notes = [];
-  if (preview.ppfdAdjustedForDli && Number.isFinite(preview.targetDli)) {
-    notes.push(`PPFD auto-scaled to maintain ${preview.targetDli.toFixed(2)} mol·m⁻²·d⁻¹.`);
-  }
-  if (preview.aiSuggestion) {
-    notes.push(preview.aiSuggestion);
-  }
-  const notesHtml = notes.length
-    ? `<div class="tiny text-muted">${notes.map((note) => escapeHtml(note)).join('<br>')}</div>`
-    : '';
-  previewEl.innerHTML = `
-    <div><strong>Today →</strong> ${escapeHtml(dayLabel)}</div>
-    <div class="tiny">Stage: <strong>${escapeHtml(stage)}</strong></div>
-    <div class="tiny">PPFD: <strong>${escapeHtml(ppfdLabel)}</strong>${basePpfdLabel ? ` <span class="text-muted">(${escapeHtml(basePpfdLabel)})</span>` : ''}</div>
-    <div class="tiny">Photoperiod: <strong>${escapeHtml(photoperiodLabel)}</strong>${basePhotoperiodLabel ? ` <span class="text-muted">(${escapeHtml(basePhotoperiodLabel)})</span>` : ''}</div>
-    <div class="tiny">DLI: <strong>${escapeHtml(dliLabel)}</strong></div>
-    ${gradientHtml}
-    ${notesHtml}
-  `;
-}
-
-function buildGroupsV2PlanConfig(planOverride) {
-  const plan = planOverride || getGroupsV2SelectedPlan();
-  if (!plan) return null;
-  const preview = computeGroupsV2PreviewData(plan);
-  const updatedAt = new Date().toISOString();
-  const schedule = buildGroupsV2ScheduleConfig();
-  const gradients = {
-    ppfd: toNumberOrNull(groupsV2FormState.gradients.ppfd) ?? GROUPS_V2_DEFAULTS.gradients.ppfd,
-    blue: toNumberOrNull(groupsV2FormState.gradients.blue) ?? GROUPS_V2_DEFAULTS.gradients.blue,
-    tempC: toNumberOrNull(groupsV2FormState.gradients.tempC) ?? GROUPS_V2_DEFAULTS.gradients.tempC,
-    rh: toNumberOrNull(groupsV2FormState.gradients.rh) ?? GROUPS_V2_DEFAULTS.gradients.rh,
-  };
-  const anchor = {
-    mode: groupsV2FormState.anchorMode,
-    seedDate: groupsV2FormState.anchorMode === 'seedDate' ? (groupsV2FormState.seedDate || null) : null,
-    dps: groupsV2FormState.anchorMode === 'dps' ? toNumberOrNull(groupsV2FormState.dps) : null,
-  };
-  const config = { anchor, schedule, gradients, updatedAt };
-  if (preview) config.preview = { ...preview, updatedAt };
-  return config;
-}
-
-function initializeGroupsV2Form() {
-  if (initializeGroupsV2Form._initialized) return;
-  initializeGroupsV2Form._initialized = true;
-  applyGroupsV2StateToInputs();
-  const planSearchSelect = document.getElementById('groupsV2PlanSearch');
-  if (planSearchSelect) {
-    planSearchSelect.addEventListener('change', (event) => {
-      groupsV2FormState.planSearch = event.target.value || '';
-      populateGroupsV2PlanDropdown(groupsV2FormState.planSearch);
-    });
-  }
-  const seedInput = document.getElementById('groupsV2SeedDate');
-  if (seedInput) {
-    seedInput.addEventListener('input', (event) => {
-      groupsV2FormState.seedDate = event.target.value || '';
-      updateGroupsV2Preview();
-    });
-  }
-  const dpsInput = document.getElementById('groupsV2Dps');
-  if (dpsInput) {
-    dpsInput.addEventListener('input', (event) => {
-      groupsV2FormState.dps = toNumberOrNull(event.target.value);
-      updateGroupsV2Preview();
-    });
-  }
-  const scheduleModeRadios = document.querySelectorAll('input[name="groupsV2ScheduleMode"]');
-  scheduleModeRadios.forEach((radio) => {
-    radio.addEventListener('change', (event) => {
-      if (!event.target.checked) return;
-      const schedule = ensureGroupsV2ScheduleState();
-      const nextMode = event.target.value === 'two' ? 'two' : 'one';
-      if (schedule.mode === nextMode) return;
-      const previousTotal = normalizePhotoperiodHours(
-        Number.isFinite(schedule.photoperiodHours) ? schedule.photoperiodHours : 0,
-        24,
-      );
-      let nextTotal = previousTotal;
-      if (nextMode === 'two') {
-        let perCycle = previousTotal > 0 ? previousTotal / 2 : 6;
-        if (!Number.isFinite(perCycle) || perCycle <= 0) perCycle = 6;
-        perCycle = normalizePhotoperiodHours(perCycle, 12);
-        nextTotal = Math.min(24, perCycle * 2);
-      } else {
-        const perCycle = normalizePhotoperiodHours(previousTotal / 2, 12);
-        nextTotal = normalizePhotoperiodHours(perCycle * 2, 24);
-      }
-      const updated = normalizeGroupsV2Schedule({ ...schedule, mode: nextMode, photoperiodHours: nextTotal });
-      groupsV2FormState.schedule = updated;
-      updateGroupsV2ScheduleUI();
-      updateGroupsV2Preview();
-    });
-  });
-  const defaultSchedule = createDefaultGroupsV2Schedule();
-  const c1OnInput = document.getElementById('groupsV2Cycle1On');
-  if (c1OnInput) {
-    const handleStartChange = (event) => {
-      const schedule = ensureGroupsV2ScheduleState();
-      const fallback = defaultSchedule.startTime || defaultSchedule.cycles[0]?.on || '08:00';
-      const value = normalizeTimeString(event.target.value, fallback);
-      const updated = normalizeGroupsV2Schedule({ ...schedule, startTime: value });
-      groupsV2FormState.schedule = updated;
-      updateGroupsV2ScheduleUI();
-      updateGroupsV2Preview();
-    };
-    c1OnInput.addEventListener('change', handleStartChange);
-    c1OnInput.addEventListener('input', handleStartChange);
-  }
-  const c1HoursInput = document.getElementById('groupsV2Cycle1Hours');
-  if (c1HoursInput) {
-    c1HoursInput.addEventListener('input', (event) => {
-      const schedule = ensureGroupsV2ScheduleState();
-      const mode = schedule.mode === 'two' ? 'two' : 'one';
-      const maxHours = mode === 'two' ? 12 : 24;
-      const perCycle = normalizePhotoperiodHours(event.target.value, maxHours);
-      const total = mode === 'two' ? Math.min(24, perCycle * 2) : perCycle;
-      const updated = normalizeGroupsV2Schedule({ ...schedule, photoperiodHours: total });
-      groupsV2FormState.schedule = updated;
-      c1HoursInput.value = formatCycleHoursValue(perCycle);
-      updateGroupsV2ScheduleUI();
-      updateGroupsV2Preview();
-    });
-  }
-  const splitEvenBtn = document.getElementById('groupsV2SplitEvenBtn');
-  if (splitEvenBtn) {
-    splitEvenBtn.addEventListener('click', () => {
-      const schedule = ensureGroupsV2ScheduleState();
-      const updated = normalizeGroupsV2Schedule({ ...schedule, mode: 'two', photoperiodHours: 12 });
-      groupsV2FormState.schedule = updated;
-      updateGroupsV2ScheduleUI();
-      updateGroupsV2Preview();
-    });
-  }
-  const maxLightBtn = document.getElementById('groupsV2MaxLightBtn');
-  if (maxLightBtn) {
-    maxLightBtn.addEventListener('click', () => {
-      const schedule = ensureGroupsV2ScheduleState();
-      const updated = normalizeGroupsV2Schedule({ ...schedule, mode: 'two', photoperiodHours: 22 });
-      groupsV2FormState.schedule = updated;
-      updateGroupsV2ScheduleUI();
-      updateGroupsV2Preview();
-    });
-  }
-  const resetRampsBtn = document.getElementById('groupsV2ResetRampsBtn');
-  if (resetRampsBtn) {
-    resetRampsBtn.addEventListener('click', () => {
-      const schedule = ensureGroupsV2ScheduleState();
-      const defaultsSchedule = createDefaultGroupsV2Schedule();
-      const updated = normalizeGroupsV2Schedule({
-        ...schedule,
-        rampUpMin: defaultsSchedule.rampUpMin,
-        rampDownMin: defaultsSchedule.rampDownMin,
-      });
-      groupsV2FormState.schedule = updated;
-      updateGroupsV2ScheduleUI();
-      updateGroupsV2Preview();
-    });
-  }
-  const gradientMap = {
-    groupsV2GradientPpfd: 'ppfd',
-    groupsV2GradientBlue: 'blue',
-    groupsV2GradientTemp: 'tempC',
-    groupsV2GradientRh: 'rh',
-  };
-  Object.entries(gradientMap).forEach(([id, key]) => {
-    const input = document.getElementById(id);
-    if (!input) return;
-    input.addEventListener('input', (event) => {
-      const value = toNumberOrNull(event.target.value);
-      const defaultValue = GROUPS_V2_DEFAULTS.gradients[key] ?? 0;
-      groupsV2FormState.gradients[key] = value != null ? value : defaultValue;
-      updateGroupsV2Preview();
-    });
-  });
-  const anchorRadios = document.querySelectorAll('input[name="groupsV2AnchorMode"]');
-  anchorRadios.forEach((radio) => {
-    radio.addEventListener('change', (event) => {
-      if (!event.target.checked) return;
-      groupsV2FormState.anchorMode = event.target.value === 'dps' ? 'dps' : 'seedDate';
-      updateGroupsV2AnchorInputs();
-      updateGroupsV2Preview();
-    });
-  });
-  updateGroupsV2AnchorInputs();
-}
-// Populate Groups V2 Plan and Schedule dropdowns from setup cards
-function populateGroupsV2PlanSearchDropdown() {
-  const select = document.getElementById('groupsV2PlanSearch');
-  if (!select) return;
-  const currentRaw = groupsV2FormState.planSearch || '';
-  const current = currentRaw.trim();
-  const plans = getGroupsV2Plans();
-  const seen = new Set();
-  const options = [{ value: '', label: 'All plans' }];
-  const addOption = (value, label) => {
-    const trimmed = (value || '').trim();
-    if (!trimmed) return;
-    const normalized = trimmed.toLowerCase();
-    if (seen.has(normalized)) return;
-    seen.add(normalized);
-    options.push({ value: trimmed, label });
-  };
-  const categories = new Set();
-  const crops = new Set();
-  const varieties = new Set();
-  const kinds = new Set();
-  const planNames = new Set();
-  plans.forEach((plan) => {
-    const derived = plan?._derived || {};
-    const applies = derived.appliesTo || plan?.meta?.appliesTo || {};
-    const allCategories = [
-      ...(Array.isArray(plan?.meta?.category) ? plan.meta.category : []),
-      ...(Array.isArray(derived?.category) ? derived.category : []),
-      ...(Array.isArray(applies?.category) ? applies.category : []),
-    ];
-    allCategories.forEach((cat) => {
-      if (typeof cat === 'string' && cat.trim()) categories.add(cat.trim());
-    });
-    if (typeof plan?.crop === 'string' && plan.crop.trim()) crops.add(plan.crop.trim());
-    if (typeof plan?.kind === 'string' && plan.kind.trim()) kinds.add(plan.kind.trim());
-    const varietyList = Array.isArray(applies?.varieties) ? applies.varieties : [];
-    varietyList.forEach((variety) => {
-      if (typeof variety === 'string' && variety.trim()) varieties.add(variety.trim());
-    });
-    const planLabel = plan?.name || plan?.label || plan?.id;
-    if (typeof planLabel === 'string' && planLabel.trim()) planNames.add(planLabel.trim());
-  });
-  const addSet = (set, prefix) => {
-    Array.from(set).sort((a, b) => a.localeCompare(b)).forEach((value) => {
-      addOption(value, prefix ? `${prefix} — ${value}` : value);
-    });
-  };
-  addSet(categories, 'Category');
-  addSet(crops, 'Crop');
-  addSet(varieties, 'Variety');
-  addSet(kinds, 'Type');
-  addSet(planNames, 'Plan');
-  const normalizedCurrent = current.toLowerCase();
-  if (normalizedCurrent && !seen.has(normalizedCurrent)) {
-    options.push({ value: current, label: `Filter — ${current}` });
-    seen.add(normalizedCurrent);
-  }
-  select.innerHTML = '';
-  options.forEach(({ value, label }) => {
-    const option = document.createElement('option');
-    option.value = value;
-    option.textContent = label;
-    select.appendChild(option);
-  });
-  if (normalizedCurrent && seen.has(normalizedCurrent)) {
-    select.value = current;
-  } else {
-    select.value = '';
-    if (normalizedCurrent && !seen.has(normalizedCurrent)) {
-      select.value = current;
-    }
-  }
-}
-
-function populateGroupsV2PlanDropdown(filterQuery) {
-  const select = document.getElementById('groupsV2PlanSelect');
-  if (!select) return;
-  const query = typeof filterQuery === 'string'
-    ? filterQuery.trim().toLowerCase()
-    : (groupsV2FormState.planSearch || '').trim().toLowerCase();
-  while (select.options.length > 1) select.remove(1);
-  const plans = getGroupsV2Plans();
-  const filtered = !query ? plans : plans.filter((plan) => planMatchesSearch(plan, query));
-  if (!filtered.length) {
-    const placeholder = document.createElement('option');
-    placeholder.value = '';
-    placeholder.textContent = '(no matching plans)';
-    placeholder.disabled = true;
-    select.appendChild(placeholder);
-  } else {
-    filtered.forEach((plan) => {
-      const opt = document.createElement('option');
-      opt.value = plan.id || plan.name || '';
-      opt.textContent = plan.name || plan.label || plan.id || '(unnamed plan)';
-      select.appendChild(opt);
-    });
-  }
-  const current = groupsV2FormState.planId;
-  const hasMatch = filtered.some((plan) => (plan.id || plan.name || '') === current);
-  if (hasMatch) {
-    select.value = current;
-  } else {
-    select.value = '';
-    if (current) groupsV2FormState.planId = '';
-  }
-  if (!select.value && filtered.length === 1) {
-    const fallback = filtered[0].id || filtered[0].name || '';
-    select.value = fallback;
-  }
-  if (!select._planListenerAttached) {
-    select.addEventListener('change', () => {
-      groupsV2FormState.planId = select.value || '';
-      const plan = getGroupsV2SelectedPlan();
-      renderGroupsV2PlanCard(plan);
-      updateGroupsV2Preview();
-    });
-    select._planListenerAttached = true;
-  }
-  groupsV2FormState.planId = select.value || '';
-  const plan = getGroupsV2SelectedPlan();
-  renderGroupsV2PlanCard(plan);
-  updateGroupsV2Preview();
-}
-
-// Render the plan card for Group V2 Setup
-function renderGroupsV2PlanCard(plan) {
-  let card = document.getElementById('groupsV2PlanCard');
-  if (!card) {
-    const planControls = document.getElementById('groupsV2PlanControls');
-    const planForm = document.getElementById('groupsV2PlanForm');
-    card = document.createElement('section');
-    card.id = 'groupsV2PlanCard';
-    card.className = 'group-info-card';
-    card.style.margin = '12px 0 18px 0';
-    if (planControls && planControls.parentNode) {
-      planControls.parentNode.insertBefore(card, planControls.nextSibling);
-    } else if (planForm) {
-      planForm.appendChild(card);
-    }
-  }
-  if (!plan) {
-    card.innerHTML = '<div class="tiny text-muted">Select a plan to view spectrum, DLI, and PPFD targets.</div>';
-    return;
-  }
-  // Prepare spectrum, DLI, PPFD
-  const derived = plan._derived || derivePlanRuntime(plan);
-  const spectrum = plan.spectrum || derived?.spectrum || { cw: 45, ww: 45, bl: 0, rd: 0 };
-  const ppfd = getPlanPPFD(plan);
-  const photoperiod = getPlanPhotoperiodHours(plan);
-  const dli = getPlanDli(plan);
-  const hasPpfd = Number.isFinite(ppfd) && ppfd > 0;
-  const hasDli = Number.isFinite(dli) && dli > 0;
-  const ppfdLabel = hasPpfd ? `${ppfd.toFixed(0)} µmol·m⁻²·s⁻¹` : '—';
-  const dliLabel = hasDli ? `${dli.toFixed(2)} mol·m⁻²·d⁻¹` : '—';
-  const photoperiodLabel = Number.isFinite(photoperiod) && photoperiod > 0 ? `${photoperiod.toFixed(1)} h` : formatPlanPhotoperiodDisplay(firstNonEmpty(plan.photoperiod, derived?.photoperiod, plan.defaults?.photoperiod));
-  const description = plan.description || (derived?.notes?.length ? derived.notes.join(' • ') : 'Spectrum and targets for this plan.');
-  // Card HTML
-  card.innerHTML = `
-    <header class="group-info-card__header">
-      <div>
-        <h3>Plan: ${escapeHtml(plan.name || 'Untitled')}</h3>
-        <p class="tiny text-muted">${escapeHtml(description)}</p>
-      </div>
-    </header>
-    <div class="group-info-card__body">
-      <canvas id="groupsV2PlanSpectrumCanvas" class="group-info-card__canvas" width="320" height="100" role="img" aria-label="Plan spectrum preview"></canvas>
-      <dl class="group-info-card__metrics">
-        <dt>PPFD</dt><dd>${ppfdLabel}</dd>
-        <dt>DLI</dt><dd>${dliLabel}</dd>
-        <dt>Photoperiod</dt><dd>${photoperiodLabel && photoperiodLabel !== '—' ? escapeHtml(photoperiodLabel) : '—'}</dd>
-      </dl>
-    </div>
-  `;
-  // Render spectrum graph if function available
-  const canvas = document.getElementById('groupsV2PlanSpectrumCanvas');
-  if (canvas && typeof renderSpectrumCanvas === 'function') {
-    const mix = { cw: Number(spectrum.cw || 0), ww: Number(spectrum.ww || 0), bl: Number(spectrum.bl || 0), rd: Number(spectrum.rd || 0) };
-    const spd = computeWeightedSPD(mix);
-    renderSpectrumCanvas(canvas, spd, { width: canvas.width, height: canvas.height });
-  }
-}
-
-function populateGroupsV2ScheduleDropdown() {
-  const select = document.getElementById('groupsV2ScheduleSelect');
-  if (!select) return;
-  while (select.options.length > 1) select.remove(1);
-  const schedules = (window.STATE && Array.isArray(window.STATE.schedules)) ? window.STATE.schedules : [];
-  schedules.forEach(sched => {
-    const opt = document.createElement('option');
-    opt.value = sched.id || sched.name || '';
-    opt.textContent = sched.name || sched.label || sched.id || '(unnamed schedule)';
-    select.appendChild(opt);
-  });
-}
-
-document.addEventListener('DOMContentLoaded', () => {
-  // ...existing code...
-  initializeGroupsV2Form();
-  populateGroupsV2PlanSearchDropdown();
-  populateGroupsV2PlanDropdown(groupsV2FormState.planSearch);
-  populateGroupsV2ScheduleDropdown();
-  document.addEventListener('plans-updated', () => {
-    populateGroupsV2PlanSearchDropdown();
-    populateGroupsV2PlanDropdown(groupsV2FormState.planSearch);
-  });
-  document.addEventListener('schedules-updated', populateGroupsV2ScheduleDropdown);
-
-  updateGroupsV2Preview();
-});
-
-document.addEventListener('DOMContentLoaded', () => {
-  const select = document.getElementById('groupsV2LoadGroup');
-  if (!select || select._groupsV2ListenerAttached) return;
-  select.addEventListener('change', () => {
-    const groupId = select.value;
-    if (!groupId) return;
-    const groups = (window.STATE && Array.isArray(window.STATE.groups)) ? window.STATE.groups : [];
-    const matchById = groups.find((g) => g && typeof g.id === 'string' && g.id === groupId);
-    const matchByLabel = groups.find((g) => {
-      if (!g) return false;
-      const label = [g.room || g.roomName || '', g.zone || '', g.name || g.label || '']
-        .filter(Boolean)
-        .join(':');
-      return label === groupId;
-    });
-    const group = matchById || matchByLabel || null;
-    if (!group) return;
-    const planId = typeof group.plan === 'string'
-      ? group.plan
-      : (group.plan && typeof group.plan === 'object' ? (group.plan.id || group.plan.name) : '');
-    groupsV2FormState.planId = planId || '';
-    groupsV2FormState.planSearch = '';
-    const cfg = group.planConfig && typeof group.planConfig === 'object' ? group.planConfig : {};
-    const anchor = cfg.anchor && typeof cfg.anchor === 'object' ? cfg.anchor : {};
-    const seed = typeof anchor.seedDate === 'string' ? anchor.seedDate : '';
-    const parsedSeed = parseLocalDateInput(seed);
-    groupsV2FormState.anchorMode = anchor.mode === 'dps' ? 'dps' : 'seedDate';
-    groupsV2FormState.seedDate = parsedSeed ? formatDateInputValue(parsedSeed) : '';
-    groupsV2FormState.dps = toNumberOrNull(anchor.dps);
-    const scheduleCfg = cfg.schedule && typeof cfg.schedule === 'object' ? cfg.schedule : {};
-    groupsV2FormState.schedule = hydrateGroupsV2ScheduleState(scheduleCfg);
-    const gradientCfg = cfg.gradients && typeof cfg.gradients === 'object' ? cfg.gradients : {};
-    groupsV2FormState.gradients = {
-      ppfd: toNumberOrNull(gradientCfg.ppfd) ?? GROUPS_V2_DEFAULTS.gradients.ppfd,
-      blue: toNumberOrNull(gradientCfg.blue) ?? GROUPS_V2_DEFAULTS.gradients.blue,
-      tempC: toNumberOrNull(gradientCfg.tempC) ?? GROUPS_V2_DEFAULTS.gradients.tempC,
-      rh: toNumberOrNull(gradientCfg.rh) ?? GROUPS_V2_DEFAULTS.gradients.rh,
-    };
-    populateGroupsV2PlanSearchDropdown();
-    populateGroupsV2PlanDropdown(groupsV2FormState.planSearch);
-    applyGroupsV2StateToInputs();
-    updateGroupsV2AnchorInputs();
-    updateGroupsV2Preview();
-  });
-  select._groupsV2ListenerAttached = true;
-});
-// Populate Groups V2 Load Group dropdown with saved groups, format: Room Name:Zone:Name
-function populateGroupsV2LoadGroupDropdown() {
-  const select = document.getElementById('groupsV2LoadGroup');
-  if (!select) return;
-  // Remove all except the first (none)
-  while (select.options.length > 1) select.remove(1);
-  // Example: get groups from window.STATE.groups or similar
-  const groups = (window.STATE && Array.isArray(window.STATE.groups)) ? window.STATE.groups : [];
-  groups.forEach(group => {
-    const room = group.room || group.roomName || '';
-    const zone = group.zone || '';
-    const name = group.name || group.label || '';
-    const label = [room, zone, name].filter(Boolean).join(':');
-    const opt = document.createElement('option');
-    opt.value = group.id || label;
-    opt.textContent = label || '(unnamed group)';
-    select.appendChild(opt);
-  });
-}
-
-document.addEventListener('DOMContentLoaded', () => {
-  // ...existing code...
-  populateGroupsV2LoadGroupDropdown();
-  // If groups can change dynamically, listen for a custom event to refresh
-  document.addEventListener('groups-updated', populateGroupsV2LoadGroupDropdown);
-});
-// Populate Groups V2 Room dropdown with 'GreenReach' and rooms from STATE.rooms
-function populateGroupsV2RoomDropdown() {
-  const select = document.getElementById('groupsV2RoomSelect');
-  if (!select) return;
-  // Remove all except the first (GreenReach)
-  while (select.options.length > 1) select.remove(1);
-  const seen = new Set(['GreenReach']);
-  if (window.STATE && Array.isArray(window.STATE.rooms)) {
-    window.STATE.rooms.forEach(room => {
-      if (!room || !room.name || seen.has(room.name)) return;
-      const opt = document.createElement('option');
-      opt.value = room.name;
-      opt.textContent = room.name;
-      select.appendChild(opt);
-      seen.add(room.name);
-    });
-  }
-}
-
-document.addEventListener('DOMContentLoaded', () => {
-  populateGroupsV2RoomDropdown();
-  // If rooms can change dynamically, listen for a custom event to refresh
-  document.addEventListener('rooms-updated', populateGroupsV2RoomDropdown);
-});
-// Wire up Groups V2 sidebar button to open Group V2 Setup card
-document.addEventListener('DOMContentLoaded', () => {
-  const groupsV2Btn = document.querySelector('[data-sidebar-link][data-target="groups-v2"]');
-  if (groupsV2Btn) {
-    groupsV2Btn.addEventListener('click', (e) => {
-      e.preventDefault();
-      setActivePanel('groups-v2');
-    });
-  }
-});
-// Feature flag: opt-in to simplified room-only group matching
-const ROOM_ONLY_GROUPS = (window.GROUPS_ROOM_ONLY !== false);
-
-const groupsSetupState = (window._groupsSetupState = window._groupsSetupState || {
-  groups: [],
-  devices: [],
-  planMap: {},
-  rooms: [],
-  roomLookup: {},
-  // zones: [],
-  currentRoom: '',
-  currentRoomId: '',
-  currentRoomOption: null,
-  currentMembers: new Set(),
-  selectedGroupId: null,
-  refreshChecklist: null,
-  refreshNameOptions: null,
-  syncToGroupSelection: null,
-});
-
-// Phase-3: Enforce strict group member selection logic
-function computeGroupMembers(group, allDevices) {
-  // Simplified: Only require 'room' property to match
-  const match = (group && group.match) || {};
-  const matchRoom = (typeof match.room === 'string' ? match.room.trim() : '');
-  if (!matchRoom) return [];
-  const devicePool = Array.isArray(allDevices) && allDevices.length
-    ? allDevices
-    : (ROOM_ONLY_GROUPS && Array.isArray(window.STATE?.devices) ? window.STATE.devices : []);
-  const candidates = (devicePool || []).filter((device) => {
-    if (!device) return false;
-    return (typeof device.room === 'string' && device.room.trim() === matchRoom);
-  });
-  if (Array.isArray(group?.members) && group.members.length) {
-    const ids = new Set(
-      group.members
-        .map((entry) => (typeof entry === 'object' ? entry.id : entry))
-        .map((id) => (typeof id === 'string' ? id.trim() : ''))
-        .filter(Boolean)
-    );
-    if (ids.size) {
-      return candidates.filter((device) => ids.has(String(device?.id || '').trim()));
-    }
-  }
-  return candidates;
-}
-
-function getActiveGroupMembers(group, selectionOverride = null) {
-  const activeGroup = group || (typeof STATE === 'object' ? STATE?.currentGroup : null) || null;
-  if (!activeGroup) return [];
-
-  const selection = selectionOverride ||
-    (typeof getSelectedGroupRoomZone === 'function'
-      ? getSelectedGroupRoomZone()
-      : { roomId: '', roomName: '', rawRoom: '', zone: '' });
-
-  const match = {
-    ...activeGroup.match,
-    room: firstNonEmptyString(selection.room, selection.roomId, selection.roomName, selection.rawRoom),
-    roomId: firstNonEmptyString(selection.roomId, selection.room, selection.roomName, selection.rawRoom),
-    roomName: firstNonEmptyString(selection.roomName, selection.room, selection.roomId, selection.rawRoom),
-    zone: firstNonEmptyString(selection.zone, selection.zoneId, selection.zoneName),
-    zoneId: firstNonEmptyString(selection.zoneId, selection.zone, selection.zoneName),
-    zoneName: firstNonEmptyString(selection.zoneName, selection.zone, selection.zoneId),
-  };
-
-  const normalizedLights = Array.isArray(activeGroup.lights)
-    ? activeGroup.lights
-        .map((entry, index) => normalizeGroupLightEntry(entry, index))
-        .filter(Boolean)
-        .map((light) => {
-          const roomValue = firstNonEmptyString(light.room, light.roomId, light.roomName, light.location?.room);
-          const zoneValue = firstNonEmptyString(light.zone, light.zoneId, light.zoneName, light.location?.zone);
-          return {
-            ...light,
-            room: roomValue,
-            roomId: firstNonEmptyString(light.roomId, light.room, light.roomName, light.location?.room),
-            roomName: firstNonEmptyString(light.roomName, light.room, light.roomId, light.location?.room),
-            zone: zoneValue,
-            zoneId: firstNonEmptyString(light.zoneId, light.zone, light.zoneName, light.location?.zone),
-            zoneName: firstNonEmptyString(light.zoneName, light.zone, light.zoneId, light.location?.zone),
-          };
-        })
-    : [];
-
-  const devicePool = ROOM_ONLY_GROUPS && (!normalizedLights || normalizedLights.length === 0)
-    ? (Array.isArray(STATE?.devices) ? STATE.devices : [])
-    : normalizedLights;
-
-  return computeGroupMembers({ ...activeGroup, match }, devicePool);
-}
-// Utility: Always include x-pin header for farm writes (mirrors Recipe Bridge _hdrs)
-function _hdrs(extra = {}) {
-  let pin = '';
-  if (typeof window.FARM_PIN === 'string' && window.FARM_PIN) {
-    pin = window.FARM_PIN;
-  } else {
-    try {
-      pin = localStorage.getItem('farm.pin') || '';
-    } catch {}
-  }
-  return {
-    'Content-Type': 'application/json',
-    'x-pin': pin,
-    ...extra
-  };
-}
-// --- DEMO PATCH: Auto-populate STATE.lightSetups from GreenReach Room 1 fixtures ---
-
-document.addEventListener('DOMContentLoaded', async () => {
-  window.GROUPS_ROOM_ONLY = true;
-  window.GROUPS_PLANS = true;
-  if (!window.STATE) window.STATE = {};
-  try {
-    await mountGroupsSetup();
-  } catch (e) {
-    console.error(e);
-  }
-  if (!Array.isArray(window.STATE.rooms)) return;
-  const room = window.STATE.rooms.find(r => r.name === 'GreenReach Room 1' || r.id === 'greenreach-room-1');
-  if (!room || !Array.isArray(room.fixtures) || !room.fixtures.length) return;
-  window.STATE.lightSetups = [
-    {
-      id: 'greenreach-room-1-setup',
-      room: room.id,
-      zone: 'Zone 1',
-      fixtures: room.fixtures.map(f => ({
-        ...f,
-        count: 1,
-        type: 'light',
-        name: f.name || 'GROW3 TopLight MH Model-300W-22G12',
-        vendor: f.vendor || 'GROW3',
-        model: f.model || 'Model-300W-22G12',
-        watts: f.watts || 300
-      })),
-      controlMethod: 'WiFi',
-      totalFixtures: room.fixtures.length,
-      totalWattage: room.fixtures.length * 300,
-      createdAt: new Date().toISOString()
-    }
-  ];
-  window.dispatchEvent(new CustomEvent('lightSetupsChanged'));
-
-  // --- Smart Plugs sidebar link wiring ---
-  const smartPlugsButtons = [
-    document.querySelector('[data-sidebar-link][data-target="smart-plugs"]'),
-    document.getElementById('btnOpenSmartPlugsPanel')
-  ].filter(Boolean);
-
-  smartPlugsButtons.forEach((btn) => {
-    btn.addEventListener('click', (e) => {
-      e.preventDefault();
-      openAutomationDrawer('smart-plugs');
-    });
-  });
-});
-
-async function readJson(response) {
-  const text = await response.text();
-  if (!text) return {};
-  try {
-    return JSON.parse(text);
-  } catch (err) {
-    console.warn('Failed to parse JSON response', err);
-    return {};
-  }
-}
-
-async function jget(path) {
-  const response = await fetch((window.API_BASE || '') + path, {
-    headers: { 'Accept': 'application/json' }
-  });
-  if (!response.ok) {
-    throw new Error(`GET ${path} failed: ${response.status}`);
-  }
-  return readJson(response);
-}
-
-async function jpost(path, body) {
-  const response = await fetch((window.API_BASE || '') + path, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json', 'Accept': 'application/json' },
-    body: JSON.stringify(body)
-  });
-  if (!response.ok) {
-    throw new Error(`POST ${path} failed: ${response.status}`);
-  }
-  return readJson(response);
-}
-
-async function jput(path, body) {
-  const response = await fetch((window.API_BASE || '') + path, {
-    method: 'PUT',
-    headers: { 'Content-Type': 'application/json', 'Accept': 'application/json' },
-    body: JSON.stringify(body)
-  });
-  if (!response.ok) {
-    throw new Error(`PUT ${path} failed: ${response.status}`);
-  }
-  return readJson(response);
-}
-
-async function jpatch(path, body) {
-  const response = await fetch((window.API_BASE || '') + path, {
-    method: 'PATCH',
-    headers: { 'Content-Type': 'application/json', 'Accept': 'application/json' },
-    body: JSON.stringify(body)
-  });
-  if (!response.ok) {
-    throw new Error(`PATCH ${path} failed: ${response.status}`);
-  }
-  return readJson(response);
-}
-
-function pctToHex(p) {
-  const clamped = Math.max(0, Math.min(100, Number(p) || 0));
-  const whole = Math.round(clamped);
-  return whole.toString(16).toUpperCase().padStart(2, '0');
-}
-
-function mixHEX12(ch) {
-  const { cw = 0, ww = 0, bl = 0, rd = 0 } = ch || {};
-  return `${pctToHex(cw)}${pctToHex(ww)}${pctToHex(bl)}${pctToHex(rd)}0000`;
-}
-
-function normalizePlanMap(plansData) {
-  if (!plansData) return {};
-  if (Array.isArray(plansData)) {
-    return plansData.reduce((acc, plan, index) => {
-      const hydrated = hydratePlan(plan, index);
-      const key = hydrated?.id || hydrated?.name;
-      if (key) acc[key] = hydrated;
-      return acc;
-    }, {});
-  }
-  if (Array.isArray(plansData?.plans)) {
-    return plansData.plans.reduce((acc, plan, index) => {
-      const hydrated = hydratePlan(plan, index);
-      const key = hydrated?.id || hydrated?.name;
-      if (key) acc[key] = hydrated;
-      return acc;
-    }, {});
-  }
-  if (plansData && typeof plansData === 'object') {
-    return { ...plansData };
-  }
-  return {};
-}
-
-function parsePhotoperiodHours(photoperiod) {
-  if (!photoperiod) return 16;
-  const first = String(photoperiod).split('/')[0];
-  const hours = Number(first);
-  return Number.isFinite(hours) && hours > 0 ? hours : 16;
-}
-
-function firstNonEmpty(...values) {
-  for (const value of values) {
-    if (value === undefined || value === null) continue;
-    if (typeof value === 'string') {
-      if (!value.trim()) continue;
-      return value;
-    }
-    return value;
-  }
-  return undefined;
-}
-
-function toNumberOrNull(value) {
-  if (value === undefined || value === null || value === '') return null;
-  const num = Number(value);
-  return Number.isFinite(num) ? num : null;
-}
-
-function readPhotoperiodHours(value) {
-  if (value === undefined || value === null) return null;
-  if (typeof value === 'number') {
-    return Number.isFinite(value) ? value : null;
-  }
-  if (typeof value === 'string') {
-    const trimmed = value.trim();
-    if (!trimmed) return null;
-    const first = trimmed.split('/')[0];
-    const num = Number(first);
-    return Number.isFinite(num) ? num : null;
-  }
-  return null;
-}
-
-function normalizePlanLightDay(entry) {
-  if (!entry || typeof entry !== 'object') return null;
-  const mixSource = entry.mix && typeof entry.mix === 'object' ? entry.mix : entry;
-  const cw = toNumberOrNull(mixSource?.cw ?? mixSource?.coolWhite);
-  const ww = toNumberOrNull(mixSource?.ww ?? mixSource?.warmWhite);
-  const bl = toNumberOrNull(mixSource?.bl ?? mixSource?.blue);
-  const rd = toNumberOrNull(mixSource?.rd ?? mixSource?.red);
-  return {
-    raw: entry,
-    day: entry.d ?? entry.day ?? entry.dayStart ?? null,
-    stage: entry.stage ?? entry.label ?? '',
-    ppfd: toNumberOrNull(entry.ppfd),
-    dli: toNumberOrNull(entry.dli ?? entry.targetDli ?? entry.dliTarget),
-    photoperiod: firstNonEmpty(entry.photoperiod, entry.hours, entry.photoperiodHours),
-    mix: {
-      cw: cw ?? 0,
-      ww: ww ?? 0,
-      bl: bl ?? 0,
-      rd: rd ?? 0,
-    },
-  };
-}
-
-function normalizePlanEnvDay(entry) {
-  if (!entry || typeof entry !== 'object') return null;
-  return {
-    raw: entry,
-    day: entry.d ?? entry.day ?? entry.dayStart ?? null,
-    tempC: toNumberOrNull(entry.tempC ?? entry.temp ?? entry.temperature),
-    rh: toNumberOrNull(entry.rh ?? entry.humidity ?? entry.rhPct),
-    rhBand: toNumberOrNull(entry.rhBand ?? entry.humidityBand ?? entry.rhDelta),
-  };
-}
-
-function derivePlanRuntime(plan) {
-  const lightV2 = Array.isArray(plan?.light?.days) ? plan.light.days : [];
-  const legacyDays = Array.isArray(plan?.days) ? plan.days : [];
-  const normalizedLight = lightV2.map(normalizePlanLightDay).filter(Boolean);
-  const normalizedLegacy = legacyDays.map(normalizePlanLightDay).filter(Boolean);
-  const lightDays = normalizedLight.length ? normalizedLight : normalizedLegacy;
-  const firstDay = lightDays.length ? lightDays[0] : null;
-  const envDays = Array.isArray(plan?.env?.days) ? plan.env.days.map(normalizePlanEnvDay).filter(Boolean) : [];
-  const spectrum = firstDay?.mix ? { ...firstDay.mix } : null;
-  const ppfd = toNumberOrNull(firstNonEmpty(plan?.ppfd, firstDay?.ppfd));
-  const photoperiodRaw = firstNonEmpty(plan?.photoperiod, firstDay?.photoperiod, plan?.defaults?.photoperiod);
-  const photoperiodHours = photoperiodRaw != null ? readPhotoperiodHours(photoperiodRaw) : null;
-  const dliProvided = toNumberOrNull(plan?.dli);
-  const dli = dliProvided != null
-    ? dliProvided
-    : (ppfd != null && photoperiodHours != null ? (ppfd * 3600 * photoperiodHours) / 1e6 : null);
-  const notes = Array.isArray(plan?.meta?.notes)
-    ? plan.meta.notes.map((note) => (typeof note === 'string' ? note.trim() : '')).filter(Boolean)
-    : [];
-  const appliesRaw = plan?.meta?.appliesTo && typeof plan.meta.appliesTo === 'object' ? plan.meta.appliesTo : {};
-  const appliesTo = {
-    category: Array.isArray(appliesRaw.category)
-      ? appliesRaw.category.map((entry) => (typeof entry === 'string' ? entry : '')).filter(Boolean)
-      : [],
-    varieties: Array.isArray(appliesRaw.varieties)
-      ? appliesRaw.varieties.map((entry) => (typeof entry === 'string' ? entry : '')).filter(Boolean)
-      : [],
-  };
-  const structured = normalizedLight.length > 0 || envDays.length > 0 || !!plan?.defaults || !!plan?.meta;
-  return {
-    structured,
-    lightDays,
-    envDays,
-    firstDay,
-    spectrum,
-    ppfd,
-    photoperiod: photoperiodRaw,
-    photoperiodHours,
-    dli,
-    notes,
-    appliesTo,
-  };
-}
-
-function hydratePlan(plan, index = 0) {
-  if (!plan || typeof plan !== 'object') return plan;
-  const normalized = { ...plan };
-  const fallbackId = `plan-${index + 1}`;
-  const idCandidate = firstNonEmpty(normalized.id, normalized.planId, normalized.plan_id, normalized.key, fallbackId);
-  if (idCandidate) normalized.id = String(idCandidate).trim();
-  if (!normalized.key && normalized.id) normalized.key = normalized.id;
-  const derived = derivePlanRuntime(normalized);
-  const nameCandidate = firstNonEmpty(normalized.name, normalized.label, normalized.meta?.label, normalized.key, normalized.id);
-  if (nameCandidate) normalized.name = String(nameCandidate).trim();
-  Object.defineProperty(normalized, '_derived', { value: derived, enumerable: false, configurable: true, writable: true });
-  Object.defineProperty(normalized, '_structured', { value: !!derived.structured, enumerable: false, configurable: true, writable: true });
-  return normalized;
-}
-
-function getPlanPPFD(plan) {
-  if (!plan || typeof plan !== 'object') return 0;
-  const candidate = firstNonEmpty(plan.ppfd, plan._derived?.ppfd);
-  const num = toNumberOrNull(candidate);
-  return num ?? 0;
-}
-
-function getPlanPhotoperiodHours(plan) {
-  if (!plan || typeof plan !== 'object') return 12;
-  const priorities = [
-    plan.photoperiod,
-    plan._derived?.photoperiod,
-    plan._derived?.firstDay?.photoperiod,
-    plan.defaults?.photoperiod
-  ];
-  for (const candidate of priorities) {
-    const hours = readPhotoperiodHours(candidate);
-    if (hours != null) return hours;
-  }
-  if (plan._derived?.photoperiodHours != null) return plan._derived.photoperiodHours;
-  return 12;
-}
-
-function getPlanDli(plan) {
-  if (!plan || typeof plan !== 'object') return 0;
-  const direct = toNumberOrNull(plan.dli);
-  if (direct != null) return direct;
-  const ppfd = getPlanPPFD(plan);
-  const photoperiod = getPlanPhotoperiodHours(plan);
-  if (ppfd && photoperiod) {
-    return (ppfd * 3600 * photoperiod) / 1e6;
-  }
-  const derived = toNumberOrNull(plan._derived?.dli);
-  return derived != null ? derived : 0;
-}
-
-function formatPlanPhotoperiodDisplay(value) {
-  if (value === undefined || value === null || value === '') return '—';
-  if (typeof value === 'number') {
-    const digits = Math.abs(value % 1) < 0.01 ? 0 : 1;
-    return `${value.toFixed(digits)} h`;
-  }
-  const text = String(value).trim();
-  if (!text) return '—';
-  const hours = readPhotoperiodHours(text);
-  if (hours != null) {
-    const digits = Math.abs(hours % 1) < 0.01 ? 0 : 1;
-    return text.includes('/') ? `${text} (${hours.toFixed(digits)} h)` : `${hours.toFixed(digits)} h`;
-  }
-  return text;
-}
-
-function formatPlanMix(mix = {}) {
-  const labels = { cw: 'CW', ww: 'WW', bl: 'BL', rd: 'RD' };
-  return ['cw', 'ww', 'bl', 'rd']
-    .map((key) => {
-      const raw = mix[key];
-      const num = toNumberOrNull(raw);
-      const digits = num != null && Math.abs(num % 1) >= 0.01 ? 1 : 0;
-      const value = num != null ? num.toFixed(digits) : '0';
-      return `${labels[key]} ${value}%`;
-    })
-    .join(' · ');
-}
-
-async function getPlanMap(force = false) {
-  if (!force && window.GROUP_PLAN_MAP && Object.keys(window.GROUP_PLAN_MAP).length) {
-    return window.GROUP_PLAN_MAP;
-  }
-  try {
-    const raw = await jget('/plans');
-    const map = normalizePlanMap(raw);
-    window.GROUP_PLAN_MAP = map;
-    return map;
-  } catch (err) {
-    console.error('Failed to load plans', err);
-    return {};
-  }
-}
-
-async function mountGroupsSetup() {
-  if (!window.GROUPS_ROOM_ONLY) return;
-
-  const root = document.getElementById('groups-setup');
-  if (!root) return;
-
-  const state = groupsSetupState;
-  state.currentMembers = ensureMembersSet(state.currentMembers);
-  state.selectedGroupId = null;
-
-  let farm = {};
-  try {
-    farm = await jget('/farm');
-  } catch (err) {
-    console.error('Failed to load farm profile', err);
-    farm = {};
-  }
-
-  const normalizedRooms = normalizeFarmRooms(farm?.rooms);
-  state.rooms = normalizedRooms;
-  const roomLookup = {};
-  normalizedRooms.forEach((room) => {
-    if (!room) return;
-    const rawId = typeof room.id === 'string' ? room.id.trim() : '';
-    if (rawId && !roomLookup[rawId]) roomLookup[rawId] = room;
-    const labelKey = typeof room.label === 'string' ? room.label.trim() : '';
-    if (labelKey && !roomLookup[labelKey]) roomLookup[labelKey] = room;
-    const normalizedKey = normalizeRoomKey(room);
-    if (normalizedKey && !roomLookup[normalizedKey]) roomLookup[normalizedKey] = room;
-    if (Array.isArray(room.aliases)) {
-      room.aliases.forEach((alias) => {
-        const aliasKey = normalizeRoomKey(alias);
-        if (aliasKey && !roomLookup[aliasKey]) roomLookup[aliasKey] = room;
-      });
-    }
-  });
-  state.roomLookup = roomLookup;
-  state.zones = Array.isArray(farm?.zones) ? [...farm.zones] : [];
-
-  state.planMap = await getPlanMap();
-
-  let devRaw = {};
-  try {
-    devRaw = await jget('/api/devicedatas');
-  } catch (err) {
-    console.error('Failed to load devices from controller', err);
-    devRaw = {};
-  }
-
-  const controllerDevices = Array.isArray(devRaw?.data)
-    ? devRaw.data
-    : Array.isArray(devRaw)
-      ? devRaw
-      : [];
-  state.devices = controllerDevices
-    .map((entry) => normalizeControllerDeviceForGroups(entry))
-    .filter(Boolean);
-
-  let groupResponse = {};
-  try {
-    groupResponse = await jget('/groups');
-  } catch (err) {
-    console.warn('Failed to load existing groups for setup card', err);
-    groupResponse = {};
-  }
-  state.groups = Array.isArray(groupResponse?.groups) ? groupResponse.groups : [];
-
-  const roomSelect = document.getElementById('grp-room');
-  const zoneInput = document.getElementById('grp-zone');
-  const zoneList = document.getElementById('zones-list');
-  const labelInput = document.getElementById('grp-label');
-  const labelList = document.getElementById('grp-name-list');
-  const planSelect = document.getElementById('grp-plan');
-
-  if (roomSelect) {
-    roomSelect.innerHTML = '';
-    state.rooms.forEach((room) => {
-      if (!room) return;
-      const option = document.createElement('option');
-      option.value = String(room.id);
-      option.textContent = room.label || String(room.id);
-      if (room.key) option.setAttribute('data-room-key', room.key);
-      roomSelect.appendChild(option);
-    });
-  }
-
-  if (zoneList) {
-    zoneList.innerHTML = '';
-    state.zones.forEach((zone) => {
-      if (!zone) return;
-      const option = document.createElement('option');
-      option.value = zone;
-      zoneList.appendChild(option);
-    });
-  }
-
-  if (planSelect) {
-    const existingDefault = planSelect.querySelector('option[value=""]');
-    if (!existingDefault) {
-      const defaultOption = document.createElement('option');
-      defaultOption.value = '';
-      defaultOption.textContent = '(no plan)';
-      planSelect.appendChild(defaultOption);
-    }
-    Object.keys(state.planMap || {}).forEach((planKey) => {
-      if (!planKey) return;
-      const hasOption = Array.from(planSelect.options || []).some((opt) => opt.value === planKey);
-      if (hasOption) return;
-      const option = document.createElement('option');
-      option.value = planKey;
-      option.textContent = planKey;
-      planSelect.appendChild(option);
-    });
-  }
-
-  const updateGroupNameOptions = (roomSelection) => {
-    if (!labelList) return;
-    labelList.innerHTML = '';
-    const roomOption = resolveRoomOptionFromState(state, roomSelection);
-    if (!roomOption) return;
-    const aliasSet = new Set([roomOption.key, ...(Array.isArray(roomOption.aliases) ? roomOption.aliases : [])]
-      .map((entry) => normalizeRoomKey(entry))
-      .filter(Boolean));
-    if (!aliasSet.size) return;
-    const matches = (state.groups || [])
-      .filter((group) => {
-        const candidates = [
-          group?.room,
-          group?.match?.room,
-          group?.roomId,
-          group?.match?.roomId,
-          group?.roomName,
-          group?.match?.roomName,
-        ]
-          .map((value) => normalizeRoomKey(value))
-          .filter(Boolean);
-        return candidates.some((candidate) => aliasSet.has(candidate));
-      })
-      .slice()
-      .sort((a, b) => {
-        const nameA = firstNonEmptyString(a?.name, a?.label, a?.id);
-        const nameB = firstNonEmptyString(b?.name, b?.label, b?.id);
-        return nameA.localeCompare(nameB, undefined, { sensitivity: 'base' });
-      });
-    matches.forEach((group) => {
-      const opt = document.createElement('option');
-      const label = firstNonEmptyString(group?.name, group?.label, group?.id);
-      opt.value = label;
-      const zone = firstNonEmptyString(group?.zone, group?.match?.zone);
-      opt.label = zone ? `${label} (${zone})` : label;
-      labelList.appendChild(opt);
-    });
-  };
-
-  const refreshChecklist = () => {
-    renderRoomDevices(state.currentRoomOption || state.currentRoom, state.devices, state.currentMembers);
-  };
-
-  const evaluateGroupSelection = () => {
-    const roomOption = resolveRoomOptionFromState(state, state.currentRoomOption || state.currentRoomId || state.currentRoom);
-    const roomValue = roomOption?.label || state.currentRoom;
-    if (!roomValue) {
-      state.currentMembers = ensureMembersSet(new Set());
-      refreshChecklist();
-      return;
-    }
-    const zoneValue = zoneInput ? zoneInput.value : '';
-    const labelValue = labelInput ? labelInput.value : '';
-    const match = findGroupForForm(state.groups, roomOption || roomValue, zoneValue, labelValue);
-    if (match) {
-      state.selectedGroupId = match.id;
-      state.currentMembers = ensureMembersSet(new Set(extractGroupMemberIds(match)));
-      if (zoneInput) zoneInput.value = firstNonEmptyString(match?.zone, match?.match?.zone) || '';
-      if (labelInput) labelInput.value = firstNonEmptyString(match?.name, match?.label, match?.id);
-      if (planSelect) planSelect.value = match?.plan || '';
-    }
-    refreshChecklist();
-    updateGroupNameOptions(roomOption || roomValue);
-  };
-
-  const handleRoomChange = (explicitRoom = null) => {
-    const selectValue = explicitRoom ? explicitRoom.id : roomSelect ? roomSelect.value : '';
-    const resolved = explicitRoom || resolveRoomOptionFromState(state, selectValue);
-    state.currentRoomOption = resolved || null;
-    state.currentRoomId = resolved?.id || (selectValue ? String(selectValue) : '');
-    state.currentRoom = resolved?.label || (selectValue ? String(selectValue) : '');
-    state.selectedGroupId = null;
-    state.currentMembers = ensureMembersSet(new Set());
-    if (zoneInput) zoneInput.value = '';
-    if (labelInput) labelInput.value = '';
-    if (planSelect) planSelect.value = '';
-    updateGroupNameOptions(resolved || selectValue);
-    refreshChecklist();
-  };
-
-  state.refreshChecklist = refreshChecklist;
-  state.refreshNameOptions = updateGroupNameOptions;
-  state.syncToGroupSelection = evaluateGroupSelection;
-
-  if (roomSelect) {
-    roomSelect.addEventListener('change', () => {
-      handleRoomChange();
-      evaluateGroupSelection();
-    });
-    if (state.rooms.length) {
-      const initialRoom = state.rooms[0];
-      roomSelect.value = String(initialRoom.id);
-      handleRoomChange(initialRoom);
-      evaluateGroupSelection();
-    } else {
-      refreshChecklist();
-    }
-  } else {
-    refreshChecklist();
-  }
-  zoneInput?.addEventListener('input', evaluateGroupSelection);
-  zoneInput?.addEventListener('change', evaluateGroupSelection);
-  labelInput?.addEventListener('input', evaluateGroupSelection);
-  labelInput?.addEventListener('change', evaluateGroupSelection);
-
-  const btnSave = document.getElementById('btn-save-group');
-  if (btnSave) btnSave.addEventListener('click', () => saveGroupFromUI());
-
-  const btnApply = document.getElementById('btn-apply-now');
-  if (btnApply) btnApply.addEventListener('click', () => applyNow());
-
-  const btnClone = document.getElementById('btn-clone-group');
-  if (btnClone)
-    btnClone.addEventListener('click', () => {
-      cloneGroupUI();
-      state.selectedGroupId = null;
-    });
-
-  const btnSeed = document.getElementById('btn-seed-demo');
-  if (btnSeed) btnSeed.addEventListener('click', () => seedDemo(window.GROUP_PLAN_MAP || state.planMap, controllerDevices, farm));
-
-  const btnAddZone = document.getElementById('btn-add-zone');
-  if (btnAddZone) {
-    btnAddZone.addEventListener('click', async () => {
-      const inputValue = (zoneInput?.value || '').trim();
-      if (!inputValue) return;
-      const uniqueZones = Array.from(new Set([...state.zones, inputValue]));
-      try {
-        await jpost('/farm', { ...farm, zones: uniqueZones });
-        state.zones = uniqueZones;
-        farm = { ...farm, zones: uniqueZones };
-        if (zoneList) {
-          zoneList.innerHTML = '';
-          state.zones.forEach((zone) => {
-            if (!zone) return;
-            const option = document.createElement('option');
-            option.value = zone;
-            zoneList.appendChild(option);
-          });
-        }
-        if (typeof showToast === 'function') {
-          showToast({ title: 'Zone added', msg: `Zone "${inputValue}" added to farm.`, kind: 'success', icon: '➕' });
-        } else {
-          alert(`Zone "${inputValue}" added to farm.`);
-        }
-      } catch (err) {
-        console.error('Failed to add zone to farm', err);
-        if (typeof showToast === 'function') {
-          showToast({ title: 'Zone add failed', msg: err?.message || String(err), kind: 'warn', icon: '⚠️' });
-        } else {
-          alert('Could not add zone. Please try again.');
-        }
-      }
-    });
-  }
-}
-
-function renderRoomDevices(room, devices, membersSet = groupsSetupState.currentMembers) {
-  const list = document.getElementById('grp-members');
-  if (!list) return;
-
-  const normalizedMembers = ensureMembersSet(membersSet);
-  groupsSetupState.currentMembers = normalizedMembers;
-
-  const state = groupsSetupState;
-  const resolvedRoom = resolveRoomOptionFromState(state, room);
-  const keySet = new Set();
-  if (resolvedRoom) {
-    if (resolvedRoom.key) keySet.add(resolvedRoom.key);
-    if (Array.isArray(resolvedRoom.aliases)) {
-      resolvedRoom.aliases
-        .map((alias) => normalizeRoomKey(alias))
-        .filter(Boolean)
-        .forEach((aliasKey) => keySet.add(aliasKey));
-    }
-  } else {
-    const fallbackKey = normalizeRoomKey(room);
-    if (fallbackKey) keySet.add(fallbackKey);
-  }
-
-  list.innerHTML = '';
-
-  if (!keySet.size) {
-    const li = document.createElement('li');
-    li.className = 'empty';
-    li.textContent = 'Select a room to view available lights.';
-    list.appendChild(li);
-    return;
-  }
-
-  const deviceList = Array.isArray(devices) ? devices : [];
-  const normalizedDevices = deviceList
-    .map((device) => {
-      if (!device) return null;
-      if (Array.isArray(device.roomKeys)) return device;
-      return normalizeControllerDeviceForGroups(device);
-    })
-    .filter(Boolean);
-
-  const matched = normalizedDevices.filter(
-    (device) => Array.isArray(device.roomKeys) && device.roomKeys.some((value) => keySet.has(value))
-  );
-
-  if (!matched.length) {
-    const li = document.createElement('li');
-    li.className = 'empty';
-    li.textContent = 'No lights found for this room.';
-    list.appendChild(li);
-    return;
-  }
-
-  matched
-    .slice()
-    .sort((a, b) => (a.deviceName || '').localeCompare(b.deviceName || '', undefined, { sensitivity: 'base' }))
-    .forEach((device) => {
-      const id = firstNonEmptyString(device.id, device.deviceId, device.device_id, device.deviceID);
-      if (!id) return;
-      const li = document.createElement('li');
-      const label = document.createElement('label');
-      const input = document.createElement('input');
-      input.type = 'checkbox';
-      input.value = id;
-      input.checked = normalizedMembers.has(id);
-      input.addEventListener('change', () => {
-        if (input.checked) {
-          normalizedMembers.add(id);
-        } else {
-          normalizedMembers.delete(id);
-        }
-      });
-      const span = document.createElement('span');
-      span.textContent = device.deviceName || `Device ${id}`;
-      span.title = id;
-      label.appendChild(input);
-      label.appendChild(span);
-      li.appendChild(label);
-      list.appendChild(li);
-    });
-}
-
-
-async function saveGroupFromUI() {
-  const roomField = document.getElementById('grp-room');
-  const zoneField = document.getElementById('grp-zone');
-  const labelField = document.getElementById('grp-label');
-  const planField = document.getElementById('grp-plan');
-
-  if (!roomField || !labelField) return;
-
-  const state = groupsSetupState;
-  const selectedRoomValue = (roomField.value || '').trim();
-  const roomOption = resolveRoomOptionFromState(state, selectedRoomValue || state.currentRoomOption || state.currentRoom);
-  const room = roomOption?.label || selectedRoomValue || state.currentRoom || '';
-  if (!room) {
-    if (typeof showToast === 'function') {
-      showToast({ title: 'Room required', msg: 'Choose a room before saving.', kind: 'warn', icon: '⚠️' });
-    } else {
-      alert('Choose a room first.');
-    }
-    return;
-  }
-
-  const roomId = roomOption?.id ? String(roomOption.id).trim() : '';
-  const zoneRaw = (zoneField?.value || '').trim();
-  const labelRaw = (labelField.value || '').trim();
-  const planRaw = (planField?.value || '').trim();
-  const groupName = labelRaw || `${room} Group`;
-  const membersSet = ensureMembersSet(state.currentMembers);
-  const members = Array.from(membersSet).map((id) => String(id).trim()).filter(Boolean);
-
-  if (!members.length) {
-    if (typeof showToast === 'function') {
-      showToast({ title: 'No lights selected', msg: 'Check at least one light to include in the group.', kind: 'warn', icon: '⚠️' });
-    } else {
-      alert('Select at least one light to include in the group.');
-    }
-    return;
-  }
-
-  const existingGroups = Array.isArray(state.groups) ? [...state.groups] : [];
-  const existing = state.selectedGroupId
-    ? existingGroups.find((group) => String(group?.id || '').trim() === state.selectedGroupId)
-    : findGroupForForm(existingGroups, roomOption || room, zoneRaw, labelRaw, { allowLabelFallback: true });
-
-  const id = existing
-    ? existing.id
-    : generateGroupId(room, zoneRaw, groupName, existingGroups.map((group) => group?.id).filter(Boolean));
-
-  const zone = zoneRaw;
-  const match = { ...(existing?.match || {}), room, zone };
-  if (roomId) {
-    match.roomId = roomId;
-    match.roomName = room;
-  } else {
-    delete match.roomId;
-    delete match.roomName;
-  }
-  if (zone) {
-    match.zoneId = zone;
-    match.zoneName = zone;
-  } else {
-    delete match.zoneId;
-    delete match.zoneName;
-  }
-
-  const nextGroup = {
-    ...(existing || {}),
-    id,
-    name: groupName,
-    label: groupName,
-    room,
-    zone,
-    match,
-    members,
-    lights: members.map((memberId) => ({ id: memberId })),
-  };
-  if (roomId) {
-    nextGroup.roomId = roomId;
-    nextGroup.roomName = room;
-  } else {
-    delete nextGroup.roomId;
-    delete nextGroup.roomName;
-  }
-  if (planRaw) {
-    nextGroup.plan = planRaw;
-  } else if (nextGroup.plan) {
-    delete nextGroup.plan;
-  }
-
-  const merged = existing
-    ? existingGroups.map((group) => (String(group?.id || '').trim() === id ? nextGroup : group))
-    : [...existingGroups, nextGroup];
-
-  let persistedGroups = merged;
-  try {
-    const response = await saveJSON('/groups', { groups: merged });
-    if (response && Array.isArray(response.groups)) {
-      persistedGroups = response.groups;
-    }
-  } catch (err) {
-    console.error('Failed to save group', err);
-    if (typeof showToast === 'function') {
-      showToast({ title: 'Save failed', msg: err?.message || String(err), kind: 'warn', icon: '⚠️' });
-    } else {
-      alert('Could not save group. Please try again.');
-    }
-    return;
-  }
-
-  state.groups = persistedGroups;
-  state.selectedGroupId = id;
-  state.currentMembers = ensureMembersSet(new Set(members));
-
-  if (typeof state.refreshNameOptions === 'function') {
-    state.refreshNameOptions(roomOption || room);
-  }
-  if (typeof state.syncToGroupSelection === 'function') {
-    state.syncToGroupSelection();
-  } else if (typeof state.refreshChecklist === 'function') {
-    state.refreshChecklist();
-  }
-
-  const successMsg = existing ? 'Group updated' : 'Group created';
-  if (typeof showToast === 'function') {
-    const zoneLabel = zone ? ` • ${zone}` : '';
-    showToast({ title: successMsg, msg: `${groupName} in ${room}${zoneLabel}`, kind: 'success', icon: '✅' });
-  } else {
-    alert(`${successMsg}.`);
-  }
-
-  if (planRaw) {
-    const planSpec = (state.planMap && state.planMap[planRaw]) || {};
-    const photoperiod = planSpec.photoperiod || '16/8';
-    const durationHours = parsePhotoperiodHours(photoperiod);
-    try {
-      await jpost('/sched', {
-        id,
-        period: '1d',
-        photoperiod: [photoperiod],
-        start: '06:00',
-        durationHours,
-        rampUpMin: planSpec?.ramp?.sunrise || 10,
-        rampDownMin: planSpec?.ramp?.sunset || 10,
-        planKey: planRaw,
-        name: `${groupName} Schedule`,
-      });
-      if (typeof showToast === 'function') {
-        const summary = planSpec.summary || '';
-        const planMsg = summary ? `${planRaw} • ${summary}` : planRaw;
-        showToast({ title: 'Plan linked', msg: `${planMsg} (${photoperiod})`, kind: 'info', icon: '🗓️' });
-      }
-    } catch (err) {
-      console.error('Failed to attach schedule', err);
-      if (typeof showToast === 'function') {
-        showToast({ title: 'Schedule not saved', msg: err?.message || String(err), kind: 'warn', icon: '⚠️' });
-      } else {
-        alert('Group saved but schedule could not be created.');
-      }
-    }
-  }
-
-}
-
-
-async function applyNow() {
-  const planField = document.getElementById('grp-plan');
-  const list = document.getElementById('grp-members');
-  if (!planField || !list) return;
-
-  const planKey = (planField.value || '').trim();
-  if (!planKey) {
-    alert('Pick a Plan first (or save without applying).');
-    return;
-  }
-
-  const ids = Array.from(list.querySelectorAll('input[type="checkbox"]:checked')).map((input) => input.value);
-  if (!ids.length) {
-    alert('Select at least one light before applying a plan.');
-    return;
-  }
-
-  const planSpec = (await getPlanMap())[planKey] || {};
-  const ch = Array.isArray(planSpec?.days)
-    ? planSpec.days[0] || {}
-    : (planSpec?.days ? Object.values(planSpec.days)[0] || {} : {});
-  const hex = mixHEX12({
-    cw: ch.cw ?? 35,
-    ww: ch.ww ?? 35,
-    bl: ch.bl ?? 15,
-    rd: ch.rd ?? 15
-  });
-
-  let success = 0;
-  let failure = 0;
-  for (const id of ids) {
-    try {
-      await jpatch(`/api/devicedatas/device/${id}`, { status: 'on', value: hex });
-      success += 1;
-    } catch (err) {
-      console.error(`Failed to apply plan to device ${id}`, err);
-      failure += 1;
-    }
-  }
-
-  if (failure) {
-    alert(`Applied plan ${planKey} to ${success} light(s). ${failure} failed.`);
-  } else {
-    alert(`Applied plan ${planKey} to ${success} light(s).`);
-  }
-}
-
-function cloneGroupUI() {
-  const labelField = document.getElementById('grp-label');
-  if (!labelField) return;
-  const current = labelField.value || '';
-  const suggestion = current ? `${current} (Clone)` : '';
-  const label = window.prompt('New group name?', suggestion);
-  if (!label) return;
-  labelField.value = label;
-  if (groupsSetupState) {
-    groupsSetupState.selectedGroupId = null;
-  }
-}
-
-async function seedDemo(plans, devices, farm) {
-  const confirmed = window.confirm('Seed the GreenReach demo groups and schedules?');
-  if (!confirmed) return;
-
-  const DEMO_PLANS = {
-    'GR-Propagation-BL55': {
-      photoperiod: '16/8',
-      ramp: { sunrise: 10, sunset: 10 },
-      days: [{ stage: 'Static', cw: 20, ww: 20, bl: 55, rd: 25 }]
-    },
-    'GR-Flower-RD60': {
-      photoperiod: '12/12',
-      ramp: { sunrise: 10, sunset: 10 },
-      days: [{ stage: 'Static', cw: 35, ww: 35, bl: 15, rd: 60 }]
-    }
-  };
-
-  try {
-    await jpost('/plans', DEMO_PLANS);
-    const refreshedPlans = await getPlanMap(true);
-    if (refreshedPlans && typeof refreshedPlans === 'object') {
-      groupsSetupState.planMap = refreshedPlans;
-    }
-  } catch (err) {
-    console.error('Failed to seed demo plans', err);
-  }
-
-  const existingPlans = (plans && typeof plans === 'object') ? plans : {};
-  window.GROUP_PLAN_MAP = {
-    ...existingPlans,
-    ...(window.GROUP_PLAN_MAP || {}),
-    ...DEMO_PLANS
-  };
-  groupsSetupState.planMap = { ...(groupsSetupState.planMap || {}), ...window.GROUP_PLAN_MAP };
-  const planSelect = document.getElementById('grp-plan');
-  if (planSelect) {
-    Object.keys(DEMO_PLANS).forEach((key) => {
-      if (!Array.from(planSelect.options || []).some((opt) => opt.value === key)) {
-        const option = document.createElement('option');
-        option.value = key;
-        option.textContent = key;
-        planSelect.appendChild(option);
-      }
-    });
-  }
-
-  const deviceList = Array.isArray(devices) ? devices : [];
-  const findId = (needle) => {
-    if (!needle) return '';
-    const lower = String(needle).toLowerCase();
-    const match = deviceList.find((d) => {
-      const candidates = [
-        d?.deviceName,
-        d?.name,
-        d?.serial,
-        d?.serialNumber,
-        d?.deviceSerial,
-        d?.meta?.serial,
-        d?.meta?.serialNumber
-      ].filter(Boolean).map((value) => String(value).toLowerCase());
-      return candidates.some((value) => value.includes(lower));
-    });
-    return match ? String(match.id) : '';
-  };
-
-  const ID1 = findId('light-001') || findId('22G12-001');
-  const ID2 = findId('light-002') || findId('22G12-002');
-
-  const gProp = {
-    id: 'group:PropagationBay:PropagationNorth:Demo',
-    label: 'Propagation North — Demo',
-    room: 'Propagation Bay',
-    zone: 'Propagation North',
-    members: [ID1, ID2].filter(Boolean),
-    plan: 'GR-Propagation-BL55',
-  };
-
-  const demoGroups = [gProp]
-    .filter((group) => Array.isArray(group.members) && group.members.length)
-    .map((group) => ({
-      id: group.id,
-      name: group.label,
-      label: group.label,
-      room: group.room,
-      zone: group.zone,
-      match: { room: group.room, zone: group.zone },
-      members: group.members,
-      lights: group.members.map((memberId) => ({ id: memberId })),
-      plan: group.plan,
-    }));
-
-  if (demoGroups.length) {
-    const state = groupsSetupState;
-    const existingGroups = Array.isArray(state.groups) ? [...state.groups] : [];
-    const groupMap = new Map(existingGroups.map((group) => [String(group?.id || ''), group]));
-    demoGroups.forEach((group) => {
-      groupMap.set(String(group.id), group);
-    });
-    const mergedGroups = Array.from(groupMap.values());
-    try {
-      const response = await saveJSON('/groups', { groups: mergedGroups });
-      const persisted = response && Array.isArray(response.groups) ? response.groups : mergedGroups;
-      state.groups = persisted;
-      if (typeof state.refreshNameOptions === 'function') {
-        state.refreshNameOptions(state.currentRoomOption || state.currentRoom);
-      }
-      if (typeof state.syncToGroupSelection === 'function') {
-        state.syncToGroupSelection();
-      }
-      if (typeof showToast === 'function') {
-        showToast({ title: 'Demo groups seeded', msg: 'Propagation and Flower demo groups saved.', kind: 'success', icon: '🌱' });
-      }
-    } catch (err) {
-      console.error('Failed to persist demo groups', err);
-      if (typeof showToast === 'function') {
-        showToast({ title: 'Demo groups failed', msg: err?.message || String(err), kind: 'warn', icon: '⚠️' });
-      }
-    }
-  }
-
-  const propSched = {
-    id: gProp.id,
-    period: '1d',
-    photoperiod: ['16/8'],
-    start: '06:00',
-    durationHours: 16,
-    rampUpMin: 10,
-    rampDownMin: 10,
-    planKey: 'GR-Propagation-BL55'
-  };
-  const flowSched = {
-    id: gFlow.id,
-    period: '1d',
-    photoperiod: ['12/12'],
-    start: '18:00',
-    durationHours: 12,
-    rampUpMin: 10,
-    rampDownMin: 10,
-    planKey: 'GR-Flower-RD60'
-  };
-
-  try {
-    await jpost('/sched', propSched);
-  } catch (err) {
-    try {
-      await jput(`/sched/${encodeURIComponent(gProp.id)}`, propSched);
-    } catch (errPut) {
-      console.error('Failed to seed propagation schedule', errPut);
-    }
-  }
-
-  try {
-    await jpost('/sched', flowSched);
-  } catch (err) {
-    try {
-      await jput(`/sched/${encodeURIComponent(gFlow.id)}`, flowSched);
-    } catch (errPut) {
-      console.error('Failed to seed flower schedule', errPut);
-    }
-  }
-
-  const zoneSet = new Set(Array.isArray(farm?.zones) ? farm.zones : []);
-  ['Propagation North', 'Flower East'].forEach((zone) => {
-    if (zone) zoneSet.add(zone);
-  });
-  const updatedZones = Array.from(zoneSet);
-  if (farm && typeof farm === 'object') {
-    try {
-      await jpost('/farm', { ...farm, zones: updatedZones });
-    } catch (err) {
-      console.error('Failed to update farm zones during seeding', err);
-    }
-    farm.zones = updatedZones;
-  }
-  const zoneList = document.getElementById('zones-list');
-  if (zoneList) {
-    zoneList.innerHTML = '';
-    updatedZones.forEach((zone) => {
-      const option = document.createElement('option');
-      option.value = zone;
-      zoneList.appendChild(option);
-    });
-  }
-  groupsSetupState.zones = updatedZones;
-
-  const hexProp = mixHEX12({ cw: 20, ww: 20, bl: 55, rd: 25 });
-  for (const id of gProp.members) {
-    await jpatch(`/api/devicedatas/device/${id}`, { status: 'on', value: hexProp });
-  }
-
-  const hexFlow = mixHEX12({ cw: 35, ww: 35, bl: 15, rd: 60 });
-  for (const id of gFlow.members) {
-    await jpatch(`/api/devicedatas/device/${id}`, { status: 'on', value: hexFlow });
-  }
-
-  if (typeof showToast === 'function') {
-    showToast({ title: 'Demo seeded', msg: 'Plans, groups, schedules, and live ON applied.', kind: 'success', icon: '🚀' });
-  } else {
-    alert('GreenReach Demo seeded: groups, plans, schedules and live ON are set.');
-  }
-}
 // Fallbacks for device pick state if not defined elsewhere
 if (typeof getDevicePickState !== 'function') {
   window.getDevicePickState = function() {
@@ -3974,11 +48,7 @@ window.openGrow3Manager = async function() {
   }
   // Show controller info at the top
   const cfg = getGrow3ControllerConfig();
-  const runtimeBase = typeof window.API_BASE === 'string' ? window.API_BASE : '';
-  const normalizedRuntimeBase = runtimeBase.replace(/\/+$/, '');
-  const fallbackBase = `http://${cfg.address}:${cfg.port}`;
-  const apiBase = normalizedRuntimeBase || fallbackBase;
-  const controllerLabel = normalizedRuntimeBase || fallbackBase;
+  const apiBase = `http://${cfg.address}:${cfg.port}`;
   const SAFE_ON_HEX = '737373730000';
   body.innerHTML = `
     <h2 style="margin-top:0">Grow3 Manager</h2>
@@ -3989,7 +59,7 @@ window.openGrow3Manager = async function() {
       <button type="submit" class="primary" style="margin-top:18px;">Save</button>
     </form>
     <div class="tiny" style="color:#475569;margin-bottom:12px;">
-      Proxy summary: <code>${controllerLabel}/healthz</code> → Code3 controller <code>http://192.168.2.80:3000</code>. HEX format <code>[CW][WW][BL][RD][00][00]</code> (00–64).
+      Proxy summary: <code>${apiBase}/healthz</code> → Code3 controller <code>http://192.168.2.80:3000</code>. HEX format <code>[CW][WW][BL][RD][00][00]</code> (00–64).
     </div>
     <div id="grow3DevicesLoading" style="text-align:center;padding:32px;">Loading Grow3 devices…</div>
   `;
@@ -4009,8 +79,7 @@ window.openGrow3Manager = async function() {
   // Fetch device list from controller API using config
   let devices = [];
   try {
-    const listBase = apiBase.replace(/\/+$/, '');
-    const resp = await fetch(`${listBase}/api/devicedatas`);
+    const resp = await fetch(`${apiBase}/api/devicedatas`);
     if (!resp.ok) throw new Error('Controller not reachable');
     const data = await resp.json();
     devices = Array.isArray(data) ? data : (data.devices || []);
@@ -4046,7 +115,7 @@ window.openGrow3Manager = async function() {
         </tbody>
       </table>
     </div>
-    <div class="tiny" style="margin-top:16px;color:#64748b">Controller API: <code>${apiBase.replace(/\/+$/, '')}/api/devicedatas</code> (GET), <code>${apiBase.replace(/\/+$/, '')}/api/devicedatas/device/:id</code> (PATCH)</div>
+    <div class="tiny" style="margin-top:16px;color:#64748b">Controller API: <code>${apiBase}/api/devicedatas</code> (GET), <code>${apiBase}/api/devicedatas/device/:id</code> (PATCH)</div>
   `;
   // Wire up actions
   Array.from(body.querySelectorAll('.grow3-on')).forEach(btn => {
@@ -4060,55 +129,32 @@ window.openGrow3Manager = async function() {
     btn.onclick = async function() {
       const row = btn.closest('tr');
       const id = row.getAttribute('data-id');
-      await sendGrow3Command(id, { status: 'off' }, row, apiBase);
+      await sendGrow3Command(id, { status: 'off', value: null }, row, apiBase);
     };
   });
   Array.from(body.querySelectorAll('.grow3-send')).forEach(btn => {
     btn.onclick = async function() {
       const row = btn.closest('tr');
       const id = row.getAttribute('data-id');
-      const hexInput = row.querySelector('.grow3-hex');
-      const rawHex = hexInput ? hexInput.value.trim().toUpperCase() : '';
-      if (!/^[0-9A-F]{12}$/.test(rawHex)) {
-        window.showToast?.({ title: 'HEX required', msg: 'Enter a 12-character HEX12 payload.', kind: 'warn', icon: '⚠️' });
-        if (hexInput) hexInput.focus();
-        return;
-      }
-      if (hexInput) hexInput.value = rawHex;
-      await sendGrow3Command(id, { status: 'on', value: rawHex }, row, apiBase);
+      const hex = row.querySelector('.grow3-hex').value.trim();
+      if (!hex) { window.showToast?.({ title: 'HEX required', msg: 'Enter a HEX payload.', kind: 'warn', icon: '⚠️' }); return; }
+      await sendGrow3Command(id, { status: 'on', value: hex }, row, apiBase);
     };
   });
 };
 
 async function sendGrow3Command(id, payload, row, apiBase) {
   try {
-    const base = (typeof apiBase === 'string' ? apiBase : '').trim().replace(/\/+$/, '');
-    if (!base) throw new Error('Controller base URL not configured');
-    const status = payload && payload.status === 'on' ? 'on' : 'off';
-    let bodyPayload = { status };
-    if (status === 'on') {
-      const hex = typeof payload?.value === 'string' ? payload.value.trim().toUpperCase() : '';
-      if (hex) {
-        if (!/^[0-9A-F]{12}$/.test(hex)) {
-          throw new Error('HEX payload must be 12 hex characters');
-        }
-        bodyPayload = { status: 'on', value: hex };
-      }
-    }
-    const resp = await fetch(`${base}/api/devicedatas/device/${encodeURIComponent(id)}`, {
+    const resp = await fetch(`${apiBase}/api/devicedatas/device/${encodeURIComponent(id)}`, {
       method: 'PATCH',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(bodyPayload)
+      body: JSON.stringify(payload)
     });
     if (!resp.ok) throw new Error('Controller error');
-    const data = await resp.json().catch(() => ({}));
-    const statusCell = row?.querySelector?.('.grow3-status');
-    const hexInput = row?.querySelector?.('.grow3-hex');
-    const controllerStatus = typeof data.status === 'string' ? data.status : bodyPayload.status;
-    if (statusCell) statusCell.textContent = controllerStatus || 'OK';
-    const controllerHex = typeof data.value === 'string' ? data.value.trim().toUpperCase() : (bodyPayload.value || '');
-    if (hexInput) hexInput.value = controllerHex || '';
-    window.showToast?.({ title: 'Grow3 Updated', msg: `Device ${id} → ${controllerStatus || 'OK'}`, kind: 'success', icon: '✅' });
+    const data = await resp.json();
+    row.querySelector('.grow3-status').textContent = data.status || payload.status || 'OK';
+    row.querySelector('.grow3-hex').value = typeof data.value === 'string' ? data.value : (payload.value || '');
+    window.showToast?.({ title: 'Grow3 Updated', msg: `Device ${id} → ${row.querySelector('.grow3-status').textContent}`, kind: 'success', icon: '✅' });
   } catch (e) {
     window.showToast?.({ title: 'Grow3 Error', msg: e.message, kind: 'error', icon: '❌' });
   }
@@ -4134,9 +180,8 @@ function collectRoomsFromState() {
 }
 
 function updateGroupActionStates({ hasGroup = false, hasRoom = false, hasZone = false } = {}) {
-  const requireZone = !ROOM_ONLY_GROUPS;
-  const applyDisabled = !(hasGroup && hasRoom && (requireZone ? hasZone : true));
-  const saveDisabled = !(hasRoom && (requireZone ? hasZone : true));
+  const applyDisabled = !(hasGroup && hasRoom && hasZone);
+  const saveDisabled = !(hasRoom && hasZone);
   ['grpApply', 'grpOn', 'grpOff'].forEach((id) => {
     const btn = document.getElementById(id);
     if (btn) btn.disabled = applyDisabled;
@@ -4152,68 +197,19 @@ function seedGroupRoomZoneDropdowns() {
   const zoneSel = document.getElementById('groupZoneDropdown');
   const fixtureSummary = document.getElementById('groupFixtureSummary');
   if (!roomSel || !zoneSel) return;
-  const buildSelection = () => {
-    const roomId = roomSel.value;
-    const roomMeta = (collectRoomsFromState() || []).find((room) => room?.id === roomId) || null;
-    const zoneValue = zoneSel.value;
-    return {
-      room: roomSel.value,
-      roomId,
-      roomName: roomMeta?.name || '',
-      rawRoom: roomSel.value,
-      zone: zoneValue,
-      zoneId: zoneValue,
-      zoneName: zoneValue,
-    };
-  };
+  // Helper to update fixture summary for selected room/zone
   function updateFixtureSummary() {
     if (!fixtureSummary) return;
     const roomId = roomSel.value;
-const zoneValue = zoneSel ? zoneSel.value : '';
-const zoneSelected = ROOM_ONLY_GROUPS ? true : !!(zoneValue && zoneValue.trim());
-updateGroupActionStates({
-  hasGroup: Boolean(STATE?.currentGroup),
-  hasRoom: !!roomId,
-  hasZone: zoneSelected,
-  selection: buildSelection()
-});
-if (!roomId) {
-  fixtureSummary.innerHTML = '<span style="color:#64748b;font-size:13px;">Select a room to view lights.</span>';
-  return;
-}
-
-    if (ROOM_ONLY_GROUPS) {
-      const devices = Array.isArray(STATE?.devices) ? STATE.devices : [];
-      const normalizedRoom = String(roomId || '').trim().toLowerCase();
-      const roomDevices = devices.filter((device) => {
-        if (!device) return false;
-        const candidates = [
-          device.room,
-          device.roomId,
-          device.roomName,
-          device.location?.room,
-          device.location?.name,
-          device.meta?.room,
-          device.meta?.roomId,
-          device.meta?.roomName,
-        ]
-          .map((value) => (typeof value === 'string' ? value.trim().toLowerCase() : ''))
-          .filter(Boolean);
-        return candidates.includes(normalizedRoom);
-      });
-      if (!roomDevices.length) {
-        fixtureSummary.innerHTML = '<span style="color:#64748b;font-size:13px;">No controller lights are assigned to this room.</span>';
-      } else {
-        const items = roomDevices
-          .map((device) => `<div style="font-size:13px;">${escapeHtml(device.deviceName || device.name || `Device ${device.id}`)} <span style="color:#94a3b8;">#${escapeHtml(String(device.id || ''))}</span></div>`)
-          .join('');
-        fixtureSummary.innerHTML = items;
-      }
+    const zone = zoneSel.value;
+    updateGroupActionStates({ hasGroup: Boolean(STATE?.currentGroup), hasRoom: !!roomId, hasZone: !!zone });
+    if (!roomId || !zone) {
+      fixtureSummary.innerHTML = '<span style="color:#64748b;font-size:13px;">Select a room and zone to view lights.</span>';
       return;
     }
-    const setups = (window.STATE?.lightSetups || []).filter(s => (s.room === roomId || s.room === (window.STATE?.rooms?.find(r=>r.id===roomId)?.name)));
+    const setups = (window.STATE?.lightSetups || []).filter(s => (s.room === roomId || s.room === (window.STATE?.rooms?.find(r=>r.id===roomId)?.name)) && s.zone === zone);
     if (!setups.length) {
-      fixtureSummary.innerHTML = '<span style="color:#64748b;font-size:13px;">No lights configured for this room.</span>';
+      fixtureSummary.innerHTML = '<span style="color:#64748b;font-size:13px;">No lights configured for this room/zone.</span>';
       return;
     }
     let html = '';
@@ -4222,67 +218,54 @@ if (!roomId) {
         html += setup.fixtures.map(f => `<div style='font-size:13px;'>${escapeHtml(f.vendor||f.name||f.model||'Light')} ×${f.count||1} (${f.watts||''}W)</div>`).join('');
       }
     });
-    fixtureSummary.innerHTML = html || '<span style="color:#64748b;font-size:13px;">No lights found for this room.</span>';
+    fixtureSummary.innerHTML = html || '<span style="color:#64748b;font-size:13px;">No lights found for this room/zone.</span>';
   }
 
   const normaliseRooms = () => (collectRoomsFromState() || []).map(room => ({
     id: room?.id || '',
-    name: room?.name || ''
+    name: room?.name || '',
+    zones: Array.isArray(room?.zones) ? room.zones : []
   }));
 
   const previousRoom = roomSel.value;
+  const previousZone = zoneSel.value;
   const rooms = normaliseRooms();
 
-  roomSel.innerHTML = '<option value="" disabled>Select room…</option>' + rooms.map(r => `<option value="${escapeHtml(r.id)}">${escapeHtml(r.name)}</option>`).join('');
+  roomSel.innerHTML = '<option value="">Room</option>' + rooms.map(r => `<option value="${escapeHtml(r.id)}">${escapeHtml(r.name)}</option>`).join('');
 
   const preservedRoomId = rooms.some(r => r.id === previousRoom) ? previousRoom : '';
   roomSel.value = preservedRoomId;
-  const roomPlaceholder = roomSel.querySelector('option[value=""]');
-  if (roomPlaceholder) {
-    roomPlaceholder.disabled = true;
-    roomPlaceholder.selected = !preservedRoomId;
-  }
 
-  function updateZoneDropdown() {
-    const roomId = roomSel.value;
-    let zones = [];
-    if (roomId) {
-      // Find the selected room in STATE.rooms or STATE.farm.rooms
-      const allRooms = collectRoomsFromState() || [];
-      const selectedRoom = allRooms.find(r => r.id === roomId || r.name === roomId);
-      if (selectedRoom && Array.isArray(selectedRoom.zones)) {
-        zones = selectedRoom.zones;
-      }
-    }
-    zoneSel.innerHTML = '<option value="" disabled>Select zone…</option>' + zones.map(z => `<option value="${escapeHtml(z)}">${escapeHtml(z)}</option>`).join('');
-    // Optionally preserve previous selection
-    const zonePlaceholder = zoneSel.querySelector('option[value=""]');
-    if (zones.length && zoneSel.dataset.prevZone && zones.includes(zoneSel.dataset.prevZone)) {
-      zoneSel.value = zoneSel.dataset.prevZone;
-      if (zonePlaceholder) zonePlaceholder.selected = false;
+  const updateZones = (roomId, zoneToPreserve) => {
+    const currentRooms = normaliseRooms();
+    const selectedRoom = currentRooms.find(r => r.id === roomId);
+    const zones = selectedRoom ? selectedRoom.zones : [];
+    zoneSel.innerHTML = '<option value="">Zone</option>' + zones.map(z => `<option value="${escapeHtml(z)}">${escapeHtml(z)}</option>`).join('');
+    const zoneCandidate = zoneToPreserve && zones.includes(zoneToPreserve) ? zoneToPreserve : '';
+    if (zoneCandidate) {
+      zoneSel.value = zoneCandidate;
     } else {
       zoneSel.value = '';
-      if (zonePlaceholder) zonePlaceholder.selected = true;
-      zoneSel.dataset.prevZone = '';
     }
-  }
+  };
+
+  updateZones(roomSel.value, previousZone);
 
   roomSel.onchange = () => {
-    updateZoneDropdown();
+    updateZones(roomSel.value, zoneSel.value);
     updateFixtureSummary();
-    updateGroupActionStates({ hasGroup: Boolean(STATE?.currentGroup), selection: buildSelection() });
     if (STATE.currentGroup) {
       try { updateGroupUI(STATE.currentGroup); } catch (e) { console.warn('Failed to refresh group UI after room change', e); }
     }
   };
   zoneSel.onchange = () => {
-    zoneSel.dataset.prevZone = zoneSel.value;
-    updateGroupActionStates({ hasGroup: Boolean(STATE?.currentGroup), selection: buildSelection() });
+    zoneSel.dataset.lastValue = zoneSel.value;
+    updateFixtureSummary();
     if (STATE.currentGroup) {
       try { updateGroupUI(STATE.currentGroup); } catch (e) { console.warn('Failed to refresh group UI after zone change', e); }
     }
   };
-  updateZoneDropdown();
+  // Initial summary
   updateFixtureSummary();
 }
 
@@ -4396,19 +379,16 @@ function isForSelection(lightMeta, selectedRoom, selectedZone) {
   const rooms = collectRoomsFromState() || [];
   const sel = resolveRoomRef(selectedRoom, rooms);
   const lit = resolveRoomRef(lightMeta?.roomId ?? lightMeta?.room ?? lightMeta?.roomName, rooms);
+  const selZone = normZone(selectedZone);
+  const litZone = normZone(lightMeta?.zone);
+  if (selZone !== litZone) return false;
   const idMatch =
     (sel.id && lit.id && lit.id === sel.id) ||
     (sel.id && lit.name && lit.name === sel.id);
   const nameMatch =
     (sel.name && lit.name && lit.name === sel.name) ||
     (sel.name && lit.id && lit.id === sel.name);
-  if (!(idMatch || nameMatch)) return false;
-  const zoneRequired = !ROOM_ONLY_GROUPS;
-  if (selectedZone === undefined) return true;
-  const targetZone = normZone(selectedZone);
-  if (!targetZone) return !zoneRequired || !ROOM_ONLY_GROUPS;
-  const lightZone = normZone(lightMeta?.zone ?? lightMeta?.zoneId ?? lightMeta?.zoneName);
-  return zoneRequired ? (lightZone === targetZone) : true;
+  return Boolean(idMatch || nameMatch);
 }
 
 // --- Build the candidate set strictly from Room+Zone ------------------------
@@ -4416,27 +396,21 @@ function isForSelection(lightMeta, selectedRoom, selectedZone) {
 function collectCandidatesForSelection(selectedRoom, selectedZone) {
   const rooms = collectRoomsFromState() || [];
   const sel = resolveRoomRef(selectedRoom, rooms);
-  const zoneRequired = !ROOM_ONLY_GROUPS;
-  const targetZone = normZone(selectedZone);
-  if (!sel.id && !sel.name) return [];
-  if (zoneRequired && !targetZone) return [];
+  const zone = normZone(selectedZone);
+  if (!zone || (!sel.id && !sel.name)) return [];
 
   const outMap = new Map();
 
   function ensureCandidate(id, payload) {
     if (!id) return;
-    const payloadZone = normZone(payload.zone ?? payload.zoneId ?? payload.zoneName);
-    if (zoneRequired && payloadZone !== targetZone) return;
     if (!outMap.has(id)) {
-      outMap.set(id, { ...payload, zone: payloadZone });
+      outMap.set(id, payload);
     }
   }
 
   (STATE?.lightSetups || []).forEach((setup) => {
     const sRoom = resolveRoomRef(setup?.room, rooms);
-    const candidateZone = normZone(setup?.zone);
-    if (zoneRequired && !candidateZone) return;
-    if (!isForSelection({ roomId: sRoom.id, room: sRoom.name, zone: candidateZone }, sel, targetZone)) return;
+    if (!isForSelection({ roomId: sRoom.id, room: sRoom.name, zone: setup?.zone }, sel, zone)) return;
     (setup?.fixtures || []).forEach((fixture) => {
       if (!fixture) return;
       const id = stableLightId(fixture);
@@ -4447,7 +421,7 @@ function collectCandidatesForSelection(selectedRoom, selectedZone) {
         deviceName: fixture.vendor ? `${fixture.vendor} ${fixture.model}` : (fixture.name || fixture.model || 'Light'),
         roomId: sRoom.id,
         roomName: sRoom.name,
-        zone: candidateZone,
+        zone,
         source: 'setup',
         setupId: setup?.id || null,
         fixtureId: fixture.id || null,
@@ -4458,9 +432,7 @@ function collectCandidatesForSelection(selectedRoom, selectedZone) {
   (STATE?.deviceKB?.fixtures || []).forEach((fixture) => {
     if (!fixture) return;
     const fRoom = resolveRoomRef(fixture?.roomId ?? fixture?.room, rooms);
-    const candidateZone = normZone(fixture.zone ?? fixture.zoneId ?? fixture.zoneName);
-    if (zoneRequired && !candidateZone) return;
-    if (!isForSelection({ roomId: fRoom.id, room: fRoom.name, zone: candidateZone }, sel, targetZone)) return;
+    if (!isForSelection({ roomId: fRoom.id, room: fRoom.name, zone: fixture?.zone }, sel, zone)) return;
     const id = stableLightId(fixture);
     ensureCandidate(id, {
       ...fixture,
@@ -4470,7 +442,7 @@ function collectCandidatesForSelection(selectedRoom, selectedZone) {
       deviceName: fixture.vendor ? `${fixture.vendor} ${fixture.model}` : (fixture.name || fixture.model || 'Light'),
       roomId: fRoom.id,
       roomName: fRoom.name,
-      zone: candidateZone,
+      zone,
       source: 'fixture',
     });
   });
@@ -4478,16 +450,7 @@ function collectCandidatesForSelection(selectedRoom, selectedZone) {
   (STATE?.devices || []).forEach((device) => {
     if (!device) return;
     const dRoom = resolveRoomRef(device?.roomId ?? device?.room, rooms);
-    const candidateZone = normZone(
-      device.zone ??
-      device.zoneId ??
-      device.zoneName ??
-      device?.location?.zone ??
-      device?.location?.zoneName ??
-      (Array.isArray(device?.zones) ? device.zones[0] : '')
-    );
-    if (zoneRequired && !candidateZone) return;
-    if (!isForSelection({ roomId: dRoom.id, room: dRoom.name, zone: candidateZone }, sel, targetZone)) return;
+    if (!isForSelection({ roomId: dRoom.id, room: dRoom.name, zone: device?.zone }, sel, zone)) return;
     const id = stableLightId(device);
     ensureCandidate(id, {
       ...device,
@@ -4495,7 +458,7 @@ function collectCandidatesForSelection(selectedRoom, selectedZone) {
       deviceName: device.deviceName || device.name || `${device.vendor || ''} ${device.model || ''}`.trim(),
       roomId: dRoom.id,
       roomName: dRoom.name,
-      zone: candidateZone,
+      zone,
       source: device.source || 'device',
     });
   });
@@ -4503,66 +466,36 @@ function collectCandidatesForSelection(selectedRoom, selectedZone) {
   Object.entries(STATE?.deviceMeta || {}).forEach(([metaId, meta]) => {
     if (!metaId) return;
     const mRoom = resolveRoomRef(meta?.roomId ?? meta?.room ?? meta?.roomName, rooms);
-    const candidateZone = normZone(meta?.zone ?? meta?.zoneId ?? meta?.zoneName);
-    if (zoneRequired && !candidateZone) return;
-    if (!isForSelection({ roomId: mRoom.id, room: mRoom.name, zone: candidateZone }, sel, targetZone)) return;
+    if (!isForSelection({ roomId: mRoom.id, room: mRoom.name, zone: meta?.zone }, sel, zone)) return;
     ensureCandidate(String(metaId), {
       ...meta,
       id: String(metaId),
       deviceName: meta.deviceName || meta.name || resolveLightNameFromState(metaId, meta) || String(metaId),
       roomId: mRoom.id,
       roomName: mRoom.name,
-      zone: candidateZone,
+      zone,
       source: meta.source || 'meta',
     });
   });
 
-  const candidates = Array.from(outMap.values());
-  // Instrumentation for group candidate selection debug
-  console.debug('GROUP TEST', { room: sel.name || sel.id, zone: targetZone }, 'candidates=', candidates.length);
-  return candidates;
+  return Array.from(outMap.values());
 }
 
 // --- Split Assigned vs Ungrouped WITHOUT using group name ------------------
 
 function computeRostersForSelection(selectedRoom, selectedZone) {
-  const rooms = collectRoomsFromState() || [];
-  const selection = resolveRoomRef(selectedRoom, rooms);
-  const zoneRequired = !ROOM_ONLY_GROUPS;
-  const targetZone = normZone(selectedZone);
-  if ((!selection.id && !selection.name) || (zoneRequired && !targetZone)) {
-    return { assigned: [], ungrouped: [] };
-  }
-
-  const candidates = collectCandidatesForSelection(selectedRoom, targetZone);
+  const candidates = collectCandidatesForSelection(selectedRoom, selectedZone);
   if (!candidates.length) return { assigned: [], ungrouped: [] };
 
   const assignedIds = new Set();
   (STATE?.groups || []).forEach((group) => {
-    if (!group) return;
-    const match = group.match && typeof group.match === 'object' ? group.match : null;
-    const roomRef = resolveRoomRef(
-      match?.room ?? group.room ?? group.roomId ?? group.roomName,
-      rooms
-    );
-    const matchZone = normZone(match?.zone ?? group.zone ?? group.zoneId ?? group.zoneName);
-    const matchesSelection = isForSelection(
-      { roomId: roomRef.id, room: roomRef.name, zone: matchZone },
-      selection,
-      zoneRequired ? targetZone : ''
-    );
-    if (!matchesSelection) return;
-    if (zoneRequired && matchZone && targetZone && matchZone !== targetZone) return;
-
-    const members = Array.isArray(group?.lights)
-      ? group.lights
-      : Array.isArray(group?.members)
-        ? group.members
-        : [];
-    members.forEach((member) => {
-      const normalized = typeof member === 'string' ? { id: String(member).trim() } : member;
-      if (!normalized?.id) return;
-      assignedIds.add(String(normalized.id));
+    (group?.lights || []).forEach((light) => {
+      const id = typeof light === 'string' ? String(light).trim() : stableLightId(light);
+      if (!id) return;
+      const meta = typeof light === 'string' ? {} : light;
+      if (isForSelection(meta, selectedRoom, selectedZone)) {
+        assignedIds.add(id);
+      }
     });
   });
 
@@ -4570,8 +503,7 @@ function computeRostersForSelection(selectedRoom, selectedZone) {
   const ungrouped = [];
   candidates.forEach((candidate) => {
     if (!candidate?.id) return;
-    const id = String(candidate.id);
-    (assignedIds.has(id) ? assigned : ungrouped).push(candidate);
+    (assignedIds.has(candidate.id) ? assigned : ungrouped).push(candidate);
   });
 
   return { assigned, ungrouped };
@@ -4731,8 +663,6 @@ function deriveDeviceId(device, fallbackIndex = 0) {
     return `device-${fallbackIndex + 1}`;
   }
   const candidates = [
-    device.controllerId,
-    device.controller_id,
     device.id,
     device.device_id,
     device.deviceId,
@@ -4786,311 +716,6 @@ function formatVendorModel(vendor, model) {
   const vendorText = typeof vendor === 'string' ? vendor.trim() : '';
   const modelText = typeof model === 'string' ? model.trim() : '';
   return [vendorText, modelText].filter(Boolean).join(' ').trim();
-}
-
-function normalizeTextKey(value) {
-  return value == null ? '' : String(value).trim().toLowerCase();
-}
-
-function normalizeRoomKey(value) {
-  if (value == null) return '';
-  if (typeof value === 'object') {
-    if (typeof value.key === 'string' && value.key) return value.key;
-    if (Array.isArray(value.aliases) && value.aliases.length) {
-      const alias = value.aliases
-        .map((entry) => normalizeTextKey(entry))
-        .find((candidate) => Boolean(candidate));
-      if (alias) return alias;
-    }
-    const fallback = firstNonEmptyString(
-      value.room,
-      value.roomId,
-      value.room_id,
-      value.roomName,
-      value.name,
-      value.label,
-      value.id,
-      value.slug,
-      value.key,
-      value.displayName,
-      value.raw?.room,
-      value.raw?.roomName,
-      value.raw?.name,
-      value.raw?.label,
-      value.raw?.id
-    );
-    return normalizeTextKey(fallback);
-  }
-  return normalizeTextKey(value);
-}
-
-function normalizeZoneKey(value) {
-  return normalizeTextKey(value);
-}
-
-function ensureMembersSet(value) {
-  if (value instanceof Set) return value;
-  const next = new Set();
-  if (Array.isArray(value)) {
-    value.forEach((entry) => {
-      if (entry == null) return;
-      const id = String(entry).trim();
-      if (id) next.add(id);
-    });
-    return next;
-  }
-  if (value && typeof value === 'object' && typeof value.forEach === 'function') {
-    try {
-      value.forEach((entry) => {
-        if (entry == null) return;
-        const id = String(entry).trim();
-        if (id) next.add(id);
-      });
-      return next;
-    } catch {}
-  }
-  return next;
-}
-
-function normalizeControllerDeviceForGroups(device) {
-  if (!device || typeof device !== 'object') return null;
-  const rawId = firstNonEmptyString(device.id, device.deviceId, device.device_id, device.deviceID);
-  const id = rawId ? String(rawId).trim() : '';
-  if (!id) return null;
-  const roomCandidates = [
-    device?.meta?.room,
-    device?.meta?.roomName,
-    device?.room,
-    device?.roomName,
-    device?.location?.room,
-    device?.location?.roomName,
-  ]
-    .map(normalizeRoomKey)
-    .filter(Boolean);
-  const roomKeys = Array.from(new Set(roomCandidates));
-  const deviceName = firstNonEmptyString(
-    device?.deviceName,
-    device?.name,
-    device?.label,
-    formatVendorModel(device?.vendor, device?.model),
-    formatVendorModel(device?.manufacturer, device?.model),
-    id
-  );
-  return { ...device, id, deviceName, roomKeys };
-}
-
-function normalizeFarmRoomEntry(room, index = 0) {
-  const fallbackId = `room-${index + 1}`;
-  const fallbackLabel = `Room ${index + 1}`;
-  if (room == null) return null;
-  const addAlias = (collection, value) => {
-    if (value == null) return;
-    if (Array.isArray(value)) {
-      value.forEach((entry) => addAlias(collection, entry));
-      return;
-    }
-    const text = String(value).trim();
-    if (text) collection.add(text);
-  };
-
-  if (typeof room === 'string') {
-    const label = room.trim();
-    if (!label) return null;
-    const alias = normalizeTextKey(label);
-    const aliases = alias ? [alias] : [];
-    return {
-      id: label,
-      label,
-      key: alias,
-      aliases,
-      raw: room,
-    };
-  }
-
-  if (typeof room !== 'object') return null;
-
-  const raw = room;
-  const aliasSource = new Set();
-
-  const idCandidate = firstNonEmptyString(
-    raw.id,
-    raw.roomId,
-    raw.room_id,
-    raw.slug,
-    raw.key,
-    raw.uuid
-  );
-  const labelCandidate = firstNonEmptyString(
-    raw.name,
-    raw.label,
-    raw.roomName,
-    raw.room,
-    raw.title,
-    raw.displayName,
-    raw.description
-  );
-  const label = labelCandidate || idCandidate || fallbackLabel;
-  const id = firstNonEmptyString(idCandidate, label, fallbackId);
-
-  addAlias(aliasSource, id);
-  addAlias(aliasSource, label);
-  addAlias(aliasSource, raw.name);
-  addAlias(aliasSource, raw.label);
-  addAlias(aliasSource, raw.room);
-  addAlias(aliasSource, raw.roomName);
-  addAlias(aliasSource, raw.room_id);
-  addAlias(aliasSource, raw.roomId);
-  addAlias(aliasSource, raw.title);
-  addAlias(aliasSource, raw.displayName);
-  addAlias(aliasSource, raw.match?.room);
-  addAlias(aliasSource, raw.match?.roomName);
-  addAlias(aliasSource, raw.alias);
-  addAlias(aliasSource, raw.aliases);
-  addAlias(aliasSource, raw.key);
-  addAlias(aliasSource, raw.slug);
-
-  const aliasList = Array.from(aliasSource)
-    .map((entry) => normalizeTextKey(entry))
-    .filter(Boolean);
-  const uniqueAliases = Array.from(new Set(aliasList));
-  const key = uniqueAliases[0] || normalizeTextKey(label) || normalizeTextKey(id) || normalizeTextKey(fallbackLabel);
-
-  if (key && !uniqueAliases.includes(key)) {
-    uniqueAliases.unshift(key);
-  }
-
-  return {
-    id: String(id || fallbackId),
-    label: label || id || fallbackLabel,
-    key,
-    aliases: uniqueAliases,
-    raw,
-  };
-}
-
-function normalizeFarmRooms(rooms) {
-  const list = Array.isArray(rooms) ? rooms : [];
-  const normalized = list.map((room, index) => normalizeFarmRoomEntry(room, index)).filter(Boolean);
-  const seenIds = new Set();
-  const seenKeys = new Set();
-  const deduped = [];
-  normalized.forEach((room) => {
-    const idKey = String(room.id || '').trim().toLowerCase();
-    const keyKey = typeof room.key === 'string' ? room.key : '';
-    if (idKey && seenIds.has(idKey)) return;
-    if (keyKey && seenKeys.has(keyKey)) return;
-    if (idKey) seenIds.add(idKey);
-    if (keyKey) seenKeys.add(keyKey);
-    deduped.push(room);
-  });
-  return deduped;
-}
-
-function resolveRoomOptionFromState(state, value) {
-  if (!state) return null;
-  if (value && typeof value === 'object') {
-    if (value.id && state.roomLookup && state.roomLookup[value.id]) {
-      return state.roomLookup[value.id];
-    }
-    return value;
-  }
-  const directKey = typeof value === 'string' ? value : '';
-  if (directKey && state.roomLookup && state.roomLookup[directKey]) {
-    return state.roomLookup[directKey];
-  }
-  const normalizedKey = normalizeRoomKey(value);
-  if (normalizedKey && state.roomLookup && state.roomLookup[normalizedKey]) {
-    return state.roomLookup[normalizedKey];
-  }
-  return null;
-}
-
-
-function extractGroupMemberIds(group) {
-  const members = new Set();
-  const addEntry = (entry) => {
-    if (!entry) return;
-    if (typeof entry === 'string') {
-      const id = entry.trim();
-      if (id) members.add(id);
-      return;
-    }
-    if (typeof entry === 'object' && entry.id) {
-      const id = String(entry.id).trim();
-      if (id) members.add(id);
-    }
-  };
-  if (Array.isArray(group?.members)) {
-    group.members.forEach(addEntry);
-  }
-  if (Array.isArray(group?.lights)) {
-    group.lights.forEach(addEntry);
-  }
-  return Array.from(members);
-}
-
-function findGroupForForm(groups, room, zone, name, options = {}) {
-  const roomKey = normalizeRoomKey(room);
-  if (!roomKey) return null;
-  const zoneKey = normalizeZoneKey(zone);
-  const nameKey = normalizeTextKey(name);
-  const entries = Array.isArray(groups) ? groups : [];
-  const candidates = entries.filter((group) =>
-    normalizeRoomKey(group?.room || group?.match?.room || group?.roomId) === roomKey
-  );
-  if (!candidates.length) return null;
-
-  let matches = candidates;
-  if (zoneKey) {
-    const zoneMatches = matches.filter(
-      (group) => normalizeZoneKey(group?.zone || group?.match?.zone || group?.zoneId) === zoneKey
-    );
-    if (zoneMatches.length) {
-      matches = zoneMatches;
-    }
-  }
-
-  if (nameKey) {
-    const labelMatches = matches.filter((group) =>
-      normalizeTextKey(firstNonEmptyString(group?.name, group?.label, group?.id)) === nameKey
-    );
-    if (labelMatches.length === 1) return labelMatches[0];
-    if (labelMatches.length) matches = labelMatches;
-  }
-
-  if (matches.length === 1) return matches[0];
-
-  if (options && options.allowLabelFallback && nameKey) {
-    const fallback = candidates.filter((group) =>
-      normalizeTextKey(firstNonEmptyString(group?.name, group?.label, group?.id)) === nameKey
-    );
-    if (fallback.length === 1) return fallback[0];
-  }
-
-  return null;
-}
-
-function slugifyGroupToken(value, fallback = 'group') {
-  const text = String(value ?? '').trim().toLowerCase();
-  if (!text) return fallback;
-  const token = text.replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '');
-  return token || fallback;
-}
-
-function generateGroupId(room, zone, label, existingIds = []) {
-  const slugRoom = slugifyGroupToken(room, 'room');
-  const slugZone = slugifyGroupToken(zone || 'all', 'all');
-  const slugLabel = slugifyGroupToken(label, 'group');
-  const base = `group:${slugRoom}:${slugZone}:${slugLabel}`;
-  const ids = new Set((existingIds || []).map((id) => String(id || '')));
-  if (!ids.has(base)) return base;
-  let counter = 2;
-  let candidate = `${base}-${counter}`;
-  while (ids.has(candidate)) {
-    counter += 1;
-    candidate = `${base}-${counter}`;
-  }
-  return candidate;
 }
 
 function resolveLightNameFromState(id, source) {
@@ -5277,10 +902,10 @@ function clearCanvas(canvas) {
   }
 }
 
-// --- Smart Controller Setup Card Show/Hide Logic ---
+// --- IoT System Setup Card Show/Hide Logic ---
 document.addEventListener('DOMContentLoaded', function() {
-  const btn = document.getElementById('btnShowSmartControllersSetup');
-  const card = document.getElementById('smartControllersSetupCard');
+  const btn = document.getElementById('btnShowIotSetup');
+  const card = document.getElementById('iotEcosystemCard');
   if (btn && card) {
     btn.onclick = function() {
       card.style.display = card.style.display === 'none' || !card.style.display ? 'block' : 'none';
@@ -5298,11 +923,11 @@ document.addEventListener('DOMContentLoaded', function() {
     });
   }
 });
-// --- Smart Controller Ecosystem Device Manager Buttons & Modal ---
+// --- IoT Ecosystem Device Manager Buttons & Modal ---
 document.addEventListener('DOMContentLoaded', function() {
-  const modal = document.getElementById('smartControllersModal');
-  const modalBody = document.getElementById('smartControllersModalBody');
-  const closeBtn = document.getElementById('closeSmartControllersModal');
+  const modal = document.getElementById('iotEcosystemModal');
+  const modalBody = document.getElementById('iotEcosystemModalBody');
+  const closeBtn = document.getElementById('closeIotEcosystemModal');
   if (closeBtn && modal) closeBtn.onclick = () => { modal.style.display = 'none'; };
   function showModal(html) {
     if (modalBody) modalBody.innerHTML = html;
@@ -5333,14 +958,6 @@ document.addEventListener('DOMContentLoaded', function() {
         { label: 'Firmware', type: 'select', id: 'sonoffFw', options: ['eWeLink (stock)', 'Tasmota', 'ESPHome'] },
         { label: 'Vendor', type: 'select', id: 'sonoffVendor', options: () => (window.DEVICE_MANUFACTURERS||[]).map(m=>m.name) }
       ]
-    },
-    Shelly: {
-      title: 'Shelly Device Setup',
-      instructions: `<b>Shelly Wi‑Fi Relays</b><br>Connect to your Shelly Cloud account or provide local device IPs to onboard relays for lighting and HVAC control.<br><br><b>Instructions:</b><ol><li>Enter your Shelly account email or LAN subnet.</li><li>Select the relay family you are configuring.</li></ol>`,
-      fields: [
-        { label: 'Shelly Account Email or IP Range', type: 'text', id: 'shellyAccount', placeholder: 'e.g. grower@email.com or 192.168.1.0/24' },
-        { label: 'Relay Family', type: 'select', id: 'shellyRelayFamily', options: ['Plus Series', 'Gen 1', 'Pro Series'] }
-      ]
     }
     // Add more ecosystems as needed...
   };
@@ -5369,8 +986,8 @@ document.addEventListener('DOMContentLoaded', function() {
     showModal(html);
 // --- Kasa Setup Wizard Modal ---
 function showKasaWizard() {
-  const modal = document.getElementById('smartControllersModal');
-  const modalBody = document.getElementById('smartControllersModalBody');
+  const modal = document.getElementById('iotEcosystemModal');
+  const modalBody = document.getElementById('iotEcosystemModalBody');
   if (!modal || !modalBody) return;
   let step = 1;
   let discoveryResults = [];
@@ -5475,8 +1092,8 @@ function showKasaWizard() {
   // --- SwitchBot Setup Wizard Modal ---
   function showSwitchBotWizard() {
     let step = 1;
-    const modal = document.getElementById('smartControllersModal');
-    const modalBody = document.getElementById('smartControllersModalBody');
+    const modal = document.getElementById('iotEcosystemModal');
+    const modalBody = document.getElementById('iotEcosystemModalBody');
     if (!modal || !modalBody) return;
     function renderStep1() {
       modalBody.innerHTML = `
@@ -5536,9 +1153,9 @@ function showKasaWizard() {
     renderStep1();
   }
   [
+    ['btnMgrSwitchBot','SwitchBot'],
     ['btnMgrKasa','Kasa'],
-    ['btnMgrSonoff','Sonoff'],
-    ['btnMgrShelly','Shelly']
+    ['btnMgrSonoff','Sonoff']
     // Add more mappings as you implement more ecosystems
   ].forEach(([btnId, eco]) => {
     const btn = document.getElementById(btnId);
@@ -5549,7 +1166,7 @@ function showKasaWizard() {
 // Save handler stub (extend as needed)
 window.saveEcosystemSetup = function(ecosystem) {
   // Collect field values and show a toast (replace with real logic as needed)
-  const modal = document.getElementById('smartControllersModal');
+  const modal = document.getElementById('iotEcosystemModal');
   const fields = Array.from((modal && modal.querySelectorAll('input,select')) || []);
   const values = {};
   fields.forEach(f => { values[f.id] = f.value; });
@@ -5588,91 +1205,6 @@ document.addEventListener('DOMContentLoaded', function() {
 });
 // Sidebar panel state (fixes ReferenceError in strict mode)
 let ACTIVE_PANEL = 'overview';
-let ACTIVE_AUTOMATION_SECTION = 'rules';
-const PANEL_PLACEMENTS = new WeakMap();
-let PANEL_STAGE_ELEMENT = null;
-
-function getPanelStageElement() {
-  if (PANEL_STAGE_ELEMENT && PANEL_STAGE_ELEMENT.isConnected) {
-    return PANEL_STAGE_ELEMENT;
-  }
-  PANEL_STAGE_ELEMENT = document.querySelector('[data-role="panel-stage"]');
-  return PANEL_STAGE_ELEMENT;
-}
-
-function registerPanelPlacement(panel) {
-  if (!(panel instanceof HTMLElement)) {
-    return;
-  }
-  if (PANEL_PLACEMENTS.has(panel)) {
-    return;
-  }
-  const placeholder = document.createComment(`panel-placeholder:${panel.getAttribute('data-panel') || ''}`);
-  const parent = panel.parentNode;
-  if (!parent) {
-    return;
-  }
-  parent.insertBefore(placeholder, panel);
-  PANEL_PLACEMENTS.set(panel, { placeholder });
-}
-
-function registerAllPanelPlacements() {
-  document.querySelectorAll('[data-panel]').forEach((panel) => registerPanelPlacement(panel));
-}
-
-function restorePanelPlacement(panel) {
-  const record = PANEL_PLACEMENTS.get(panel);
-  if (!record || !record.placeholder) {
-    return;
-  }
-  const { placeholder } = record;
-  const parent = placeholder.parentNode;
-  if (!parent) {
-    return;
-  }
-  if (placeholder.nextSibling === panel) {
-    return;
-  }
-  parent.insertBefore(panel, placeholder.nextSibling);
-}
-
-function clearPanelStage() {
-  const stage = getPanelStageElement();
-  if (!stage) {
-    return;
-  }
-  Array.from(stage.children).forEach((child) => {
-    if (child instanceof HTMLElement && child.hasAttribute('data-panel')) {
-      restorePanelPlacement(child);
-    } else {
-      stage.removeChild(child);
-    }
-  });
-  stage.classList.remove('is-active');
-  stage.setAttribute('hidden', 'hidden');
-  stage.removeAttribute('data-active-panel');
-}
-
-function movePanelToStage(panel) {
-  const stage = getPanelStageElement();
-  if (!stage || !(panel instanceof HTMLElement)) {
-    return;
-  }
-  if (!PANEL_PLACEMENTS.has(panel)) {
-    registerPanelPlacement(panel);
-  }
-  Array.from(stage.children).forEach((child) => {
-    if (child instanceof HTMLElement && child.hasAttribute('data-panel')) {
-      restorePanelPlacement(child);
-    } else {
-      stage.removeChild(child);
-    }
-  });
-  stage.appendChild(panel);
-  stage.classList.add('is-active');
-  stage.removeAttribute('hidden');
-  stage.setAttribute('data-active-panel', panel.getAttribute('data-panel') || '');
-}
 
 // --- Grow Room Modal Show/Hide Logic ---
 
@@ -5686,513 +1218,91 @@ function groupBy(arr, key) {
     return acc;
   }, {});
 }
-// --- Smart Controller Device Manager Modular UI ---
-const SMART_CONTROLLER_STATE = {
-  lookup: new Map()
-};
-let controllerLinkerOverlay = null;
-
-const CONTROLLER_CAPABILITY_RULES = {
-  onOff: ['onoff', 'power', 'power_control', 'toggle', 'switch', 'relay', 'enable'],
-  dim: ['dim', 'dimmer', 'brightness', 'level'],
-  energy: ['energy', 'power_monitor', 'power_usage', 'consumption', 'kwh'],
-  refresh: ['refresh', 'status', 'state', 'poll', 'sync'],
-  discover: ['discover', 'scan', 'identify', 'pair', 'search']
-};
-
-const CONTROLLER_ACTION_REQUIREMENTS = {
-  'ctrl.testOn': 'onOff',
-  'ctrl.testOff': 'onOff',
-  'ctrl.refresh': 'refresh',
-  'ctrl.discover': 'discover',
-  'ctrl.saveLink': null,
-  'ctrl.assignUnknown': null,
-  'ctrl.quarantineUnknown': null
-};
-
-function collectControllerCapabilities(device) {
-  const set = new Set();
-  const push = (value) => {
-    if (typeof value === 'string' && value.trim()) {
-      set.add(value.trim().toLowerCase());
-    }
-  };
-  const visit = (source) => {
-    if (!source) return;
-    if (Array.isArray(source)) {
-      source.forEach(visit);
-      return;
-    }
-    if (typeof source === 'object') {
-      Object.entries(source).forEach(([key, val]) => {
-        if (key) push(key);
-        if (typeof val === 'boolean') {
-          if (val) push(key);
-        } else {
-          visit(val);
-        }
-      });
-      return;
-    }
-    push(String(source || '').trim());
-  };
-  visit(device?.capabilities);
-  visit(device?.hints?.capabilities);
-  visit(device?.supports);
-  visit(device?.traits);
-  return set;
-}
-
-function capabilityMatch(capabilities, requirement) {
-  if (!requirement) return true;
-  if (!(capabilities instanceof Set) || !capabilities.size) return false;
-  const aliases = CONTROLLER_CAPABILITY_RULES[requirement] || [requirement];
-  return aliases.some((alias) => capabilities.has(alias));
-}
-
-function normalizeSmartController(device, index) {
-  const source = device || {};
-  const id = firstNonEmptyString(
-    source.id,
-    source.deviceId,
-    source.device_id,
-    source.address,
-    source.mac,
-    `controller-${index + 1}`
-  );
-  const vendor = firstNonEmptyString(
-    source.vendor,
-    source.brand,
-    source.manufacturer,
-    source.maker,
-    source.hints?.vendor,
-    'Unknown'
-  ).trim();
-  const type = firstNonEmptyString(
-    source.type,
-    source.category,
-    source.kind,
-    source.deviceType,
-    source.hints?.type,
-    source.protocol,
-    'Unknown'
-  ).trim();
-  const protocol = firstNonEmptyString(source.protocol, source.transport, source.conn, 'unknown').trim();
-  const name = firstNonEmptyString(source.name, source.label, `${vendor || ''} ${type || ''}`.trim(), id);
-  const address = firstNonEmptyString(source.address, source.ip, source.host, source.deviceId, source.mac, '');
-  const location = firstNonEmptyString(
-    source.location,
-    source.room,
-    source.zone,
-    source.hints?.location,
-    source.hints?.room,
-    ''
-  );
-  const trust = (firstNonEmptyString(source.trust, '') || 'unknown').toLowerCase();
-  const capabilities = collectControllerCapabilities(source);
-  const supports = {
-    onOff: capabilityMatch(capabilities, 'onOff'),
-    dim: capabilityMatch(capabilities, 'dim'),
-    energy: capabilityMatch(capabilities, 'energy'),
-    refresh: capabilityMatch(capabilities, 'refresh'),
-    discover: capabilityMatch(capabilities, 'discover')
-  };
-  const lastSeen = firstNonEmptyString(source.lastSeen, source.updatedAt, source.hints?.lastSeen, '');
-  const statusRaw = firstNonEmptyString(source.status, source.state, '');
-  const online = typeof source.online === 'boolean'
-    ? source.online
-    : ['online', 'on', 'connected', 'ok'].includes((statusRaw || '').toLowerCase());
-  const status = statusRaw || (online ? 'Online' : 'Offline');
-  const hexValue = typeof source.value === 'string'
-    ? source.value
-    : firstNonEmptyString(source.hex, source.hints?.hex, '');
-  const link = typeof source.link === 'string' ? source.link : '';
-  const unknown = !vendor || vendor.toLowerCase() === 'unknown' || !type || type.toLowerCase() === 'unknown' || trust === 'unknown';
-  return {
-    id,
-    index,
-    name,
-    vendor: vendor || 'Unknown',
-    type: type || 'Unknown',
-    protocol: protocol || 'unknown',
-    address,
-    location,
-    trust,
-    online,
-    status,
-    lastSeen,
-    capabilities,
-    supports,
-    hexValue,
-    link,
-    raw: source,
-    unknown
-  };
-}
-
-function controllerSupportsCapability(controller, requirement) {
-  if (!requirement) return true;
-  if (controller?.supports && Object.prototype.hasOwnProperty.call(controller.supports, requirement)) {
-    return Boolean(controller.supports[requirement]);
+// --- IoT Device Manager Modular UI ---
+function renderIoTDeviceCards(devices) {
+  const list = document.getElementById('iotDevicesList');
+  if (!list) return;
+  list.innerHTML = '';
+  if (!Array.isArray(devices) || !devices.length) {
+    list.innerHTML = '';
+    return;
   }
-  return capabilityMatch(controller?.capabilities, requirement);
-}
-
-function renderControllerActionButton(controller, label, action, options = {}) {
-  const requirement = CONTROLLER_ACTION_REQUIREMENTS[action] ?? null;
-  const supported = controllerSupportsCapability(controller, requirement);
-  const classes = ['ghost', 'tiny'];
-  if (options.variant === 'primary') {
-    classes[0] = 'primary';
-  } else if (options.variant === 'secondary') {
-    classes[0] = 'secondary';
-  }
-  const attrs = [`type="button"`, `class="${classes.join(' ')}"`, `data-action="${action}"`];
-  const title = options.title || (supported ? '' : 'Capability not available');
-  if (title) attrs.push(`title="${escapeHtml(title)}"`);
-  if (!supported) {
-    attrs.push('disabled');
-    attrs.push('aria-disabled="true"');
-  }
-  return `<button ${attrs.join(' ')}>${escapeHtml(label)}</button>`;
-}
-
-function buildSmartControllerCard(controller) {
-  const statusLower = (controller.status || '').toLowerCase();
-  let statusClass = 'unknown';
-  if (statusLower.includes('on') || statusLower === 'online') statusClass = 'online';
-  else if (statusLower.includes('off') || statusLower === 'offline' || statusLower.includes('error')) statusClass = 'offline';
-  const capabilityChips = [];
-  if (controllerSupportsCapability(controller, 'onOff')) capabilityChips.push('On/Off');
-  if (controllerSupportsCapability(controller, 'dim')) capabilityChips.push('Dim');
-  if (controllerSupportsCapability(controller, 'energy')) capabilityChips.push('Energy');
-  if (controllerSupportsCapability(controller, 'refresh')) capabilityChips.push('Status');
-  if (controllerSupportsCapability(controller, 'discover')) capabilityChips.push('Discovery');
-  const hexDisplay = (controller.hexValue || '').toUpperCase();
-  return `
-    <article class="smart-controller-card" data-controller-id="${escapeHtml(controller.id)}" data-controller-index="${controller.index}">
-      <header class="smart-controller-card__header">
-        <div>
-          <h3>${escapeHtml(controller.name || controller.id)}</h3>
-          <p class="tiny">${escapeHtml(controller.vendor)} • ${escapeHtml(controller.type)}</p>
-        </div>
-        <span class="smart-controller-card__status smart-controller-card__status--${statusClass}">${escapeHtml(controller.status || 'Unknown')}</span>
-      </header>
-      <dl class="smart-controller-card__meta">
-        <div><dt>Protocol</dt><dd>${escapeHtml(controller.protocol || '—')}</dd></div>
-        <div><dt>Address</dt><dd>${escapeHtml(controller.address || '—')}</dd></div>
-        <div><dt>Last seen</dt><dd>${escapeHtml(controller.lastSeen || '—')}</dd></div>
-      </dl>
-      ${capabilityChips.length ? `<div class="smart-controller-card__capabilities">${capabilityChips.map((chip) => `<span class="smart-controller-card__capability">${escapeHtml(chip)}</span>`).join('')}</div>` : ''}
-      <div class="smart-controller-card__command">
-        <label class="tiny smart-controller-card__command-label">HEX payload
-          <input type="text" data-role="controller-hex" value="${escapeHtml(hexDisplay)}" maxlength="12" placeholder="e.g. 737373730000">
-        </label>
-        <div class="smart-controller-card__actions">
-          ${renderControllerActionButton(controller, 'Test On', 'ctrl.testOn', { variant: 'primary', title: 'Send a safe ON command using the payload above' })}
-          ${renderControllerActionButton(controller, 'Test Off', 'ctrl.testOff', { title: 'Send an OFF command to this controller' })}
-          ${renderControllerActionButton(controller, 'Refresh', 'ctrl.refresh', { title: 'Refresh controller telemetry' })}
-          ${renderControllerActionButton(controller, 'Discover', 'ctrl.discover', { title: 'Run controller discovery' })}
-        </div>
-      </div>
-      <div class="smart-controller-card__footer">
-        <label class="tiny">Equipment link
-          <input type="text" data-role="controller-link" value="${escapeHtml(controller.link || '')}" placeholder="Room / equipment assignment">
-        </label>
-        ${renderControllerActionButton(controller, 'Save link', 'ctrl.saveLink', { title: 'Persist a note linking this controller to equipment' })}
-      </div>
-    </article>
-  `;
-}
-
-function buildUnknownControllersTable(controllers) {
-  if (!controllers.length) return '';
-  const rows = controllers.map((controller) => {
-    const trustValue = controller.trust || 'unknown';
-    return `
-      <tr data-controller-index="${controller.index}" data-controller-id="${escapeHtml(controller.id)}" data-controller-address="${escapeHtml(controller.address || controller.id || '')}">
-        <td>${escapeHtml(controller.address || controller.id || '')}</td>
-        <td><input type="text" data-field="type" value="${escapeHtml(controller.type === 'Unknown' ? '' : controller.type)}" placeholder="Type"></td>
-        <td><input type="text" data-field="vendor" value="${escapeHtml(controller.vendor === 'Unknown' ? '' : controller.vendor)}" placeholder="Vendor"></td>
-        <td><input type="text" data-field="name" value="${escapeHtml(controller.name || '')}" placeholder="Name"></td>
-        <td><input type="text" data-field="location" value="${escapeHtml(controller.location || '')}" placeholder="Location"></td>
+  // Identify unknown devices: no vendor/type or not trusted/assigned/quarantined
+  const unknowns = devices.filter(d => !d.vendor || d.vendor === 'Unknown' || !d.type || d.trust === 'unknown' || d.trust === undefined);
+  if (unknowns.length) {
+    let html = `<h3 style="margin:0 0 8px 0;">Unknown Devices</h3>`;
+    html += `<table class="iot-unknown-table" style="width:100%;border-collapse:collapse;margin-bottom:12px;">
+      <thead><tr style="background:#f1f5f9"><th>Address</th><th>Type</th><th>Vendor</th><th>Name</th><th>Location</th><th>Trust</th><th>Actions</th></tr></thead><tbody>`;
+    for (const dev of unknowns) {
+      html += `<tr data-addr="${escapeHtml(dev.address||dev.id||'')}" style="border-bottom:1px solid #e5e7eb;">
+        <td>${escapeHtml(dev.address||dev.id||'')}</td>
+        <td><input type="text" class="iot-unknown-type" value="${escapeHtml(dev.type||'')}" style="width:80px"></td>
+        <td><input type="text" class="iot-unknown-vendor" value="${escapeHtml(dev.vendor||'')}" style="width:90px"></td>
+        <td><input type="text" class="iot-unknown-name" value="${escapeHtml(dev.name||'')}" style="width:90px"></td>
+        <td><input type="text" class="iot-unknown-loc" value="${escapeHtml(dev.location||'')}" style="width:90px"></td>
         <td>
-          <select data-field="trust">
-            <option value="unknown"${trustValue === 'unknown' ? ' selected' : ''}>Unknown</option>
-            <option value="trusted"${trustValue === 'trusted' ? ' selected' : ''}>Trusted</option>
-            <option value="quarantine"${trustValue === 'quarantine' ? ' selected' : ''}>Quarantine</option>
-            <option value="ignored"${trustValue === 'ignored' ? ' selected' : ''}>Ignored</option>
+          <select class="iot-unknown-trust">
+            <option value="unknown"${!dev.trust||dev.trust==='unknown'?' selected':''}>Unknown</option>
+            <option value="trusted"${dev.trust==='trusted'?' selected':''}>Trusted</option>
+            <option value="quarantine"${dev.trust==='quarantine'?' selected':''}>Quarantine</option>
+            <option value="ignored"${dev.trust==='ignored'?' selected':''}>Ignored</option>
           </select>
         </td>
-        <td class="smart-controller-unknown__actions">
-          ${renderControllerActionButton(controller, 'Assign', 'ctrl.assignUnknown', { variant: 'primary', title: 'Save details for this controller' })}
-          ${renderControllerActionButton(controller, 'Quarantine', 'ctrl.quarantineUnknown', { title: 'Move controller to quarantine' })}
+        <td>
+          <button class="primary tiny iot-unknown-assign">Assign</button>
+          <button class="ghost tiny iot-unknown-quarantine">Quarantine</button>
         </td>
-      </tr>
-    `;
-  }).join('');
-  return `
-    <section class="smart-controller-unknown">
-      <h3 class="smart-controller-unknown__title">Unknown Devices</h3>
-      <p class="tiny smart-controller-unknown__subtitle">Classify these controllers to unlock actions and assignments.</p>
-      <div class="smart-controller-unknown__table-wrapper">
-        <table class="iot-unknown-table">
-          <thead>
-            <tr>
-              <th>Address</th>
-              <th>Type</th>
-              <th>Vendor</th>
-              <th>Name</th>
-              <th>Location</th>
-              <th>Trust</th>
-              <th>Actions</th>
-            </tr>
-          </thead>
-          <tbody>${rows}</tbody>
-        </table>
-      </div>
-    </section>
-  `;
-}
-
-function renderSmartControllerCards(devices) {
-  const list = document.getElementById('smartControllersList');
-  if (!list) return;
-  SMART_CONTROLLER_STATE.lookup.clear();
-  if (!Array.isArray(devices) || !devices.length) {
-    list.innerHTML = '<div class="smart-controller-empty">No smart controllers detected yet. Run a scan to populate this list.</div>';
-    return;
-  }
-  const normalized = devices.map((device, index) => normalizeSmartController(device, index));
-  normalized.forEach((controller) => {
-    SMART_CONTROLLER_STATE.lookup.set(controller.id, controller);
-  });
-  const unknowns = normalized.filter((controller) => controller.unknown);
-  const knowns = normalized.filter((controller) => !controller.unknown);
-  const sections = [];
-  if (unknowns.length) {
-    sections.push(buildUnknownControllersTable(unknowns));
-  }
-  if (knowns.length) {
-    sections.push(`<div class="smart-controller-grid">${knowns.map((controller) => buildSmartControllerCard(controller)).join('')}</div>`);
-  }
-  list.innerHTML = sections.join('');
-}
-
-function getControllerFromElement(el) {
-  const host = el?.closest('[data-controller-id]');
-  if (!host) return null;
-  const id = host.getAttribute('data-controller-id');
-  if (!id) return null;
-  return SMART_CONTROLLER_STATE.lookup.get(id) || null;
-}
-
-function setControllerActionPending(btn, pending, label) {
-  if (!btn) return;
-  if (pending) {
-    if (!btn.dataset.originalText) {
-      btn.dataset.originalText = btn.textContent || '';
+      </tr>`;
     }
-    if (label) btn.textContent = label;
-    btn.disabled = true;
-    btn.classList.add('is-loading');
-  } else {
-    btn.disabled = false;
-    btn.classList.remove('is-loading');
-    if (btn.dataset.originalText !== undefined) {
-      btn.textContent = btn.dataset.originalText;
-      delete btn.dataset.originalText;
-    }
-  }
-}
-
-function normalizeControllerHex(input) {
-  if (input == null) return null;
-  const cleaned = String(input).trim();
-  if (!cleaned) return null;
-  const normalized = cleaned.replace(/[^0-9a-fA-F]/g, '').toUpperCase();
-  if (!normalized) return null;
-  if (normalized.length !== 12) return null;
-  return normalized;
-}
-
-async function doControllerToggle(controller, turnOn, btn) {
-  if (!controllerSupportsCapability(controller, 'onOff')) {
-    showToast({ title: controller.name || 'Controller', msg: 'On/off control is not supported for this controller.', kind: 'warn', icon: '⚠️' });
-    return;
-  }
-  const host = btn.closest('[data-controller-id]');
-  const hexInput = host?.querySelector('[data-role="controller-hex"]');
-  const rawHex = hexInput?.value || controller.hexValue || '';
-  let payload = turnOn ? { status: 'on' } : { status: 'off', value: null };
-  if (turnOn) {
-    const normalized = normalizeControllerHex(rawHex);
-    if (rawHex.trim() && !normalized) {
-      showToast({ title: 'Invalid HEX payload', msg: 'Enter a 12-digit HEX payload using 0-9 or A-F.', kind: 'error', icon: '⚠️' });
-      if (hexInput) hexInput.focus();
-      return;
-    }
-    if (normalized) {
-      payload.value = normalized;
-    }
-  }
-  setControllerActionPending(btn, true, turnOn ? 'Testing…' : 'Stopping…');
-  try {
-    await controllerPatchDevice(controller.id, payload);
-    if (turnOn && payload.value) {
-      controller.hexValue = payload.value;
-      if (Array.isArray(window.LAST_SMART_CONTROLLER_SCAN) && window.LAST_SMART_CONTROLLER_SCAN[controller.index]) {
-        window.LAST_SMART_CONTROLLER_SCAN[controller.index].value = payload.value;
-      }
-      if (hexInput) hexInput.value = payload.value;
-    }
-    showToast({
-      title: controller.name || 'Controller',
-      msg: turnOn ? 'Command sent successfully.' : 'Off command sent successfully.',
-      kind: 'success',
-      icon: turnOn ? '✅' : '⏹️'
+    html += '</tbody></table>';
+    // Insert the table at the top of the list
+    list.insertAdjacentHTML('afterbegin', html);
+    // Add event listeners for actions
+    Array.from(list.querySelectorAll('.iot-unknown-assign')).forEach(btn => {
+      btn.onclick = function(e) {
+        const row = e.target.closest('tr');
+        const addr = row.getAttribute('data-addr');
+        const type = row.querySelector('.iot-unknown-type').value.trim();
+        const vendor = row.querySelector('.iot-unknown-vendor').value.trim();
+        const name = row.querySelector('.iot-unknown-name').value.trim();
+        const loc = row.querySelector('.iot-unknown-loc').value.trim();
+        const trust = row.querySelector('.iot-unknown-trust').value;
+        // Update in window.LAST_IOT_SCAN
+        const dev = window.LAST_IOT_SCAN.find(d => (d.address||d.id||'') === addr);
+        if (dev) {
+          dev.type = type; dev.vendor = vendor; dev.name = name; dev.location = loc; dev.trust = trust;
+        }
+        showToast({ title: 'Device assigned', msg: `${addr} updated.`, kind: 'success', icon: '✅' });
+        renderIoTDeviceCards(window.LAST_IOT_SCAN);
+      };
     });
-  } catch (error) {
-    let msg = error?.message || 'Controller command failed.';
-    if (error && typeof error.status === 'number' && error.status === 400) {
-      msg = 'Controller rejected the payload (HTTP 400). Check HEX12 scale and payload.';
+    Array.from(list.querySelectorAll('.iot-unknown-quarantine')).forEach(btn => {
+      btn.onclick = function(e) {
+        const row = e.target.closest('tr');
+        const addr = row.getAttribute('data-addr');
+        const dev = window.LAST_IOT_SCAN.find(d => (d.address||d.id||'') === addr);
+        if (dev) {
+          dev.trust = 'quarantine';
+        }
+        showToast({ title: 'Device quarantined', msg: `${addr} moved to quarantine.`, kind: 'warn', icon: '🚫' });
+        renderIoTDeviceCards(window.LAST_IOT_SCAN);
+      };
+    });
+  }
+  // Grouped device cards (excluding unknowns)
+  const knowns = devices.filter(d => unknowns.indexOf(d) === -1);
+  if (knowns.length) {
+    const byVendor = groupBy(knowns, d => (d.vendor || d.brand || 'Unknown').toLowerCase());
+    for (const vendor of Object.keys(byVendor)) {
+      let card = document.createElement('section');
+      card.className = 'iot-vendor-card';
+      card.innerHTML = `<h3 style="margin:0 0 8px 0;text-transform:capitalize">${vendor} Devices</h3>`;
+      card.innerHTML += '<ul style="margin:0 0 8px 0;padding:0;list-style:none">' +
+        byVendor[vendor].map(dev => `<li style="margin-bottom:4px"><b>${escapeHtml(dev.name)}</b> <span class="tiny">(${escapeHtml(dev.protocol)})</span> <span class="tiny">${escapeHtml(dev.address||'')}</span></li>`).join('') + '</ul>';
+      list.appendChild(card);
     }
-    showToast({ title: controller.name || 'Controller', msg, kind: 'error', icon: '⚠️' });
-  } finally {
-    setControllerActionPending(btn, false);
   }
 }
-
-function saveControllerLink(controller, btn) {
-  const host = btn.closest('[data-controller-id]');
-  const input = host?.querySelector('[data-role="controller-link"]');
-  const value = (input?.value || '').trim();
-  controller.link = value;
-  if (Array.isArray(window.LAST_SMART_CONTROLLER_SCAN) && window.LAST_SMART_CONTROLLER_SCAN[controller.index]) {
-    window.LAST_SMART_CONTROLLER_SCAN[controller.index].link = value;
-  }
-  showToast({
-    title: 'Link saved',
-    msg: value ? `${controller.name || controller.id} linked to ${value}.` : `${controller.name || controller.id} link cleared.`,
-    kind: 'success',
-    icon: '💾'
-  });
-}
-
-async function refreshController(controller, btn) {
-  if (typeof window.scanSmartControllers !== 'function') {
-    showToast({ title: 'Controller refresh unavailable', msg: 'Discovery service is not available in this mode.', kind: 'warn', icon: '⚠️' });
-    return;
-  }
-  setControllerActionPending(btn, true, 'Refreshing…');
-  try {
-    await window.scanSmartControllers();
-  } catch (error) {
-    showToast({ title: 'Controller refresh failed', msg: error?.message || 'Scan failed.', kind: 'error', icon: '⚠️' });
-  } finally {
-    setControllerActionPending(btn, false);
-  }
-}
-
-async function discoverControllers(btn) {
-  if (typeof window.scanSmartControllers !== 'function') {
-    showToast({ title: 'Discovery unavailable', msg: 'Discovery service is not available in this mode.', kind: 'warn', icon: '⚠️' });
-    return;
-  }
-  setControllerActionPending(btn, true, 'Scanning…');
-  try {
-    await window.scanSmartControllers();
-  } catch (error) {
-    showToast({ title: 'Discovery failed', msg: error?.message || 'Scan failed.', kind: 'error', icon: '⚠️' });
-  } finally {
-    setControllerActionPending(btn, false);
-  }
-}
-
-function assignUnknownController(btn) {
-  const row = btn.closest('tr[data-controller-index]');
-  if (!row) return;
-  const index = Number(row.dataset.controllerIndex);
-  if (!Number.isFinite(index)) return;
-  const devices = window.LAST_SMART_CONTROLLER_SCAN || [];
-  const device = devices[index];
-  if (!device) return;
-  const type = row.querySelector('[data-field="type"]')?.value.trim() || '';
-  const vendor = row.querySelector('[data-field="vendor"]')?.value.trim() || '';
-  const name = row.querySelector('[data-field="name"]')?.value.trim() || '';
-  const location = row.querySelector('[data-field="location"]')?.value.trim() || '';
-  const trust = row.querySelector('[data-field="trust"]')?.value || 'unknown';
-  device.type = type;
-  device.vendor = vendor;
-  device.name = name;
-  device.location = location;
-  device.trust = trust;
-  showToast({
-    title: 'Device assigned',
-    msg: `${device.address || device.id || 'Controller'} classified as ${vendor || 'device'}.`,
-    kind: 'success',
-    icon: '✅'
-  });
-  renderSmartControllerCards(devices);
-}
-
-function quarantineUnknownController(btn) {
-  const row = btn.closest('tr[data-controller-index]');
-  if (!row) return;
-  const index = Number(row.dataset.controllerIndex);
-  if (!Number.isFinite(index)) return;
-  const devices = window.LAST_SMART_CONTROLLER_SCAN || [];
-  const device = devices[index];
-  if (!device) return;
-  device.trust = 'quarantine';
-  showToast({
-    title: 'Device quarantined',
-    msg: `${device.address || device.id || 'Controller'} moved to quarantine.`,
-    kind: 'warn',
-    icon: '🚫'
-  });
-  renderSmartControllerCards(devices);
-}
-
-const controllerActions = {
-  'ctrl.testOn': (btn) => {
-    const controller = getControllerFromElement(btn);
-    if (controller) doControllerToggle(controller, true, btn);
-  },
-  'ctrl.testOff': (btn) => {
-    const controller = getControllerFromElement(btn);
-    if (controller) doControllerToggle(controller, false, btn);
-  },
-  'ctrl.saveLink': (btn) => {
-    const controller = getControllerFromElement(btn);
-    if (controller) saveControllerLink(controller, btn);
-  },
-  'ctrl.refresh': (btn) => {
-    const controller = getControllerFromElement(btn);
-    if (controller) refreshController(controller, btn);
-  },
-  'ctrl.discover': (btn) => {
-    discoverControllers(btn);
-  },
-  'ctrl.assignUnknown': (btn) => {
-    assignUnknownController(btn);
-  },
-  'ctrl.quarantineUnknown': (btn) => {
-    quarantineUnknownController(btn);
-  }
-};
-
-document.addEventListener('click', (event) => {
-  const target = event.target.closest('[data-action]');
-  if (!target) return;
-  const action = target.getAttribute('data-action');
-  if (!action || !action.startsWith('ctrl.')) return;
-  const handler = controllerActions[action];
-  if (typeof handler === 'function') {
-    event.preventDefault();
-    handler(target, event);
-  }
-});
 
 // Demo: global stubs for Kasa/Shelly managers
 window.openKasaManager = function() { showToast({ title: 'Kasa Manager', msg: 'Kasa setup wizard coming soon.', kind: 'info', icon: '💡' }); };
@@ -6204,7 +1314,7 @@ window.openSwitchBotManager = function() {
     // Optionally reload iframe for fresh data
     // document.getElementById('switchBotIframe').src = './switchbot.html';
   } else {
-    showToast({ title: 'SwitchBot Manager', msg: 'SwitchBot manager UI not found.', kind: 'error', icon: grIconImg('generic', 'SwitchBot Manager') });
+    showToast({ title: 'SwitchBot Manager', msg: 'SwitchBot manager UI not found.', kind: 'error', icon: '🤖' });
   }
 };
 
@@ -6223,15 +1333,15 @@ document.addEventListener('DOMContentLoaded', function() {
   }
 });
 
-// Demo: global for last Smart Controller scan results
-window.LAST_SMART_CONTROLLER_SCAN = [];
+// Demo: global for last IoT scan results
+window.LAST_IOT_SCAN = [];
 
-// Scan for controllers and update UI
-window.scanSmartControllers = async function() {
-  const btn = document.getElementById('btnScanSmartControllers');
-  const barContainer = document.getElementById('smartControllersScanBarContainer');
-  const barFill = document.getElementById('smartControllersScanBarFill');
-  const barPercent = document.getElementById('smartControllersScanBarPercent');
+// Scan for devices and update UI
+window.scanIoTDevices = async function() {
+  const btn = document.getElementById('btnScanIoTDevices');
+  const barContainer = document.getElementById('iotScanBarContainer');
+  const barFill = document.getElementById('iotScanBarFill');
+  const barPercent = document.getElementById('iotScanBarPercent');
   let percent = 0;
   let animFrame;
   let running = true;
@@ -6261,9 +1371,9 @@ window.scanSmartControllers = async function() {
     if (!resp.ok) throw new Error('Discovery failed');
     const data = await resp.json();
     const devices = Array.isArray(data.devices) ? data.devices : [];
-    window.LAST_SMART_CONTROLLER_SCAN = devices;
-    renderSmartControllerCards(devices);
-    showToast({ title: 'Scan complete', msg: `Found ${devices.length} controllers`, kind: 'success', icon: '🔍' });
+    window.LAST_IOT_SCAN = devices;
+    renderIoTDeviceCards(devices);
+    showToast({ title: 'Scan complete', msg: `Found ${devices.length} devices`, kind: 'success', icon: '🔍' });
     if (data.analysis && data.analysis.suggestedWizards) {
       console.info('Suggested wizards:', data.analysis.suggestedWizards);
     }
@@ -6275,8 +1385,8 @@ window.scanSmartControllers = async function() {
     }
     await new Promise(res => setTimeout(res, 500));
   } catch (e) {
-    renderSmartControllerCards([]);
-    showToast({ title: 'Scan failed', msg: e.message || 'Could not scan for controllers.', kind: 'error', icon: '❌' });
+    renderIoTDeviceCards([]);
+    showToast({ title: 'Scan failed', msg: e.message || 'Could not scan for devices.', kind: 'error', icon: '❌' });
     // Fill bar to 100% on error
     percent = 100;
     if (barFill && barPercent) {
@@ -6287,7 +1397,7 @@ window.scanSmartControllers = async function() {
   } finally {
     running = false;
     if (animFrame) cancelAnimationFrame(animFrame);
-    if (btn) { btn.disabled = false; btn.textContent = 'Scan for Controllers'; }
+    if (btn) { btn.disabled = false; btn.textContent = 'Scan for Devices'; }
     // Hide bar after short delay
     setTimeout(() => {
       if (barContainer) barContainer.style.display = 'none';
@@ -6653,10 +1763,9 @@ if (typeof window.applyTheme !== 'function') {
 // Utility: Save farm to backend or localStorage fallback
 async function safeFarmSave(payload) {
   try {
-    const base = window.API_BASE || '';
-    const resp = await fetch(`${base}/farm`, {
+    const resp = await fetch('/farm', {
       method: 'POST',
-      headers: _hdrs(),
+      headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(payload)
     });
     if (resp.ok) return true;
@@ -6692,32 +1801,22 @@ async function safeRoomsDelete(roomId) {
 // Helper to reload rooms from backend
 async function loadRoomsFromBackend() {
   try {
-    const base = window.API_BASE || '';
-    const resp = await fetch(`${base}/farm`);
+    const resp = await fetch('/data/rooms.json');
     if (resp.ok) {
       const data = await resp.json();
-      STATE.rooms = Array.isArray(data.rooms) ? data.rooms : [];
-      STATE.zones = Array.isArray(data.zones) ? data.zones : [];
-      STATE.farmName = data.farmName || '';
-      STATE.farmLocation = data.location || {};
+      STATE.rooms = data.rooms || [];
     }
-  } catch (e) { console.warn('Failed to reload farm:', e); }
+  } catch (e) { console.warn('Failed to reload rooms:', e); }
 }
 }
 
 async function safeRoomsSave() {
-  const farm = {
-    farmName: STATE.farmName || '',
-    location: STATE.farmLocation || {},
-    rooms: Array.isArray(STATE.rooms) ? STATE.rooms : [],
-    zones: Array.isArray(STATE.zones) ? STATE.zones : []
-  };
+  const rooms = Array.isArray(STATE.rooms) ? STATE.rooms : [];
   try {
-    const base = window.API_BASE || '';
-    const resp = await fetch(`${base}/farm`, {
+    const resp = await fetch('/data/rooms.json', {
       method: 'POST',
-      headers: _hdrs(),
-      body: JSON.stringify(farm)
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ rooms })
     });
     if (resp.ok) return true;
     throw new Error('HTTP ' + resp.status);
@@ -6870,18 +1969,6 @@ function validateSchedule(mode, cycles) {
 
 function getDailyOnMinutes(schedule) {
   if (!schedule || typeof schedule !== 'object') return 0;
-  if (schedule.cyclesSelected && schedule.cycleA) {
-    const cyclesSelected = schedule.cyclesSelected === 2 ? 2 : 1;
-    const cycleAOn = Number(schedule.cycleA.onHours);
-    const safeA = Number.isFinite(cycleAOn) ? Math.max(0, cycleAOn) : 0;
-    let totalOnHours = safeA;
-    if (cyclesSelected === 2) {
-      const cycleBOn = Number(schedule.cycleB?.onHours);
-      const safeB = Number.isFinite(cycleBOn) ? Math.max(0, cycleBOn) : safeA;
-      totalOnHours += safeB;
-    }
-    return Math.max(0, Math.min(24, totalOnHours)) * 60;
-  }
   const { onTotal } = validateSchedule(schedule.mode, schedule.cycles);
   return Math.max(0, onTotal);
 }
@@ -6892,43 +1979,6 @@ function getDailyOnHours(schedule) {
 
 function scheduleSummary(schedule) {
   if (!schedule || typeof schedule !== 'object') return 'No schedule';
-  if (schedule.cyclesSelected && schedule.cycleA) {
-    const cyclesSelected = schedule.cyclesSelected === 2 ? 2 : 1;
-    const windowHoursRaw = cyclesSelected === 2 && schedule.constraints && Number.isFinite(schedule.constraints.windowHours)
-      ? schedule.constraints.windowHours
-      : cyclesSelected === 2
-        ? 12
-        : 24;
-    const windowHours = Math.max(0, Math.min(24, Number(windowHoursRaw) || 0)) || (cyclesSelected === 2 ? 12 : 24);
-    const cycleAStart = typeof schedule.cycleA.start === 'string' && schedule.cycleA.start
-      ? schedule.cycleA.start
-      : '--:--';
-    const cycleAOnRaw = Number(schedule.cycleA.onHours);
-    const cycleAOn = Math.max(0, Math.min(windowHours, Number.isFinite(cycleAOnRaw) ? cycleAOnRaw : 0));
-    const cycleAOff = cyclesSelected === 2 ? windowHours - cycleAOn : 24 - cycleAOn;
-    const summaryParts = [
-      `Cycle A: ${cycleAStart} → ${formatCycleHoursValue(cycleAOn)} h ON, ${formatCycleHoursValue(Math.max(0, cycleAOff))} h OFF`,
-    ];
-    let totalOn = cycleAOn;
-    if (cyclesSelected === 2) {
-      const cycleBStart = typeof schedule.cycleB?.start === 'string' && schedule.cycleB.start
-        ? schedule.cycleB.start
-        : minutesToHHMM((toMinutes(cycleAStart) + windowHours * 60) % 1440);
-      const cycleBOnRaw = Number(schedule.cycleB?.onHours);
-      const cycleBOn = Math.max(0, Math.min(windowHours, Number.isFinite(cycleBOnRaw) ? cycleBOnRaw : cycleAOn));
-      const cycleBOff = Math.max(0, windowHours - cycleBOn);
-      summaryParts.push(
-        `Cycle B: ${cycleBStart} → ${formatCycleHoursValue(cycleBOn)} h ON, ${formatCycleHoursValue(cycleBOff)} h OFF`,
-      );
-      totalOn += cycleBOn;
-    } else {
-      summaryParts.push('Cycle B: —');
-    }
-    const totalOff = Math.max(0, 24 - totalOn);
-    summaryParts.push(`Total ON = ${formatCycleHoursValue(totalOn)} h`);
-    summaryParts.push(`Total OFF = ${formatCycleHoursValue(totalOff)} h`);
-    return summaryParts.join(' • ');
-  }
   const cycles = Array.isArray(schedule.cycles) ? schedule.cycles.filter(Boolean) : [];
   if (!cycles.length) return 'No schedule';
   const totalHours = getDailyOnHours(schedule);
@@ -6957,76 +2007,11 @@ function minutesToHHMM(mins) {
   const m = Math.round(mins % 60);
   return `${h.toString().padStart(2, '0')}:${m.toString().padStart(2, '0')}`;
 }
-
-function drawSparkline(canvas, values = [], options = {}) {
-  if (!canvas || (typeof HTMLCanvasElement !== 'undefined' && !(canvas instanceof HTMLCanvasElement))) return;
-  const ctx = canvas.getContext('2d');
-  if (!ctx) return;
-
-  const safeValues = Array.isArray(values)
-    ? values
-        .map((value) => Number(value))
-        .filter((value) => Number.isFinite(value))
-    : [];
-
-  const width = Math.max(1, Math.round(options.width || canvas.width || 120));
-  const height = Math.max(1, Math.round(options.height || canvas.height || 40));
-  if (canvas.width !== width) canvas.width = width;
-  if (canvas.height !== height) canvas.height = height;
-
-  ctx.clearRect(0, 0, width, height);
-
-  const strokeColor = options.color || '#0ea5e9';
-  const fallbackColor = '#cbd5f5';
-  const paddingX = 4;
-  const paddingY = 4;
-  const spanX = Math.max(1, width - paddingX * 2);
-  const spanY = Math.max(1, height - paddingY * 2);
-
-  ctx.lineWidth = 1.5;
-  ctx.lineJoin = 'round';
-  ctx.lineCap = 'round';
-
-  if (!safeValues.length) {
-    ctx.strokeStyle = fallbackColor;
-    ctx.beginPath();
-    ctx.moveTo(paddingX, height - paddingY - spanY / 2);
-    ctx.lineTo(width - paddingX, height - paddingY - spanY / 2);
-    ctx.stroke();
-    return;
-  }
-
-  const min = Math.min(...safeValues);
-  const max = Math.max(...safeValues);
-  const span = max - min;
-
-  ctx.strokeStyle = strokeColor;
-  ctx.beginPath();
-
-  let lastX = paddingX;
-  let lastY = height - paddingY;
-
-  safeValues.forEach((value, index) => {
-    const progress = safeValues.length === 1 ? 0.5 : index / (safeValues.length - 1);
-    const x = paddingX + progress * spanX;
-    const ratio = span === 0 ? 0.5 : (value - min) / span;
-    const y = height - paddingY - ratio * spanY;
-    if (index === 0) {
-      ctx.moveTo(x, y);
-    } else {
-      ctx.lineTo(x, y);
-    }
-    lastX = x;
-    lastY = y;
-  });
-  ctx.stroke();
-
-  ctx.fillStyle = strokeColor;
-  ctx.beginPath();
-  ctx.arc(lastX, lastY, 2.5, 0, Math.PI * 2);
-  ctx.fill();
+// Global lights status UI initializer stub
+function initLightsStatusUI() {
+  // TODO: Replace with real lights status UI initialization if needed
+  console.warn('[Stub] initLightsStatusUI called');
 }
-// ...existing code...
 // Spectral rendering constants
 const HEX_CHANNEL_KEYS = ['cw', 'ww', 'bl', 'rd', 'fr', 'uv'];
 const DRIVER_CHANNEL_KEYS = ['cw', 'ww', 'bl', 'rd'];
@@ -7324,530 +2309,6 @@ function computeWeightedSPD(mix, opts = {}) {
     deviceCount: deviceIds.length,
   };
 }
-// ===== Spectra helpers (Plan vs Light) =====
-function ensureGlobalAppState() {
-  if (!window.__state) window.__state = {};
-  if (!window.__state.gral29) window.__state.gral29 = { selected: [], available: [] };
-  if (!Array.isArray(window.__state.gral29.selected)) window.__state.gral29.selected = [];
-  if (!Array.isArray(window.__state.gral29.available)) window.__state.gral29.available = [];
-  return window.__state;
-}
-
-function ensureSpectraState() {
-  const state = ensureGlobalAppState();
-  if (!window.__spectraState) {
-    window.__spectraState = { selectedPlan: null, selectedLights: [] };
-  }
-  const selection = Array.isArray(state.gral29?.selected) ? state.gral29.selected : [];
-  window.__spectraState.selectedLights = selection;
-  return window.__spectraState;
-}
-
-function onGRAL29SelectionChange(selectedLights, opts = {}) {
-  const state = ensureGlobalAppState();
-  const normalized = Array.isArray(selectedLights) ? selectedLights.slice() : [];
-  const previous = Array.isArray(state.gral29.selected) ? state.gral29.selected : [];
-  const sameLength = previous.length === normalized.length;
-  const same = sameLength && previous.every((entry, index) => entry === normalized[index]);
-  state.gral29.selected = normalized;
-  const spectraState = ensureSpectraState();
-  spectraState.selectedLights = normalized;
-  const force = opts && opts.force;
-  if (!same || force) {
-    document.dispatchEvent(
-      new CustomEvent('gral29:changed', { detail: { selectedLights: normalized } })
-    );
-  }
-}
-
-function setGRAL29Lights(lights) {
-  const state = ensureGlobalAppState();
-  const normalized = Array.isArray(lights) ? lights.slice() : [];
-  const prevAvailable = Array.isArray(state.gral29.available) ? state.gral29.available : [];
-  const summarize = (entry) => {
-    if (!entry || typeof entry !== 'object') {
-      return { id: String(entry ?? ''), name: '', dynamic: false, source: '' };
-    }
-    return {
-      id: String(entry.id ?? entry.serial ?? entry.name ?? ''),
-      name: String(entry.name ?? ''),
-      dynamic: !!entry.isDynamic,
-      source: String(entry.source ?? ''),
-    };
-  };
-  const prevSignature = JSON.stringify(prevAvailable.map(summarize));
-  const nextSignature = JSON.stringify(normalized.map(summarize));
-  const availableChanged = prevSignature !== nextSignature;
-  state.gral29.available = normalized;
-  onGRAL29SelectionChange(normalized, { force: availableChanged });
-}
-
-function renderGRAL29LightList() {
-  const container = document.getElementById('gral29-light-list');
-  if (!container) return;
-  const state = ensureGlobalAppState();
-  const available = Array.isArray(state.gral29?.available) ? state.gral29.available : [];
-  const selected = Array.isArray(state.gral29?.selected) ? state.gral29.selected : [];
-  const keyFor = (entry) => {
-    if (!entry || typeof entry !== 'object') return String(entry ?? '');
-    return String(entry.id ?? entry.serial ?? entry.name ?? '');
-  };
-  const selectedIds = new Set(selected.map(keyFor));
-
-  if (!available.length) {
-    container.innerHTML = '<p class="gral29-empty">No lights selected.</p>';
-    return;
-  }
-
-  const rows = available
-    .map((light) => {
-      const id = keyFor(light);
-      const name =
-        light && typeof light === 'object'
-          ? light.name || light.id || 'Light'
-          : String(light || 'Light');
-      const modeLabel =
-        light && typeof light === 'object' && Object.prototype.hasOwnProperty.call(light, 'isDynamic')
-          ? light.isDynamic
-            ? 'Dynamic'
-            : 'Static'
-          : '';
-      const sourceLabel =
-        light && typeof light === 'object' && light.source ? String(light.source) : '';
-      const nameHtml = escapeHtml(name);
-      const idHtml = escapeHtml(id);
-      const modeHtml = modeLabel
-        ? `<span class="gral29-mode ${light.isDynamic ? 'is-dynamic' : 'is-static'}">${escapeHtml(modeLabel)}</span>`
-        : '';
-      const sourceHtml = sourceLabel
-        ? `<span class="gral29-source">${escapeHtml(sourceLabel)}</span>`
-        : '';
-      return `
-        <tr data-light-id="${idHtml}">
-          <td class="col-select">
-            <input type="checkbox" class="gral29-select" value="${idHtml}" ${selectedIds.has(id) ? 'checked' : ''} aria-label="Select ${nameHtml}">
-          </td>
-          <td class="col-name">
-            <div class="gral29-name">${nameHtml}</div>
-            <div class="gral29-meta">${modeHtml}${sourceHtml}</div>
-          </td>
-        </tr>
-      `;
-    })
-    .join('');
-
-  container.innerHTML = `
-    <table class="gral29-table">
-      <thead>
-        <tr>
-          <th scope="col" class="col-select">Select</th>
-          <th scope="col" class="col-name">Light</th>
-        </tr>
-      </thead>
-      <tbody>${rows}</tbody>
-    </table>
-  `;
-
-  const checkboxes = container.querySelectorAll('.gral29-select');
-  checkboxes.forEach((input) => {
-    input.addEventListener('change', () => {
-      const checkedIds = new Set(
-        Array.from(container.querySelectorAll('.gral29-select:checked')).map((cb) => cb.value)
-      );
-      const nextSelection = available.filter((entry) => checkedIds.has(keyFor(entry)));
-      onGRAL29SelectionChange(nextSelection);
-    });
-  });
-}
-
-function deleteSelectedLightsGRAL29() {
-  const state = ensureGlobalAppState();
-  const current = Array.isArray(state.gral29?.selected) ? state.gral29.selected : [];
-  if (!current.length) return;
-
-  const toKey = (entry) => {
-    if (!entry || typeof entry !== 'object') return String(entry ?? '');
-    return String(entry.id ?? entry.serial ?? entry.name ?? '');
-  };
-  const ids = current.map(toKey).filter(Boolean);
-  if (!ids.length) return;
-
-  const escapeSelector = (value) => {
-    const str = String(value ?? '');
-    if (typeof CSS !== 'undefined' && CSS.escape) return CSS.escape(str);
-    return str.replace(/["'\\]/g, '\\$&');
-  };
-  ids.forEach((id) => {
-    const selector = `[data-light-id="${escapeSelector(id)}"]`;
-    document.querySelectorAll(selector).forEach((node) => node.remove());
-  });
-
-  const idSet = new Set(ids);
-  const available = Array.isArray(state.gral29.available) ? state.gral29.available : [];
-  state.gral29.available = available.filter((entry) => !idSet.has(toKey(entry)));
-
-  if (typeof window.STATE === 'object' && window.STATE) {
-    const groups = Array.isArray(window.STATE.groups) ? window.STATE.groups : [];
-    groups.forEach((group) => {
-      if (!group || !Array.isArray(group.lights)) return;
-      group.lights = group.lights.filter((entry) => !idSet.has(toKey(entry)));
-    });
-    if (window.STATE.currentGroup && Array.isArray(window.STATE.currentGroup.lights)) {
-      window.STATE.currentGroup.lights = window.STATE.currentGroup.lights.filter(
-        (entry) => !idSet.has(toKey(entry))
-      );
-    }
-    if (Array.isArray(window.STATE.lights)) {
-      window.STATE.lights.forEach((light) => {
-        const lightId = toKey(light);
-        if (lightId && idSet.has(lightId)) {
-          light.zoneId = null;
-        }
-      });
-    }
-    document.dispatchEvent(new Event('groups-updated'));
-    document.dispatchEvent(new Event('lights-updated'));
-    if (typeof updateGroupUI === 'function' && window.STATE.currentGroup) {
-      try { updateGroupUI(window.STATE.currentGroup); } catch (err) { console.warn('Failed to refresh group UI after delete', err); }
-    }
-  }
-
-  onGRAL29SelectionChange([]);
-
-  fetch('/ui/groups', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ op: 'removeLights', ids }),
-  }).catch(() => {});
-}
-
-function ensureSpdFromMix(mix, deviceIds = []) {
-  if (!mix) return null;
-  try {
-    const computed = computeWeightedSPD(mix, { deviceIds });
-    if (computed && Array.isArray(computed.wavelengths) && computed.wavelengths.length) {
-      const wavelengths = computed.wavelengths.map(Number);
-      const baseSamples = Array.isArray(computed.samples) && computed.samples.length ? computed.samples : computed.display;
-      const samples = Array.isArray(baseSamples) ? baseSamples.map((value) => Number(value) || 0) : [];
-      return { wavelengths, samples };
-    }
-  } catch (err) {
-    console.debug('SPD mix fallback engaged', err);
-  }
-  const safeMix = {
-    bl: Number(mix.bl ?? mix.blue ?? 0),
-    cw: Number(mix.cw ?? mix.cool ?? 0),
-    ww: Number(mix.ww ?? mix.warm ?? 0),
-    rd: Number(mix.rd ?? mix.red ?? 0),
-  };
-  const points = [
-    { nm: 400, val: safeMix.bl },
-    { nm: 450, val: safeMix.bl },
-    { nm: 520, val: safeMix.cw },
-    { nm: 560, val: safeMix.ww },
-    { nm: 620, val: safeMix.rd },
-    { nm: 700, val: safeMix.rd * 0.85 },
-  ];
-  return {
-    wavelengths: points.map((point) => point.nm),
-    samples: points.map((point) => point.val),
-  };
-}
-
-function resolveSpd(curve, deviceIds = []) {
-  if (!curve) return null;
-  if (Array.isArray(curve.wavelengths) && Array.isArray(curve.samples)) {
-    return {
-      wavelengths: curve.wavelengths.map(Number),
-      samples: curve.samples.map((value, index) => Number(value ?? (Array.isArray(curve.display) ? curve.display[index] : 0)) || 0),
-    };
-  }
-  if (Array.isArray(curve.wavelengths) && Array.isArray(curve.display) && !Array.isArray(curve.samples)) {
-    return {
-      wavelengths: curve.wavelengths.map(Number),
-      samples: curve.display.map((value) => Number(value) || 0),
-    };
-  }
-  if (Array.isArray(curve) && curve.length && typeof curve[0] === 'object' && curve[0]) {
-    if ('nm' in curve[0]) {
-      const sorted = curve.slice().sort((a, b) => Number(a.nm) - Number(b.nm));
-      return {
-        wavelengths: sorted.map((point) => Number(point.nm)),
-        samples: sorted.map((point) => Number(point.val ?? point.value ?? 0)),
-      };
-    }
-  }
-  if (typeof curve === 'object') {
-    const numericKeys = Object.keys(curve).filter((key) => !Number.isNaN(Number(key)));
-    if (numericKeys.length) {
-      const sortedKeys = numericKeys.map(Number).sort((a, b) => a - b);
-      return {
-        wavelengths: sortedKeys,
-        samples: sortedKeys.map((nm) => Number(curve[nm]) || 0),
-      };
-    }
-  }
-  return ensureSpdFromMix(curve, deviceIds);
-}
-
-// Ensure we work with 400–700 nm domain (1 nm resolution)
-function sampleSpectrum(curve, nmStart = 400, nmEnd = 700) {
-  if (!curve) return [];
-  let spectrumArray = [];
-  if (Array.isArray(curve.wavelengths) && Array.isArray(curve.samples)) {
-    spectrumArray = curve.wavelengths.map((nm, index) => ({
-      nm: Number(nm),
-      val: Number(curve.samples[index] ?? 0),
-    }));
-  } else if (Array.isArray(curve)) {
-    if (curve.length && typeof curve[0] === 'object' && curve[0]) {
-      spectrumArray = curve.map((point) => ({
-        nm: Number(point.nm ?? point.wavelength ?? 0),
-        val: Number(point.val ?? point.value ?? 0),
-      }));
-    } else if (curve.length && typeof curve[0] === 'number') {
-      spectrumArray = curve.map((value, index) => ({
-        nm: nmStart + index,
-        val: Number(value) || 0,
-      }));
-    }
-  } else if (typeof curve === 'object') {
-    if (Array.isArray(curve.wavelengths) && Array.isArray(curve.display)) {
-      spectrumArray = curve.wavelengths.map((nm, index) => ({
-        nm: Number(nm),
-        val: Number(curve.display[index] ?? 0),
-      }));
-    } else {
-      const numericKeys = Object.keys(curve).filter((key) => !Number.isNaN(Number(key)));
-      if (numericKeys.length) {
-        spectrumArray = numericKeys.map((key) => ({
-          nm: Number(key),
-          val: Number(curve[key]) || 0,
-        }));
-      }
-    }
-  }
-  if (!spectrumArray.length) return [];
-  spectrumArray = spectrumArray.filter((point) => Number.isFinite(point.nm)).sort((a, b) => a.nm - b.nm);
-  const out = [];
-  for (let nm = nmStart; nm <= nmEnd; nm++) {
-    let lo = 0;
-    let hi = spectrumArray.length - 1;
-    let value = 0;
-    let found = false;
-    while (lo <= hi) {
-      const mid = (lo + hi) >> 1;
-      const diff = spectrumArray[mid].nm - nm;
-      if (diff === 0) {
-        value = spectrumArray[mid].val;
-        found = true;
-        break;
-      }
-      if (diff < 0) lo = mid + 1;
-      else hi = mid - 1;
-    }
-    if (!found) {
-      const candidates = [];
-      if (lo < spectrumArray.length) candidates.push(spectrumArray[lo]);
-      if (hi >= 0) candidates.push(spectrumArray[hi]);
-      if (candidates.length) {
-        candidates.sort((a, b) => Math.abs(a.nm - nm) - Math.abs(b.nm - nm));
-        value = candidates[0].val;
-      }
-    }
-    out.push({ nm, val: value });
-  }
-  return out;
-}
-
-function normalizeSpectrum(samples) {
-  const total = samples.reduce((acc, point) => acc + Number(point.val || 0), 0) || 1;
-  return samples.map((point) => ({ nm: point.nm, val: point.val / total }));
-}
-
-const BAND_RANGES = {
-  blue: [400, 500],
-  mid: [500, 600],
-  red: [600, 700],
-};
-
-function bandIntegrals(normSamples) {
-  const acc = { blue: 0, mid: 0, red: 0 };
-  normSamples.forEach((point) => {
-    if (point.nm >= 400 && point.nm < 500) acc.blue += point.val;
-    else if (point.nm >= 500 && point.nm < 600) acc.mid += point.val;
-    else if (point.nm >= 600 && point.nm <= 700) acc.red += point.val;
-  });
-  return acc;
-}
-
-function deltaBands(planBands, lightBands) {
-  const out = {};
-  ['blue', 'mid', 'red'].forEach((band) => {
-    const base = planBands[band];
-    const safeBase = Math.abs(base) < 1e-9 ? 1e-9 : base;
-    out[band] = ((lightBands[band] - planBands[band]) / safeBase) * 100;
-  });
-  return out;
-}
-
-function renderSpectraCanvas(canvas, samples, options = {}) {
-  if (!canvas || !canvas.getContext) return;
-  const ctx = canvas.getContext('2d');
-  const width = canvas.clientWidth || canvas.width || 320;
-  const height = canvas.clientHeight || canvas.height || 120;
-  canvas.width = width;
-  canvas.height = height;
-  ctx.clearRect(0, 0, width, height);
-
-  const padL = 24;
-  const padR = 8;
-  const padT = 8;
-  const padB = 18;
-
-  const xs = (nm) => padL + ((nm - 400) / 300) * (width - padL - padR);
-  const maxY = Math.max(...samples.map((sample) => sample.val), 0) || 1;
-  const ys = (value) => height - padB - (value / maxY) * (height - padT - padB);
-
-  ctx.strokeStyle = '#bbb';
-  ctx.lineWidth = 1;
-  ctx.beginPath();
-  ctx.moveTo(padL, height - padB);
-  ctx.lineTo(width - padR, height - padB);
-  ctx.moveTo(padL, height - padB);
-  ctx.lineTo(padL, padT);
-  ctx.stroke();
-
-  ctx.fillStyle = '#666';
-  ctx.font = '11px system-ui, sans-serif';
-  [400, 500, 600, 700].forEach((nm) => {
-    const x = xs(nm);
-    ctx.beginPath();
-    ctx.moveTo(x, height - padB);
-    ctx.lineTo(x, height - padB + 4);
-    ctx.stroke();
-    ctx.fillText(String(nm), x - 10, height - 4);
-  });
-
-  ctx.strokeStyle = options.stroke || '#111';
-  ctx.lineWidth = 1.5;
-  ctx.beginPath();
-  samples.forEach((point, index) => {
-    const x = xs(point.nm);
-    const y = ys(point.val);
-    if (index === 0) ctx.moveTo(x, y);
-    else ctx.lineTo(x, y);
-  });
-  ctx.stroke();
-}
-
-function getSelectedPlanSpectrum() {
-  return ensureSpectraState().selectedPlan?.spectrum || null;
-}
-
-function getSelectedLights() {
-  const state = ensureGlobalAppState();
-  const selection = state.gral29?.selected;
-  return Array.isArray(selection) ? selection : [];
-}
-
-function renderSelectedLightsSpectraUnderPlan() {
-  const planSpd = getSelectedPlanSpectrum();
-  const host = document.getElementById('light-spectra-graphs');
-  const deltaHost = document.getElementById('light-plan-delta');
-  if (!host || !deltaHost) return;
-  host.innerHTML = '';
-  deltaHost.innerHTML = '';
-  if (!planSpd) return;
-
-  const planSamples = normalizeSpectrum(sampleSpectrum(planSpd));
-  if (!planSamples.length) return;
-  const planBands = bandIntegrals(planSamples);
-
-  const lights = getSelectedLights();
-  if (!lights || !lights.length) return;
-
-  const table = document.createElement('table');
-  table.innerHTML = `
-    <thead>
-      <tr><th>Light</th><th>Blue Δ%</th><th>Mid (Green) Δ%</th><th>Red Δ%</th></tr>
-    </thead>
-    <tbody></tbody>`;
-  const tbody = table.querySelector('tbody');
-
-  lights.forEach((light) => {
-    const lightCurve = light.isDynamic ? planSpd : light.manufacturerSpectrum;
-    if (!lightCurve) return;
-    const lightSamples = normalizeSpectrum(sampleSpectrum(lightCurve));
-    if (!lightSamples.length) return;
-    const lightBands = bandIntegrals(lightSamples);
-    const deltas = deltaBands(planBands, lightBands);
-
-    const card = document.createElement('div');
-    card.className = 'spectra-card';
-    card.innerHTML = `
-      <div class="spectra-title">${light.name || light.id || 'Light'}</div>
-      <canvas class="spectra-canvas" aria-label="Spectrum plot"></canvas>
-    `;
-    host.appendChild(card);
-    const canvas = card.querySelector('canvas');
-    renderSpectraCanvas(canvas, lightSamples, { stroke: light.isDynamic ? '#333' : '#111' });
-
-    const fmt = (value) => {
-      const text = `${value >= 0 ? '+' : ''}${value.toFixed(1)}%`;
-      const cls = value >= 0 ? 'delta-pos' : 'delta-neg';
-      return `<span class="${cls}">${text}</span>`;
-    };
-    const row = document.createElement('tr');
-    row.innerHTML = `
-      <td style="text-align:left">${light.name || light.id || 'Light'}</td>
-      <td>${fmt(deltas.blue)}</td>
-      <td>${fmt(deltas.mid)}</td>
-      <td>${fmt(deltas.red)}</td>
-    `;
-    tbody.appendChild(row);
-  });
-
-  if (tbody.children.length) {
-    deltaHost.appendChild(table);
-  }
-}
-
-let __spectraRenderScheduled = false;
-function scheduleSelectedSpectraRender() {
-  if (__spectraRenderScheduled) return;
-  __spectraRenderScheduled = true;
-  const raf = window.requestAnimationFrame || ((cb) => setTimeout(cb, 0));
-  raf(() => {
-    __spectraRenderScheduled = false;
-    renderSelectedLightsSpectraUnderPlan();
-  });
-}
-
-document.addEventListener('plan:changed', scheduleSelectedSpectraRender);
-document.addEventListener('gral29:changed', scheduleSelectedSpectraRender);
-document.addEventListener('gral29:changed', renderGRAL29LightList);
-window.addEventListener('DOMContentLoaded', () => {
-  ensureSpectraState();
-  scheduleSelectedSpectraRender();
-});
-document.addEventListener('DOMContentLoaded', () => {
-  ['EAC02', 'TC01'].forEach((id) => {
-    const node = document.getElementById(id);
-    if (node) {
-      node.classList.add('gr-card', 'gr-full');
-    }
-  });
-
-  const deleteBtn = document.getElementById('gral29-delete');
-  if (deleteBtn) deleteBtn.addEventListener('click', deleteSelectedLightsGRAL29);
-
-  renderGRAL29LightList();
-});
-// ===== End Spectra helpers =====
-
-// ===== Light selection + spectragraph panels =====
-
 // Global farm normalization stub
 function normalizeFarmDoc(farm) {
   // TODO: Replace with real normalization logic if needed
@@ -7855,58 +2316,49 @@ function normalizeFarmDoc(farm) {
 }
 // Global JSON loader
 async function loadJSON(url) {
-  const resp = await fetch(resolveApiUrl(url));
+  const resp = await fetch(url);
   if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
-  return await resp.json();
-}
-
-async function saveJSON(url, payload, { method = 'POST', headers = {}, expectJson = true } = {}) {
-  const resp = await fetch(resolveApiUrl(url), {
-    method,
-    headers: { ..._hdrs(), ...headers },
-    body: JSON.stringify(payload ?? {}),
-  });
-  if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
-  if (!expectJson) return null;
-  const contentType = resp.headers.get('content-type') || '';
-  if (!contentType.toLowerCase().includes('application/json')) return null;
   return await resp.json();
 }
 // Light Engine Charlie - Comprehensive Dashboard Application
 // Global API fetch helper
-function resolveApiUrl(url) {
-  if (!url && url !== '') return url;
-  const text = String(url);
-  if (/^https?:/i.test(text)) return text;
-  const base = (window.API_BASE || '').replace(/\/+$/, '');
-  if (!text) return base || '/';
-  return text.startsWith('/') ? `${base}${text}` : `${base}/${text}`;
-}
-
 async function api(url, opts = {}) {
-  const resp = await fetch(resolveApiUrl(url), opts);
+  const resp = await fetch(url, opts);
   if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
   return await resp.json();
 }
 // Ensure STATE is globally defined
 var STATE = window.STATE = window.STATE || {};
+
 const $ = (s, r=document)=>r.querySelector(s);
 const $$ = (s, r=document)=>r.querySelectorAll(s);
 const setStatus = m => { const el=$("#status"); if(el) el.textContent = m; };
-//
+
+// Remove demo rooms from STATE.rooms on load
+function removeDemoRooms() {
+  if (!Array.isArray(STATE.rooms)) return;
+  // Define demo room names/ids to remove (customize as needed)
+  const demoNames = [
+    "Demo Room", "Demo Grow Room", "Test Room", "Sample Room", "Room 1", "Room 2", "Room A", "Room B",
+    "Propagation Bay", "Flower Bay"
+  ];
+  STATE.rooms = STATE.rooms.filter(r => {
+    if (!r) return false;
+    const name = (r.name||"").toLowerCase();
+    return !demoNames.some(dn => name.includes(dn.toLowerCase()));
+  });
+}
+
+document.addEventListener('DOMContentLoaded', function() {
+  removeDemoRooms();
+  if (typeof renderRooms === 'function') renderRooms();
+});
 
 STATE.smartPlugs = Array.isArray(STATE.smartPlugs) ? STATE.smartPlugs : [];
 STATE.preAutomationRules = Array.isArray(STATE.preAutomationRules) ? STATE.preAutomationRules : [];
 STATE.preAutomationEnv = STATE.preAutomationEnv || { scopes: {} };
 STATE.preAutomationAlert = null;
 STATE.environment = Array.isArray(STATE.environment) ? STATE.environment : [];
-STATE.roomAutomation = STATE.roomAutomation || { rooms: [], meta: {} };
-STATE.aiAdvisory = STATE.aiAdvisory || { summary: '', rooms: [] };
-STATE.envReadings = Array.isArray(STATE.envReadings) ? STATE.envReadings : [];
-STATE.ctrlMap = (STATE.ctrlMap && typeof STATE.ctrlMap === 'object' && !Array.isArray(STATE.ctrlMap)) ? STATE.ctrlMap : {};
-STATE.equipmentCounts = (STATE.equipmentCounts && typeof STATE.equipmentCounts === 'object' && !Array.isArray(STATE.equipmentCounts))
-  ? STATE.equipmentCounts
-  : {};
 
 // ...existing code...
 class FarmWizard {
@@ -8357,31 +2809,35 @@ class FarmWizard {
     this.updateWifiPasswordUI();
   }
 
-
   addRoom() {
     const input = $('#newRoomName');
     if (!input) return;
     const name = (input.value || '').trim();
     if (!name) return;
     const id = `room-${Date.now().toString(36)}-${Math.random().toString(36).slice(2,6)}`;
-    this.data.rooms.push({ id, name });
+    this.data.rooms.push({ id, name, zones: [] });
     input.value = '';
     this.renderRoomsEditor();
-    window.dispatchEvent(new CustomEvent('rooms-updated'));
   }
-
 
   removeRoom(roomId) {
     this.data.rooms = this.data.rooms.filter(r => r.id !== roomId);
     this.renderRoomsEditor();
-    window.dispatchEvent(new CustomEvent('rooms-updated'));
   }
 
+  addZone(roomId, zoneName) {
+    const room = this.data.rooms.find(r => r.id === roomId);
+    if (!room || !zoneName) return;
+    if (!room.zones.includes(zoneName)) room.zones.push(zoneName);
+    this.renderRoomsEditor();
+  }
 
-  // addZone removed
-
-
-  // removeZone removed
+  removeZone(roomId, zoneName) {
+    const room = this.data.rooms.find(r => r.id === roomId);
+    if (!room) return;
+    room.zones = room.zones.filter(z => z !== zoneName);
+    this.renderRoomsEditor();
+  }
 
   renderRoomsEditor() {
     const host = $('#roomsEditor');
@@ -9932,8 +4388,7 @@ class DeviceManagerWindow {
     this.runBtn?.addEventListener('click', () => this.runDiscovery());
     this.filterButtons.forEach(btn => btn.addEventListener('click', () => this.setFilter(btn.dataset.filter)));
     this.automationBtn?.addEventListener('click', () => {
-      focusAutomationCard();
-      showToast({ title: 'Automation card', msg: 'Scroll to Grow Room Automation for live advisories.', kind: 'info', icon: grIconImg('evie-training', 'Automation status') }, 4000);
+      showToast({ title: 'Automation card', msg: 'Coming soon — natural language rules for any sensor to control any device.', kind: 'info', icon: '🧠' }, 5000);
     });
   }
 
@@ -10240,11 +4695,10 @@ class DeviceManagerWindow {
 
     // Create New Zone action
     createZoneBtn.addEventListener('click', () => {
-  const roomId = roomSelect.value;
-  // No need to check for room selection; equipment is already assigned to a room
-  // Zone creation prompt removed as requested
-  const zoneName = '';
-  // No prompt for zone name; zoneName will be empty
+      const roomId = roomSelect.value;
+      if (!roomId) return alert('Select a room first');
+      const zoneName = prompt('Enter new zone name:');
+      if (!zoneName) return;
       // Find and update the room in STATE.rooms (preferred) or STATE.farm.rooms
       let updated = false;
       if (Array.isArray(STATE.rooms)) {
@@ -10275,7 +4729,7 @@ class DeviceManagerWindow {
         }
         window.dispatchEvent(new CustomEvent('farmDataChanged'));
       } else {
-  // Removed: alert('Failed to add zone.');
+        alert('Failed to add zone.');
       }
     });
 
@@ -11309,24 +5763,17 @@ class RoomWizard {
       const nameInput = document.getElementById('roomInfoName');
       const zoneCountInput = document.getElementById('roomInfoZoneCount');
       const zoneInputsHost = document.getElementById('roomInfoZoneInputs');
-      if (!nameInput) {
-        console.error('[RoomWizard] roomInfoName input not found!');
-        this.showError('roomInfoError', 'Room name input is missing from the form.');
-        return;
+      if (nameInput) {
+        if (!this.data.name && STATE.farm?.farmName) {
+          const roomNumber = (this.multiRoomIndex || 0) + 1;
+          this.data.name = `${STATE.farm.farmName} - Room ${roomNumber}`;
+        }
+        nameInput.value = this.data.name || '';
+        nameInput.oninput = (e) => {
+          this.data.name = (e.target.value || '').trim();
+          this.updateSetupQueue();
+        };
       }
-      if (!this.data.name && STATE.farm?.farmName) {
-        const roomNumber = (this.multiRoomIndex || 0) + 1;
-        this.data.name = `${STATE.farm.farmName} - Room ${roomNumber}`;
-      }
-      nameInput.value = this.data.name || '';
-      nameInput.oninput = (e) => {
-        this.data.name = (e.target.value || '').trim();
-        this.updateSetupQueue();
-        this.showError('roomInfoError', '');
-        console.debug('[RoomWizard] roomInfoName input changed:', this.data.name);
-      };
-      // Always focus the name input for user clarity
-      setTimeout(() => { try { nameInput.focus(); } catch {} }, 100);
       if (zoneCountInput) {
         let zoneCount = Number(zoneCountInput.value) || 1;
         if (!Array.isArray(this.data.zones) || this.data.zones.length !== zoneCount) {
@@ -11519,13 +5966,11 @@ class RoomWizard {
       case 'room-info': {
         const v = ($('#roomInfoName')?.value||'').trim();
         if (!v) {
-          this.showError('roomInfoError', 'Room name is required. Please enter a name for this room.');
-          console.warn('[RoomWizard] validateCurrentStep: Room name missing!');
+          this.showError('roomInfoError', 'Room name is required.');
           return false;
         }
         this.showError('roomInfoError', '');
         this.data.name = v;
-        console.debug('[RoomWizard] validateCurrentStep: Room name OK:', v);
         break; }
 
       case 'layout': {
@@ -11724,10 +6169,6 @@ class RoomWizard {
       'other': 'Other equipment setup'
     };
     titleEl.textContent = titles[catId] || 'Category setup';
-    // Patch: ensure in-progress room data is used for category setup
-    // If any code tries to require a room from STATE.rooms, use this.data instead
-    // Patch global for category-setup context
-    window._activeRoomWizardRoom = this.data;
     // Render category-specific micro-forms (3-tap style where applicable)
     const v = (x)=> x==null? '' : String(x);
     const data = (this.data.category || (this.data.category = {}));
@@ -13290,48 +7731,35 @@ window.RoomWizard = RoomWizard;
 async function loadAllData() {
   try {
     // 1) Try DB-backed devices first
-    let dbDevices = [];
+    let dbDevices = null;
     try {
-      const dbResponse = await api('/devices');
-      if (dbResponse && Array.isArray(dbResponse.devices)) {
-        dbDevices = dbResponse.devices;
-      }
+      dbDevices = await api('/devices');
     } catch (e) {
       console.warn('DB /devices fetch failed, will try forwarder/api', e);
     }
-
-    // 2) Load device data from controller via forwarder; fallback to /api/devicedatas
-    let controllerDevices = [];
-    let deviceResponse = null;
-    try {
-      deviceResponse = await api('/forwarder/devicedatas');
-    } catch (e) {
-      console.warn('forwarder devicedatas fetch failed, falling back to /api/devicedatas', e);
-    }
-    if (!deviceResponse || (!deviceResponse.data && !Array.isArray(deviceResponse))) {
+    if (dbDevices && Array.isArray(dbDevices.devices)) {
+      STATE.devices = dbDevices.devices;
+    } else {
+      // 2) Load device data from controller via forwarder; fallback to /api/devicedatas
+      let deviceResponse = null;
       try {
-        deviceResponse = await api('/api/devicedatas');
+        deviceResponse = await api('/forwarder/devicedatas');
       } catch (e) {
-        console.error('Failed to load device list from /api/devicedatas', e);
-        deviceResponse = { data: [] };
+        console.warn('forwarder devicedatas fetch failed, falling back to /api/devicedatas', e);
       }
+      if (!deviceResponse || !deviceResponse.data) {
+        try {
+          deviceResponse = await api('/api/devicedatas');
+        } catch (e) {
+          console.error('Failed to load device list from /api/devicedatas', e);
+          deviceResponse = { data: [] };
+        }
+      }
+      STATE.devices = deviceResponse?.data || [];
     }
-    if (Array.isArray(deviceResponse?.data)) {
-      controllerDevices = deviceResponse.data;
-    } else if (Array.isArray(deviceResponse)) {
-      controllerDevices = deviceResponse;
-    }
-
-    const dbDeviceMap = new Map();
-    dbDevices.forEach((device, index) => {
-      const id = deriveDeviceId(device, index);
-      if (id) dbDeviceMap.set(id, device);
-    });
-
-    const primaryDevices = controllerDevices.length ? controllerDevices : dbDevices;
-
-    // Ensure all devices have proper online status and canonical controller ids
-    STATE.devices = primaryDevices.map((device, index) => {
+    
+    // Ensure all devices have proper online status for research mode
+    STATE.devices = STATE.devices.map((device, index) => {
       if (!device || typeof device !== 'object') {
         const fallbackId = deriveDeviceId(null, index);
         return {
@@ -13344,16 +7772,6 @@ async function loadAllData() {
       const copy = { ...device };
       const id = deriveDeviceId(copy, index);
       copy.id = id;
-
-      if (controllerDevices.length && dbDeviceMap.has(id)) {
-        const reference = dbDeviceMap.get(id);
-        Object.entries(reference || {}).forEach(([key, value]) => {
-          if (copy[key] == null || copy[key] === '') {
-            copy[key] = value;
-          }
-        });
-      }
-
       const friendlyName = deriveDeviceName(copy, id);
       if (!copy.deviceName || !String(copy.deviceName).trim()) {
         copy.deviceName = friendlyName;
@@ -13367,7 +7785,7 @@ async function loadAllData() {
     
     // Load static data files
     const [groups, schedules, plans, environment, calibrations, spdLibrary, deviceMeta, deviceKB, equipmentKB, deviceManufacturers, farm, rooms, switchbotDevices] = await Promise.all([
-      api('/groups').catch((err) => { console.warn('Failed to load /groups', err); return { ok: false, groups: [] }; }),
+      loadJSON('./data/groups.json'),
       loadJSON('./data/schedules.json'),
       loadJSON('./data/plans.json'),
       api('/env'),
@@ -13377,47 +7795,14 @@ async function loadAllData() {
         loadJSON('./data/device-kb.json'),
         loadJSON('./data/equipment-kb.json'),
         loadJSON('./data/device-manufacturers.json'),
-  api('/farm'),
-  null, // rooms.json is deprecated in Charlie contract
+      loadJSON('./data/farm.json'),
+      loadJSON('./data/rooms.json'),
       loadJSON('./data/switchbot-devices.json')
     ]);
 
-  const incomingGroups = Array.isArray(groups?.groups)
-    ? groups.groups
-    : (Array.isArray(groups) ? groups : []);
-  STATE.groups = incomingGroups.map((group) => {
-    if (!group || typeof group !== 'object') return group;
-    const room = group.room ?? group.roomId ?? group.match?.room ?? '';
-    const zone = group.zone ?? group.zoneId ?? group.match?.zone ?? '';
-    const label = group.label || group.name || group.id || '';
-    const membersRaw = Array.isArray(group.members)
-      ? group.members
-      : Array.isArray(group.lights)
-        ? group.lights
-        : [];
-    const lights = membersRaw.map((entry) => {
-      if (typeof entry === 'string') return { id: entry };
-      if (entry && typeof entry === 'object') {
-        const id = entry.id || entry.deviceId || entry.device_id || entry.deviceID;
-        return id ? { ...entry, id: String(id) } : null;
-      }
-      return null;
-    }).filter(Boolean);
-    return {
-      ...group,
-      name: label,
-      label,
-      room,
-      zone,
-      match: room || zone ? { room, zone } : group.match,
-      lights,
-      members: lights.map((light) => ({ id: light.id })),
-    };
-  });
-  STATE.schedules = schedules?.schedules || [];
-  STATE.plans = (plans?.plans || []).map((plan, idx) => hydratePlan(plan, idx));
-  document.dispatchEvent(new Event('plans-updated'));
-  document.dispatchEvent(new Event('schedules-updated'));
+  STATE.groups = groups?.groups || [];
+    STATE.schedules = schedules?.schedules || [];
+    STATE.plans = plans?.plans || [];
   STATE.environment = environment?.zones || [];
     STATE.calibrations = calibrations?.calibrations || [];
     STATE._calibrationCache = new Map();
@@ -13475,19 +7860,15 @@ async function loadAllData() {
     renderEnvironment();
     renderRooms();
     renderLightSetups();
-
+    
     // Demo/mock light setups removed: only live light setups and devices will be used.
-
+    
     renderLightSetupSummary();
-    await loadControllerLinkMap({ silent: true });
     renderControllerAssignments();
     renderSwitchBotDevices();
     
     // Wire controller assignments buttons
-    document.getElementById('btnRefreshControllerAssignments')?.addEventListener('click', async () => {
-      await loadControllerLinkMap({ silent: true });
-      renderControllerAssignments();
-    });
+    document.getElementById('btnRefreshControllerAssignments')?.addEventListener('click', renderControllerAssignments);
     document.getElementById('btnManageControllers')?.addEventListener('click', () => {
       alert('Controller management interface will be implemented in future update');
     });
@@ -13648,10 +8029,10 @@ function renderGroups() {
       const idx = STATE.groups.findIndex(g => g.id === group.id);
       if (idx >= 0) {
         STATE.groups[idx] = { ...group };
-        Promise.resolve(saveJSON('/groups', { groups: STATE.groups }))
+        Promise.resolve(saveJSON('./data/groups.json', { groups: STATE.groups }))
           .then(async () => {
             // Reload groups from disk to ensure persistence
-            const groupsReloaded = await api('/groups');
+            const groupsReloaded = await loadJSON('./data/groups.json');
             if (groupsReloaded && Array.isArray(groupsReloaded.groups)) {
               STATE.groups = groupsReloaded.groups;
               normalizeGroupsInState();
@@ -13711,32 +8092,30 @@ function renderGroups() {
     const groupRoomSel = document.getElementById('groupRoomDropdown');
     const groupZoneSel = document.getElementById('groupZoneDropdown');
     let setupLights = [];
-    if (groupRoomSel && window.STATE?.lightSetups) {
+    if (groupRoomSel && groupZoneSel && window.STATE?.lightSetups) {
       const roomId = groupRoomSel.value;
-      console.debug('[GroupCard] groupRoomDropdown.value:', roomId);
-      console.debug('[GroupCard] STATE.lightSetups:', JSON.stringify(window.STATE.lightSetups, null, 2));
+      const zone = groupZoneSel.value;
       window.STATE.lightSetups.forEach(setup => {
-        if (setup.room === roomId || setup.room === (window.STATE?.rooms?.find(r=>r.id===roomId)?.name)) {
-          if (Array.isArray(setup.fixtures)) {
-            setup.fixtures.forEach(f => {
-              const fixtureId = f.id || buildFixtureSyntheticId(f);
-              setupLights.push({
-                id: fixtureId,
-                name: f.vendor ? `${f.vendor} ${f.model}` : (f.name || f.model || 'Light'),
-                vendor: f.vendor,
-                model: f.model,
-                watts: f.watts,
-                count: f.count,
-                source: 'setup',
-                setupId: setup.id || null,
-                fixtureId,
+          if ((setup.room === roomId || setup.room === (window.STATE?.rooms?.find(r=>r.id===roomId)?.name)) && setup.zone === zone) {
+            if (Array.isArray(setup.fixtures)) {
+              setup.fixtures.forEach(f => {
+                const fixtureId = f.id || buildFixtureSyntheticId(f);
+                setupLights.push({
+                  id: fixtureId,
+                  name: f.vendor ? `${f.vendor} ${f.model}` : (f.name || f.model || 'Light'),
+                  vendor: f.vendor,
+                  model: f.model,
+                  watts: f.watts,
+                  count: f.count,
+                  source: 'setup',
+                  setupId: setup.id || null,
+                  fixtureId,
+                });
               });
-            });
+            }
           }
-        }
-      });
-      console.debug('[GroupCard] setupLights candidates:', JSON.stringify(setupLights, null, 2));
-    }
+        });
+      }
     if (setupLights.length === 0) {
       lightSelectionBar.innerHTML = '<span style="color:#64748b;font-size:13px;">No lights configured for this room/zone.</span>';
     } else {
@@ -13778,13 +8157,8 @@ function renderGroups() {
 
 function renderRooms() {
   const host = $('#roomsList'); if (!host) return;
-  const automationHost = ensureRoomAutomationHost();
   if (!STATE.rooms.length) {
     host.innerHTML = '<p class="tiny" style="color:#64748b">No rooms yet. Create one to get started.</p>';
-    if (automationHost) {
-      automationHost.dataset.activeRoom = '';
-      automationHost.innerHTML = '<p class="tiny text-muted">Add a grow room to enable automation guardrails.</p>';
-    }
     return;
   }
     host.innerHTML = STATE.rooms.map(r => {
@@ -13815,22 +8189,12 @@ function renderRooms() {
             <div class="tiny" style="color:#475569">${lightsList}</div>
           </div>
           <div class="row" style="gap:6px">
-            <button type="button" class="ghost" data-action="room-automation" data-room-id="${roomId}">Automation</button>
             <button type="button" class="ghost" data-action="edit-room" data-room-id="${roomId}">Edit</button>
             <button type="button" class="ghost danger" data-action="del-room" data-room-id="${roomId}">Delete</button>
           </div>
         </div>
       </div>`;
     }).join('');
-
-    // Wire Automation actions
-    host.querySelectorAll('[data-action="room-automation"]').forEach(btn => {
-      btn.addEventListener('click', () => {
-        const id = btn.getAttribute('data-room-id');
-        if (!id) return;
-        openRoomAutomationConfig(id);
-      });
-    });
 
     // Wire Edit actions
     host.querySelectorAll('[data-action="edit-room"]').forEach(btn => {
@@ -13880,424 +8244,7 @@ function renderRooms() {
       });
     });
 
-  if (automationHost && !automationHost.dataset.activeRoom && !automationHost.hasChildNodes()) {
-    automationHost.innerHTML = '<p class="tiny text-muted">Select a room to configure automation.</p>';
-  }
-
   renderGrowRoomOverview();
-}
-
-function ensureRoomAutomationHost() {
-  const panelBody = document.getElementById('roomsPanelBody');
-  if (!panelBody) return null;
-  let host = document.getElementById('roomAutomationConfigHost');
-  if (!host) {
-    host = document.createElement('div');
-    host.id = 'roomAutomationConfigHost';
-    host.className = 'room-automation-config-host';
-    host.innerHTML = '<p class="tiny text-muted">Select a room to configure automation.</p>';
-    panelBody.appendChild(host);
-  }
-  return host;
-}
-
-function normalizeEnvRoomsMap(rooms) {
-  if (!rooms) return {};
-  if (Array.isArray(rooms)) {
-    return rooms.reduce((acc, room) => {
-      const key = room?.roomId || room?.id || room?.name;
-      if (key) acc[key] = room;
-      return acc;
-    }, {});
-  }
-  if (typeof rooms === 'object') {
-    return { ...rooms };
-  }
-  return {};
-}
-
-function openRoomAutomationConfig(roomId) {
-  if (!roomId) return;
-  const host = ensureRoomAutomationHost();
-  if (!host) return;
-  host.dataset.activeRoom = roomId;
-  host.innerHTML = '';
-  const card = mountAutomationCard(host, roomId);
-  if (!card) {
-    host.dataset.activeRoom = '';
-    host.innerHTML = '<p class="tiny text-muted">Unable to load automation controls for this room.</p>';
-    return;
-  }
-  if (typeof card.scrollIntoView === 'function') {
-    try {
-      card.scrollIntoView({ behavior: 'smooth', block: 'center' });
-    } catch (error) {
-      console.warn('scrollIntoView failed', error);
-    }
-  }
-}
-
-function mountAutomationCard(container, roomId) {
-  if (!(container instanceof HTMLElement)) return null;
-  const slug = (String(roomId || 'room')
-    .toLowerCase()
-    .replace(/[^a-z0-9]+/g, '-')
-    .replace(/^-+|-+$/g, '') || 'room');
-
-  const enableId = `auto-enable-${slug}`;
-  const modeId = `auto-mode-${slug}`;
-  const tempId = `t-temp-${slug}`;
-  const rhId = `t-rh-${slug}`;
-  const rhBandId = `t-rhband-${slug}`;
-  const minMasterId = `t-minm-${slug}`;
-  const minBlueId = `t-minb-${slug}`;
-  const stepId = `c-step-${slug}`;
-  const dwellId = `c-dwell-${slug}`;
-  const suggestionsId = `suggestions-${slug}`;
-  const saveId = `btn-save-${slug}`;
-  const runId = `btn-run-${slug}`;
-  const applyId = `btn-apply-${slug}`;
-
-  const card = document.createElement('section');
-  card.className = 'card std hud-shell';
-  card.dataset.size = 'md';
-  card.dataset.role = 'room-automation-config';
-  card.dataset.roomId = roomId;
-  card.innerHTML = `
-    <div class="card-head">
-      <h3>Room Automation — ${escapeHtml(roomId)}</h3>
-      <label><input type="checkbox" id="${enableId}"> Enable</label>
-      <select id="${modeId}"><option value="advisory">Advisory</option><option value="autopilot">Autopilot</option></select>
-    </div>
-    <div class="card-body">
-      <div class="grid two">
-        <label>Target Temp °C <input id="${tempId}" type="number" step="0.1"></label>
-        <label>Target RH % <input id="${rhId}" type="number" step="1"></label>
-        <label>RH Band ±% <input id="${rhBandId}" type="number" step="1" value="5"></label>
-        <label>Min Master <input id="${minMasterId}" type="number" step="0.05" value="0.6"></label>
-        <label>Min Blue <input id="${minBlueId}" type="number" step="0.05" value="0.5"></label>
-        <label>Step (Δ) <input id="${stepId}" type="number" step="0.01" value="0.05"></label>
-        <label>Dwell (s) <input id="${dwellId}" type="number" step="10" value="180"></label>
-      </div>
-      <div id="${suggestionsId}" class="suggestions"></div>
-    </div>
-    <div class="card-foot">
-      <button id="${saveId}">Save</button>
-      <button id="${runId}">Run Policy Once</button>
-      <button id="${applyId}" hidden>Apply Suggestion</button>
-    </div>`;
-  container.appendChild(card);
-
-  const refs = {
-    enable: card.querySelector(`#${enableId}`),
-    mode: card.querySelector(`#${modeId}`),
-    targetTemp: card.querySelector(`#${tempId}`),
-    targetRh: card.querySelector(`#${rhId}`),
-    targetRhBand: card.querySelector(`#${rhBandId}`),
-    minMaster: card.querySelector(`#${minMasterId}`),
-    minBlue: card.querySelector(`#${minBlueId}`),
-    step: card.querySelector(`#${stepId}`),
-    dwell: card.querySelector(`#${dwellId}`),
-    suggestions: card.querySelector(`#${suggestionsId}`),
-    saveBtn: card.querySelector(`#${saveId}`),
-    runBtn: card.querySelector(`#${runId}`),
-    applyBtn: card.querySelector(`#${applyId}`)
-  };
-
-  let envState = null;
-  let currentRoom = null;
-  let currentActions = [];
-
-  const setBusy = (btn, busy) => {
-    if (!btn) return;
-    btn.disabled = Boolean(busy);
-    btn.classList.toggle('is-loading', Boolean(busy));
-  };
-
-  const updateApplyVisibility = () => {
-    if (!refs.applyBtn) return;
-    const mode = (refs.mode?.value || 'advisory').toLowerCase();
-    const hasLightAction = currentActions.some(action => action?.type === 'lights.scale');
-    refs.applyBtn.hidden = !(mode === 'advisory' && hasLightAction);
-  };
-
-  const renderPlaceholder = (message) => {
-    if (!refs.suggestions) return;
-    refs.suggestions.innerHTML = `<p class="tiny text-muted">${escapeHtml(message)}</p>`;
-  };
-
-  const renderActions = (actions) => {
-    if (!Array.isArray(actions)) actions = [];
-    currentActions = actions.filter(action => !action.roomId || action.roomId === roomId);
-    if (!refs.suggestions) {
-      updateApplyVisibility();
-      return;
-    }
-    if (!currentActions.length) {
-      renderPlaceholder('No automation suggestions yet. Run policy to generate adjustments.');
-      updateApplyVisibility();
-      return;
-    }
-    const html = currentActions.map((action) => {
-      if (action.type === 'lights.scale') {
-        const parts = [];
-        if (Number.isFinite(action.masterDelta) && action.masterDelta !== 0) {
-          parts.push(`${action.masterDelta > 0 ? '+' : ''}${(action.masterDelta * 100).toFixed(1)}% master`);
-        }
-        if (Number.isFinite(action.blueDelta) && action.blueDelta !== 0) {
-          parts.push(`${action.blueDelta > 0 ? '+' : ''}${(action.blueDelta * 100).toFixed(1)}% blue`);
-        }
-        if (Number.isFinite(action.dwell)) {
-          parts.push(`${Math.round(action.dwell)}s dwell`);
-        }
-        const guardrails = [];
-        if (Number.isFinite(action.minMaster)) guardrails.push(`Master ≥${(action.minMaster * 100).toFixed(0)}%`);
-        if (Number.isFinite(action.minBlue)) guardrails.push(`Blue ≥${(action.minBlue * 100).toFixed(0)}%`);
-        const guardrailText = guardrails.length ? `<span class="tiny text-muted">Guardrails: ${escapeHtml(guardrails.join(', '))}</span>` : '';
-        const detail = parts.length ? escapeHtml(parts.join(' • ')) : 'Review lighting adjustments.';
-        return `
-          <div class="automation-suggestion" data-kind="lights">
-            <div class="automation-suggestion__text">
-              <span class="automation-suggestion__label">Lights scaling</span>
-              <span class="automation-suggestion__detail tiny text-muted">${detail}</span>
-              ${guardrailText}
-            </div>
-          </div>`;
-      }
-      const label = escapeHtml(action.label || 'Automation action');
-      const detail = action.detail ? `<span class="automation-suggestion__detail tiny text-muted">${escapeHtml(action.detail)}</span>` : '';
-      return `
-        <div class="automation-suggestion" data-kind="${escapeHtml(action.type || 'action')}">
-          <div class="automation-suggestion__text">
-            <span class="automation-suggestion__label">${label}</span>
-            ${detail}
-          </div>
-        </div>`;
-    }).join('');
-    refs.suggestions.innerHTML = html;
-    updateApplyVisibility();
-  };
-
-  const parseNumber = (input) => {
-    if (!input) return null;
-    const value = Number(input.value);
-    return Number.isFinite(value) ? value : null;
-  };
-
-  const loadEnv = async () => {
-    try {
-      const payload = await api('/env');
-      envState = payload || {};
-      const roomsMap = normalizeEnvRoomsMap(envState.rooms);
-      currentRoom = roomsMap[roomId] || { roomId, control: {}, targets: {} };
-      currentRoom.roomId = currentRoom.roomId || roomId;
-      currentRoom.control = currentRoom.control || {};
-      currentRoom.targets = currentRoom.targets || {};
-
-      if (refs.enable) refs.enable.checked = Boolean(currentRoom.control.enable);
-      if (refs.mode) refs.mode.value = currentRoom.control.mode || 'advisory';
-      if (refs.step && Number.isFinite(currentRoom.control.step)) refs.step.value = currentRoom.control.step;
-      if (refs.dwell && Number.isFinite(currentRoom.control.dwell)) refs.dwell.value = currentRoom.control.dwell;
-      if (refs.targetTemp && Number.isFinite(currentRoom.targets.temp)) refs.targetTemp.value = currentRoom.targets.temp;
-      if (refs.targetRh && Number.isFinite(currentRoom.targets.rh)) refs.targetRh.value = currentRoom.targets.rh;
-      if (refs.targetRhBand && Number.isFinite(currentRoom.targets.rhBand)) refs.targetRhBand.value = currentRoom.targets.rhBand;
-      if (refs.minMaster && Number.isFinite(currentRoom.targets.minMaster)) refs.minMaster.value = currentRoom.targets.minMaster;
-      if (refs.minBlue && Number.isFinite(currentRoom.targets.minBlue)) refs.minBlue.value = currentRoom.targets.minBlue;
-
-      const suggestions = Array.isArray(currentRoom.suggestions) ? currentRoom.suggestions : [];
-      if (suggestions.length) {
-        const suggestionHtml = suggestions.map((item) => {
-          const label = escapeHtml(item.label || 'Suggestion');
-          const detail = item.detail ? `<span class="automation-suggestion__detail tiny text-muted">${escapeHtml(item.detail)}</span>` : '';
-          return `
-            <div class="automation-suggestion" data-kind="${escapeHtml(item.type || 'suggestion')}">
-              <div class="automation-suggestion__text">
-                <span class="automation-suggestion__label">${label}</span>
-                ${detail}
-              </div>
-            </div>`;
-        }).join('');
-        if (refs.suggestions) refs.suggestions.innerHTML = suggestionHtml;
-        currentActions = [];
-      } else {
-        renderPlaceholder('No automation suggestions yet. Run policy to generate adjustments.');
-        currentActions = [];
-      }
-      updateApplyVisibility();
-    } catch (error) {
-      console.warn('Failed to load automation config', error);
-      if (refs.suggestions) {
-        refs.suggestions.innerHTML = `<p class="tiny" style="color:#b91c1c">Failed to load automation config: ${escapeHtml(error.message || String(error))}</p>`;
-      }
-    }
-  };
-
-  const saveConfig = async () => {
-    try {
-      setBusy(refs.saveBtn, true);
-      if (!envState) {
-        await loadEnv();
-      }
-      const roomsMap = normalizeEnvRoomsMap(envState?.rooms);
-      const existingRoom = roomsMap[roomId] || { roomId, control: {}, targets: {} };
-      const nextControl = { ...existingRoom.control };
-      nextControl.enable = Boolean(refs.enable?.checked);
-      nextControl.mode = refs.mode?.value || 'advisory';
-      const stepVal = parseNumber(refs.step);
-      const dwellVal = parseNumber(refs.dwell);
-      if (stepVal !== null) nextControl.step = stepVal;
-      if (dwellVal !== null) nextControl.dwell = dwellVal;
-
-      const nextTargets = { ...existingRoom.targets };
-      const tempVal = parseNumber(refs.targetTemp);
-      const rhVal = parseNumber(refs.targetRh);
-      const rhBandVal = parseNumber(refs.targetRhBand);
-      const minMasterVal = parseNumber(refs.minMaster);
-      const minBlueVal = parseNumber(refs.minBlue);
-
-      if (tempVal !== null) nextTargets.temp = tempVal; else delete nextTargets.temp;
-      if (rhVal !== null) nextTargets.rh = rhVal; else delete nextTargets.rh;
-      if (rhBandVal !== null) nextTargets.rhBand = rhBandVal; else delete nextTargets.rhBand;
-      if (minMasterVal !== null) nextTargets.minMaster = minMasterVal; else delete nextTargets.minMaster;
-      if (minBlueVal !== null) nextTargets.minBlue = minBlueVal; else delete nextTargets.minBlue;
-
-      const updatedRoom = {
-        ...existingRoom,
-        roomId,
-        control: nextControl,
-        targets: nextTargets
-      };
-
-      roomsMap[roomId] = updatedRoom;
-
-      await api('/env', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ rooms: roomsMap })
-      });
-
-      envState = { ...(envState || {}), rooms: roomsMap };
-      currentRoom = updatedRoom;
-
-      if (typeof showToast === 'function') {
-        showToast({ title: 'Automation saved', msg: `Guardrails updated for ${roomId}.`, kind: 'success', icon: '✅' }, 4000);
-      }
-      await reloadEnvironment();
-    } catch (error) {
-      console.warn('Failed to save automation config', error);
-      if (typeof showToast === 'function') {
-        showToast({ title: 'Automation', msg: error.message || 'Failed to save automation settings.', kind: 'warn', icon: '⚠️' }, 5000);
-      }
-    } finally {
-      setBusy(refs.saveBtn, false);
-      updateApplyVisibility();
-    }
-  };
-
-  const runPolicyOnce = async () => {
-    try {
-      setBusy(refs.runBtn, true);
-      if (typeof showToast === 'function') {
-        showToast({ title: 'Automation', msg: `Evaluating policy for ${roomId}…`, kind: 'info', icon: grIconImg('evie-training', 'Automation status') }, 2500);
-      }
-      const response = await api('/automation/run', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ room: roomId })
-      });
-      const actions = Array.isArray(response?.actions) ? response.actions : [];
-      renderActions(actions.filter(action => !action.roomId || action.roomId === roomId));
-      if (!currentActions.length && typeof showToast === 'function') {
-        showToast({ title: 'Automation', msg: 'No adjustments recommended at this time.', kind: 'info', icon: 'ℹ️' }, 3500);
-      }
-      await reloadEnvironment();
-    } catch (error) {
-      console.warn('Automation run failed', error);
-      if (typeof showToast === 'function') {
-        showToast({ title: 'Automation', msg: error.message || 'Failed to run automation policy.', kind: 'warn', icon: '⚠️' }, 5000);
-      }
-    } finally {
-      setBusy(refs.runBtn, false);
-      updateApplyVisibility();
-    }
-  };
-
-  const applyActions = async () => {
-    const mode = (refs.mode?.value || 'advisory').toLowerCase();
-    if (mode !== 'advisory') {
-      if (typeof showToast === 'function') {
-        showToast({ title: 'Automation', msg: 'Autopilot applies adjustments automatically.', kind: 'info', icon: 'ℹ️' }, 3500);
-      }
-      return;
-    }
-    const lightActions = currentActions.filter(action => action.type === 'lights.scale');
-    if (!lightActions.length) {
-      if (typeof showToast === 'function') {
-        showToast({ title: 'Automation', msg: 'No lighting adjustments to apply.', kind: 'info', icon: 'ℹ️' }, 3500);
-      }
-      return;
-    }
-    const lights = Array.isArray(currentRoom?.actuators?.lights) ? currentRoom.actuators.lights : [];
-    if (!lights.length) {
-      if (typeof showToast === 'function') {
-        showToast({ title: 'Automation', msg: 'Map lights to this room before applying adjustments.', kind: 'warn', icon: '⚠️' }, 5000);
-      }
-      return;
-    }
-    try {
-      setBusy(refs.applyBtn, true);
-      let success = 0;
-      let failure = 0;
-      for (const action of lightActions) {
-        for (const lightId of lights) {
-          try {
-            const payload = { adjust: {} };
-            if (Number.isFinite(action.masterDelta) && action.masterDelta !== 0) payload.adjust.master = action.masterDelta;
-            if (Number.isFinite(action.blueDelta) && action.blueDelta !== 0) payload.adjust.blue = action.blueDelta;
-            if (Number.isFinite(action.dwell) && action.dwell > 0) payload.adjust.dwell = Math.round(action.dwell);
-            const guardrails = {};
-            if (Number.isFinite(action.minMaster)) guardrails.minMaster = action.minMaster;
-            if (Number.isFinite(action.minBlue)) guardrails.minBlue = action.minBlue;
-            if (Object.keys(guardrails).length) payload.adjust.guardrails = guardrails;
-            if (!Object.keys(payload.adjust).length) continue;
-            await controllerPatchDevice(lightId, payload);
-            success += 1;
-          } catch (error) {
-            failure += 1;
-            console.warn('Failed to patch light for automation', lightId, error);
-          }
-        }
-      }
-      if (typeof showToast === 'function') {
-        const msg = failure
-          ? `Sent ${success} adjustment${success === 1 ? '' : 's'} · ${failure} failed`
-          : `Sent ${success} adjustment${success === 1 ? '' : 's'} to lights`;
-        showToast({ title: failure ? 'Automation warning' : 'Automation applied', msg, kind: failure ? 'warn' : 'success', icon: failure ? '⚠️' : '✅' }, 4500);
-      }
-      await reloadEnvironment();
-    } catch (error) {
-      console.warn('Automation apply failed', error);
-      if (typeof showToast === 'function') {
-        showToast({ title: 'Automation', msg: error.message || 'Failed to apply automation suggestion.', kind: 'warn', icon: '⚠️' }, 5000);
-      }
-    } finally {
-      setBusy(refs.applyBtn, false);
-      updateApplyVisibility();
-    }
-  };
-
-  refs.saveBtn?.addEventListener('click', saveConfig);
-  refs.runBtn?.addEventListener('click', runPolicyOnce);
-  refs.applyBtn?.addEventListener('click', applyActions);
-  refs.mode?.addEventListener('change', () => {
-    updateApplyVisibility();
-  });
-
-  loadEnv().catch((error) => {
-    console.warn('Initial automation load failed', error);
-  });
-
-  return card;
 }
 
 function renderLightSetups() {
@@ -14521,266 +8468,6 @@ function editLightSetup(roomId) {
 }
 
 // Controller Assignments functionality
-const CONTROLLER_METHOD_OPTIONS = [
-  { value: 'wifi', label: 'Wi‑Fi' },
-  { value: 'smartplug', label: 'Smart Plug' },
-  { value: '0-10v', label: '0‑10V' },
-  { value: 'modbus', label: 'Modbus' },
-  { value: 'switchbot', label: 'SwitchBot' }
-];
-
-function formatControlMethodLabel(method) {
-  const normalized = String(method || '').toLowerCase();
-  const found = CONTROLLER_METHOD_OPTIONS.find((option) => option.value === normalized);
-  if (found) return found.label;
-  if (!normalized) return 'Unknown';
-  return normalized.replace(/(^|[-_\s])(\w)/g, (_, sep, chr) => `${sep ? ' ' : ''}${chr.toUpperCase()}`);
-}
-
-function deriveControllerLinkKey(item, index) {
-  if (!item) return `equipment-${index}`;
-  const baseId = firstNonEmptyString(item.uniqueId, item.id, '');
-  if (baseId) return baseId;
-  const roomKey = normalizeIdentifier(firstNonEmptyString(item.room, item.roomId, item.roomName, 'room')) || `room-${index + 1}`;
-  const zonePart = normalizeIdentifier(firstNonEmptyString(item.zone, item.zoneId, item.zoneName, ''));
-  const typeKey = normalizeIdentifier(firstNonEmptyString(item.type, item.category, item.kind, 'equipment')) || 'equipment';
-  const suffix = zonePart ? `${typeKey}@${zonePart}` : typeKey;
-  return `${roomKey}:${suffix}#${index + 1}`;
-}
-
-function resolveControllerLabel(controllerId) {
-  if (!controllerId) return '';
-  const direct = SMART_CONTROLLER_STATE.lookup?.get?.(controllerId);
-  if (direct) {
-    const label = firstNonEmptyString(direct.name, direct.label, direct.deviceName, direct.id, controllerId);
-    return `${label}`;
-  }
-  const devices = Array.isArray(STATE.devices) ? STATE.devices : [];
-  const matched = devices.find((device) => {
-    const id = firstNonEmptyString(device.id, device.deviceId, device.device_id, device.address, device.mac);
-    return id && String(id) === String(controllerId);
-  });
-  if (matched) {
-    const label = firstNonEmptyString(matched.name, matched.deviceName, matched.label, matched.model, controllerId);
-    return `${label}`;
-  }
-  return controllerId;
-}
-
-function getControllerOptions() {
-  const options = [];
-  if (SMART_CONTROLLER_STATE.lookup && SMART_CONTROLLER_STATE.lookup.size) {
-    SMART_CONTROLLER_STATE.lookup.forEach((controller) => {
-      if (!controller) return;
-      const id = firstNonEmptyString(controller.id, controller.deviceId, controller.address);
-      if (!id) return;
-      const label = firstNonEmptyString(controller.name, controller.label, controller.deviceName, id);
-      options.push({ id, label });
-    });
-  }
-  if (options.length === 0 && Array.isArray(STATE.devices)) {
-    STATE.devices.forEach((device) => {
-      if (!device || typeof device !== 'object') return;
-      const id = firstNonEmptyString(device.id, device.deviceId, device.device_id, device.address, device.mac);
-      if (!id) return;
-      const label = firstNonEmptyString(device.name, device.deviceName, device.label, device.model, id);
-      options.push({ id, label });
-    });
-  }
-  const unique = [];
-  const seen = new Set();
-  options.forEach((option) => {
-    if (!option || !option.id) return;
-    const key = String(option.id);
-    if (seen.has(key)) return;
-    seen.add(key);
-    unique.push(option);
-  });
-  return unique;
-}
-
-async function loadControllerLinkMap({ silent = false } = {}) {
-  try {
-    const resp = await fetch(resolveApiUrl('/ui/ctrlmap'));
-    if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
-    const data = await resp.json();
-    if (data && typeof data === 'object' && !Array.isArray(data)) {
-      STATE.ctrlMap = data;
-    } else {
-      STATE.ctrlMap = {};
-    }
-  } catch (error) {
-    if (!silent) {
-      console.warn('Failed to load controller link map', error);
-    } else {
-      console.warn('Failed to load controller link map', error?.message || error);
-    }
-    STATE.ctrlMap = STATE.ctrlMap || {};
-  }
-}
-
-async function saveControllerLinkMapping(key, method, controllerId) {
-  const payload = { key, method, controllerId };
-  const resp = await fetch(resolveApiUrl('/ui/ctrlmap'), {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(payload)
-  });
-  if (!resp.ok) {
-    const text = await resp.text().catch(() => '');
-    const error = new Error(text || `HTTP ${resp.status}`);
-    error.status = resp.status;
-    throw error;
-  }
-  try { await resp.json(); } catch {}
-  if (!STATE.ctrlMap || typeof STATE.ctrlMap !== 'object') STATE.ctrlMap = {};
-  STATE.ctrlMap[key] = { method, controllerId, ts: Date.now() };
-}
-
-function closeControllerLinker() {
-  if (controllerLinkerOverlay && controllerLinkerOverlay.parentElement) {
-    controllerLinkerOverlay.parentElement.removeChild(controllerLinkerOverlay);
-  }
-  controllerLinkerOverlay = null;
-}
-
-function openControllerLinker(item, key) {
-  if (!item || !key) return;
-  closeControllerLinker();
-  const existing = (STATE.ctrlMap && STATE.ctrlMap[key]) || {};
-  const overlay = document.createElement('div');
-  overlay.className = 'ctrl-linker-overlay';
-  overlay.innerHTML = `
-    <div class="ctrl-linker-dialog" role="dialog" aria-modal="true">
-      <header class="ctrl-linker-header">
-        <h3>Link controller</h3>
-        <button type="button" class="ctrl-linker-close" aria-label="Close">×</button>
-      </header>
-      <div class="ctrl-linker-body">
-        <div class="ctrl-linker-summary">
-          <div><strong>Equipment:</strong> ${escapeHtml(firstNonEmptyString(item.type, 'Equipment'))}</div>
-          <div><strong>Room:</strong> ${escapeHtml(firstNonEmptyString(item.room, 'Unassigned'))}</div>
-          <div><strong>Zone:</strong> ${escapeHtml(firstNonEmptyString(item.zone, '—'))}</div>
-          <div><strong>ID:</strong> <code>${escapeHtml(firstNonEmptyString(item.uniqueId, key))}</code></div>
-        </div>
-        <label for="ctrl-linker-method">Control Method</label>
-        <select id="ctrl-linker-method" data-field="method"></select>
-        <label for="ctrl-linker-controller">Controller</label>
-        <select id="ctrl-linker-controller" data-field="controller"></select>
-      </div>
-      <footer class="ctrl-linker-actions">
-        <button type="button" class="ghost" data-action="cancel">Cancel</button>
-        <button type="button" class="primary" data-action="save">Save</button>
-      </footer>
-    </div>
-  `;
-  controllerLinkerOverlay = overlay;
-  document.body.appendChild(overlay);
-
-  const methodSelect = overlay.querySelector('[data-field="method"]');
-  const controllerSelect = overlay.querySelector('[data-field="controller"]');
-  const closeBtn = overlay.querySelector('.ctrl-linker-close');
-  const cancelBtn = overlay.querySelector('[data-action="cancel"]');
-  const saveBtn = overlay.querySelector('[data-action="save"]');
-
-  if (methodSelect) {
-    methodSelect.innerHTML = CONTROLLER_METHOD_OPTIONS.map((option) => `
-      <option value="${escapeAttribute(option.value)}">${escapeHtml(option.label)}</option>
-    `).join('');
-    if (existing.method) {
-      methodSelect.value = String(existing.method).toLowerCase();
-    }
-  }
-
-  if (controllerSelect) {
-    const options = getControllerOptions();
-    if (options.length) {
-      controllerSelect.innerHTML = ['<option value="">Select controller…</option>',
-        ...options.map((option) => `
-          <option value="${escapeAttribute(option.id)}">${escapeHtml(`${option.label} (${option.id})`)}</option>
-        `)
-      ].join('');
-    } else {
-      controllerSelect.innerHTML = '<option value="">No controllers detected</option>';
-      controllerSelect.disabled = true;
-    }
-    if (existing.controllerId) {
-      controllerSelect.value = existing.controllerId;
-    }
-  }
-
-  const dismiss = () => closeControllerLinker();
-
-  overlay.addEventListener('click', (event) => {
-    if (event.target === overlay) {
-      dismiss();
-    }
-  });
-  closeBtn?.addEventListener('click', dismiss);
-  cancelBtn?.addEventListener('click', dismiss);
-
-  if (saveBtn) {
-    saveBtn.addEventListener('click', async () => {
-      if (!methodSelect || !controllerSelect) return;
-      const method = methodSelect.value;
-      const controllerId = controllerSelect.value;
-      if (!method) {
-        if (typeof showToast === 'function') {
-          showToast({ title: 'Pick a method', msg: 'Choose a control method to link.', kind: 'warn', icon: '⚠️' });
-        } else {
-          alert('Choose a control method to link.');
-        }
-        return;
-      }
-      if (!controllerId) {
-        if (typeof showToast === 'function') {
-          showToast({ title: 'Pick a controller', msg: 'Select a controller to link.', kind: 'warn', icon: '⚠️' });
-        } else {
-          alert('Select a controller to link.');
-        }
-        return;
-      }
-      saveBtn.disabled = true;
-      saveBtn.textContent = 'Saving…';
-      try {
-        await saveControllerLinkMapping(key, method, controllerId);
-        if (typeof showToast === 'function') {
-          const controllerLabel = resolveControllerLabel(controllerId);
-          showToast({
-            title: 'Controller linked',
-            msg: `${formatControlMethodLabel(method)} → ${controllerLabel}`,
-            kind: 'success',
-            icon: '🔗'
-          });
-        }
-        dismiss();
-        renderControllerAssignments();
-      } catch (error) {
-        saveBtn.disabled = false;
-        saveBtn.textContent = 'Save';
-        const message = error?.message || 'Failed to save controller link.';
-        if (typeof showToast === 'function') {
-          showToast({ title: 'Link failed', msg: message, kind: 'error', icon: '⚠️' });
-        } else {
-          alert(message);
-        }
-      }
-    });
-  }
-
-  document.addEventListener('keydown', function escListener(event) {
-    if (event.key === 'Escape') {
-      event.preventDefault();
-      document.removeEventListener('keydown', escListener);
-      dismiss();
-    }
-  }, { once: true });
-
-  requestAnimationFrame(() => {
-    methodSelect?.focus();
-  });
-}
-
 function generateUniqueId(equipmentType, roomName, zoneName) {
   // Create unique ID format: EQUIPMENTTYPEROOM#ZONE#RANDOM
   // e.g., DEAL037 for Dehumidifier in Alpha room, zone 3, random 7
@@ -14940,18 +8627,7 @@ function getControllerRequiredEquipment() {
       });
     }
   });
-
-  if (STATE.ctrlMap && typeof STATE.ctrlMap === 'object') {
-    equipment.forEach((item, index) => {
-      const key = deriveControllerLinkKey(item, index);
-      const link = STATE.ctrlMap[key];
-      if (link && link.controllerId) {
-        item.controller = link.controllerId;
-        item.controllerMethod = link.method;
-      }
-    });
-  }
-
+  
   return equipment;
 }
 
@@ -15021,73 +8697,54 @@ function renderControllerAssignments() {
             <th style="text-align: left; padding: 12px 8px; font-weight: 600;">Unique ID</th>
             <th style="text-align: left; padding: 12px 8px; font-weight: 600;">Control</th>
             <th style="text-align: left; padding: 12px 8px; font-weight: 600;">Status</th>
-            <th style="text-align: left; padding: 12px 8px; font-weight: 600;">Controller Link</th>
+            <th style="text-align: left; padding: 12px 8px; font-weight: 600;">Controller</th>
             <th style="text-align: center; padding: 12px 8px; font-weight: 600;">Actions</th>
           </tr>
         </thead>
         <tbody>
-          ${equipment.map((item, index) => {
-            const key = deriveControllerLinkKey(item, index);
-            const linkInfo = (STATE.ctrlMap && STATE.ctrlMap[key]) || null;
-            const methodLabel = linkInfo ? formatControlMethodLabel(linkInfo.method) : '';
-            const controllerLabel = linkInfo && linkInfo.controllerId
-              ? resolveControllerLabel(linkInfo.controllerId)
-              : '';
-            const controllerDisplay = linkInfo && linkInfo.controllerId
-              ? firstNonEmptyString(
-                  controllerLabel && controllerLabel !== linkInfo.controllerId
-                    ? `${controllerLabel} (${linkInfo.controllerId})`
-                    : linkInfo.controllerId,
-                  linkInfo.controllerId,
-                  'Unknown controller'
-                )
-              : '';
-            const detail = linkInfo
-              ? `${methodLabel} → ${controllerDisplay}`
-              : 'No controller linked';
-            const tsDetail = linkInfo?.ts ? new Date(linkInfo.ts).toLocaleString() : '';
-            if (linkInfo && linkInfo.controllerId) {
-              item.controller = linkInfo.controllerId;
-              item.controllerMethod = linkInfo.method;
-            }
-            return `
+          ${equipment.map((item, index) => `
             <tr style="border-bottom: 1px solid #e2e8f0;">
               <td style="padding: 12px 8px;">
-                <span class="chip tiny" style="background: #dbeafe; color: #1e40af;">${escapeHtml(item.type)}</span>
-                ${item.watts ? `<div class="tiny" style="color: #64748b; margin-top: 2px;">${escapeHtml(String(item.watts))}W</div>` : ''}
+                <span class="chip tiny" style="background: #dbeafe; color: #1e40af;">${item.type}</span>
+                ${item.watts ? `<div class="tiny" style="color: #64748b; margin-top: 2px;">${item.watts}W</div>` : ''}
               </td>
-              <td style="padding: 12px 8px; font-weight: 500;">${escapeHtml(item.make)}</td>
+              <td style="padding: 12px 8px; font-weight: 500;">${item.make}</td>
               <td style="padding: 12px 8px;">
-                ${escapeHtml(item.model)}
-                ${item.serial ? `<div class="tiny" style="color: #64748b; margin-top: 2px;">S/N: ${escapeHtml(item.serial)}</div>` : ''}
+                ${item.model}
+                ${item.serial ? `<div class="tiny" style="color: #64748b; margin-top: 2px;">S/N: ${item.serial}</div>` : ''}
               </td>
-              <td style="padding: 12px 8px;">${escapeHtml(item.room)}</td>
-              <td style="padding: 12px 8px;">${escapeHtml(item.zone)}</td>
+              <td style="padding: 12px 8px;">${item.room}</td>
+              <td style="padding: 12px 8px;">${item.zone}</td>
               <td style="padding: 12px 8px;">
-                <code style="background: #f1f5f9; padding: 2px 6px; border-radius: 4px; font-family: 'Monaco', monospace; font-size: 12px;">${escapeHtml(item.uniqueId)}</code>
-              </td>
-              <td style="padding: 12px 8px;">
-                <span class="chip tiny" style="background: #ecfdf5; color: #059669;">${escapeHtml(item.controlMethod)}</span>
+                <code style="background: #f1f5f9; padding: 2px 6px; border-radius: 4px; font-family: 'Monaco', monospace; font-size: 12px;">${item.uniqueId}</code>
               </td>
               <td style="padding: 12px 8px;">
-                ${item.status === 'Operational'
-                  ? '<span class="chip tiny" style="background: #dcfce7; color: #166534;">Operational</span>'
-                  : '<span class="chip tiny" style="background: #fef3c7; color: #d97706;">Setup Required</span>'
+                <span class="chip tiny" style="background: #ecfdf5; color: #059669;">${item.controlMethod}</span>
+              </td>
+              <td style="padding: 12px 8px;">
+                ${item.status === 'Operational' ? 
+                  '<span class="chip tiny" style="background: #dcfce7; color: #166534;">Operational</span>' : 
+                  '<span class="chip tiny" style="background: #fef3c7; color: #d97706;">Setup Required</span>'
                 }
               </td>
               <td style="padding: 12px 8px;">
-                <button type="button" class="chip chip--link-controller${linkInfo ? ' is-linked' : ''}" data-action="link-controller" data-key="${escapeAttribute(key)}" data-index="${index}">Link controller…</button>
-                <div class="ctrl-linker-detail tiny">${escapeHtml(detail)}${tsDetail ? `<br><span class="text-muted">${escapeHtml(tsDetail)}</span>` : ''}</div>
+                <select class="controller-select" data-equipment-index="${index}" style="padding: 4px 8px; border: 1px solid #d1d5db; border-radius: 4px; font-size: 13px;">
+                  <option value="">Select Controller...</option>
+                  <option value="hub-001">Main Hub (HUB-001)</option>
+                  <option value="controller-001">Zone Controller 1 (CTRL-001)</option>
+                  <option value="controller-002">Zone Controller 2 (CTRL-002)</option>
+                  <option value="wifi-bridge">WiFi Bridge (WIFI-001)</option>
+                </select>
               </td>
               <td style="padding: 12px 8px; text-align: center;">
                 <button type="button" class="ghost tiny" onclick="editControllerAssignment(${index})">Edit</button>
               </td>
-            </tr>`;
-          }).join('')}
+            </tr>
+          `).join('')}
         </tbody>
       </table>
     </div>
-
+    
     <div style="margin-top: 16px; padding: 12px; background: #f8fafc; border-radius: 8px; border: 1px solid #e2e8f0;">
       <div class="row" style="justify-content: space-between; align-items: center;">
         <div>
@@ -15101,14 +8758,22 @@ function renderControllerAssignments() {
     </div>
   `;
   
-  container.querySelectorAll('[data-action="link-controller"]').forEach((btn) => {
-    btn.addEventListener('click', (event) => {
-      const target = event.currentTarget;
-      const idx = Number(target.getAttribute('data-index'));
-      const key = target.getAttribute('data-key');
-      const item = equipment[idx];
-      if (!item || !key) return;
-      openControllerLinker(item, key);
+  // Wire up controller selection changes
+  container.querySelectorAll('.controller-select').forEach(select => {
+    select.addEventListener('change', (e) => {
+      const index = parseInt(e.target.getAttribute('data-equipment-index'));
+      const controllerId = e.target.value;
+      
+      if (equipment[index]) {
+        equipment[index].controller = controllerId || 'Unassigned';
+        
+        showToast({
+          title: 'Controller Updated',
+          msg: `${equipment[index].uniqueId} assigned to ${controllerId || 'Unassigned'}`,
+          kind: 'success',
+          icon: '🔗'
+        });
+      }
     });
   });
 }
@@ -15279,7 +8944,7 @@ function closeModal() {
 function exportControllerAssignments() {
   const equipment = getControllerRequiredEquipment();
   
-  const csvHeaders = ['Type', 'Make', 'Model', 'Room', 'Zone', 'Unique ID', 'Configured Control', 'Link Method', 'Controller'];
+  const csvHeaders = ['Type', 'Make', 'Model', 'Room', 'Zone', 'Unique ID', 'Control Method', 'Controller'];
   const csvRows = equipment.map(item => [
     item.type,
     item.make,
@@ -15288,8 +8953,7 @@ function exportControllerAssignments() {
     item.zone,
     item.uniqueId,
     item.controlMethod,
-    item.controllerMethod ? formatControlMethodLabel(item.controllerMethod) : '',
-    item.controller || ''
+    item.controller
   ]);
   
   const csvContent = [csvHeaders, ...csvRows]
@@ -15334,6 +8998,211 @@ function renderSchedules() {
   renderGrowRoomOverview();
 }
 
+function renderGrowRoomOverview() {
+  const summaryEl = document.getElementById('growOverviewSummary');
+  const gridEl = document.getElementById('growOverviewGrid');
+  if (!summaryEl || !gridEl) return;
+
+  const rooms = Array.isArray(STATE.rooms) ? STATE.rooms : [];
+  const zones = Array.isArray(STATE.environment) ? STATE.environment : [];
+  const plans = Array.isArray(STATE.plans) ? STATE.plans : [];
+  const schedules = Array.isArray(STATE.schedules) ? STATE.schedules : [];
+
+  const roomCount = rooms.length;
+  const zoneCount = zones.length;
+  const summaries = [
+    {
+      label: 'Grow Rooms',
+      value: roomCount
+        ? `${roomCount} room${roomCount === 1 ? '' : 's'}`
+        : zoneCount
+        ? `${zoneCount} zone${zoneCount === 1 ? '' : 's'}`
+        : 'None'
+    },
+    {
+      label: 'Plans running',
+      value:
+        plans.length === 0
+          ? 'None'
+          : (() => {
+              const names = plans.map((plan) => plan.name || 'Untitled plan').filter(Boolean);
+              const preview = names.slice(0, 2).join(', ');
+              const extra = names.length > 2 ? ` +${names.length - 2}` : '';
+              return `${preview}${extra}`;
+            })()
+    },
+    {
+      label: 'Schedules',
+      value:
+        schedules.length === 0
+          ? 'None'
+          : (() => {
+              const names = schedules.map((sched) => sched.name || 'Unnamed schedule').filter(Boolean);
+              const preview = names.slice(0, 2).join(', ');
+              const extra = names.length > 2 ? ` +${names.length - 2}` : '';
+              return `${preview}${extra}`;
+            })()
+    }
+  ];
+
+  summaryEl.innerHTML = summaries
+    .map(
+      (item) => `
+        <div class="grow-overview__summary-item">
+          <span class="grow-overview__summary-label">${escapeHtml(item.label)}</span>
+          <span class="grow-overview__summary-value">${escapeHtml(item.value)}</span>
+        </div>`
+    )
+    .join('');
+
+  const activeFeatures = Array.from(document.querySelectorAll('.ai-feature-card.active h3'))
+    .map((el) => el.textContent?.trim())
+    .filter(Boolean);
+
+  const matchZoneForRoom = (room) => {
+    if (!room) return null;
+    const identifiers = new Set(
+      [room.id, room.name]
+        .filter((value) => value !== undefined && value !== null)
+        .map((value) => String(value).toLowerCase())
+    );
+    if (!identifiers.size) return null;
+    return zones.find((zone) => {
+      const id = zone.id ? String(zone.id).toLowerCase() : '';
+      const name = zone.name ? String(zone.name).toLowerCase() : '';
+      const location = zone.location ? String(zone.location).toLowerCase() : '';
+      return identifiers.has(id) || identifiers.has(name) || identifiers.has(location);
+    }) || null;
+  };
+
+  const metricKeys = [
+    { key: 'tempC', label: 'Temp', unit: '°C', precision: 1 },
+    { key: 'rh', label: 'Humidity', unit: '%', precision: 1 },
+    { key: 'co2', label: 'CO₂', unit: ' ppm', precision: 0 },
+    { key: 'vpd', label: 'VPD', unit: ' kPa', precision: 2 }
+  ];
+
+  const formatMetricValue = (sensor, meta) => {
+    if (!sensor || typeof sensor.current !== 'number' || !Number.isFinite(sensor.current)) {
+      return '—';
+    }
+    const value = meta.precision != null ? sensor.current.toFixed(meta.precision) : String(sensor.current);
+    if (meta.unit.trim() === '%') {
+      return `${value}${meta.unit}`;
+    }
+    return `${value}${meta.unit}`;
+  };
+
+  const metricStatus = (sensor) => {
+    if (!sensor || typeof sensor.current !== 'number' || !Number.isFinite(sensor.current)) {
+      return 'unknown';
+    }
+    const min = sensor.setpoint?.min;
+    const max = sensor.setpoint?.max;
+    if (typeof min === 'number' && typeof max === 'number') {
+      return sensor.current >= min && sensor.current <= max ? 'ok' : 'warn';
+    }
+    return 'unknown';
+  };
+
+  const buildMetrics = (zone) => {
+    if (!zone || !zone.sensors) return '';
+    const items = metricKeys
+      .map((meta) => {
+        const sensor = zone.sensors?.[meta.key];
+        if (!sensor) return '';
+        const status = metricStatus(sensor);
+        const value = formatMetricValue(sensor, meta);
+        return `
+          <div class="grow-room-card__metric grow-room-card__metric--${status}">
+            <span class="grow-room-card__metric-label">${escapeHtml(meta.label)}</span>
+            <span class="grow-room-card__metric-value">${escapeHtml(value)}</span>
+          </div>`;
+      })
+      .filter(Boolean)
+      .join('');
+    return items;
+  };
+
+  const buildAiSection = () => {
+    if (!activeFeatures.length) {
+      return '<p class="tiny text-muted">AI features inactive.</p>';
+    }
+    return `
+      <ul class="grow-room-card__ai-list">
+        ${activeFeatures.map((name) => `<li class="grow-room-card__ai-chip">${escapeHtml(name)}</li>`).join('')}
+      </ul>`;
+  };
+
+  const cards = [];
+  if (rooms.length) {
+    rooms.forEach((room) => {
+      const zone = matchZoneForRoom(room);
+      const name = room.name || room.id || 'Grow Room';
+      const details = [];
+      const zonesList = Array.isArray(room.zones) ? room.zones.filter(Boolean) : [];
+      if (zonesList.length) {
+        details.push(`Zones: ${zonesList.map((item) => escapeHtml(item)).join(', ')}`);
+      }
+      if (room.layout?.type) {
+        details.push(`Layout: ${escapeHtml(room.layout.type)}`);
+      }
+      if (room.controlMethod) {
+        details.push(`Control: ${escapeHtml(room.controlMethod)}`);
+      }
+      const metaParts = [];
+      if (zone?.meta?.source) metaParts.push(`Source: ${escapeHtml(zone.meta.source)}`);
+      if (typeof zone?.meta?.battery === 'number') metaParts.push(`Battery: ${escapeHtml(`${zone.meta.battery}%`)}`);
+      if (typeof zone?.meta?.rssi === 'number') metaParts.push(`RSSI: ${escapeHtml(`${zone.meta.rssi} dBm`)}`);
+      const metrics = buildMetrics(zone);
+      cards.push(`
+        <article class="grow-room-card">
+          <div class="grow-room-card__header">
+            <h3>${escapeHtml(name)}</h3>
+            ${room.roomType ? `<span class="chip tiny">${escapeHtml(room.roomType)}</span>` : ''}
+          </div>
+          ${details.length ? `<div class="tiny text-muted">${details.join(' • ')}</div>` : ''}
+          ${metaParts.length ? `<div class="tiny text-muted">${metaParts.join(' • ')}</div>` : ''}
+          ${metrics ? `<div class="grow-room-card__metrics">${metrics}</div>` : '<p class="tiny text-muted">No telemetry available.</p>'}
+          <div class="grow-room-card__ai">
+            <span class="tiny text-muted">AI Features</span>
+            ${buildAiSection()}
+          </div>
+        </article>`);
+    });
+  } else if (zones.length) {
+    zones.forEach((zone) => {
+      const name = zone.name || zone.id || 'Zone';
+      const location = zone.location ? `Location: ${escapeHtml(zone.location)}` : '';
+      const metaParts = [];
+      if (zone.meta?.source) metaParts.push(`Source: ${escapeHtml(zone.meta.source)}`);
+      if (typeof zone.meta?.battery === 'number') metaParts.push(`Battery: ${escapeHtml(`${zone.meta.battery}%`)}`);
+      if (typeof zone.meta?.rssi === 'number') metaParts.push(`RSSI: ${escapeHtml(`${zone.meta.rssi} dBm`)}`);
+      const metrics = buildMetrics(zone);
+      cards.push(`
+        <article class="grow-room-card">
+          <div class="grow-room-card__header">
+            <h3>${escapeHtml(name)}</h3>
+          </div>
+          ${location ? `<div class="tiny text-muted">${location}</div>` : ''}
+          ${metaParts.length ? `<div class="tiny text-muted">${metaParts.join(' • ')}</div>` : ''}
+          ${metrics ? `<div class="grow-room-card__metrics">${metrics}</div>` : '<p class="tiny text-muted">No telemetry available.</p>'}
+          <div class="grow-room-card__ai">
+            <span class="tiny text-muted">AI Features</span>
+            ${buildAiSection()}
+          </div>
+        </article>`);
+    });
+  }
+
+  if (!cards.length) {
+    gridEl.innerHTML = '<p class="tiny text-muted">Add a grow room to view live status and telemetry.</p>';
+    return;
+  }
+
+  gridEl.innerHTML = cards.join('');
+}
+
 function updateAutomationIndicator(status = {}) {
   const indicator = document.getElementById('automationIndicator');
   const statusEl = document.getElementById('automationIndicatorStatus');
@@ -15349,28 +9218,15 @@ function updateAutomationIndicator(status = {}) {
 
   const managedZones = (STATE.environment || []).filter(zone => zone.meta?.managedByPlugs);
   const hasRules = (STATE.preAutomationRules || []).length > 0;
-  const automationRooms = Array.isArray(STATE.roomAutomation?.rooms) ? STATE.roomAutomation.rooms : [];
-  const suggestionCount = automationRooms.reduce((acc, room) => acc + (room.suggestions?.length || 0), 0);
-  const autopilotRooms = automationRooms.filter(room => room.control?.enable && room.control?.mode === 'autopilot').length;
-  const alertRooms = automationRooms.filter(room => ['alert', 'critical'].includes(room.status?.level)).length;
 
-  if (autopilotRooms > 0) {
-    indicator.classList.add('is-active');
-    statusEl.textContent = autopilotRooms === 1
-      ? 'Autopilot • 1 room'
-      : `Autopilot • ${autopilotRooms} rooms`;
-  } else if (suggestionCount > 0) {
-    indicator.classList.add('is-alert');
-    const alertSuffix = alertRooms > 0 ? ` • ${alertRooms} room${alertRooms === 1 ? '' : 's'} out of range` : '';
-    statusEl.textContent = `Advisory • ${suggestionCount} suggestion${suggestionCount === 1 ? '' : 's'}${alertSuffix}`;
-  } else if (managedZones.length > 0) {
+  if (managedZones.length > 0) {
     indicator.classList.add('is-active');
     statusEl.textContent = managedZones.length === 1
       ? 'Managing 1 zone'
       : `Managing ${managedZones.length} zones`;
-  } else if (hasRules || automationRooms.length > 0) {
+  } else if (hasRules) {
     indicator.classList.add('is-idle');
-    statusEl.textContent = hasRules ? 'Armed' : 'Targets stable';
+    statusEl.textContent = 'Armed';
   } else {
     indicator.classList.add('is-idle');
     statusEl.textContent = 'Idle';
@@ -15560,374 +9416,10 @@ async function refreshSmartPlug(plugId) {
   }
 }
 
-function onAutomationCardClick(event) {
-  const actionBtn = event.target.closest('[data-action="apply-suggestion"]');
-  if (actionBtn) {
-    const roomId = actionBtn.getAttribute('data-room-id');
-    const suggestionId = actionBtn.getAttribute('data-suggestion-id');
-    applyAutomationSuggestion(roomId, suggestionId, actionBtn);
-    return;
-  }
-
-  const modeBtn = event.target.closest('[data-mode]');
-  if (modeBtn) {
-    const mode = modeBtn.getAttribute('data-mode');
-    if (mode === 'autopilot') {
-      event.preventDefault();
-      modeBtn.blur();
-      showToast({ title: 'Autopilot', msg: 'Guardrailed Autopilot is on deck. For now, run in Advisory to review actions.', kind: 'info', icon: '🛡️' }, 5000);
-    }
-  }
-}
-
-function findRoomAnalytics(room) {
-  if (!room) return null;
-  if (room.analytics) return room.analytics;
-  const advisoryRooms = Array.isArray(STATE.aiAdvisory?.rooms) ? STATE.aiAdvisory.rooms : [];
-  const fallback = advisoryRooms.find((entry) => entry?.roomId === room.roomId);
-  return fallback?.analytics || null;
-}
-
-function formatRelativeTimeLabel(ts) {
-  if (!ts) return null;
-  const date = new Date(ts);
-  if (!Number.isFinite(date.getTime())) return null;
-  const diffMs = Date.now() - date.getTime();
-  if (diffMs < 0) return 'in progress';
-  const minutes = Math.round(diffMs / 60000);
-  if (minutes < 1) return 'just now';
-  if (minutes < 60) return `${minutes}m ago`;
-  const hours = Math.round(minutes / 60);
-  if (hours < 24) return `${hours}h ago`;
-  const days = Math.round(hours / 24);
-  return `${days}d ago`;
-}
-
-function describeCorrelationStrengthClient(value) {
-  const magnitude = Math.abs(value);
-  if (magnitude >= 0.85) return 'very strong';
-  if (magnitude >= 0.7) return 'strong';
-  if (magnitude >= 0.5) return 'moderate';
-  if (magnitude >= 0.3) return 'weak';
-  return 'minimal';
-}
-
-function buildLearningInsights(analytics, daily) {
-  const learning = analytics?.learning || {};
-  const correlationLabels = {
-    ppfdBlue: 'PPFD↔Blue',
-    tempRh: 'Temp↔RH',
-    dutyEnergy: 'Duty↔Energy'
-  };
-  let correlationItems = [];
-  if (Array.isArray(learning.correlationSummary) && learning.correlationSummary.length) {
-    correlationItems = learning.correlationSummary.filter(Boolean);
-  } else {
-    const source = learning.correlations || daily?.correlations || {};
-    correlationItems = Object.entries(source || {}).reduce((acc, [key, info]) => {
-      if (!info || !Number.isFinite(info.coefficient)) return acc;
-      const label = correlationLabels[key] || key;
-      const descriptor = describeCorrelationStrengthClient(info.coefficient);
-      const direction = info.coefficient >= 0 ? 'direct' : 'inverse';
-      const magnitude = info.coefficient.toFixed(2);
-      const samples = Number.isFinite(info.samples) ? `${info.samples} sample${info.samples === 1 ? '' : 's'}` : 'samples';
-      acc.push(`${label}: ${descriptor} ${direction} (${magnitude}) · ${samples}`);
-      return acc;
-    }, []);
-  }
-
-  const adaptive = learning.adaptive || {};
-  const recommendation = adaptive.recommendation || {};
-  const notes = Array.isArray(learning.suggestions)
-    ? learning.suggestions.map((entry) => entry?.detail || entry?.label).filter(Boolean)
-    : [];
-  if (adaptive.summary && !notes.includes(adaptive.summary)) {
-    notes.unshift(adaptive.summary);
-  }
-
-  const adjustments = [];
-  const formatPercentDelta = (value, scale = 100) => {
-    if (!Number.isFinite(value)) return null;
-    const pct = value * scale;
-    if (!Number.isFinite(pct)) return null;
-    const abs = Math.abs(pct);
-    const decimals = abs > 0 && abs < 1 ? 1 : 0;
-    const sign = pct >= 0 ? '+' : '−';
-    return `${sign}${abs.toFixed(decimals)}%`;
-  };
-
-  const ppfdDelta = formatPercentDelta((recommendation.ppfdScale ?? null) != null ? (recommendation.ppfdScale - 1) : null, 100);
-  if (ppfdDelta) adjustments.push(`PPFD ${ppfdDelta}`);
-  const blueDelta = formatPercentDelta(recommendation.blueDelta ?? null, 100);
-  if (blueDelta) adjustments.push(`Blue ${blueDelta}`);
-  const redDelta = formatPercentDelta(recommendation.redDelta ?? null, 100);
-  if (redDelta) adjustments.push(`Red ${redDelta}`);
-
-  const adjustmentSummary = adjustments.length ? `Advisory: ${adjustments.join(' & ')}` : '';
-  if (adjustmentSummary) notes.push(adjustmentSummary);
-
-  const planRef = recommendation.plan || adaptive.plan || '';
-  if (planRef) {
-    notes.push(`Source plan: ${planRef}`);
-  }
-
-  const hasLearning = correlationItems.length > 0 || notes.length > 0;
-  return {
-    hasLearning,
-    correlationItems,
-    notes
-  };
-}
-
-function renderAiAdvisoryCard() {
-  const card = document.getElementById('aiAdvisoryCard');
-  if (!card) return;
-  const summaryEl = card.querySelector('[data-role="ai-summary"]');
-  const listEl = card.querySelector('[data-role="ai-rooms"]');
-  if (summaryEl) {
-    const summary = STATE.aiAdvisory?.summary || '';
-    summaryEl.textContent = summary || 'AI Copilot is gathering advisory telemetry.';
-  }
-  if (!listEl) return;
-
-  const rooms = Array.isArray(STATE.roomAutomation?.rooms) ? STATE.roomAutomation.rooms : [];
-  if (!rooms.length) {
-    listEl.innerHTML = '<p class="tiny text-muted">No rooms enrolled in AI Copilot yet. Enable advisory mode to start building labeled history.</p>';
-    return;
-  }
-
-  const rowsHtml = rooms.map((room) => {
-    const analytics = findRoomAnalytics(room);
-    const daily = analytics?.daily || {};
-    const suggestions = Array.isArray(analytics?.suggestions) ? analytics.suggestions.slice(0, 2) : [];
-    const metrics = [
-      { label: 'Temp', value: Number.isFinite(daily.tempAvg) ? `${daily.tempAvg.toFixed(1)}°C` : '—' },
-      { label: 'RH', value: Number.isFinite(daily.rhAvg) ? `${daily.rhAvg.toFixed(0)}%` : '—' },
-      { label: 'VPD', value: Number.isFinite(daily.vpdAvg) ? `${daily.vpdAvg.toFixed(2)} kPa` : '—' },
-      { label: 'PPFD', value: Number.isFinite(daily.ppfdAvg) ? `${Math.round(daily.ppfdAvg)} µmol` : '—' },
-      { label: 'Energy', value: Number.isFinite(daily.energyKwh) ? `${daily.energyKwh.toFixed(2)} kWh` : '—' }
-    ];
-    const suggestionHtml = suggestions.length
-      ? suggestions.map((item) => `
-          <li>
-            <span class="ai-advisory-room__suggestion-label">${escapeHtml(item.label || 'Advisory action')}</span>
-            ${item.detail ? `<span class="ai-advisory-room__suggestion-detail">${escapeHtml(item.detail)}</span>` : ''}
-          </li>
-        `).join('')
-      : '<li><span class="tiny text-muted">No adjustments recommended.</span></li>';
-
-    const learningInfo = buildLearningInsights(analytics, daily);
-    const learningHtml = learningInfo.hasLearning
-      ? `
-        <div class="ai-advisory-room__learning">
-          <h4 class="ai-advisory-room__learning-title">Learning mode</h4>
-          ${learningInfo.correlationItems.length ? `<ul class="ai-advisory-room__learning-list">${learningInfo.correlationItems.map((text) => `<li>${escapeHtml(text)}</li>`).join('')}</ul>` : ''}
-          ${learningInfo.notes.map((text) => `<p class="ai-advisory-room__learning-note">${escapeHtml(text)}</p>`).join('')}
-        </div>`
-      : '';
-
-    const footerParts = [];
-    if (analytics?.planName || analytics?.plan) {
-      footerParts.push(`Plan ${escapeHtml(analytics.planName || analytics.plan)}`);
-    }
-    if (Number.isFinite(daily.samples) && daily.samples > 0) {
-      footerParts.push(`${daily.samples} samples today`);
-    }
-    const relative = formatRelativeTimeLabel(analytics?.lastActionAt);
-    if (relative) footerParts.push(`Last action ${relative}`);
-    if (room.control?.mode === 'autopilot') footerParts.push('Autopilot ready');
-
-    return `
-      <article class="ai-advisory-room" data-room="${escapeHtml(room.roomId || room.name || '')}">
-        <header class="ai-advisory-room__header">
-          <h3 class="ai-advisory-room__title">${escapeHtml(room.name || room.roomId || 'Room')}</h3>
-          <span class="ai-advisory-room__badge">${escapeHtml(room.control?.mode === 'autopilot' ? 'Autopilot' : 'Advisory')}</span>
-        </header>
-        <p class="ai-advisory-room__summary">${escapeHtml(analytics?.summary || 'Within configured guardrails.')}</p>
-        <div class="ai-advisory-room__metrics">
-          ${metrics.map((metric) => `
-            <div class="ai-advisory-room__metric">
-              <span>${metric.label}</span>
-              <span>${escapeHtml(metric.value)}</span>
-            </div>
-          `).join('')}
-        </div>
-        <ul class="ai-advisory-room__suggestions">${suggestionHtml}</ul>
-        ${learningHtml}
-        <div class="ai-advisory-room__footer">
-          ${footerParts.map((text) => `<span>${escapeHtml(text)}</span>`).join('')}
-        </div>
-      </article>`;
-  }).join('');
-
-  listEl.innerHTML = rowsHtml;
-}
-
-function renderRoomAutomationCard() {
-  const card = document.getElementById('roomAutomationCard');
-  if (!card) return;
-
-  if (!card.dataset.bound) {
-    card.dataset.bound = '1';
-    card.addEventListener('click', onAutomationCardClick);
-  }
-
-  const body = card.querySelector('[data-role="automation-body"]');
-  const statusEl = card.querySelector('[data-role="automation-status"]');
-  const modeLabel = card.querySelector('[data-role="automation-mode-label"]');
-  if (!body) return;
-
-  const automation = STATE.roomAutomation || {};
-  const rooms = Array.isArray(automation.rooms) ? automation.rooms : [];
-  const totalSuggestions = rooms.reduce((acc, room) => acc + (room.suggestions?.length || 0), 0);
-  const alertRooms = rooms.filter((room) => ['alert', 'critical'].includes(room.status?.level)).length;
-  const autopilotRooms = rooms.filter((room) => room.control?.enable && room.control?.mode === 'autopilot').length;
-
-  if (modeLabel) {
-    if (autopilotRooms > 0) {
-      modeLabel.textContent = `Autopilot (${autopilotRooms})`;
-    } else {
-      modeLabel.textContent = 'Advisory';
-    }
-  }
-
-  if (!rooms.length) {
-    body.innerHTML = '<p class="tiny text-muted">No rooms are mapped to automation yet. Configure Grow Rooms to seed advisory guardrails.</p>';
-  } else {
-    body.innerHTML = rooms.map((room) => {
-      const control = room.control || {};
-      const targets = room.targets || {};
-      const stepPct = Math.round((control.step ?? 0.05) * 100);
-      const dwell = control.dwell ?? 180;
-      const modeText = control.mode === 'autopilot' ? 'Autopilot' : 'Advisory';
-      const enableText = control.enable ? 'Enabled' : 'Manual';
-      const statusSummary = escapeHtml(room.status?.summary || 'Within guardrails');
-      const statusDetail = escapeHtml(room.status?.detail || '');
-      const statusLevel = room.status?.level || 'idle';
-      const tempTarget = typeof targets.temp === 'number' ? `${targets.temp.toFixed(1)}°C` : null;
-      const rhBand = typeof targets.rhBand === 'number' ? targets.rhBand : 5;
-      const rhTarget = typeof targets.rh === 'number' ? `${targets.rh.toFixed(0)}% ±${rhBand}` : null;
-      const minBlue = typeof targets.minBlue === 'number' ? `Blue ≥${Math.round(targets.minBlue * 100)}%` : null;
-      const minMaster = typeof targets.minMaster === 'number' ? `Master ≥${Math.round(targets.minMaster * 100)}%` : null;
-      const targetParts = [tempTarget, rhTarget, minBlue, minMaster].filter(Boolean).join(' • ');
-      const targetsText = targetParts || '—';
-      const tempReading = room.readings?.temp?.value;
-      const rhReading = room.readings?.rh?.value;
-      const readingParts = [];
-      if (typeof tempReading === 'number') readingParts.push(`Temp ${tempReading.toFixed(1)}°C`);
-      if (typeof rhReading === 'number') readingParts.push(`RH ${rhReading.toFixed(1)}%`);
-      const readingsText = readingParts.length ? readingParts.join(' • ') : 'Awaiting sensors';
-      const lights = Array.isArray(room.actuators?.lights) ? room.actuators.lights : [];
-      const fans = Array.isArray(room.actuators?.fans) ? room.actuators.fans : [];
-      const dehu = Array.isArray(room.actuators?.dehu) ? room.actuators.dehu : [];
-      const actuatorParts = [];
-      if (lights.length) actuatorParts.push(`Lights: ${lights.map(escapeHtml).join(', ')}`);
-      if (fans.length) actuatorParts.push(`Fans: ${fans.map(escapeHtml).join(', ')}`);
-      if (dehu.length) actuatorParts.push(`Dehu: ${dehu.map(escapeHtml).join(', ')}`);
-      const actuatorsText = actuatorParts.length ? actuatorParts.map((part) => `<span>${part}</span>`).join('') : '<span class="tiny text-muted">No actuators mapped</span>';
-
-      const suggestions = Array.isArray(room.suggestions) ? room.suggestions : [];
-      const suggestionsHtml = suggestions.length
-        ? suggestions.map((suggestion) => {
-            const severity = suggestion.severity || 'minor';
-            const label = escapeHtml(suggestion.label || 'Suggested action');
-            const detail = escapeHtml(suggestion.detail || '');
-            const disabledAttr = suggestion.disabled ? ' disabled' : '';
-            return `
-              <div class="automation-suggestion" data-severity="${severity}">
-                <div class="automation-suggestion__text">
-                  <span class="automation-suggestion__label">${label}</span>
-                  ${detail ? `<span class="automation-suggestion__detail tiny text-muted">${detail}</span>` : ''}
-                </div>
-                <button type="button" class="ghost automation-suggestion__apply" data-action="apply-suggestion" data-room-id="${escapeHtml(room.roomId || '')}" data-suggestion-id="${escapeHtml(suggestion.id || '')}"${disabledAttr}>Apply</button>
-              </div>`;
-          }).join('')
-        : '<div class="automation-suggestion automation-suggestion--empty"><span>No actions recommended.</span></div>';
-
-      return `
-        <article class="automation-room automation-room--${statusLevel}" data-room="${escapeHtml(room.roomId || '')}">
-          <header class="automation-room__header">
-            <div>
-              <h3 class="automation-room__title">${escapeHtml(room.name || room.roomId || 'Room')}</h3>
-              <p class="tiny automation-room__status" title="${statusDetail}">${statusSummary}</p>
-            </div>
-            <div class="automation-room__badges">
-              <span class="badge">${escapeHtml(modeText)}</span>
-              <span class="badge">${escapeHtml(enableText)}</span>
-              <span class="badge">Step ${stepPct}%</span>
-              <span class="badge">Dwell ${dwell}s</span>
-            </div>
-          </header>
-          <div class="automation-room__metrics">
-            <div>
-              <span class="automation-room__metric-label">Targets</span>
-              <span class="automation-room__metric-value">${escapeHtml(targetsText)}</span>
-            </div>
-            <div>
-              <span class="automation-room__metric-label">Readings</span>
-              <span class="automation-room__metric-value">${escapeHtml(readingsText)}</span>
-            </div>
-          </div>
-          <div class="automation-room__actuators">${actuatorsText}</div>
-          <div class="automation-room__suggestions">
-            <h4 class="automation-room__suggestions-title">Suggestions</h4>
-            ${suggestionsHtml}
-          </div>
-        </article>`;
-    }).join('');
-  }
-
-  if (statusEl) {
-    if (!rooms.length) {
-      statusEl.textContent = 'Add rooms to enable automation guardrails.';
-    } else if (totalSuggestions > 0) {
-      statusEl.textContent = `${totalSuggestions} suggestion${totalSuggestions === 1 ? '' : 's'} ready · ${alertRooms} room${alertRooms === 1 ? '' : 's'} out of range`;
-    } else {
-      statusEl.textContent = 'All rooms within configured guardrails.';
-    }
-  }
-}
-
-async function applyAutomationSuggestion(roomId, suggestionId, button) {
-  if (!roomId || !suggestionId) return;
-  const btn = button instanceof HTMLElement ? button : null;
-  if (btn) {
-    btn.disabled = true;
-    btn.classList.add('is-loading');
-  }
-  try {
-    showToast({ title: 'Automation', msg: 'Sending advisory action…', kind: 'info', icon: grIconImg('evie-training', 'Automation status') }, 2500);
-    const payload = await api(`/env/rooms/${encodeURIComponent(roomId)}/actions`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ suggestionId })
-    });
-    if (payload?.room) {
-      const rooms = Array.isArray(STATE.roomAutomation?.rooms) ? STATE.roomAutomation.rooms : [];
-      const idx = rooms.findIndex((entry) => entry.roomId === payload.room.roomId);
-      if (idx >= 0) {
-        rooms[idx] = payload.room;
-      }
-      STATE.roomAutomation.rooms = rooms;
-    }
-    const appliedLabel = payload?.appliedSuggestion?.label || 'Automation action logged.';
-    showToast({ title: 'Applied', msg: appliedLabel, kind: 'success', icon: '✅' }, 4000);
-    await reloadEnvironment();
-  } catch (error) {
-    console.warn('Automation apply failed', error);
-    showToast({ title: 'Automation', msg: error.message || 'Failed to apply automation suggestion.', kind: 'warn', icon: '⚠️' }, 5000);
-  } finally {
-    if (btn) {
-      btn.disabled = false;
-      btn.classList.remove('is-loading');
-    }
-  }
-}
-
 function renderEnvironment() {
   const container = document.getElementById('envZones');
   if (!container) return;
-
+  
   container.innerHTML = STATE.environment.map(zone => `
     <div class="env-zone" data-zone-id="${zone.id}">
       <div class="env-zone__header">
@@ -15979,8 +9471,6 @@ function renderEnvironment() {
     });
   });
 
-  renderAiAdvisoryCard();
-  renderRoomAutomationCard();
   renderGrowRoomOverview();
   updateAutomationIndicator();
 }
@@ -15992,15 +9482,6 @@ async function reloadEnvironment() {
     const payload = await api('/env');
     STATE.preAutomationEnv = payload?.env || { scopes: {} };
     STATE.environment = Array.isArray(payload?.zones) ? payload.zones : [];
-    STATE.roomAutomation = {
-      rooms: Array.isArray(payload?.rooms) ? payload.rooms : [],
-      meta: payload?.meta || {}
-    };
-    STATE.aiAdvisory = {
-      summary: payload?.ai?.summary || '',
-      rooms: Array.isArray(payload?.ai?.rooms) ? payload.ai.rooms : []
-    };
-    STATE.envReadings = Array.isArray(payload?.readings) ? payload.readings : [];
     renderEnvironment();
     $('#envStatus')?.replaceChildren(document.createTextNode(`Updated ${new Date().toLocaleTimeString()}`));
   } catch (e) {
@@ -16014,26 +9495,6 @@ function startEnvPolling(intervalMs = 10000) {
 }
 
 // --- SwitchBot Devices Management ---
-async function loadSwitchBotDevices() {
-  try {
-    const response = await fetch('/switchbot/devices');
-    if (!response.ok) {
-      throw new Error(`SwitchBot proxy returned ${response.status}`);
-    }
-    const payload = await response.json();
-    const items = payload && (payload.body?.deviceList || payload.devices || []);
-    renderSwitchBotList(Array.isArray(items) ? items : []);
-  } catch (error) {
-    console.error('Failed to load SwitchBot devices list:', error);
-    renderSwitchBotList([]);
-  }
-}
-
-function renderSwitchBotList(items) {
-  STATE.switchbotDevices = Array.isArray(items) ? items : [];
-  renderSwitchBotDevices();
-}
-
 function renderSwitchBotDevices() {
   const container = document.getElementById('switchbotDevicesList');
   if (!container) return;
@@ -16150,164 +9611,15 @@ function renderPlansPanel() {
     if (g.plan) { (acc[g.plan] = acc[g.plan] || []).push(g); }
     return acc;
   }, {});
-  const formatMaybeNumber = (value, suffix = '', minDigits = 0) => {
-    const num = toNumberOrNull(value);
-    if (num == null) return '—';
-    let digits = minDigits;
-    if (digits === 0 && Math.abs(num % 1) >= 0.01) digits = 1;
-    return `${num.toFixed(digits)}${suffix}`;
-  };
   const toRow = (plan, idx) => {
-    const derived = plan._derived || derivePlanRuntime(plan);
-    const isStructured = !!plan._structured;
-    const spectrum = plan.spectrum || derived?.spectrum || { cw:45, ww:45, bl:0, rd:0 };
-    const ppfd = getPlanPPFD(plan);
-    const photoperiodHours = getPlanPhotoperiodHours(plan);
-    const dli = getPlanDli(plan);
-    const photoperiodLabelSource = firstNonEmpty(plan.photoperiod, derived?.photoperiod, plan.defaults?.photoperiod);
-    const photoperiodLabel = formatPlanPhotoperiodDisplay(photoperiodLabelSource);
-    const usedInNames = (groupsByPlan[plan.id] || []).map((g) => g.name).filter(Boolean);
-    const usedIn = usedInNames.join(', ');
-    const description = plan.description || (derived.notes && derived.notes.length ? derived.notes.join(' • ') : '');
-    const descriptionHtml = description ? `<div class="tiny" style="color:#475569;margin:-2px 0 6px">${escapeHtml(description)}</div>` : '';
-    const planIdAttr = escapeHtml(plan.id || `plan-${idx}`);
-    if (isStructured) {
-      const chips = [];
-      if (plan.key) chips.push(`Key: ${plan.key}`);
-      if (plan.kind) chips.push(`Kind: ${plan.kind}`);
-      if (plan.version !== undefined && plan.version !== null) chips.push(`v${plan.version}`);
-      if (Array.isArray(plan.meta?.channels) && plan.meta.channels.length) {
-        chips.push(`Channels: ${plan.meta.channels.map((ch) => String(ch).toUpperCase()).join(' / ')}`);
-      }
-      const chipsHtml = chips.length
-        ? `<div class="plan-structured__chips">${chips.map((text) => `<span class="chip plan-structured__chip">${escapeHtml(text)}</span>`).join('')}</div>`
-        : '';
-      const appliesParts = [];
-      if (derived.appliesTo?.category?.length) appliesParts.push(`Categories: ${derived.appliesTo.category.join(', ')}`);
-      if (derived.appliesTo?.varieties?.length) appliesParts.push(`Varieties: ${derived.appliesTo.varieties.join(', ')}`);
-      const appliesHtml = appliesParts.length
-        ? `<div class="tiny plan-structured__applies">Applies to: ${escapeHtml(appliesParts.join(' • '))}</div>`
-        : '';
-      const defaultsParts = [];
-      if (plan.defaults && plan.defaults.photoperiod !== undefined && plan.defaults.photoperiod !== null && plan.defaults.photoperiod !== '') {
-        defaultsParts.push(`Photoperiod ${formatPlanPhotoperiodDisplay(plan.defaults.photoperiod)}`);
-      }
-      if (plan.defaults && plan.defaults.ramp && (plan.defaults.ramp.sunrise != null || plan.defaults.ramp.sunset != null)) {
-        const rampPieces = [];
-        const sunrise = toNumberOrNull(plan.defaults.ramp.sunrise);
-        const sunset = toNumberOrNull(plan.defaults.ramp.sunset);
-        if (sunrise != null) rampPieces.push(`Sunrise ${formatMaybeNumber(sunrise, ' min')}`);
-        if (sunset != null) rampPieces.push(`Sunset ${formatMaybeNumber(sunset, ' min')}`);
-        if (rampPieces.length) defaultsParts.push(`Ramp ${rampPieces.join(' • ')}`);
-      }
-      const defaultsHtml = defaultsParts.length
-        ? `<div class="tiny plan-structured__defaults">${escapeHtml(defaultsParts.join(' • '))}</div>`
-        : '';
-      const notesHtml = derived.notes && derived.notes.length
-        ? `<div class="plan-structured__section"><h4 class="plan-structured__section-title">Notes</h4><ul class="plan-structured__notes">${derived.notes.map((note) => `<li>${escapeHtml(note)}</li>`).join('')}</ul></div>`
-        : '';
-      const lightRows = (derived.lightDays || []).map((day) => {
-        const dayLabel = day.day != null ? escapeHtml(String(day.day)) : '—';
-        const stageLabel = day.stage ? escapeHtml(day.stage) : '—';
-        const ppfdCell = day.ppfd != null ? escapeHtml(formatMaybeNumber(day.ppfd, ' µmol·m⁻²·s⁻¹')) : '—';
-        const dayPhotoperiod = formatPlanPhotoperiodDisplay(firstNonEmpty(day.photoperiod, plan.defaults?.photoperiod));
-        const photoperiodCell = escapeHtml(dayPhotoperiod);
-        const mixCell = escapeHtml(formatPlanMix(day.mix));
-        return `<tr><td>${dayLabel}</td><td>${stageLabel}</td><td>${ppfdCell}</td><td>${photoperiodCell}</td><td>${mixCell}</td></tr>`;
-      }).join('');
-      const lightSection = lightRows
-        ? `<div class="plan-structured__section"><h4 class="plan-structured__section-title">Light targets</h4><table class="plan-structured__table"><thead><tr><th>Day</th><th>Stage</th><th>PPFD</th><th>Photoperiod</th><th>Mix</th></tr></thead><tbody>${lightRows}</tbody></table></div>`
-        : '';
-      const envRows = (derived.envDays || []).map((day) => {
-        const dayLabel = day.day != null ? escapeHtml(String(day.day)) : '—';
-        const tempCell = escapeHtml(formatMaybeNumber(day.tempC, '°C'));
-        const rhCell = escapeHtml(formatMaybeNumber(day.rh, '%'));
-        const rhBandVal = toNumberOrNull(day.rhBand);
-        const rhBandCell = rhBandVal != null
-          ? escapeHtml(`±${(Math.abs(rhBandVal % 1) >= 0.01 ? rhBandVal.toFixed(1) : rhBandVal.toFixed(0))}%`)
-          : '—';
-        return `<tr><td>${dayLabel}</td><td>${tempCell}</td><td>${rhCell}</td><td>${rhBandCell}</td></tr>`;
-      }).join('');
-      const envSection = envRows
-        ? `<div class="plan-structured__section"><h4 class="plan-structured__section-title">Environment targets</h4><table class="plan-structured__table"><thead><tr><th>Day</th><th>Temp</th><th>RH</th><th>RH band</th></tr></thead><tbody>${envRows}</tbody></table></div>`
-        : '';
-      let controlBlock = '';
-      if (plan.env && plan.env.control && typeof plan.env.control === 'object') {
-        const ctrl = plan.env.control;
-        const controlParts = [];
-        if (typeof ctrl.enable === 'boolean') controlParts.push(ctrl.enable ? 'Enabled' : 'Disabled');
-        if (typeof ctrl.mode === 'string' && ctrl.mode.trim()) controlParts.push(`Mode ${ctrl.mode}`);
-        const stepVal = toNumberOrNull(ctrl.step);
-        if (stepVal != null) controlParts.push(`Step ${formatMaybeNumber(stepVal, ' min')}`);
-        const dwellVal = toNumberOrNull(ctrl.dwell);
-        if (dwellVal != null) controlParts.push(`Dwell ${formatMaybeNumber(dwellVal, ' min')}`);
-        const controlText = controlParts.length ? controlParts.join(' • ') : '—';
-        controlBlock = `<div class="plan-structured__section"><h4 class="plan-structured__section-title">Env control</h4><div class="tiny plan-structured__control">${escapeHtml(controlText)}</div></div>`;
-      }
-      let adaptSection = '';
-      const curve = Array.isArray(plan.adapt?.tempCurve) ? plan.adapt.tempCurve : [];
-      if (curve.length) {
-        const adaptRows = curve.map((row) => {
-          const bin = row?.bin ? escapeHtml(String(row.bin)) : '—';
-          const scaleVal = toNumberOrNull(row?.ppfdScale);
-          const scaleText = scaleVal != null ? scaleVal.toFixed(2) : '—';
-          const blueVal = toNumberOrNull(row?.blueDelta);
-          const blueText = blueVal != null ? `${blueVal >= 0 ? '+' : ''}${blueVal.toFixed(2)}` : '—';
-          const redVal = toNumberOrNull(row?.redDelta);
-          const redText = redVal != null ? `${redVal >= 0 ? '+' : ''}${redVal.toFixed(2)}` : '—';
-          return `<tr><td>${bin}</td><td>${scaleText}</td><td>${blueText}</td><td>${redText}</td></tr>`;
-        }).join('');
-        adaptSection = `<div class="plan-structured__section"><h4 class="plan-structured__section-title">Adaptive responses</h4><table class="plan-structured__table"><thead><tr><th>Temp bin</th><th>PPFD scale</th><th>Blue Δ</th><th>Red Δ</th></tr></thead><tbody>${adaptRows}</tbody></table></div>`;
-      }
-      const usedInHtml = `<div class="tiny plan-structured__used">Used in: ${escapeHtml(usedIn || '—')}</div>`;
-      const hasPpfd = Number.isFinite(ppfd) && ppfd > 0;
-      const hasDli = Number.isFinite(dli) && dli > 0;
-      const dliSummary = hasDli ? `${dli.toFixed(2)} mol·m⁻²·d⁻¹` : '—';
-      const ppfdSummary = hasPpfd ? `${ppfd.toFixed(0)} µmol·m⁻²·s⁻¹` : '—';
-      const photoperiodSummary = photoperiodLabel && photoperiodLabel !== '—' ? photoperiodLabel : '—';
-      const hint = `<div class="plan-structured__hint">Structured plan with day-by-day light and environment targets. Update via recipe bridge or /plans API.</div>`;
-      return `
-      <div class="card plan-card plan-card--structured" data-plan-id="${planIdAttr}">
-        <div class="row" style="justify-content:space-between;align-items:center;margin-bottom:6px">
-          <h3 style="margin:0">${escapeHtml(plan.name || 'Untitled plan')}</h3>
-          <div class="row" style="gap:6px">
-            <button type="button" class="ghost" data-action="dup">Duplicate</button>
-            <button type="button" class="ghost" data-action="del">Delete</button>
-          </div>
-        </div>
-        ${descriptionHtml || ''}
-        <div class="grid cols-2 plan-structured__grid" style="align-items:start">
-          <div class="plan-structured__main">
-            ${chipsHtml || ''}
-            ${usedInHtml}
-            ${appliesHtml || ''}
-            ${defaultsHtml || ''}
-            ${notesHtml || ''}
-            ${lightSection || ''}
-            ${envSection || ''}
-            ${controlBlock || ''}
-            ${adaptSection || ''}
-            ${hint}
-          </div>
-          <div class="plan-structured__aside">
-            <div class="tiny" style="margin-bottom:4px">Spectrum preview (CW/WW/BL/RD)</div>
-            <canvas class="plan-spd" width="300" height="36" data-idx="${idx}"></canvas>
-            <dl class="plan-structured__metrics plan-structured__metrics--vertical">
-              <div><dt>PPFD</dt><dd data-role="plan-ppfd" data-format="summary">${ppfdSummary}</dd></div>
-              <div><dt>DLI</dt><dd data-role="plan-dli" data-format="summary">${dliSummary}</dd></div>
-              <div><dt>Photoperiod</dt><dd data-role="plan-photoperiod" data-format="summary">${escapeHtml(photoperiodSummary)}</dd></div>
-            </dl>
-          </div>
-        </div>
-      </div>`;
-    }
-    const ppfdValue = Number.isFinite(ppfd) ? ppfd : 0;
-    const photoperiodValue = Number.isFinite(photoperiodHours) ? photoperiodHours : 12;
-    const dliValue = Number.isFinite(dli) ? dli : ((ppfdValue && photoperiodValue) ? (ppfdValue * 3600 * photoperiodValue) / 1e6 : 0);
-    const dliLabel = Number.isFinite(dliValue) ? dliValue.toFixed(2) : '0.00';
-    const usedInHtml = `<div class="tiny" style="color:#475569;margin-top:6px">Used in: ${escapeHtml(usedIn || '—')}</div>`;
+    const spectrum = plan.spectrum || { cw:45, ww:45, bl:0, rd:0 };
+    const ppfd = Number(plan.ppfd || 0);
+    const photoperiod = Number(plan.photoperiod || 12);
+    const dli = ppfd > 0 ? (ppfd * 3600 * photoperiod) / 1e6 : (Number(plan.dli || 0));
+    const usedIn = (groupsByPlan[plan.id] || []).map(g=>g.name).join(', ');
+    const idSafe = `plan-${idx}`;
     return `
-      <div class="card" data-plan-id="${planIdAttr}">
+      <div class="card" data-plan-id="${plan.id}">
         <div class="row" style="justify-content:space-between;align-items:center;margin-bottom:6px">
           <h3 style="margin:0">${escapeHtml(plan.name || 'Untitled plan')}</h3>
           <div class="row" style="gap:6px">
@@ -16315,15 +9627,15 @@ function renderPlansPanel() {
             <button type="button" class="ghost" data-action="del">Delete</button>
           </div>
         </div>
-        ${descriptionHtml || ''}
+        <div class="tiny" style="color:#475569;margin:-2px 0 6px">${escapeHtml(plan.description || '')}</div>
         <div class="grid cols-2" style="align-items:start">
           <div>
             <label class="tiny">Name <input data-field="name" type="text" value="${escapeHtml(plan.name||'')}" placeholder="Plan name"></label>
             <label class="tiny">Description <input data-field="description" type="text" value="${escapeHtml(plan.description||'')}" placeholder="Short description"></label>
             <div class="row tiny" style="gap:8px;align-items:center;margin-top:6px">
-              <label>PPFD <input data-field="ppfd" type="number" min="0" step="1" value="${ppfdValue}" style="width:90px"></label>
-              <label>Photoperiod (h) <input data-field="photoperiod" type="number" min="0" max="24" step="0.5" value="${photoperiodValue}" style="width:90px"></label>
-              <span class="chip plan-card__dli" data-role="plan-dli" data-format="chip" title="DLI = PPFD × 3600 × h ÷ 1e6">DLI ≈ ${dliLabel}</span>
+              <label>PPFD <input data-field="ppfd" type="number" min="0" step="1" value="${ppfd}" style="width:90px"></label>
+              <label>Photoperiod (h) <input data-field="photoperiod" type="number" min="0" max="24" step="0.5" value="${photoperiod}" style="width:90px"></label>
+              <span class="chip" title="DLI = PPFD × 3600 × h ÷ 1e6">DLI ≈ ${(dli||0).toFixed(2)}</span>
             </div>
             <div class="row tiny" style="gap:8px;align-items:center;margin-top:6px">
               <label>CW <input data-field="cw" type="number" min="0" max="100" step="1" value="${spectrum.cw||0}" style="width:70px"></label>
@@ -16331,7 +9643,7 @@ function renderPlansPanel() {
               <label>Blue <input data-field="bl" type="number" min="0" max="100" step="1" value="${spectrum.bl||0}" style="width:70px"></label>
               <label>Red <input data-field="rd" type="number" min="0" max="100" step="1" value="${spectrum.rd||0}" style="width:70px"></label>
             </div>
-            ${usedInHtml}
+            <div class="tiny" style="color:#475569;margin-top:6px">Used in: ${usedIn || '—'}</div>
           </div>
           <div>
             <div class="tiny" style="margin-bottom:4px">Spectrum preview (400–700 nm)</div>
@@ -16370,15 +9682,10 @@ function renderPlansPanel() {
           if (cv) renderSpectrumCanvas(cv, computeWeightedSPD(plan.spectrum), { width:300, height:36 });
         }
         // live DLI chip update
-        const dliNode = card.querySelector('[data-role=plan-dli]');
-        if (dliNode) {
-          const nextDli = getPlanDli(plan);
-          if (dliNode.dataset.format === 'chip') {
-            dliNode.textContent = `DLI ≈ ${(nextDli || 0).toFixed(2)}`;
-          } else {
-            dliNode.textContent = nextDli ? `${nextDli.toFixed(2)} mol·m⁻²·d⁻¹` : '—';
-          }
-        }
+        const ppfd = Number(plan.ppfd || 0);
+        const photoperiod = Number(plan.photoperiod || 12);
+        const chip = card.querySelector('.chip');
+        if (chip) chip.textContent = `DLI ≈ ${((ppfd*3600*photoperiod)/1e6 || 0).toFixed(2)}`;
       });
     };
     const bindText = (selector, path) => {
@@ -16412,7 +9719,7 @@ function renderPlansPanel() {
       const clone = JSON.parse(JSON.stringify(plan));
       clone.id = `plan-${Math.random().toString(36).slice(2,8)}`;
       clone.name = `${plan.name || 'Untitled'} (copy)`;
-      STATE.plans.push(hydratePlan(clone, STATE.plans.length));
+      STATE.plans.push(clone);
       renderPlansPanel(); renderPlans();
     });
   });
@@ -16644,15 +9951,14 @@ function wireGlobalEvents() {
     const clamp01 = v => Math.max(0, Math.min(100, Math.round(Number(v)||0)));
     const finalMix = { cw: clamp01(scaled.cw), ww: clamp01(scaled.ww), bl: clamp01(scaled.bl), rd: clamp01(scaled.rd) };
     const payloadMix = { ...finalMix, fr: 0, uv: 0 };
-    const members = getActiveGroupMembers(group);
-    const deviceIds = members.map((member) => member.id).filter(Boolean);
+    const deviceIds = Array.isArray(group?.lights) ? group.lights.map((l) => l.id).filter(Boolean) : [];
     const perDevice = {};
     deviceIds.forEach((id) => {
       const details = buildDeviceHexForMix(payloadMix, id);
       perDevice[id] = details;
     });
     const hex12 = buildHex12(payloadMix);
-    return { mix: finalMix, hex12, perDevice, deviceIds, members };
+    return { mix: finalMix, hex12, perDevice, deviceIds };
   }
 
   function setHudLocked(locked) {
@@ -16668,140 +9974,82 @@ function wireGlobalEvents() {
   }
 
   function updateGroupPlanInfoCard(group) {
-    const spectraState = ensureSpectraState();
     const card = document.getElementById('groupPlanInfoCard');
+    if (!card) return;
     const title = document.getElementById('groupPlanInfoTitle');
     const subtitle = document.getElementById('groupPlanInfoSubtitle');
     const canvas = document.getElementById('groupPlanInfoCanvas');
     const metrics = document.getElementById('groupPlanInfoMetrics');
     const plan = group ? STATE.plans.find((p) => p.id === group.plan) : null;
-
     if (!plan) {
-      const hadPlan = !!spectraState.selectedPlan;
-      spectraState.selectedPlan = null;
-      if (hadPlan) document.dispatchEvent(new Event('plan:changed'));
-      if (card) {
-        card.classList.add('is-empty');
-        if (title) title.textContent = 'Plan information';
-        if (subtitle) subtitle.textContent = 'Select a plan to view spectrum targets.';
-        if (metrics) metrics.innerHTML = '';
-      }
+      card.classList.add('is-empty');
+      if (title) title.textContent = 'Plan information';
+      if (subtitle) subtitle.textContent = 'Select a plan to view spectrum targets.';
+      if (metrics) metrics.innerHTML = '';
       clearCanvas(canvas);
       return;
     }
-
-    const derived = plan._derived || derivePlanRuntime(plan);
+    card.classList.remove('is-empty');
+    if (title) title.textContent = `Plan: ${plan.name || 'Untitled'}`;
     const cropStage = [plan.crop, plan.stage].filter(Boolean).join(' • ');
-    const spectrum = plan.spectrum || derived?.spectrum || { cw: 45, ww: 45, bl: 0, rd: 0 };
-    const { percentages } = computeChannelPercentages(spectrum);
-    const ppfd = getPlanPPFD(plan);
-    const photoperiodHours = getPlanPhotoperiodHours(plan);
-    const dli = getPlanDli(plan);
-    const hasPpfd = Number.isFinite(ppfd) && ppfd > 0;
-    const hasDli = Number.isFinite(dli) && dli > 0;
-    const photoperiodLabel = Number.isFinite(photoperiodHours) && photoperiodHours > 0
-      ? `${photoperiodHours.toFixed(1)} h`
-      : formatPlanPhotoperiodDisplay(firstNonEmpty(plan.photoperiod, derived?.photoperiod, plan.defaults?.photoperiod));
-
-    const members = getActiveGroupMembers(group) || [];
-    const deviceIds = members.map((entry) => entry.id).filter(Boolean);
-    const mix = { cw: Number(spectrum.cw || 0), ww: Number(spectrum.ww || 0), bl: Number(spectrum.bl || 0), rd: Number(spectrum.rd || 0) };
-    const planSpd = resolveSpd(mix, deviceIds);
-
-    spectraState.selectedPlan = {
-      id: plan.id || plan.name || '',
-      name: plan.name || 'Untitled',
-      spectrum: planSpd,
-      deviceIds,
-    };
-    document.dispatchEvent(new Event('plan:changed'));
-
-    if (card) {
-      card.classList.remove('is-empty');
-      if (title) title.textContent = `Plan: ${plan.name || 'Untitled'}`;
-      if (subtitle) {
-        const desc = plan.description || (derived?.notes?.length ? derived.notes.join(' • ') : 'Spectrum targets from the selected plan.');
-        subtitle.textContent = cropStage || desc;
-      }
-      const roomSel = document.getElementById('groupRoomDropdown');
-      const zoneSel = document.getElementById('groupZoneDropdown');
-      const targets = resolveEnvironmentTargets(roomSel?.value || '', zoneSel?.value || '');
-      if (metrics) {
-        const items = [
-          { label: 'Cool white', value: `${percentages.cw.toFixed(0)}%` },
-          { label: 'Warm white', value: `${percentages.ww.toFixed(0)}%` },
-          { label: 'Blue', value: `${percentages.bl.toFixed(0)}%` },
-          { label: 'Red', value: `${percentages.rd.toFixed(0)}%` },
-          { label: 'PPFD', value: hasPpfd ? `${ppfd.toFixed(0)} µmol·m⁻²·s⁻¹` : '—' },
-          { label: 'Photoperiod', value: photoperiodLabel && photoperiodLabel !== '—' ? photoperiodLabel : '—' },
-          { label: 'DLI', value: hasDli ? `${dli.toFixed(2)} mol·m⁻²·d⁻¹` : '—' },
-        ];
-        if (targets?.temp) {
-          items.push({ label: 'Temp target', value: formatSetpointRange(targets.temp, '°C') });
-        }
-        if (targets?.rh) {
-          items.push({ label: 'Humidity target', value: formatSetpointRange(targets.rh, '%') });
-        }
-        metrics.innerHTML = items
-          .map((item) => `<dt>${escapeHtml(item.label)}</dt><dd>${escapeHtml(item.value)}</dd>`)
-          .join('');
-      }
+    if (subtitle) {
+      subtitle.textContent = cropStage || plan.description || 'Spectrum targets from the selected plan.';
     }
-
-    if (canvas && typeof renderSpectrumCanvas === 'function') {
-      if (planSpd) {
-        renderSpectrumCanvas(canvas, planSpd, { width: canvas.width, height: canvas.height });
-      } else {
-        clearCanvas(canvas);
+    const spectrum = plan.spectrum || { cw: 45, ww: 45, bl: 0, rd: 0 };
+    const { percentages } = computeChannelPercentages(spectrum);
+    const photoperiod = Number(plan.photoperiod || 12);
+    const ppfd = Number(plan.ppfd || 0);
+    const dli = plan.dli != null ? Number(plan.dli) : (ppfd > 0 ? (ppfd * 3600 * photoperiod) / 1e6 : 0);
+    const roomSel = document.getElementById('groupRoomDropdown');
+    const zoneSel = document.getElementById('groupZoneDropdown');
+    const targets = resolveEnvironmentTargets(roomSel?.value || '', zoneSel?.value || '');
+    if (metrics) {
+      const items = [
+        { label: 'Cool white', value: `${percentages.cw.toFixed(0)}%` },
+        { label: 'Warm white', value: `${percentages.ww.toFixed(0)}%` },
+        { label: 'Blue', value: `${percentages.bl.toFixed(0)}%` },
+        { label: 'Red', value: `${percentages.rd.toFixed(0)}%` },
+        { label: 'PPFD', value: ppfd ? `${ppfd.toFixed(0)} µmol·m⁻²·s⁻¹` : '—' },
+        { label: 'Photoperiod', value: photoperiod ? `${photoperiod.toFixed(1)} h` : '—' },
+        { label: 'DLI', value: dli ? `${dli.toFixed(2)} mol·m⁻²·d⁻¹` : '—' },
+      ];
+      if (targets?.temp) {
+        items.push({ label: 'Temp target', value: formatSetpointRange(targets.temp, '°C') });
       }
+      if (targets?.rh) {
+        items.push({ label: 'Humidity target', value: formatSetpointRange(targets.rh, '%') });
+      }
+      metrics.innerHTML = items
+        .map((item) => `<dt>${escapeHtml(item.label)}</dt><dd>${escapeHtml(item.value)}</dd>`)
+        .join('');
+    }
+    if (canvas && typeof renderSpectrumCanvas === 'function') {
+      const mix = { cw: Number(spectrum.cw || 0), ww: Number(spectrum.ww || 0), bl: Number(spectrum.bl || 0), rd: Number(spectrum.rd || 0) };
+      const deviceIds = Array.isArray(group?.lights) ? group.lights.map((l) => l.id).filter(Boolean) : [];
+      const spd = computeWeightedSPD(mix, { deviceIds });
+      renderSpectrumCanvas(canvas, spd, { width: canvas.width, height: canvas.height });
     }
   }
 
   function updateGroupLightInfoCard(group) {
-    const spectraState = ensureSpectraState();
     const card = document.getElementById('groupLightInfoCard');
+    if (!card) return;
     const title = document.getElementById('groupLightInfoTitle');
     const subtitle = document.getElementById('groupLightInfoSubtitle');
     const canvas = document.getElementById('groupLightInfoCanvas');
     const metrics = document.getElementById('groupLightInfoMetrics');
     const modeLabel = document.getElementById('groupLightInfoMode');
-
-    if (!group) {
-      setGRAL29Lights([]);
-      if (card) {
-        card.classList.add('is-empty');
-        if (title) title.textContent = 'Current mix';
-        if (subtitle) subtitle.textContent = 'Select a group to preview live control options.';
-        if (metrics) metrics.innerHTML = '';
-        if (modeLabel) modeLabel.textContent = 'Control mode: Locked until lights are assigned.';
-      }
+    if (!group || !Array.isArray(group.lights) || group.lights.length === 0) {
+      card.classList.add('is-empty');
+      if (title) title.textContent = 'Current mix';
+      if (subtitle) subtitle.textContent = 'Add lights to preview live control options.';
+      if (metrics) metrics.innerHTML = '';
+      if (modeLabel) modeLabel.textContent = 'Control mode: Locked until lights are assigned.';
       clearCanvas(canvas);
       setHudLocked(true);
       return;
     }
-
-    const activeLights = getActiveGroupMembers(group);
-    if (!activeLights.length) {
-      setGRAL29Lights([]);
-      if (card) {
-        card.classList.add('is-empty');
-        if (title) title.textContent = 'Current mix';
-        if (subtitle) {
-          const { rawRoom, zone } = typeof getSelectedGroupRoomZone === 'function' ? getSelectedGroupRoomZone() : { rawRoom: '', zone: '' };
-          const missingSelection = !String(rawRoom || '').trim() || !String(zone || '').trim();
-          subtitle.textContent = missingSelection
-            ? 'Select a room and zone to preview live control options.'
-            : 'No lights assigned for this room and zone.';
-        }
-        if (metrics) metrics.innerHTML = '';
-        if (modeLabel) modeLabel.textContent = 'Control mode: Locked until lights are assigned.';
-      }
-      clearCanvas(canvas);
-      setHudLocked(true);
-      return;
-    }
-
-    const resolvedLights = activeLights.map((entry) => {
+    const resolvedLights = group.lights.map((entry) => {
       const meta = getDeviceMeta(entry.id) || {};
       const setup = findSetupFixtureById(entry.id);
       const fromSetup = setup?.fixture || null;
@@ -16818,39 +10066,33 @@ function wireGlobalEvents() {
         source: setup ? 'setup' : (meta.vendor || meta.model ? 'device' : 'unknown')
       };
     });
-
-    const selectedLightRecords = resolvedLights.map((light) => ({
-      id: light.id,
-      name: light.name,
-      isDynamic: light.dynamic,
-      manufacturerSpectrum: light.dynamic ? null : resolveSpd(light.spectrum, [light.id]),
-    }));
-    setGRAL29Lights(selectedLightRecords);
-
     const dynamicCount = resolvedLights.filter((light) => light.dynamic).length;
     const staticCount = resolvedLights.length - dynamicCount;
     const mixInfo = computeMixAndHex(group);
     const { percentages } = computeChannelPercentages(mixInfo.mix);
     const plan = group ? STATE.plans.find((p) => p.id === group.plan) : null;
-    const planDerived = plan?._derived || (plan ? derivePlanRuntime(plan) : null);
-    const planSpectrum = plan?.spectrum || planDerived?.spectrum || { cw: 45, ww: 45, bl: 0, rd: 0 };
+    const planSpectrum = plan?.spectrum || { cw: 45, ww: 45, bl: 0, rd: 0 };
     const { percentages: planPercentages } = computeChannelPercentages(planSpectrum);
     const hud = readHUD();
     const masterValue = Number.isFinite(Number(hud.master)) ? Number(hud.master) : 100;
     const masterPct = Math.max(0, Math.min(100, masterValue));
     const intensityScale = plan ? (hud.lock ? masterPct / 100 : 1) : 1;
-    const planPhotoperiod = plan ? getPlanPhotoperiodHours(plan) : 12;
-    const planPpfd = plan ? getPlanPPFD(plan) : 0;
-    const planDliValue = plan ? getPlanDli(plan) : 0;
-    const activePhotoperiod = Number.isFinite(planPhotoperiod) ? planPhotoperiod : 0;
+    const planPhotoperiod = Number(plan?.photoperiod || 12);
+    const planPpfd = Number(plan?.ppfd || 0);
+    const planDliValue = plan
+      ? (plan.dli != null
+          ? Number(plan.dli)
+          : (planPpfd > 0 ? (planPpfd * 3600 * planPhotoperiod) / 1e6 : 0))
+      : null;
+    const activePhotoperiod = planPhotoperiod;
     const actualPpfd = planPpfd ? planPpfd * intensityScale : 0;
     const actualDli = actualPpfd > 0 && activePhotoperiod > 0 ? (actualPpfd * 3600 * activePhotoperiod) / 1e6 : 0;
-
-    if (card) card.classList.remove('is-empty');
+    card.classList.remove('is-empty');
     if (title) title.textContent = `Current mix • ${resolvedLights.length} light${resolvedLights.length === 1 ? '' : 's'}`;
     if (subtitle) {
       const primary = resolvedLights[0];
       if (primary) {
+        // Show both manufacturer/vendor and model if available
         let label = '';
         if (primary.vendor) label += primary.vendor + ' ';
         if (primary.model) label += primary.model + ' ';
@@ -16896,7 +10138,7 @@ function wireGlobalEvents() {
         {
           label: 'DLI',
           value: actualDli ? `${actualDli.toFixed(2)} mol·m⁻²·d⁻¹` : '—',
-          delta: hasPlan ? formatDelta(actualDli - (planDliValue || 0), ' mol·m⁻²·d⁻¹', 2) : null
+          delta: hasPlan ? formatDelta(actualDli - (planDliValue ?? 0), ' mol·m⁻²·d⁻¹', 2) : null
         },
         { label: 'Dynamic fixtures', value: dynamicCount ? `${dynamicCount}` : '0', delta: null },
         { label: 'Static fixtures', value: staticCount ? `${staticCount}` : '0', delta: null }
@@ -16979,22 +10221,12 @@ function wireGlobalEvents() {
     const host = document.getElementById('groupSpectrumPreview');
     if (!host) return;
     host.innerHTML = '';
-    const mixInfo = computeMixAndHex(group);
-    const activeMembers = mixInfo.members || [];
-    if (!activeMembers.length) {
-      const selection = typeof getSelectedGroupRoomZone === 'function' ? getSelectedGroupRoomZone() : { rawRoom: '', zone: '' };
-      const missingSelection = !String(selection.rawRoom || '').trim() || !String(selection.zone || '').trim();
-      const message = missingSelection
-        ? 'Select a room and zone to preview spectrum.'
-        : 'No lights assigned for this room and zone.';
-      host.innerHTML = `<div class="group-spectrum__empty" style="padding:12px;color:#64748b;font-size:13px;">${escapeHtml(message)}</div>`;
-      return;
-    }
-    const spd = computeWeightedSPD(mixInfo.mix, { deviceIds: mixInfo.deviceIds });
+    const { mix, deviceIds } = computeMixAndHex(group);
+    const spd = computeWeightedSPD(mix, { deviceIds });
     const cv = document.createElement('canvas');
     cv.className = 'group-spectrum__canvas';
     host.appendChild(cv);
-
+    
     // Use consistent fixed dimensions to prevent resizing issues
     const w = 420;
     const h = 40;
@@ -17015,7 +10247,7 @@ function wireGlobalEvents() {
         const planSpec = plan?.spectrum || { cw: 45, ww: 45, bl: 0, rd: 0 };
         const planSpd = computeWeightedSPD({
           cw: Number(planSpec.cw||0), ww: Number(planSpec.ww||0), bl: Number(planSpec.bl||0), rd: Number(planSpec.rd||0)
-        }, { deviceIds: mixInfo.deviceIds });
+        }, { deviceIds });
         const pW = 260;
         const pH = 90;
         renderSpectrumCanvas(planCv, planSpd, { width: pW, height: pH });
@@ -17075,24 +10307,29 @@ function wireGlobalEvents() {
 
     const { roomId: selectedRoomId, roomName: selectedRoomName, zone: selectedZone } = getSelectedGroupRoomZone();
     const hasRoomSelection = !!(selectedRoomValue && selectedRoomValue.trim());
-    const hasZoneSelection = ROOM_ONLY_GROUPS ? true : !!(selectedZoneValue && selectedZoneValue.trim());
+    const hasZoneSelection = !!(selectedZoneValue && selectedZoneValue.trim());
     const hasFilters = hasRoomSelection && hasZoneSelection;
 
-    const selectionPayload = {
-      room: firstNonEmptyString(selectedRoomValue, selectedRoomId, selectedRoomName),
-      roomId: selectedRoomId,
-      roomName: selectedRoomName,
-      rawRoom: selectedRoomValue,
-      zone: firstNonEmptyString(selectedZoneValue, selectedZone),
-      zoneId: firstNonEmptyString(selectedZoneValue, selectedZone),
-      zoneName: firstNonEmptyString(selectedZoneValue, selectedZone),
-    };
-
-    const filteredLights = hasFilters ? getActiveGroupMembers(group, selectionPayload) : [];
+    const filteredLights = hasFilters
+      ? (group.lights || [])
+          .map((entry, idx) => normalizeGroupLightEntry(entry, idx))
+          .filter((entry) => {
+            if (!entry || !entry.id) return false;
+            if (entry.type && entry.type !== 'Light') return false;
+            if (/mock|demo/i.test(entry.id)) return false;
+            const room = (entry.room || entry.roomId || '').toString().trim().toLowerCase();
+            const zone = (entry.zone || '').toString().trim().toLowerCase();
+            const selRoomId = (selectedRoomId || '').toString().trim().toLowerCase();
+            const selRoomName = (selectedRoomName || '').toString().trim().toLowerCase();
+            const selZone = (selectedZone || '').toString().trim().toLowerCase();
+            return (room === selRoomId || room === selRoomName) && zone === selZone;
+          })
+      : [];
 
     updateGroupActionStates({
       hasGroup: Boolean(group),
-      selection: selectionPayload,
+      hasRoom: hasRoomSelection,
+      hasZone: hasZoneSelection,
     });
 
     if (!group) {
@@ -17123,27 +10360,20 @@ function wireGlobalEvents() {
     if (groupSchedule) groupSchedule.value = group.schedule || '';
     if (groupName) groupName.value = group.name || '';
     // Chip
-      if (chipsHost) {
-        chipsHost.querySelectorAll('.chip[data-kind]').forEach(n=>n.remove());
-        // Plan chip with PPFD/DLI
-        const plan = STATE.plans.find(p => p.id === group.plan);
-        if (plan) {
-        const scheduleHours = (()=>{ const s = STATE.schedules.find(x=>x.id===group.schedule); return s ? getDailyOnHours(s) : null; })();
-        const planPpfd = getPlanPPFD(plan);
-        const planPhotoperiod = scheduleHours != null ? scheduleHours : getPlanPhotoperiodHours(plan);
-        const planDli = getPlanDli(plan);
-        const dliValue = Number.isFinite(planDli) && planDli > 0
-          ? planDli
-          : (planPpfd > 0 && Number.isFinite(planPhotoperiod) && planPhotoperiod > 0
-              ? (planPpfd * 3600 * planPhotoperiod) / 1e6
-              : 0);
+    if (chipsHost) {
+      chipsHost.querySelectorAll('.chip[data-kind]').forEach(n=>n.remove());
+      // Plan chip with PPFD/DLI
+      const plan = STATE.plans.find(p => p.id === group.plan);
+      if (plan) {
+        const photoperiod = (()=>{ const s = STATE.schedules.find(x=>x.id===group.schedule); return s ? getDailyOnHours(s) : (Number(plan.photoperiod)||12); })();
+        const dli = (Number(plan.ppfd||0) * 3600 * photoperiod) / 1e6;
         const pchip = document.createElement('span');
         pchip.className = 'chip';
         pchip.dataset.kind = 'plan';
-        pchip.textContent = `${plan.name} • PPFD ${Math.round(planPpfd || 0)} • DLI ${dliValue.toFixed(2)}`;
+        pchip.textContent = `${plan.name} • PPFD ${Math.round(Number(plan.ppfd||0))} • DLI ${dli.toFixed(2)}`;
         pchip.title = 'Assigned plan';
         chipsHost.appendChild(pchip);
-        }
+      }
       const sched = STATE.schedules.find(s => s.id === group.schedule);
       const chip = document.createElement('span');
       chip.className = 'chip';
@@ -17163,9 +10393,7 @@ function wireGlobalEvents() {
     // Meta status: roster count and online
     if (groupsStatus) {
       if (!hasFilters) {
-        groupsStatus.textContent = ROOM_ONLY_GROUPS
-          ? 'Select a room to preview this group.'
-          : 'Select a room and zone to preview this group.';
+        groupsStatus.textContent = 'Select a room and zone to preview this group.';
       } else {
         try {
           const filteredIds = filteredLights.map((entry) => entry.id).filter(Boolean);
@@ -17175,14 +10403,9 @@ function wireGlobalEvents() {
           const online = targets.filter((d) => d && d.online !== false).length;
           const planName = STATE.plans.find((p) => p.id === group.plan)?.name || '—';
           const schedName = STATE.schedules.find((s) => s.id === group.schedule)?.name || '—';
-          const roomLabel = hasRoomSelection ? selectedRoomValue : '';
-          const zoneLabel = ROOM_ONLY_GROUPS ? '' : selectedZoneValue;
-          const locationLabel = [roomLabel, zoneLabel].filter(Boolean).join(' · ');
-          groupsStatus.textContent = `${filteredLights.length} light(s) • ${online} online${locationLabel ? ` • ${locationLabel}` : ''} • Plan: ${planName} • Schedule: ${schedName}`;
+          groupsStatus.textContent = `${filteredLights.length} light(s) • ${online} online • Plan: ${planName} • Schedule: ${schedName}`;
         } catch {
-          groupsStatus.textContent = ROOM_ONLY_GROUPS
-            ? 'Select a room to preview this group.'
-            : 'Select a room and zone to preview this group.';
+          groupsStatus.textContent = 'Select a room and zone to preview this group.';
         }
       }
     }
@@ -17213,16 +10436,12 @@ function wireGlobalEvents() {
     if (groupRosterEmpty) {
       if (!hasFilters) {
         groupRosterEmpty.style.display = 'block';
-        groupRosterEmpty.textContent = ROOM_ONLY_GROUPS
-          ? 'Select a room to view this group.'
-          : 'Select a room and zone to view this group.';
+        groupRosterEmpty.textContent = 'Select a room and zone to view this group.';
       } else if (filteredLights.length) {
         groupRosterEmpty.style.display = 'none';
       } else {
         groupRosterEmpty.style.display = 'block';
-        groupRosterEmpty.textContent = ROOM_ONLY_GROUPS
-          ? 'No lights in this group for the selected room.'
-          : 'No lights in this group for the selected room and zone.';
+        groupRosterEmpty.textContent = 'No lights in this group for the selected room and zone.';
       }
     }
 
@@ -17230,12 +10449,12 @@ function wireGlobalEvents() {
     if (ungroupedList) {
       const { rawRoom, roomId, roomName, zone } = getSelectedGroupRoomZone();
       const selectedRoom = roomId || roomName ? { id: roomId, name: roomName } : rawRoom;
-      const zoneValue = ROOM_ONLY_GROUPS ? '' : normZone(zone);
+      const zoneValue = normZone(zone);
       const hasRoom =
         typeof selectedRoom === 'string'
           ? !!selectedRoom.trim()
           : !!(selectedRoom && (selectedRoom.id || selectedRoom.name));
-      const hasZone = ROOM_ONLY_GROUPS ? true : !!zoneValue;
+      const hasZone = !!zoneValue;
       const roster = hasRoom && hasZone ? computeRostersForSelection(selectedRoom, zoneValue) : { assigned: [], ungrouped: [] };
       const assignedIds = new Set((roster.assigned || []).map((entry) => entry.id).filter(Boolean));
       const ungrouped = roster.ungrouped || [];
@@ -17243,9 +10462,7 @@ function wireGlobalEvents() {
       if (!hasRoom || !hasZone) {
         if (ungroupedEmpty) {
           ungroupedEmpty.style.display = 'block';
-          ungroupedEmpty.textContent = ROOM_ONLY_GROUPS
-            ? 'Select a room to view configured lights.'
-            : 'Select a room and zone to view configured lights.';
+          ungroupedEmpty.textContent = 'Select a room and zone to view configured lights.';
         }
       } else if (!ungrouped.length) {
         if (ungroupedEmpty) {
@@ -17253,9 +10470,7 @@ function wireGlobalEvents() {
           const hasAnyCandidates = (roster.assigned || []).length > 0;
           ungroupedEmpty.textContent = hasAnyCandidates
             ? 'All lights are assigned to groups.'
-            : ROOM_ONLY_GROUPS
-              ? 'No lights found for this room.'
-              : 'No lights found for this room and zone.';
+            : 'No lights found for this room and zone.';
         }
       } else {
         if (ungroupedEmpty) ungroupedEmpty.style.display = 'none';
@@ -17310,11 +10525,11 @@ function wireGlobalEvents() {
         });
       }
       if (ungroupedStatus) {
-      if (!hasRoom || !hasZone) {
-        ungroupedStatus.textContent = ROOM_ONLY_GROUPS ? 'Select a room' : 'Select a room and zone';
-      } else {
-        ungroupedStatus.textContent = `${ungrouped.length} ungrouped`;
-      }
+        if (!hasRoom || !hasZone) {
+          ungroupedStatus.textContent = 'Select a room and zone';
+        } else {
+          ungroupedStatus.textContent = `${ungrouped.length} ungrouped`;
+        }
       }
     }
     // Removed rendering of light cards in group card as requested.
@@ -17457,7 +10672,7 @@ function wireGlobalEvents() {
       if (group) group.schedule = edited.id;
       await Promise.all([
         saveJSON('./data/schedules.json', { schedules: STATE.schedules }),
-        saveJSON('/groups', { groups: STATE.groups })
+        saveJSON('./data/groups.json', { groups: STATE.groups })
       ]);
       updateGroupUI(group);
       setStatus('Saved group schedule');
@@ -17512,7 +10727,7 @@ function wireGlobalEvents() {
     if (groupsStatus) groupsStatus.textContent = 'Group saved';
   });
   btnReloadGroups?.addEventListener('click', async () => {
-    const data = await api('/groups');
+    const data = await loadJSON('./data/groups.json');
     STATE.groups = data?.groups || [];
     normalizeGroupsInState();
     renderGroups();
@@ -17562,7 +10777,7 @@ function wireGlobalEvents() {
   });
 
   async function saveGroups() {
-    const ok = await saveJSON('/groups', { groups: STATE.groups });
+    const ok = await saveJSON('./data/groups.json', { groups: STATE.groups });
     if (ok) {
       setStatus('Groups saved');
       // Update controller assignments when groups change
@@ -17751,7 +10966,7 @@ function wireGlobalEvents() {
     STATE.schedules = STATE.schedules.filter(s => s.id !== id);
     // Unlink from any groups referencing it
     STATE.groups.forEach(g => { if (g.schedule === id) g.schedule = ''; });
-    await Promise.all([saveSchedules(), saveJSON('/groups', { groups: STATE.groups })]);
+    await Promise.all([saveSchedules(), saveJSON('./data/groups.json', { groups: STATE.groups })]);
     renderSchedules();
     setStatus(`Deleted schedule ${id}`);
   });
@@ -17839,7 +11054,7 @@ function wireGlobalEvents() {
       // File-only: persist to groups.json as a pending mix so a Room Wizard or future apply can use it
       try {
         STATE.currentGroup.pendingSpectrum = { ...mix, updatedAt: new Date().toISOString() };
-        await saveJSON('/groups', { groups: STATE.groups });
+        await saveJSON('./data/groups.json', { groups: STATE.groups });
         setStatus('Saved spectrum to file only (pending)');
         showToast({ title: 'Saved to file only', msg: 'Pending spectrum saved to groups.json', kind: 'info', icon: '💾' });
       } catch (e) {
@@ -17874,7 +11089,7 @@ function wireGlobalEvents() {
         const id = `plan-${Math.random().toString(36).slice(2,8)}`;
         const name = `${STATE.currentGroup.name || 'Group'} — Manual`;
         const plan = { id, name, description: 'Saved from Group HUD', spectrum: { cw: hud.cw, ww: hud.ww, bl: hud.bl, rd: hud.rd }, ppfd, photoperiod };
-        STATE.plans.push(hydratePlan(plan, STATE.plans.length));
+        STATE.plans.push(plan);
         // Assign to group and persist
         STATE.currentGroup.plan = id;
         await Promise.all([
@@ -18137,11 +11352,10 @@ class FreshLightWizard {
 
     // Create New Zone action
     createZoneBtn.addEventListener('click', () => {
-  const roomId = roomSelect.value;
-  // No need to check for room selection; equipment is already assigned to a room
-  // Zone creation prompt removed as requested
-  const zoneName = '';
-  // No prompt for zone name; zoneName will be empty
+      const roomId = roomSelect.value;
+      if (!roomId) return alert('Select a room first');
+      const zoneName = prompt('Enter new zone name:');
+      if (!zoneName) return;
       let updated = false;
       if (Array.isArray(STATE.rooms)) {
         const r = STATE.rooms.find(r => (r.id || r.name) === roomId);
@@ -18171,7 +11385,7 @@ class FreshLightWizard {
         }
         window.dispatchEvent(new CustomEvent('farmDataChanged'));
       } else {
-  // Removed: alert('Failed to add zone.');
+        alert('Failed to add zone.');
       }
     });
 
@@ -18443,9 +11657,7 @@ class FreshLightWizard {
       totalWattage: totalWattage,
       createdAt: new Date().toISOString()
     };
-    console.debug('[FreshLightWizard.save] Saving light setup:', JSON.stringify(lightSetup, null, 2));
     STATE.lightSetups.push(lightSetup);
-    console.debug('[FreshLightWizard.save] STATE.lightSetups after save:', JSON.stringify(STATE.lightSetups, null, 2));
     window.dispatchEvent(new CustomEvent('lightSetupsChanged'));
     renderLightSetupSummary();
     renderControllerAssignments();
@@ -18747,7 +11959,7 @@ class DevicePairWizard {
       console.warn('AI Assist request failed', err);
       if (!this.aiNotifiedFailure && stage === 'start') {
         this.aiNotifiedFailure = true;
-        showToast({ title: 'IA Assist', msg: 'Unable to fetch pairing suggestions right now.', kind: 'info', icon: grIconImg('ia-assist-ei2', 'IA Assist E.i2') }, 5000);
+        showToast({ title: 'IA Assist', msg: 'Unable to fetch pairing suggestions right now.', kind: 'info', icon: '🤖' }, 5000);
       }
       return null;
     }
@@ -18796,7 +12008,7 @@ class DevicePairWizard {
         button.textContent = 'Suggestion applied';
       }
     }
-    showToast({ title: 'IA Assist', msg: `Transport set to ${String(transport).toUpperCase()}.`, kind: 'info', icon: grIconImg('ia-assist-ei2', 'IA Assist E.i2') }, 5000);
+    showToast({ title: 'IA Assist', msg: `Transport set to ${String(transport).toUpperCase()}.`, kind: 'info', icon: '🤖' }, 5000);
     this.updateReview();
   }
 
@@ -18845,7 +12057,7 @@ class DevicePairWizard {
         button.textContent = 'Suggestion applied';
       }
     }
-    showToast({ title: 'IA Assist', msg: 'Applied Wi‑Fi configuration suggestions.', kind: 'info', icon: grIconImg('ia-assist-ei2', 'IA Assist E.i2') }, 5000);
+    showToast({ title: 'IA Assist', msg: 'Applied Wi‑Fi configuration suggestions.', kind: 'info', icon: '🤖' }, 5000);
     this.updateReview();
   }
 
@@ -18886,7 +12098,7 @@ class DevicePairWizard {
         button.textContent = 'Suggestion applied';
       }
     }
-    showToast({ title: 'IA Assist', msg: 'Bluetooth pairing details filled in.', kind: 'info', icon: grIconImg('ia-assist-ei2', 'IA Assist E.i2') }, 5000);
+    showToast({ title: 'IA Assist', msg: 'Bluetooth pairing details filled in.', kind: 'info', icon: '🤖' }, 5000);
     this.updateReview();
   }
 
@@ -18955,9 +12167,9 @@ class DevicePairWizard {
         this.aiFollowUp = followUp;
         const steps = Array.isArray(followUp.next_steps) ? followUp.next_steps : [];
         if (steps.length) {
-          showToast({ title: 'IA Assist', msg: steps.join(' • '), kind: 'info', icon: grIconImg('ia-assist-ei2', 'IA Assist E.i2') }, 8000);
+          showToast({ title: 'IA Assist', msg: steps.join(' • '), kind: 'info', icon: '🤖' }, 8000);
         } else if (followUp.summary) {
-          showToast({ title: 'IA Assist', msg: followUp.summary, kind: 'info', icon: grIconImg('ia-assist-ei2', 'IA Assist E.i2') }, 6000);
+          showToast({ title: 'IA Assist', msg: followUp.summary, kind: 'info', icon: '🤖' }, 6000);
         }
       }
     }
@@ -19116,1430 +12328,24 @@ function hookRoomDevicePairing(roomWizardInstance) {
 
 
 // --- Grow Room Overview (move this above AI features to avoid ReferenceError) ---
-const OVERVIEW_METRIC_META = [
-  { key: 'tempC', label: 'Temp', unit: '°C', precision: 1 },
-  { key: 'rh', label: 'Humidity', unit: '%', precision: 1 },
-  { key: 'vpd', label: 'VPD', unit: ' kPa', precision: 2 },
-  { key: 'co2', label: 'CO₂', unit: ' ppm', precision: 0 }
-];
-
-function clamp01(x) {
-  return Math.max(0, Math.min(1, Number.isFinite(x) ? x : 0));
-}
-
-function pctToByte64(pct) {
-  const ratio = clamp01((Number(pct) || 0) / 100);
-  return Math.round(ratio * 0x64)
-    .toString(16)
-    .padStart(2, '0')
-    .toUpperCase();
-}
-
-function hex12(cw, ww, bl, rd) {
-  return `${pctToByte64(cw)}${pctToByte64(ww)}${pctToByte64(bl)}${pctToByte64(rd)}0000`;
-}
-
-const OVERVIEW_ROOM_META = new Map();
-const DEMO_SAFE_HEX = '737373730000';
-const DEMO_MIN_BPM = 60;
-const DEMO_MAX_BPM = 140;
-const DEMO_STATIC_ON = Object.freeze({ status: 'on', value: hex12(20, 20, 0, 0) });
-const DEMO_STATIC_OFF = Object.freeze({ status: 'off', value: null });
-
-let DEMO_STATE = {
-  active: false,
-  roomKey: '',
-  roomLabel: '',
-  bpm: 90,
-  step: 0,
-  interval: getDemoIntervalFromBpm(90),
-  devices: []
-};
-let DEMO_TIMER = null;
-let DEMO_SNAPSHOT = new Map();
-const DEMO_LOCKS = new Map();
-
-function deviceSupportsSpectrum(device) {
-  if (!device || typeof device !== 'object') return true;
-  if (Array.isArray(device.channels)) return device.channels.length >= 4;
-  const channelCount = Number(
-    device.channels ??
-    device.channelCount ??
-    device.channel_count ??
-    device.lightChannels ??
-    device.channelTotal
-  );
-  if (Number.isFinite(channelCount) && channelCount >= 4) return true;
-  const spectrumType = firstNonEmptyString(
-    device.spectrumType,
-    device.spectrum_type,
-    device.type,
-    device.deviceType
-  ).toLowerCase();
-  return /(dynamic|spectrum|rgbw|rg|cw)/.test(spectrumType || '');
-}
-
-function stepHexDynamic(step) {
-  const beat = Number(step) % 8;
-  switch (beat) {
-    case 0: return hex12(5, 5, 0, 45);
-    case 1: return hex12(5, 5, 45, 0);
-    case 2: return hex12(40, 10, 0, 0);
-    case 3: return hex12(10, 40, 0, 0);
-    case 4: return hex12(20, 20, 10, 10);
-    case 5: return hex12(10, 10, 20, 20);
-    case 6: return hex12(0, 0, 0, 45);
-    case 7: default: return hex12(0, 0, 45, 0);
-  }
-}
-
-function snapshotDeviceState(device) {
-  const statusRaw = firstNonEmptyString(
-    device?.status,
-    device?.power,
-    device?.lastState?.status,
-    device?.onOffStatus === true ? 'on' : '',
-    device?.onOffStatus === false ? 'off' : ''
-  ).toLowerCase();
-  const status = statusRaw === 'on' ? 'on' : 'off';
-  const value = firstNonEmptyString(
-    device?.valueHex,
-    device?.hexValue,
-    device?.value,
-    device?.lastValue,
-    device?.lastCommand?.value,
-    device?.command?.value,
-    device?.lastKnownHex
-  );
-  return {
-    status,
-    value: typeof value === 'string' && value.trim() ? value : null
-  };
-}
-
-function refreshDemoSnapshot(devices) {
-  const next = new Map();
-  (devices || []).forEach((device) => {
-    const id = firstNonEmptyString(device?.id, device?.deviceId, device?.device_id);
-    if (!id) return;
-    if (DEMO_SNAPSHOT.has(id)) {
-      next.set(id, DEMO_SNAPSHOT.get(id));
-    } else {
-      next.set(id, snapshotDeviceState(device));
-    }
-  });
-  DEMO_SNAPSHOT = next;
-}
-
-function normalizeIdentifier(value) {
-  if (value === undefined || value === null) return '';
-  if (typeof value === 'string') return value.trim().toLowerCase();
-  if (typeof value === 'number') return String(value).trim().toLowerCase();
-  return '';
-}
-
-function collectRoomIdentifiers(room) {
-  const identifiers = new Set();
-  if (!room || typeof room !== 'object') return identifiers;
-  const add = (value) => {
-    const normalized = normalizeIdentifier(value);
-    if (normalized) identifiers.add(normalized);
-  };
-  add(room.id);
-  add(room.name);
-  add(room.roomId);
-  add(room.roomName);
-  add(room.location);
-  if (room.match) {
-    add(room.match.room);
-    add(room.match.roomId);
-    add(room.match.roomName);
-    add(room.match.zone);
-    add(room.match.zoneId);
-    add(room.match.zoneName);
-  }
-  if (Array.isArray(room.zones)) {
-    room.zones.forEach(add);
-  }
-  return identifiers;
-}
-
-function collectZoneIdentifiers(zone) {
-  const identifiers = new Set();
-  if (!zone || typeof zone !== 'object') return identifiers;
-  const add = (value) => {
-    const normalized = normalizeIdentifier(value);
-    if (normalized) identifiers.add(normalized);
-  };
-  add(zone.id);
-  add(zone.name);
-  add(zone.location);
-  if (zone.meta) {
-    add(zone.meta.room);
-    add(zone.meta.roomId);
-    add(zone.meta.roomName);
-    add(zone.meta.zone);
-    add(zone.meta.zoneId);
-    add(zone.meta.scope);
-  }
-  return identifiers;
-}
-
-function normalizeAiMode(value, fallback = 'advisory') {
-  const raw = firstNonEmptyString(value);
-  if (!raw) return fallback;
-  const normalized = String(raw).trim().toLowerCase();
-  if (/off|disable|manual|pause/.test(normalized)) return 'off';
-  if (/auto|pilot|autonomous|always/.test(normalized)) return 'autopilot';
-  if (/advisory|assist|guide/.test(normalized)) return 'advisory';
-  return fallback;
-}
-
-function detectAiMode(room, zone, fallbackMode = 'advisory') {
-  const identifiers = new Set([...collectRoomIdentifiers(room), ...collectZoneIdentifiers(zone)]);
-  const fallback = normalizeAiMode(fallbackMode, 'advisory');
-  const aiState = STATE.ai || STATE.aiAssist || STATE.aiSettings || STATE.aiConfig || {};
-
-  const explicitMode = normalizeAiMode(
-    firstNonEmptyString(
-      zone?.meta?.aiMode,
-      zone?.meta?.ai?.mode,
-      zone?.aiMode,
-      room?.meta?.aiMode,
-      room?.aiMode,
-      room?.ai?.mode
-    ),
-    ''
-  );
-  if (explicitMode) return explicitMode;
-
-  const matchesIdentifiers = (candidate) => {
-    if (!identifiers.size) return false;
-    return valueMatchesIdentifiers(candidate, identifiers);
-  };
-
-  if (matchesIdentifiers(aiState?.disabledRooms) || matchesIdentifiers(aiState?.offRooms) || matchesIdentifiers(aiState?.off)) {
-    return 'off';
-  }
-  if (matchesIdentifiers(aiState?.autopilotRooms) || matchesIdentifiers(aiState?.autopilot) || matchesIdentifiers(aiState?.roomsAutopilot)) {
-    return 'autopilot';
-  }
-
-  const aiRooms = aiState?.rooms;
-  if (identifiers.size && aiRooms) {
-    const processEntry = (entry, key) => {
-      if (!entry) return null;
-      const mode = normalizeAiMode(entry.mode || entry.status || entry.posture || entry);
-      if (!mode) return null;
-      if (key) {
-        const normalizedKey = normalizeIdentifier(key);
-        if (normalizedKey && identifiers.has(normalizedKey)) return mode;
-      }
-      if (matchesIdentifiers(entry.scope) || matchesIdentifiers(entry.match) || matchesIdentifiers(entry.room) || matchesIdentifiers(entry.zone) || matchesIdentifiers(entry.rooms) || matchesIdentifiers(entry.targets)) {
-        return mode;
-      }
-      return null;
-    };
-
-    if (Array.isArray(aiRooms)) {
-      for (const entry of aiRooms) {
-        const mode = processEntry(entry);
-        if (mode) return mode;
-      }
-    } else if (typeof aiRooms === 'object') {
-      for (const [key, entry] of Object.entries(aiRooms)) {
-        const mode = processEntry(entry, key);
-        if (mode) return mode;
-      }
-    }
-  }
-
-  const globalMode = normalizeAiMode(aiState?.mode || aiState?.status || aiState?.posture || STATE.aiMode, '');
-  if (globalMode) {
-    if (globalMode === 'off') return 'off';
-    if (globalMode === 'autopilot') return 'autopilot';
-    if (globalMode === 'advisory') return 'advisory';
-  }
-
-  return fallback;
-}
-
-function deriveRoomAiStatus(room, zone, fallbackMode = 'advisory', fallbackLabel = 'Advisory') {
-  const mode = detectAiMode(room, zone, fallbackMode);
-  let label = fallbackLabel || 'Advisory';
-  let description = 'AI Copilot providing advisory insights for this room.';
-
-  if (mode === 'autopilot') {
-    label = 'Autopilot';
-    description = 'AI Copilot is actively steering this room in autopilot mode.';
-  } else if (mode === 'off') {
-    label = 'Off';
-    description = 'AI Copilot is paused for this room.';
-  } else if (!fallbackLabel || fallbackLabel.toLowerCase() === 'off') {
-    label = 'Advisory';
-  }
-
-  return { status: mode, label, description, shortLabel: label };
-}
-
-function normalizeMinutesValue(value) {
-  const minutes = Number(value);
-  if (!Number.isFinite(minutes)) return 0;
-  const rounded = Math.round(minutes);
-  return ((rounded % 1440) + 1440) % 1440;
-}
-
-function getMinutesInTimezone(timezone) {
-  const now = new Date();
-  if (typeof Intl !== 'undefined' && Intl.DateTimeFormat) {
-    try {
-      const formatter = new Intl.DateTimeFormat('en-US', { hour12: false, hour: '2-digit', minute: '2-digit', timeZone: timezone || Intl.DateTimeFormat().resolvedOptions().timeZone });
-      const parts = formatter.formatToParts(now);
-      const hour = Number(parts.find((part) => part.type === 'hour')?.value || now.getHours());
-      const minute = Number(parts.find((part) => part.type === 'minute')?.value || now.getMinutes());
-      return normalizeMinutesValue(hour * 60 + minute);
-    } catch (error) {
-      // fall through to local time
-    }
-  }
-  return normalizeMinutesValue(now.getHours() * 60 + now.getMinutes());
-}
-
-function scheduleCycleIncludes(cycle, nowMinutes) {
-  if (!cycle) return false;
-  const startMinutes = normalizeMinutesValue(toMinutes(cycle.on));
-  const endMinutes = normalizeMinutesValue(toMinutes(cycle.off));
-  const rampUp = normalizeMinutesValue(Number(cycle?.ramp?.up ?? cycle?.ramp?.start ?? cycle?.rampUp ?? cycle?.ramp_start ?? 0));
-  const rampDown = normalizeMinutesValue(Number(cycle?.ramp?.down ?? cycle?.ramp?.end ?? cycle?.rampDown ?? cycle?.ramp_end ?? 0));
-  const start = normalizeMinutesValue(startMinutes - rampUp);
-  const end = normalizeMinutesValue(endMinutes + rampDown);
-
-  if (start === end) return true;
-  if (start < end) {
-    return nowMinutes >= start && nowMinutes < end;
-  }
-  return nowMinutes >= start || nowMinutes < end;
-}
-
-function isScheduleActiveNow(schedule) {
-  if (!schedule || typeof schedule !== 'object') return false;
-  const cycles = Array.isArray(schedule.cycles) ? schedule.cycles.filter(Boolean) : [];
-  if (!cycles.length) return false;
-
-  const tz = firstNonEmptyString(
-    schedule.timezone,
-    schedule.timeZone,
-    STATE?.farm?.timezone,
-    STATE?.timezone,
-    STATE?.config?.timezone
-  );
-  const nowMinutes = getMinutesInTimezone(tz);
-  return cycles.some((cycle) => scheduleCycleIncludes(cycle, nowMinutes));
-}
-
-function buildOverviewKey(room, zone, index) {
-  const base = firstNonEmptyString(room?.id, zone?.id, room?.name, zone?.name, `room-${index + 1}`);
-  const slug = String(base || '')
-    .trim()
-    .toLowerCase()
-    .replace(/[^a-z0-9]+/g, '-')
-    .replace(/^-+|-+$/g, '') || `room-${index + 1}`;
-  return `${slug}-${index}`;
-}
-
-function findZoneForRoom(room, zones) {
-  if (!room || !Array.isArray(zones) || !zones.length) return null;
-  const roomIds = collectRoomIdentifiers(room);
-  if (!roomIds.size) return null;
-  return zones.find((zone) => {
-    const zoneIds = collectZoneIdentifiers(zone);
-    return Array.from(zoneIds).some((value) => roomIds.has(value));
-  }) || null;
-}
-
-function findGroupForRoom(room, zone, groups) {
-  if (!Array.isArray(groups) || !groups.length) return null;
-  const identifiers = new Set([...collectRoomIdentifiers(room), ...collectZoneIdentifiers(zone)]);
-  if (!identifiers.size) return null;
-  return groups.find((group) => {
-    if (!group || typeof group !== 'object') return false;
-    const match = group.match || {};
-    const values = [
-      group.id,
-      group.name,
-      group.room,
-      group.roomId,
-      group.zone,
-      group.zoneId,
-      match.room,
-      match.roomId,
-      match.roomName,
-      match.zone,
-      match.zoneId,
-      match.zoneName
-    ];
-    if (values.some((value) => identifiers.has(normalizeIdentifier(value)))) return true;
-    if (Array.isArray(group.members)) {
-      return group.members.some((member) => {
-        if (!member || typeof member !== 'object') return false;
-        return [
-          member.room,
-          member.roomId,
-          member.roomName,
-          member.zone,
-          member.zoneId,
-          member.zoneName,
-          member.location?.room,
-          member.location?.zone
-        ].some((value) => identifiers.has(normalizeIdentifier(value)));
-      });
-    }
-    return false;
-  }) || null;
-}
-
-function formatOverviewMetricValue(sensor, meta) {
-  const unit = (meta.unit || '').trim();
-  if (!sensor || typeof sensor.current !== 'number' || !Number.isFinite(sensor.current)) {
-    return { value: '—', unit, full: '—' };
-  }
-  let valueText;
-  if (unit === 'ppm') {
-    valueText = Number(sensor.current).toLocaleString();
-  } else if (meta.precision != null) {
-    valueText = Number(sensor.current).toFixed(meta.precision);
-  } else {
-    valueText = String(sensor.current);
-  }
-  const full = `${valueText}${meta.unit}`;
-  return { value: valueText, unit, full };
-}
-
-function computeOverviewMetricStatus(sensor) {
-  if (!sensor || typeof sensor.current !== 'number' || !Number.isFinite(sensor.current)) {
-    return 'unknown';
-  }
-  const min = sensor.setpoint?.min;
-  const max = sensor.setpoint?.max;
-  if (typeof min === 'number' && typeof max === 'number') {
-    return sensor.current >= min && sensor.current <= max ? 'ok' : 'warn';
-  }
-  return 'unknown';
-}
-
-function buildOverviewMetrics(zone) {
-  return OVERVIEW_METRIC_META.map((meta) => {
-    const sensor = zone?.sensors?.[meta.key] || null;
-    const formatted = formatOverviewMetricValue(sensor, meta);
-    return {
-      key: meta.key,
-      label: meta.label,
-      value: formatted.value,
-      unit: formatted.unit,
-      full: formatted.full,
-      status: computeOverviewMetricStatus(sensor),
-      sensor
-    };
-  });
-}
-
-function resolvePlanInfo(planId) {
-  const plans = Array.isArray(STATE.plans) ? STATE.plans : [];
-  const normalized = normalizeIdentifier(planId);
-  if (!normalized) {
-    return { id: '', name: 'No plan assigned', detail: 'Assign a SpectraSync plan.', plan: null };
-  }
-  const plan = plans.find((entry) => normalizeIdentifier(entry.id) === normalized || normalizeIdentifier(entry.name) === normalized) || null;
-  if (!plan) {
-    return { id: planId, name: planId, detail: '', plan: null };
-  }
-  const parts = [];
-  if (plan.stage) parts.push(plan.stage);
-  if (plan.crop) parts.push(plan.crop);
-  const ppfd = getPlanPPFD(plan);
-  const dli = getPlanDli(plan);
-  if (Number.isFinite(ppfd) && ppfd > 0) parts.push(`${ppfd.toFixed(0)} µmol`);
-  if (Number.isFinite(dli) && dli > 0) parts.push(`${dli.toFixed(1)} DLI`);
-  return { id: plan.id, name: plan.name || plan.id, detail: parts.join(' • '), plan };
-}
-
-function resolveScheduleInfo(scheduleId) {
-  const schedules = Array.isArray(STATE.schedules) ? STATE.schedules : [];
-  const normalized = normalizeIdentifier(scheduleId);
-  if (!normalized) {
-    return { id: '', name: 'No schedule', detail: 'Assign a daily schedule.', schedule: null };
-  }
-  const schedule = schedules.find((entry) => normalizeIdentifier(entry.id) === normalized || normalizeIdentifier(entry.name) === normalized) || null;
-  if (!schedule) {
-    return { id: scheduleId, name: scheduleId, detail: '', schedule: null };
-  }
-  return { id: schedule.id, name: schedule.name || schedule.id, detail: scheduleSummary(schedule), schedule };
-}
-
-function gatherDevicesForRoom(room, zone) {
-  const devices = Array.isArray(STATE.devices) ? STATE.devices : [];
-  if (!devices.length) return [];
-  const identifiers = new Set([...collectRoomIdentifiers(room), ...collectZoneIdentifiers(zone)]);
-  if (!identifiers.size) return [];
-  return devices.filter((device) => {
-    if (!device || typeof device !== 'object') return false;
-    const values = [
-      device.id,
-      device.deviceId,
-      device.device_id,
-      device.room,
-      device.roomId,
-      device.roomName,
-      device.zone,
-      device.zoneId,
-      device.zoneName,
-      device.location?.room,
-      device.location?.zone
-    ];
-    return values.some((value) => identifiers.has(normalizeIdentifier(value)));
-  });
-}
-
-function valueMatchesIdentifiers(subject, identifiers, seen = new Set()) {
-  if (subject === null || subject === undefined) return false;
-  if (typeof subject === 'string' || typeof subject === 'number') {
-    return identifiers.has(normalizeIdentifier(subject));
-  }
-  if (Array.isArray(subject)) {
-    return subject.some((item) => valueMatchesIdentifiers(item, identifiers, seen));
-  }
-  if (typeof subject === 'object') {
-    if (seen.has(subject)) return false;
-    seen.add(subject);
-    return Object.values(subject).some((value) => valueMatchesIdentifiers(value, identifiers, seen));
-  }
-  return false;
-}
-
-function gatherRulesForRoom(room, zone, rules) {
-  if (!Array.isArray(rules) || !rules.length) return [];
-  const identifiers = new Set([...collectRoomIdentifiers(room), ...collectZoneIdentifiers(zone)]);
-  if (!identifiers.size) return [];
-  return rules.filter((rule) => {
-    if (!rule || typeof rule !== 'object') return false;
-    return (
-      valueMatchesIdentifiers(rule.scope, identifiers) ||
-      valueMatchesIdentifiers(rule.match, identifiers) ||
-      valueMatchesIdentifiers(rule.room, identifiers) ||
-      valueMatchesIdentifiers(rule.zone, identifiers) ||
-      valueMatchesIdentifiers(rule.rooms, identifiers) ||
-      valueMatchesIdentifiers(rule.targets, identifiers) ||
-      valueMatchesIdentifiers(rule.target, identifiers)
-    );
-  });
-}
-
-function deriveAutomationStatus(room, zone, rules, devices) {
-  const matches = gatherRulesForRoom(room, zone, rules);
-  const automationRooms = Array.isArray(STATE.roomAutomation?.rooms) ? STATE.roomAutomation.rooms : [];
-  const identifiers = new Set([
-    ...collectRoomIdentifiers(room),
-    ...collectZoneIdentifiers(zone)
-  ].map((value) => String(value || '').toLowerCase()));
-
-  const automationEntry = automationRooms.find((entry) => {
-    if (!entry) return false;
-    const roomId = String(entry.roomId || '').toLowerCase();
-    const name = String(entry.name || '').toLowerCase();
-    return identifiers.has(roomId) || identifiers.has(name);
-  });
-
-  if (automationEntry) {
-    const hasSuggestions = Array.isArray(automationEntry.suggestions) && automationEntry.suggestions.length > 0;
-    const autopilot = automationEntry.control?.enable && automationEntry.control?.mode === 'autopilot';
-    const status = autopilot ? 'on' : hasSuggestions ? 'alert' : 'off';
-    const labelParts = [autopilot ? 'Autopilot' : 'Advisory'];
-    if (hasSuggestions) {
-      labelParts.push(`${automationEntry.suggestions.length} suggestion${automationEntry.suggestions.length === 1 ? '' : 's'}`);
-    }
-    const label = `Automation ${labelParts.join(' • ')}`;
-    const description = automationEntry.status?.detail || automationEntry.status?.summary || label;
-    const suggestionWord = automationEntry.suggestions.length === 1 ? 'advisory' : 'advisories';
-    return {
-      status,
-      label,
-      matches,
-      governed: autopilot,
-      description,
-      shortLabel: hasSuggestions
-        ? `${automationEntry.suggestions.length} ${suggestionWord}`
-        : (autopilot ? 'On' : 'Idle')
-    };
-  }
-
-  const governed = Boolean(zone?.meta?.managedByPlugs || zone?.meta?.automation === 'on' || zone?.meta?.governance === 'automation');
-  const active = governed || matches.length > 0;
-  const detailParts = [];
-  if (matches.length) detailParts.push(`${matches.length} rule${matches.length === 1 ? '' : 's'}`);
-  if (governed) detailParts.push('controller');
-  if (Array.isArray(devices) && devices.length) detailParts.push(`${devices.length} fixture${devices.length === 1 ? '' : 's'}`);
-  const label = active ? `Automation active${detailParts.length ? ` • ${detailParts.join(' + ')}` : ''}` : 'Automation idle';
-  const description = active
-    ? label
-    : matches.length
-      ? `Automation armed with ${matches.length} rule${matches.length === 1 ? '' : 's'}.`
-      : 'Automation is idle for this room.';
-  return {
-    status: active ? 'on' : 'off',
-    label,
-    matches,
-    governed,
-    description,
-    shortLabel: active ? 'On' : 'Off'
-  };
-}
-
-function deriveSpectraStatus(planInfo, scheduleInfo, devices) {
-  const hasPlan = Boolean(planInfo?.id);
-  const hasSchedule = Boolean(scheduleInfo?.id);
-  const scheduled = hasPlan && hasSchedule;
-  const count = Array.isArray(devices) ? devices.length : 0;
-  const activeNow = scheduled && isScheduleActiveNow(scheduleInfo?.schedule);
-  let label;
-  if (!scheduled) {
-    label = 'SpectraSync idle';
-  } else if (activeNow) {
-    label = `SpectraSync active${count ? ` • ${count} fixture${count === 1 ? '' : 's'}` : ''}`;
-  } else {
-    label = 'SpectraSync scheduled • Outside photoperiod';
-  }
-  const description = scheduled
-    ? activeNow
-      ? 'Lights are in an active SpectraSync photoperiod window right now.'
-      : 'SpectraSync has a schedule, but the current time is outside the photoperiod window.'
-    : 'Assign a plan and schedule to enable SpectraSync.';
-  return {
-    status: scheduled && activeNow ? 'active' : 'idle',
-    label,
-    active: scheduled,
-    activeNow,
-    description,
-    shortLabel: scheduled ? (activeNow ? 'Active' : 'Idle') : 'Idle'
-  };
-}
-
-function deriveAiPostureStatus() {
-  try {
-    if (typeof isIAAssistActive === 'function' && isIAAssistActive()) {
-      return { status: 'autopilot', label: 'Autopilot' };
-    }
-  } catch (error) {
-    console.warn('deriveAiPostureStatus error', error);
-  }
-  const activeCard = document.querySelector('.ai-feature-card.active[data-feature]');
-  if (activeCard) {
-    return { status: 'advisory', label: 'Advisory' };
-  }
-  const anyCard = document.querySelector('.ai-feature-card[data-feature]');
-  if (anyCard) {
-    return { status: 'advisory', label: 'Advisory' };
-  }
-  return { status: 'off', label: 'Off' };
-}
-
-function createOverviewMetricHTML(metric) {
-  const classes = ['metric', `metric--${metric.status}`];
-  const interactive = metric.status !== 'unknown' && metric.sensor;
-  const attrs = [`data-metric="${escapeHtml(metric.key)}"`];
-  if (interactive) {
-    attrs.push('role="button"', 'tabindex="0"', `aria-label="View ${escapeHtml(metric.label)} trend"`);
-  } else {
-    attrs.push('aria-disabled="true"');
-  }
-  const trend = interactive
-    ? '<canvas class="spark" width="220" height="36" aria-hidden="true"></canvas>'
-    : '';
-  const unitText = metric.value === '—' ? '' : metric.unit;
-  const unit = unitText ? `<div class="unit">${escapeHtml(unitText)}</div>` : '<div class="unit">&nbsp;</div>';
-  const title = metric.full && metric.full !== '—'
-    ? ` title="${escapeHtml(`${metric.label}: ${metric.full}`)}"`
-    : '';
-  return `
-    <div ${attrs.join(' ')} class="${classes.join(' ')}"${title}>
-      <div class="label">${escapeHtml(metric.label)}</div>
-      <div class="val">${escapeHtml(metric.value)}</div>
-      ${unit}
-      ${trend}
-    </div>
-  `;
-}
-
-function createOverviewTile(entry) {
-  const planDetail = entry.planInfo.detail
-    ? `<span class="detail">${escapeHtml(entry.planInfo.detail)}</span>`
-    : '';
-  const scheduleDetail = entry.scheduleInfo.detail
-    ? `<span class="detail">${escapeHtml(entry.scheduleInfo.detail)}</span>`
-    : '';
-  return `
-    <article class="room-tile" data-room-key="${escapeHtml(entry.key)}">
-      <header class="room-tile__hdr">
-        <div>
-          <h2 class="room-name">${escapeHtml(entry.name)}</h2>
-          ${entry.subtitle ? `<p class="room-subtitle">${escapeHtml(entry.subtitle)}</p>` : ''}
-        </div>
-        <div class="room-status" data-role="ai-cluster" aria-live="polite"></div>
-      </header>
-      <div class="metrics">
-        ${entry.metrics.map((metric) => createOverviewMetricHTML(metric)).join('')}
-      </div>
-      <div class="plan-row">
-        <span class="label">Plan</span>
-        <div class="plan-row__value">
-          <span class="badge">${escapeHtml(entry.planInfo.name)}</span>
-          ${planDetail}
-        </div>
-      </div>
-      <div class="plan-row">
-        <span class="label">Schedule</span>
-        <div class="plan-row__value">
-          <span class="badge">${escapeHtml(entry.scheduleInfo.name)}</span>
-          ${scheduleDetail}
-        </div>
-      </div>
-    </article>
-  `;
-}
-
-function addControlTipHandlers(node) {
-  if (!node) return;
-  const tip = node.getAttribute('data-tip') || node.getAttribute('title');
-  if (!tip) return;
-  node.setAttribute('data-tip', tip);
-  const show = () => {
-    if (typeof showTipFor === 'function') showTipFor(node);
-  };
-  const hide = () => {
-    if (typeof hideTip === 'function') hideTip();
-  };
-  node.addEventListener('mouseenter', show);
-  node.addEventListener('mouseleave', hide);
-  node.addEventListener('focus', show);
-  node.addEventListener('blur', hide);
-}
-
-function handleAiControlClick(entry) {
-  if (!entry || !entry.ai) return;
-  const msg = entry.ai.description || entry.ai.label || 'AI Copilot';
-  if (typeof showToast === 'function') {
-    showToast({
-      title: `${entry.roomLabel} • AI`,
-      msg,
-      kind: entry.ai.status === 'off' ? 'warn' : 'info',
-      icon: grIconImg('ia-assist-ei2', 'IA Assist E.i2')
-    });
-  }
-  openAutomationDrawer('ai');
-}
-
-function getAutomationDrawerElement() {
-  return document.getElementById('automation-drawer');
-}
-
-function hideAutomationDrawerCard(card, track = false) {
-  if (!(card instanceof HTMLElement)) {
-    return;
-  }
-  if (track) {
-    card.dataset.aiHidden = 'true';
-  }
-  card.setAttribute('hidden', '');
-  card.setAttribute('aria-hidden', 'true');
-  card.style.display = 'none';
-}
-
-function showAutomationDrawerCard(card) {
-  if (!(card instanceof HTMLElement)) {
-    return;
-  }
-  card.removeAttribute('hidden');
-  card.removeAttribute('aria-hidden');
-  card.style.display = '';
-  if (card.dataset.aiHidden) {
-    delete card.dataset.aiHidden;
-  }
-}
-
-function restoreAutomationDrawerCards() {
-  const drawer = getAutomationDrawerElement();
-  if (!drawer) {
-    return;
-  }
-  drawer.querySelectorAll('.automation-drawer__card').forEach((card) => {
-    const featureKey = card.getAttribute('data-feature-section');
-    const featureEnabled = !featureKey || window.FEATURES?.[featureKey];
-    if (!featureEnabled) {
-      hideAutomationDrawerCard(card);
-      return;
-    }
-    showAutomationDrawerCard(card);
-  });
-}
-
-function openAutomationDrawer(section = '') {
-  if (!window.FEATURES?.automation) {
-    return;
-  }
-
-  let nextSection = section || ACTIVE_AUTOMATION_SECTION || 'rules';
-  if (!section && nextSection === 'ai') {
-    nextSection = 'rules';
-  }
-  ACTIVE_AUTOMATION_SECTION = nextSection;
-
-  if (!document.getElementById('automation-drawer')) {
-    mountAutomationDrawer();
-    if (window.FEATURES.smartPlugs) {
-      mountSmartPlugsCard('#automation-drawer');
-    }
-    if (window.FEATURES.wizards) {
-      mountWizardEntry('#automation-drawer');
-    }
-  }
-
-  if (typeof setActivePanel === 'function') {
-    setActivePanel('automation');
-  }
-
-  const automationGroup = document.querySelector('[data-group="automation"]');
-  if (automationGroup) {
-    automationGroup.classList.add('is-expanded');
-    const trigger = automationGroup.querySelector('.sidebar-group__trigger');
-    const items = automationGroup.querySelector('.sidebar-group__items');
-    if (trigger) trigger.setAttribute('aria-expanded', 'true');
-    if (items) items.hidden = false;
-  }
-
-  const sectionTargets = {
-    ai: 'aiAdvisoryCard',
-    rules: 'roomAutomationCard',
-    'smart-plugs': 'smartPlugsPanel',
-    'smart-controllers': 'smartControllersPanel',
-    'smart-devices': 'smartControllersPanel'
-  };
-  const targetId = sectionTargets[nextSection] || 'roomAutomationCard';
-  const target = document.getElementById(targetId) || document.getElementById('roomAutomationCard');
-  if (!target) return;
-
-  const drawer = getAutomationDrawerElement();
-  if (drawer) {
-    drawer.dataset.activeSection = nextSection;
-    const cards = drawer.querySelectorAll('.automation-drawer__card');
-    const isAiSection = nextSection === 'ai';
-    cards.forEach((card) => {
-      const featureKey = card.getAttribute('data-feature-section');
-      const featureEnabled = !featureKey || window.FEATURES?.[featureKey];
-      if (!featureEnabled) {
-        hideAutomationDrawerCard(card);
-        return;
-      }
-      if (isAiSection) {
-        if (card === target) {
-          showAutomationDrawerCard(card);
-        } else {
-          hideAutomationDrawerCard(card, true);
-        }
-        return;
-      }
-      showAutomationDrawerCard(card);
-    });
-  }
-
-  const spotlight = () => {
-    if (typeof target.scrollIntoView === 'function') {
-      target.scrollIntoView({ behavior: 'smooth', block: 'center' });
-    }
-    target.classList.add('card--spotlight');
-    setTimeout(() => target.classList.remove('card--spotlight'), 1200);
-    if (typeof target.setAttribute === 'function') {
-      target.setAttribute('tabindex', '-1');
-      if (typeof target.focus === 'function') {
-        target.focus({ preventScroll: true });
-      }
-      target.addEventListener('blur', () => {
-        target.removeAttribute('tabindex');
-      }, { once: true });
-    }
-  };
-
-  if (typeof requestAnimationFrame === 'function') {
-    requestAnimationFrame(spotlight);
-  } else {
-    spotlight();
-  }
-}
-
-function focusAutomationCard() {
-  if (!window.FEATURES?.automation) {
-    return;
-  }
-  openAutomationDrawer();
-}
-
-function handleAutomationControlClick(entry) {
-  if (!entry || !entry.automation) return;
-  const msg = entry.automation.description || entry.automation.label || 'Automation status';
-  if (typeof showToast === 'function') {
-    showToast({
-      title: `${entry.roomLabel} • Automation`,
-      msg,
-      kind: entry.automation.status === 'on' ? 'success' : entry.automation.paused ? 'warn' : 'info',
-      icon: grIconImg('evie-training', 'EVIE · training')
-    });
-  }
-  focusAutomationCard();
-}
-
-function handleSpectraControlClick(entry) {
-  if (!entry || !entry.spectra) return;
-  const msg = entry.spectra.description || entry.spectra.label || 'SpectraSync status';
-  if (typeof showToast === 'function') {
-    showToast({
-      title: `${entry.roomLabel} • SpectraSync`,
-      msg,
-      kind: entry.spectra.status === 'active' ? 'success' : entry.spectra.paused ? 'warn' : 'info',
-      icon: grIconImg('spectrasync', 'SpectraSync')
-    });
-  }
-  const card = document.getElementById('spectraSyncFeature');
-  if (card && typeof card.scrollIntoView === 'function') {
-    card.scrollIntoView({ behavior: 'smooth', block: 'center' });
-    card.classList.add('card--spotlight');
-    setTimeout(() => card.classList.remove('card--spotlight'), 1200);
-  }
-}
-
-async function pollIAState() {
-  try {
-    const response = await fetch('/ui/ai/state');
-    const payload = response.ok ? await response.json() : { hasReco: false };
-    document.getElementById('btn-ia-assist')?.classList.toggle('glow', !!payload.hasReco);
-  } catch (error) {
-    console.warn('Failed to poll IA Assist state', error);
-    document.getElementById('btn-ia-assist')?.classList.remove('glow');
-  }
-}
-
-function mountAiAutomationCluster(entry, tile) {
-  const host = tile?.querySelector('[data-role="ai-cluster"]');
-  const template = document.getElementById('aiAutomationClusterTemplate');
-  if (!host || !template) return;
-  host.innerHTML = '';
-  const fragment = template.content.cloneNode(true);
-  hydrateIconSlots(fragment);
-  host.appendChild(fragment);
-  const cluster = host.querySelector('.ai-automation-cluster');
-  if (!cluster) return;
-  cluster.dataset.roomKey = entry.key || '';
-
-  const aiChip = cluster.querySelector('[data-control="ai"]');
-  const aiBtn = aiChip ? aiChip.querySelector('.gr-icon') : null;
-  if (aiBtn) {
-    const mode = entry.ai?.status || 'off';
-    aiBtn.dataset.mode = mode;
-    aiBtn.setAttribute('aria-pressed', mode !== 'off' ? 'true' : 'false');
-    aiBtn.setAttribute('aria-label', `AI ${entry.ai?.label || 'status'} for ${entry.roomLabel}`);
-    const labelEl = aiChip?.querySelector('[data-status]');
-    if (labelEl) labelEl.textContent = entry.ai?.shortLabel || entry.ai?.label || 'AI';
-    if (entry.ai?.description || entry.ai?.label) {
-      const tip = entry.ai.description || entry.ai.label;
-      aiBtn.setAttribute('data-tip', tip);
-      aiBtn.title = tip;
-      addControlTipHandlers(aiBtn);
-    }
-    aiBtn.addEventListener('click', () => handleAiControlClick(entry));
-  }
-
-  const automationChip = cluster.querySelector('[data-control="automation"]');
-  const automationBtn = automationChip ? automationChip.querySelector('.gr-icon') : null;
-  if (automationBtn) {
-    const state = entry.automation?.paused ? 'paused' : entry.automation?.status || 'off';
-    automationBtn.dataset.state = state;
-    automationBtn.setAttribute('aria-pressed', state === 'on' ? 'true' : 'false');
-    automationBtn.setAttribute('aria-label', `Automation ${entry.automation?.label || 'status'} for ${entry.roomLabel}`);
-    const labelEl = automationChip?.querySelector('[data-status]');
-    if (labelEl) labelEl.textContent = entry.automation?.shortLabel || (state === 'on' ? 'On' : state === 'paused' ? 'Paused' : 'Off');
-    if (entry.automation?.description || entry.automation?.label) {
-      const tip = entry.automation.description || entry.automation.label;
-      automationBtn.setAttribute('data-tip', tip);
-      automationBtn.title = tip;
-      addControlTipHandlers(automationBtn);
-    }
-    automationBtn.addEventListener('click', () => handleAutomationControlClick(entry));
-  }
-
-  const spectraChip = cluster.querySelector('[data-control="spectra"]');
-  const spectraBtn = spectraChip ? spectraChip.querySelector('.gr-icon') : null;
-  if (spectraBtn) {
-    let state = 'idle';
-    if (entry.spectra?.paused) state = 'paused';
-    else if (entry.spectra?.activeNow) state = 'active';
-    spectraBtn.dataset.state = state;
-    spectraBtn.setAttribute('aria-pressed', state === 'active' ? 'true' : 'false');
-    spectraBtn.setAttribute('aria-label', `SpectraSync ${entry.spectra?.label || 'status'} for ${entry.roomLabel}`);
-    const labelEl = spectraChip?.querySelector('[data-status]');
-    if (labelEl) labelEl.textContent = entry.spectra?.shortLabel || (state === 'active' ? 'Active' : state === 'paused' ? 'Paused' : 'Idle');
-    if (entry.spectra?.description || entry.spectra?.label) {
-      const tip = entry.spectra.description || entry.spectra.label;
-      spectraBtn.setAttribute('data-tip', tip);
-      spectraBtn.title = tip;
-      addControlTipHandlers(spectraBtn);
-    }
-    spectraBtn.addEventListener('click', () => handleSpectraControlClick(entry));
-  }
-
-  const lockChip = cluster.querySelector('[data-role="tour-lock"]');
-  if (lockChip) {
-    if (entry.demoLocked) {
-      lockChip.hidden = false;
-      lockChip.setAttribute('data-tip', 'Demo mode active • Automation and SpectraSync are paused.');
-      lockChip.title = 'Demo mode active • Automation and SpectraSync are paused.';
-      lockChip.setAttribute('aria-label', `Tour lock active for ${entry.roomLabel}`);
-      lockChip.setAttribute('role', 'status');
-      lockChip.tabIndex = 0;
-      addControlTipHandlers(lockChip);
-    } else {
-      lockChip.hidden = true;
-      lockChip.removeAttribute('role');
-      lockChip.removeAttribute('tabindex');
-    }
-  }
-}
-
-function hydrateOverviewTile(entry, tile) {
-  mountAiAutomationCluster(entry, tile);
-  entry.metrics.forEach((metric) => {
-    const metricEl = tile.querySelector(`.metric[data-metric="${metric.key}"]`);
-    if (!metricEl) return;
-    if (!metric.sensor || !entry.zone) {
-      metricEl.setAttribute('aria-disabled', 'true');
-      return;
-    }
-    const canvas = metricEl.querySelector('canvas.spark');
-    if (canvas) {
-      const values = Array.isArray(metric.sensor.history) ? metric.sensor.history.slice(-144).reverse() : [];
-      const color = metric.status === 'warn' ? '#ef4444' : metric.status === 'ok' ? '#22c55e' : '#f59e0b';
-      canvas.width = canvas.clientWidth || 220;
-      canvas.height = canvas.clientHeight || 36;
-      drawSparkline(canvas, values, { width: canvas.width, height: canvas.height, color });
-    }
-    const activate = (event) => {
-      if (event.type === 'keydown' && !['Enter', ' '].includes(event.key)) return;
-      if (event.type === 'keydown') event.preventDefault();
-      if (entry.zone) openEnvModal(entry.zone, metric.key);
-    };
-    metricEl.addEventListener('click', activate);
-    metricEl.addEventListener('keydown', activate);
-  });
-}
-
-function buildRoomSubtitle(room, zone, group) {
-  const parts = [];
-  const location = firstNonEmptyString(room?.location, zone?.location);
-  if (location) parts.push(location);
-  if (Array.isArray(room?.zones) && room.zones.length) parts.push(`Zones: ${room.zones.join(', ')}`);
-  if (zone?.meta?.source) parts.push(`Source: ${zone.meta.source}`);
-  if (group?.name) parts.push(`Group ${group.name}`);
-  return parts.join(' • ');
-}
-
-function applyDemoLock(entry) {
-  if (!entry) return;
-  if (!DEMO_LOCKS.has(entry.key)) {
-    entry.demoLocked = false;
-    return;
-  }
-  entry.demoLocked = true;
-  entry.automation = {
-    ...entry.automation,
-    status: 'off',
-    shortLabel: 'Paused',
-    label: 'Automation paused for demo',
-    description: 'Automation paused while demo mode is active.',
-    paused: true
-  };
-  entry.spectra = {
-    ...entry.spectra,
-    status: 'idle',
-    shortLabel: 'Paused',
-    label: 'SpectraSync paused for demo',
-    description: 'SpectraSync paused while demo mode is active.',
-    activeNow: false,
-    paused: true
-  };
-  entry.ai = {
-    ...entry.ai,
-    description: `${entry.ai.description || entry.ai.label || 'AI Copilot'} • Demo mode active.`,
-    shortLabel: entry.ai.shortLabel || entry.ai.label
-  };
-}
-
 function renderGrowRoomOverview() {
-  const gridEl = document.getElementById('overviewGrid');
-  if (!gridEl) return;
-  const roomSelect = document.getElementById('demoRoom');
-  const startBtn = document.getElementById('demoStart');
-  const stopBtn = document.getElementById('demoStop');
-  const bpmInput = document.getElementById('demoBpm');
-
-  gridEl.setAttribute('aria-busy', 'true');
+  const summaryEl = document.getElementById('growOverviewSummary');
+  const gridEl = document.getElementById('growOverviewGrid');
+  if (!summaryEl || !gridEl) return;
 
   const rooms = Array.isArray(STATE.rooms) ? STATE.rooms : [];
   const zones = Array.isArray(STATE.environment) ? STATE.environment : [];
-  const groups = Array.isArray(STATE.groups) ? STATE.groups : [];
-  const rules = Array.isArray(STATE.preAutomationRules) ? STATE.preAutomationRules : [];
-  const aiPosture = deriveAiPostureStatus();
-  const fallbackAiMode = normalizeAiMode(aiPosture?.status || 'advisory', 'advisory');
-  const fallbackAiLabel = aiPosture?.label || (fallbackAiMode === 'autopilot' ? 'Autopilot' : fallbackAiMode === 'off' ? 'Off' : 'Advisory');
+  const plans = Array.isArray(STATE.plans) ? STATE.plans : [];
+  const schedules = Array.isArray(STATE.schedules) ? STATE.schedules : [];
 
-  const entries = [];
-
-  if (rooms.length) {
-    rooms.forEach((room, index) => {
-      const zone = findZoneForRoom(room, zones);
-      const group = findGroupForRoom(room, zone, groups);
-      const planId = firstNonEmptyString(room.plan, room.activePlan, room.currentPlan, zone?.meta?.plan, zone?.plan, group?.plan);
-      const scheduleId = firstNonEmptyString(room.schedule, room.activeSchedule, room.currentSchedule, zone?.meta?.schedule, zone?.schedule, group?.schedule);
-      const planInfo = resolvePlanInfo(planId);
-      const scheduleInfo = resolveScheduleInfo(scheduleId);
-      const metrics = buildOverviewMetrics(zone);
-      const devices = gatherDevicesForRoom(room, zone);
-      const automation = deriveAutomationStatus(room, zone, rules, devices);
-      const spectra = deriveSpectraStatus(planInfo, scheduleInfo, devices);
-      const ai = deriveRoomAiStatus(room, zone, fallbackAiMode, fallbackAiLabel);
-      const key = buildOverviewKey(room, zone, index);
-      const entry = {
-        key,
-        name: room.name || room.id || `Room ${index + 1}`,
-        subtitle: buildRoomSubtitle(room, zone, group),
-        metrics,
-        planInfo,
-        scheduleInfo,
-        devices,
-        automation,
-        ai,
-        spectra,
-        zone,
-        room,
-        group,
-        roomLabel: room.name || room.id || zone?.name || `Room ${index + 1}`
-      };
-      applyDemoLock(entry);
-      entries.push(entry);
-    });
-  } else if (zones.length) {
-    zones.forEach((zone, index) => {
-      const planInfo = resolvePlanInfo(zone?.meta?.plan || zone?.plan);
-      const scheduleInfo = resolveScheduleInfo(zone?.meta?.schedule || zone?.schedule);
-      const metrics = buildOverviewMetrics(zone);
-      const devices = gatherDevicesForRoom(null, zone);
-      const automation = deriveAutomationStatus(null, zone, rules, devices);
-      const spectra = deriveSpectraStatus(planInfo, scheduleInfo, devices);
-      const ai = deriveRoomAiStatus(null, zone, fallbackAiMode, fallbackAiLabel);
-      const key = buildOverviewKey(null, zone, index);
-      const subtitleParts = [];
-      if (zone.location) subtitleParts.push(zone.location);
-      if (zone.meta?.source) subtitleParts.push(`Source: ${zone.meta.source}`);
-      const entry = {
-        key,
-        name: zone.name || zone.id || `Zone ${index + 1}`,
-        subtitle: subtitleParts.join(' • '),
-        metrics,
-        planInfo,
-        scheduleInfo,
-        devices,
-        automation,
-        ai,
-        spectra,
-        zone,
-        room: null,
-        group: null,
-        roomLabel: zone.name || zone.id || `Zone ${index + 1}`
-      };
-      applyDemoLock(entry);
-      entries.push(entry);
-    });
-  }
-
-  const entryKeys = new Set(entries.map((entry) => entry.key));
-  Array.from(DEMO_LOCKS.keys()).forEach((key) => {
-    if (!entryKeys.has(key)) {
-      DEMO_LOCKS.delete(key);
+  const roomCount = rooms.length;
+  const zoneCount = zones.length;
+  const summaries = [
+    {
+      // ...existing summary logic...
     }
-  });
-
-  OVERVIEW_ROOM_META.clear();
-  entries.forEach((entry) => OVERVIEW_ROOM_META.set(entry.key, entry));
-
-  if (roomSelect) {
-    const previous = roomSelect.value;
-    roomSelect.innerHTML = entries.map((entry) => `<option value="${escapeHtml(entry.key)}">${escapeHtml(entry.roomLabel)}</option>`).join('');
-    if (entries.length) {
-      roomSelect.disabled = false;
-      if (previous && OVERVIEW_ROOM_META.has(previous)) {
-        roomSelect.value = previous;
-      } else {
-        roomSelect.value = entries[0].key;
-      }
-    } else {
-      roomSelect.disabled = true;
-    }
-  }
-
-  if (startBtn) startBtn.disabled = !entries.length && !DEMO_STATE.active;
-  if (stopBtn && !DEMO_STATE.active) stopBtn.disabled = entries.length === 0;
-  if (bpmInput && !DEMO_STATE.active) bpmInput.disabled = false;
-
-  if (DEMO_STATE.active) {
-    if (!OVERVIEW_ROOM_META.has(DEMO_STATE.roomKey)) {
-      stopDemoMode({ silent: false, flush: false, reason: 'room-missing', refresh: false });
-    } else {
-      const refreshed = OVERVIEW_ROOM_META.get(DEMO_STATE.roomKey);
-      if (refreshed) {
-        DEMO_STATE.devices = refreshed.devices;
-        DEMO_STATE.roomLabel = refreshed.roomLabel;
-        refreshDemoSnapshot(refreshed.devices);
-      }
-    }
-  }
-
-  if (!entries.length) {
-    gridEl.innerHTML = '<div class="overview-empty">Connect a grow room to see live conditions, schedules, and demo controls.</div>';
-    gridEl.setAttribute('aria-busy', 'false');
-    return;
-  }
-
-  gridEl.innerHTML = entries.map((entry) => createOverviewTile(entry)).join('');
-  entries.forEach((entry) => {
-    const tile = gridEl.querySelector(`[data-room-key="${entry.key}"]`);
-    if (tile) hydrateOverviewTile(entry, tile);
-  });
-  gridEl.setAttribute('aria-busy', 'false');
-}
-
-function controllerPatchDevice(deviceId, payload) {
-  const url = resolveApiUrl(`/api/devicedatas/device/${encodeURIComponent(deviceId)}`);
-  return fetch(url, {
-    method: 'PATCH',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(payload)
-  }).then(async (resp) => {
-    if (!resp.ok) {
-      const text = await resp.text().catch(() => '');
-      const error = new Error(text || `Controller returned ${resp.status}`);
-      error.status = resp.status;
-      throw error;
-    }
-    return resp.json().catch(() => ({}));
-  });
-}
-
-function clampBpm(value) {
-  const n = Number(value);
-  if (!Number.isFinite(n)) return 90;
-  return Math.min(DEMO_MAX_BPM, Math.max(DEMO_MIN_BPM, Math.round(n)));
-}
-
-function getDemoIntervalFromBpm(bpm) {
-  const clamped = clampBpm(bpm);
-  const interval = Math.round((60 / clamped) * 1000);
-  return Math.max(250, Math.min(1000, interval));
-}
-
-async function runDemoTick() {
-  if (!DEMO_STATE.active || !Array.isArray(DEMO_STATE.devices) || !DEMO_STATE.devices.length) return;
-  const step = DEMO_STATE.step;
-  const commands = DEMO_STATE.devices.map((device) => {
-    const id = firstNonEmptyString(device.id, device.deviceId, device.device_id);
-    if (!id) return Promise.resolve();
-    const payload = deviceSupportsSpectrum(device)
-      ? { status: 'on', value: stepHexDynamic(step) }
-      : (step % 2 === 0 ? { ...DEMO_STATIC_ON } : { ...DEMO_STATIC_OFF });
-    return controllerPatchDevice(id, payload).catch((error) => {
-      console.warn('Demo patch failed', id, error);
-    });
-  });
-  await Promise.all(commands);
-  DEMO_STATE.step = (step + 1) % 64;
-}
-
-function scheduleDemoTick() {
-  clearTimeout(DEMO_TIMER);
-  DEMO_TIMER = setTimeout(async () => {
-    if (!DEMO_STATE.active) return;
-    await runDemoTick();
-    if (DEMO_STATE.active) {
-      scheduleDemoTick();
-    }
-  }, DEMO_STATE.interval);
-}
-
-function stopDemoMode({ silent = false, flush = true, reason = '', restore = true, refresh = true } = {}) {
-  if (!DEMO_STATE.active && !reason) return;
-  clearTimeout(DEMO_TIMER);
-  const wasActive = DEMO_STATE.active;
-  const label = DEMO_STATE.roomLabel || 'selected room';
-  const devices = Array.isArray(DEMO_STATE.devices) ? [...DEMO_STATE.devices] : [];
-  const snapshotEntries = Array.from(DEMO_SNAPSHOT.entries());
-  const lockedKey = DEMO_STATE.roomKey;
-
-  DEMO_STATE = {
-    active: false,
-    roomKey: '',
-    roomLabel: '',
-    bpm: 90,
-    step: 0,
-    interval: getDemoIntervalFromBpm(90),
-    devices: []
-  };
-  DEMO_SNAPSHOT = new Map();
-
-  const roomSelect = document.getElementById('demoRoom');
-  const bpmInput = document.getElementById('demoBpm');
-  const startBtn = document.getElementById('demoStart');
-  const stopBtn = document.getElementById('demoStop');
-
-  if (roomSelect) roomSelect.disabled = !OVERVIEW_ROOM_META.size;
-  if (bpmInput) bpmInput.disabled = false;
-  if (startBtn) startBtn.disabled = !OVERVIEW_ROOM_META.size;
-  if (stopBtn) stopBtn.disabled = true;
-
-  if (flush) {
-    const targetIds = new Set();
-    snapshotEntries.forEach(([id]) => {
-      if (id) targetIds.add(id);
-    });
-    devices.forEach((device) => {
-      const id = firstNonEmptyString(device?.id, device?.deviceId, device?.device_id);
-      if (id) targetIds.add(id);
-    });
-    const commands = Array.from(targetIds).map((id) =>
-      controllerPatchDevice(id, { status: 'off', value: null }).catch((error) => {
-        console.warn('Demo reset failed', id, error);
-      })
-    );
-    if (commands.length) {
-      Promise.all(commands).catch(() => {});
-    }
-  }
-
-  if (lockedKey) {
-    DEMO_LOCKS.delete(lockedKey);
-  }
-  if (refresh) {
-    renderGrowRoomOverview();
-  }
-
-  if (wasActive && !silent) {
-    let kind = 'info';
-    let icon = '⏹️';
-    let msg = `Demo ended for ${label}.`;
-    if (reason === 'room-missing') {
-      kind = 'warn';
-      icon = '⚠️';
-      msg = 'Room is no longer available.';
-    } else if (reason === 'panic') {
-      kind = 'warn';
-      icon = '🛑';
-      msg = 'Demo interrupted (panic stop).';
-    }
-    showToast({ title: 'Demo stopped', msg, kind, icon });
-  }
-}
-
-function startDemoMode() {
-  const roomSelect = document.getElementById('demoRoom');
-  const bpmInput = document.getElementById('demoBpm');
-  const startBtn = document.getElementById('demoStart');
-  const stopBtn = document.getElementById('demoStop');
-  if (!roomSelect || !bpmInput || !startBtn || !stopBtn) return;
-
-  const roomKey = roomSelect.value;
-  if (!roomKey || !OVERVIEW_ROOM_META.has(roomKey)) {
-    showToast({ title: 'Demo mode', msg: 'Select a room to start demo mode.', kind: 'warn', icon: '⚠️' });
-    return;
-  }
-
-  const entry = OVERVIEW_ROOM_META.get(roomKey);
-  const bpm = clampBpm(bpmInput.value);
-  const devices = (entry?.devices || []).filter((device) => firstNonEmptyString(device.id, device.deviceId, device.device_id));
-  if (!devices.length) {
-    showToast({ title: 'Demo mode', msg: 'No controllable fixtures found for this room.', kind: 'warn', icon: '⚠️' });
-    return;
-  }
-
-  stopDemoMode({ silent: true, flush: false });
-
-  DEMO_SNAPSHOT = new Map();
-  refreshDemoSnapshot(devices);
-
-  DEMO_STATE = {
-    active: true,
-    roomKey,
-    roomLabel: entry.roomLabel,
-    bpm,
-    step: 0,
-    interval: getDemoIntervalFromBpm(bpm),
-    devices
-  };
-
-  DEMO_LOCKS.set(roomKey, { startedAt: Date.now() });
-
-  startBtn.disabled = true;
-  roomSelect.disabled = true;
-  bpmInput.disabled = true;
-  stopBtn.disabled = false;
-
-  showToast({ title: 'Demo started', msg: `${entry.roomLabel} at ${bpm} BPM`, kind: 'info', icon: '🎛️' });
-
-  runDemoTick().finally(() => {
-    if (DEMO_STATE.active) scheduleDemoTick();
-  });
-
-  renderGrowRoomOverview();
-}
-
-function initOverviewDemoControls() {
-  const startBtn = document.getElementById('demoStart');
-  const stopBtn = document.getElementById('demoStop');
-  const bpmInput = document.getElementById('demoBpm');
-  const roomSelect = document.getElementById('demoRoom');
-
-  startBtn?.addEventListener('click', startDemoMode);
-  stopBtn?.addEventListener('click', () => stopDemoMode({ silent: false }));
-
-  if (bpmInput) {
-    bpmInput.addEventListener('change', () => {
-      const clamped = clampBpm(bpmInput.value);
-      bpmInput.value = clamped;
-      if (DEMO_STATE.active) {
-        DEMO_STATE.bpm = clamped;
-        DEMO_STATE.interval = getDemoIntervalFromBpm(clamped);
-      }
-    });
-  }
-
-  if (roomSelect) {
-    roomSelect.addEventListener('change', () => {
-      if (DEMO_STATE.active) {
-        stopDemoMode({ silent: false });
-      }
-    });
-  }
-
-  if (!window._demoPanicBound) {
-    window._demoPanicBound = true;
-    window.addEventListener('keydown', (event) => {
-      if (event.key === 'Escape') {
-        stopDemoMode({ silent: false, restore: false, reason: 'panic' });
-      }
-    });
-  }
+  ];
+  // ...existing code to update DOM...
 }
 
 // --- Top Card and AI Features Management ---
@@ -20653,70 +12459,13 @@ function updateFeatureStatus(card, status) {
                         status === 'dev' ? 'DEV' : status.toUpperCase();
 }
 
-function applyHudShell(root) {
-  if (!root) {
-    return;
-  }
-
-  let panels = [];
-
-  if (root instanceof HTMLElement) {
-    panels = root.matches('[data-panel].card')
-      ? [root]
-      : Array.from(root.querySelectorAll('[data-panel].card'));
-  } else if (root instanceof Document || root instanceof DocumentFragment) {
-    panels = Array.from(root.querySelectorAll('[data-panel].card'));
-  }
-
-  panels.forEach((panel) => {
-    panel.classList.add('hud-shell');
-  });
-}
-
-function initializePanelShells() {
-  const dashboardMain = document.querySelector('.dashboard-main');
-  if (!dashboardMain) {
-    return;
-  }
-
-  applyHudShell(dashboardMain);
-
-  if (dashboardMain.dataset.hudShellObserverBound === 'true') {
-    return;
-  }
-
-  const observer = new MutationObserver((mutations) => {
-    mutations.forEach(({ addedNodes }) => {
-      addedNodes.forEach((node) => {
-        if (!(node instanceof HTMLElement)) {
-          return;
-        }
-        applyHudShell(node);
-      });
-    });
-  });
-
-  observer.observe(dashboardMain, { childList: true, subtree: true });
-  dashboardMain.dataset.hudShellObserverBound = 'true';
-}
-
 function setActivePanel(panelId = 'overview') {
   console.log('[DEBUG] setActivePanel called with:', panelId);
-  registerAllPanelPlacements();
   ACTIVE_PANEL = panelId;
   const panels = document.querySelectorAll('[data-panel]');
   let matched = false;
   let activePanel = null;
   panels.forEach((panel) => {
-    const requiredFeature = panel.getAttribute('data-feature');
-    const featureEnabled = !requiredFeature || window.FEATURES?.[requiredFeature];
-    if (!featureEnabled) {
-      panel.classList.remove('is-active');
-      panel.hidden = true;
-      panel.style.display = 'none';
-      return;
-    }
-
     const isMatch = panel.getAttribute('data-panel') === panelId;
     panel.classList.toggle('is-active', isMatch);
     panel.hidden = !isMatch;
@@ -20724,8 +12473,6 @@ function setActivePanel(panelId = 'overview') {
     if (isMatch) {
       matched = true;
       activePanel = panel;
-    } else {
-      restorePanelPlacement(panel);
     }
   });
 
@@ -20734,40 +12481,19 @@ function setActivePanel(panelId = 'overview') {
     return;
   }
 
-  if (panelId === 'overview') {
-    clearPanelStage();
-  } else if (activePanel) {
-    movePanelToStage(activePanel);
-  }
-
-  // Ensure the active panel is visible within the main column
-  if (activePanel && panelId !== 'automation') {
+  // Move the active panel to the top of .dashboard-main
+  if (activePanel) {
     const dashboardMain = document.querySelector('.dashboard-main');
-    if (dashboardMain) {
-      activePanel.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    if (dashboardMain && dashboardMain.firstElementChild !== activePanel) {
+      dashboardMain.insertBefore(activePanel, dashboardMain.firstElementChild);
     }
+    // Reset scroll position
+    dashboardMain.scrollTop = 0;
   }
 
   document.querySelectorAll('[data-sidebar-link]').forEach((link) => {
-    const requiredFeature = link.getAttribute('data-feature');
-    const featureEnabled = !requiredFeature || window.FEATURES?.[requiredFeature];
-    if (!featureEnabled) {
-      link.hidden = true;
-      link.setAttribute('aria-hidden', 'true');
-      link.classList.remove('is-active');
-      link.setAttribute('aria-current', 'false');
-      return;
-    }
-
-    link.hidden = false;
-    link.removeAttribute('aria-hidden');
-
     const target = link.getAttribute('data-target');
-    let isActive = target === panelId;
-    if (target === 'automation') {
-      const section = link.getAttribute('data-automation-section') || '';
-      isActive = panelId === 'automation' && (!section || section === ACTIVE_AUTOMATION_SECTION);
-    }
+    const isActive = target === panelId;
     link.classList.toggle('is-active', isActive);
     link.setAttribute('aria-current', isActive ? 'page' : 'false');
   });
@@ -20785,22 +12511,11 @@ function setActivePanel(panelId = 'overview') {
 
 function initializeSidebarNavigation() {
   console.log('[DEBUG] initializeSidebarNavigation called');
-  registerAllPanelPlacements();
-  clearPanelStage();
-  // Robust event delegation for sidebar-group__trigger
   document.querySelectorAll('.sidebar-group').forEach((group) => {
+    const trigger = group.querySelector('.sidebar-group__trigger');
     const items = group.querySelector('.sidebar-group__items');
-    if (items) items.hidden = !group.classList.contains('is-expanded');
-  });
-
-  // Event delegation: handle all sidebar-group__trigger clicks at the nav level
-  const sidebarNav = document.querySelector('.sidebar-nav');
-  if (sidebarNav && !sidebarNav.dataset.sidebarDelegationBound) {
-    sidebarNav.addEventListener('click', function(e) {
-      const trigger = e.target.closest('.sidebar-group__trigger');
-      if (!trigger) return;
-      const group = trigger.closest('.sidebar-group');
-      const items = group?.querySelector('.sidebar-group__items');
+    if (items) items.hidden = true;
+    trigger?.addEventListener('click', () => {
       const expanded = trigger.getAttribute('aria-expanded') === 'true';
       const next = !expanded;
       trigger.setAttribute('aria-expanded', String(next));
@@ -20813,43 +12528,13 @@ function initializeSidebarNavigation() {
         }
       }
     });
-    sidebarNav.dataset.sidebarDelegationBound = 'true';
-  }
+  });
 
   document.querySelectorAll('[data-sidebar-link]').forEach((link) => {
-    if (!(link instanceof HTMLElement)) {
-      return;
-    }
-
-    const requiredFeature = link.getAttribute('data-feature');
-    const featureEnabled = !requiredFeature || window.FEATURES?.[requiredFeature];
-    if (!featureEnabled) {
-      link.hidden = true;
-      link.setAttribute('aria-hidden', 'true');
-      return;
-    }
-
-    link.hidden = false;
-    link.removeAttribute('aria-hidden');
-
-    if (link.dataset.sidebarLinkBound === 'true') {
-      return;
-    }
-    link.dataset.sidebarLinkBound = 'true';
-
     link.addEventListener('click', () => {
       const target = link.getAttribute('data-target') || 'overview';
       if (target === 'overview') {
         setActivePanel('overview');
-        return;
-      }
-      if (target === 'automation') {
-        const section = link.getAttribute('data-automation-section') || '';
-        openAutomationDrawer(section);
-        return;
-      }
-      if (target === 'smart-plugs' || target === 'smart-controllers') {
-        openAutomationDrawer(target === 'smart-plugs' ? 'smart-plugs' : 'smart-controllers');
         return;
       }
       const group = link.closest('.sidebar-group');
@@ -20890,73 +12575,6 @@ document.addEventListener('DOMContentLoaded', async () => {
   // Initialize light wizard
   window.lightWizard = new LightWizard();
   window.freshLightWizard = new FreshLightWizard();
-
-  if (window.FEATURES.automation) mountAutomationDrawer(); // sidebar only
-  if (window.FEATURES.smartPlugs) mountSmartPlugsCard('#automation-drawer'); // not main
-  if (window.FEATURES.wizards) mountWizardEntry('#automation-drawer'); // off by default
-
-  const aiCopilotBtn = document.getElementById('btnOpenAiCopilot');
-  if (aiCopilotBtn) {
-    aiCopilotBtn.addEventListener('click', () => {
-      openAutomationDrawer('ai');
-    });
-  }
-  const iaAssistBtn = document.getElementById('btn-ia-assist');
-  if (iaAssistBtn) {
-    iaAssistBtn.addEventListener('click', () => {
-      openAutomationDrawer('ai');
-    });
-  }
-  const panelStage = document.querySelector('[data-role="panel-stage"]');
-  if (panelStage) {
-    panelStage.addEventListener('click', (event) => {
-      if (panelStage.dataset.activePanel === 'automation' && event.target === panelStage) {
-        setActivePanel('overview');
-      }
-    });
-  }
-  document.addEventListener('keydown', (event) => {
-    if (event.key === 'Escape') {
-      const stage = document.querySelector('[data-role="panel-stage"]');
-      if (stage && stage.dataset.activePanel === 'automation') {
-        setActivePanel('overview');
-      }
-    }
-  });
-  if (window.FEATURES.dehumOnMain) {
-    mountDehumidifierSetup('#main-cards');
-  } else {
-    mountDehumidifierSetup('#equip-dehum-setup');
-  }
-
-  if (window.FEATURES.unassignedOnMain) {
-    mountUnassignedLights('#main-cards');
-  } else {
-    mountUnassignedLights('#groupsv2-unassigned');
-  }
-
-  if (window.FEATURES.spectragraphOnMain) {
-    mountSpectragraph('#main-cards');
-  } else {
-    mountSpectragraph('#groupsv2-spectragraph');
-  }
-  hydrateEquipmentCounters();
-  pollIAState();
-  setInterval(pollIAState, 30000);
-  const aiCopilotCloseBtn = document.querySelector('[data-role="ai-copilot-close"]');
-  if (aiCopilotCloseBtn) {
-    aiCopilotCloseBtn.addEventListener('click', () => {
-      restoreAutomationDrawerCards();
-      ACTIVE_AUTOMATION_SECTION = 'rules';
-      const drawer = getAutomationDrawerElement();
-      if (drawer) {
-        drawer.dataset.activeSection = 'rules';
-      }
-      if (typeof setActivePanel === 'function') {
-        setActivePanel('overview');
-      }
-    });
-  }
   // Wire up light setup button (with retry logic)
   function setupLightSetupButton() {
     const lightSetupBtn = document.getElementById('btnLaunchLightSetup');
@@ -20992,9 +12610,7 @@ document.addEventListener('DOMContentLoaded', async () => {
 
     if (typeof wireHints === 'function') wireHints();
     if (typeof wireGlobalEvents === 'function') wireGlobalEvents();
-    initializePanelShells();
     if (typeof initializeSidebarNavigation === 'function') initializeSidebarNavigation();
-    initOverviewDemoControls();
 
     document.getElementById('btnLaunchPairWizard')?.addEventListener('click', () => {
       if (typeof DEVICE_PAIR_WIZARD !== 'undefined' && DEVICE_PAIR_WIZARD?.open) DEVICE_PAIR_WIZARD.open();
@@ -21147,7 +12763,7 @@ document.addEventListener('DOMContentLoaded', async () => {
   try {
     document.getElementById('btnAddPlan')?.addEventListener('click', () => {
       const id = `plan-${Math.random().toString(36).slice(2,8)}`;
-      STATE.plans.push(hydratePlan({ id, name: 'New plan', description: '', spectrum: { cw:45, ww:45, bl:0, rd:10 }, ppfd: 200, photoperiod: 12 }, STATE.plans.length));
+      STATE.plans.push({ id, name: 'New plan', description: '', spectrum: { cw:45, ww:45, bl:0, rd:10 }, ppfd: 200, photoperiod: 12 });
       renderPlans();
       renderPlansPanel();
       const status = document.getElementById('plansStatus'); if (status) status.textContent = 'Draft plan added';
@@ -21182,14 +12798,10 @@ document.addEventListener('DOMContentLoaded', async () => {
         const incoming = Array.isArray(data) ? data : (data.plans || []);
         if (!Array.isArray(incoming)) throw new Error('Invalid format');
         // merge by id or append
-        const map = new Map(STATE.plans.map((p, index) => [p.id, hydratePlan(p, index)]));
-        let counter = map.size;
-        for (const entry of incoming) {
-          if (!entry || typeof entry !== 'object') continue;
-          const candidateId = entry.id || entry.key || `plan-${Math.random().toString(36).slice(2,8)}`;
-          const base = map.get(candidateId) || {};
-          const merged = { ...base, ...entry, id: candidateId };
-          map.set(candidateId, hydratePlan(merged, counter++));
+        const map = new Map(STATE.plans.map(p => [p.id, p]));
+        for (const p of incoming) {
+          const id = p.id || `plan-${Math.random().toString(36).slice(2,8)}`;
+          map.set(id, { ...map.get(p.id), ...p, id });
         }
         STATE.plans = Array.from(map.values());
         renderPlans();
@@ -21202,12 +12814,13 @@ document.addEventListener('DOMContentLoaded', async () => {
     });
   } catch (e) { console.warn('Plans panel wiring failed', e); }
   try {
-    document.getElementById('btnScanSmartControllers')?.addEventListener('click', window.scanSmartControllers);
+    document.getElementById('btnScanIoTDevices')?.addEventListener('click', window.scanIoTDevices);
     document.getElementById('btnOpenSwitchBotManager')?.addEventListener('click', window.openSwitchBotManager);
+    document.getElementById('btnOpenKasaManager')?.addEventListener('click', window.openKasaManager);
+    document.getElementById('btnOpenShellyManager')?.addEventListener('click', window.openShellyManager);
   } catch (e) { console.warn('SwitchBot panel wiring failed', e); }
-  try { await loadSwitchBotDevices(); } catch (e) { console.warn('SwitchBot devices load failed', e); }
-  if (document.getElementById('smartControllersList')) {
-    renderSmartControllerCards(window.LAST_SMART_CONTROLLER_SCAN);
+  if (document.getElementById('iotDevicesList')) {
+    renderIoTDeviceCards(window.LAST_IOT_SCAN);
   }
   await loadDeviceManufacturers();
   try {
