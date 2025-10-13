@@ -3435,13 +3435,13 @@ app.get('/plugs', asyncHandler(async (req, res) => {
   res.json({ ok: true, plugs });
 }));
 
-app.post('/plugs/discover', asyncHandler(async (req, res) => {
+app.post('/plugs/discover', pinGuard, asyncHandler(async (req, res) => {
   setPreAutomationCors(req, res);
   const plugs = await prePlugManager.discoverAll();
   res.json({ ok: true, plugs, refreshedAt: new Date().toISOString() });
 }));
 
-app.post('/plugs/register', (req, res) => {
+app.post('/plugs/register', pinGuard, (req, res) => {
   try {
     setPreAutomationCors(req, res);
     const body = req.body || {};
@@ -3465,7 +3465,7 @@ app.post('/plugs/register', (req, res) => {
   }
 });
 
-app.delete('/plugs/:plugId', (req, res) => {
+app.delete('/plugs/:plugId', pinGuard, (req, res) => {
   try {
     setPreAutomationCors(req, res);
     const plugId = decodeURIComponent(req.params.plugId);
@@ -3476,7 +3476,7 @@ app.delete('/plugs/:plugId', (req, res) => {
   }
 });
 
-app.post('/plugs/:plugId/state', asyncHandler(async (req, res) => {
+app.post('/plugs/:plugId/state', pinGuard, asyncHandler(async (req, res) => {
   setPreAutomationCors(req, res);
   const plugId = decodeURIComponent(req.params.plugId);
   const body = req.body || {};
@@ -3494,7 +3494,7 @@ app.post('/plugs/:plugId/state', asyncHandler(async (req, res) => {
   res.json({ ok: true, plugId, state });
 }));
 
-app.post('/plugs/:plugId/rules', (req, res) => {
+app.post('/plugs/:plugId/rules', pinGuard, (req, res) => {
   try {
     setPreAutomationCors(req, res);
     const plugId = decodeURIComponent(req.params.plugId);
@@ -5538,7 +5538,7 @@ app.get('/api/devicedatas', async (req, res) => {
   }
 });
 
-app.patch('/api/devicedatas/device/:id', express.json(), async (req, res) => {
+app.patch('/api/devicedatas/device/:id', pinGuard, express.json(), async (req, res) => {
   const target = `${CONTROLLER_BASE()}/api/devicedatas/device/${encodeURIComponent(req.params.id)}`;
   try {
     const response = await fetch(target, {
@@ -6607,7 +6607,7 @@ app.post('/ui/equip', pinGuard, express.json(), (req, res) => {
   return res.json({ ok: true, id, count: safeCount });
 });
 
-app.post('/ui/:resource', (req, res) => {
+app.post('/ui/:resource', pinGuard, (req, res) => {
   const resource = String(req.params.resource || '').toLowerCase();
   setCors(req, res);
   const fullPath = resolveUiDataPath(resource);
@@ -6651,7 +6651,7 @@ app.get('/groups', (req, res) => {
   }
 });
 
-app.post('/groups', async (req, res) => {
+app.post('/groups', pinGuard, async (req, res) => {
   setCors(req, res);
   const body = req.body ?? {};
   const incoming = Array.isArray(body.groups) ? body.groups : (Array.isArray(body) ? body : null);
@@ -6671,7 +6671,7 @@ app.post('/groups', async (req, res) => {
   }
 });
 
-app.put('/groups/:id', async (req, res) => {
+app.put('/groups/:id', pinGuard, async (req, res) => {
   setCors(req, res);
   const id = String(req.params.id || '').trim();
   if (!id) return res.status(400).json({ ok: false, error: 'Group id is required.' });
@@ -6742,7 +6742,7 @@ app.get('/sched', (req, res) => {
   }
 });
 
-app.post('/sched', (req, res) => {
+app.post('/sched', pinGuard, (req, res) => {
   try {
     setCors(req, res);
     const incoming = parseIncomingSchedules(req.body);

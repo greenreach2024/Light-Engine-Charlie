@@ -12592,35 +12592,48 @@ window.RoomWizard = RoomWizard;
 async function loadAllData() {
   try {
     // 1) Try DB-backed devices first
-    let dbDevices = null;
+    let dbDevices = [];
     try {
-      dbDevices = await api('/devices');
+      const dbResponse = await api('/devices');
+      if (dbResponse && Array.isArray(dbResponse.devices)) {
+        dbDevices = dbResponse.devices;
+      }
     } catch (e) {
       console.warn('DB /devices fetch failed, will try forwarder/api', e);
     }
-    if (dbDevices && Array.isArray(dbDevices.devices)) {
-      STATE.devices = dbDevices.devices;
-    } else {
-      // 2) Load device data from controller via forwarder; fallback to /api/devicedatas
-      let deviceResponse = null;
-      try {
-        deviceResponse = await api('/forwarder/devicedatas');
-      } catch (e) {
-        console.warn('forwarder devicedatas fetch failed, falling back to /api/devicedatas', e);
-      }
-      if (!deviceResponse || !deviceResponse.data) {
-        try {
-          deviceResponse = await api('/api/devicedatas');
-        } catch (e) {
-          console.error('Failed to load device list from /api/devicedatas', e);
-          deviceResponse = { data: [] };
-        }
-      }
-      STATE.devices = deviceResponse?.data || [];
+
+    // 2) Load device data from controller via forwarder; fallback to /api/devicedatas
+    let controllerDevices = [];
+    let deviceResponse = null;
+    try {
+      deviceResponse = await api('/forwarder/devicedatas');
+    } catch (e) {
+      console.warn('forwarder devicedatas fetch failed, falling back to /api/devicedatas', e);
     }
-    
-    // Ensure all devices have proper online status for research mode
-    STATE.devices = STATE.devices.map((device, index) => {
+    if (!deviceResponse || (!deviceResponse.data && !Array.isArray(deviceResponse))) {
+      try {
+        deviceResponse = await api('/api/devicedatas');
+      } catch (e) {
+        console.error('Failed to load device list from /api/devicedatas', e);
+        deviceResponse = { data: [] };
+      }
+    }
+    if (Array.isArray(deviceResponse?.data)) {
+      controllerDevices = deviceResponse.data;
+    } else if (Array.isArray(deviceResponse)) {
+      controllerDevices = deviceResponse;
+    }
+
+    const dbDeviceMap = new Map();
+    dbDevices.forEach((device, index) => {
+      const id = deriveDeviceId(device, index);
+      if (id) dbDeviceMap.set(id, device);
+    });
+
+    const primaryDevices = controllerDevices.length ? controllerDevices : dbDevices;
+
+    // Ensure all devices have proper online status and canonical controller ids
+    STATE.devices = primaryDevices.map((device, index) => {
       if (!device || typeof device !== 'object') {
         const fallbackId = deriveDeviceId(null, index);
         return {
@@ -12633,6 +12646,16 @@ async function loadAllData() {
       const copy = { ...device };
       const id = deriveDeviceId(copy, index);
       copy.id = id;
+
+      if (controllerDevices.length && dbDeviceMap.has(id)) {
+        const reference = dbDeviceMap.get(id);
+        Object.entries(reference || {}).forEach(([key, value]) => {
+          if (copy[key] == null || copy[key] === '') {
+            copy[key] = value;
+          }
+        });
+      }
+
       const friendlyName = deriveDeviceName(copy, id);
       if (!copy.deviceName || !String(copy.deviceName).trim()) {
         copy.deviceName = friendlyName;
