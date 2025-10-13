@@ -216,6 +216,21 @@
 
       <div class="dashboard-stage" data-role="panel-stage" hidden></div>
 
+      <section id="AAC09" class="card hud-shell std ai-advisory-card gr-card gr-full" aria-labelledby="aiAdvisoryTitle" data-panel="AAC09">
+        <header class="ai-advisory-card__header">
+          <div>
+            <h2 id="aiAdvisoryTitle" class="section-title hud-shell__title">AI Copilot Advisory</h2>
+            <p class="tiny text-muted">Narrative insights from Temp · RH · VPD · PPFD vs. energy draw.</p>
+          </div>
+          <div class="ai-advisory-card__actions">
+            <button type="button" class="ghost" data-role="ai-copilot-close">Back to Overview</button>
+            <span class="badge badge--ai">Advisory</span>
+          </div>
+        </header>
+        <p class="ai-advisory-card__summary" data-role="ai-summary">Loading Copilot narrative…</p>
+        <div class="ai-advisory-card__body" data-role="ai-rooms"></div>
+      </section>
+
         <section id="roomAutomationCard" class="card hud-shell std automation-card gr-card" aria-labelledby="automationCardTitle" data-panel="automation">
           <header class="automation-card__header">
             <div>
@@ -234,18 +249,6 @@
           <footer class="automation-card__footer">
             <span class="tiny text-muted" data-role="automation-status">Loading…</span>
           </footer>
-        </section>
-
-        <section id="aiAdvisoryCard" class="card hud-shell std ai-advisory-card gr-card gr-full" aria-labelledby="aiAdvisoryTitle">
-          <header class="ai-advisory-card__header">
-            <div>
-              <h2 id="aiAdvisoryTitle" class="section-title hud-shell__title">AI Copilot Advisory</h2>
-              <p class="tiny text-muted">Narrative insights from Temp · RH · VPD · PPFD vs. energy draw.</p>
-            </div>
-            <span class="badge badge--ai">Advisory</span>
-          </header>
-          <p class="ai-advisory-card__summary" data-role="ai-summary">Loading Copilot narrative…</p>
-          <div class="ai-advisory-card__body" data-role="ai-rooms"></div>
         </section>
 
   <!-- Current Lights Status card removed -->
@@ -269,6 +272,7 @@
               <button id="demoStart" type="button" class="primary">Start Demo</button>
               <button id="demoStop" type="button" class="ghost" disabled>Stop</button>
             </div>
+            <button id="btnOpenAiCopilot" type="button" class="primary overview__legend-button">Open AI Copilot</button>
           </div>
         </header>
         <div id="overviewGrid" class="overview__grid" aria-live="polite"></div>

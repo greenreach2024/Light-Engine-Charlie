@@ -14035,7 +14035,7 @@ function buildLearningInsights(analytics, daily) {
 }
 
 function renderAiAdvisoryCard() {
-  const card = document.getElementById('aiAdvisoryCard');
+  const card = document.getElementById('AAC09') || document.getElementById('aiAdvisoryCard');
   if (!card) return;
   const summaryEl = card.querySelector('[data-role="ai-summary"]');
   const listEl = card.querySelector('[data-role="ai-rooms"]');
@@ -19047,6 +19047,22 @@ document.addEventListener('DOMContentLoaded', async () => {
   // Initialize light wizard
   window.lightWizard = new LightWizard();
   window.freshLightWizard = new FreshLightWizard();
+  const aiCopilotBtn = document.getElementById('btnOpenAiCopilot');
+  if (aiCopilotBtn) {
+    aiCopilotBtn.addEventListener('click', () => {
+      if (typeof setActivePanel === 'function') {
+        setActivePanel('AAC09');
+      }
+    });
+  }
+  const aiCopilotCloseBtn = document.querySelector('[data-role="ai-copilot-close"]');
+  if (aiCopilotCloseBtn) {
+    aiCopilotCloseBtn.addEventListener('click', () => {
+      if (typeof setActivePanel === 'function') {
+        setActivePanel('overview');
+      }
+    });
+  }
   // Wire up light setup button (with retry logic)
   function setupLightSetupButton() {
     const lightSetupBtn = document.getElementById('btnLaunchLightSetup');
