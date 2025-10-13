@@ -4812,90 +4812,511 @@ function groupBy(arr, key) {
   }, {});
 }
 // --- Smart Controller Device Manager Modular UI ---
+const SMART_CONTROLLER_STATE = {
+  lookup: new Map()
+};
+
+const CONTROLLER_CAPABILITY_RULES = {
+  onOff: ['onoff', 'power', 'power_control', 'toggle', 'switch', 'relay', 'enable'],
+  dim: ['dim', 'dimmer', 'brightness', 'level'],
+  energy: ['energy', 'power_monitor', 'power_usage', 'consumption', 'kwh'],
+  refresh: ['refresh', 'status', 'state', 'poll', 'sync'],
+  discover: ['discover', 'scan', 'identify', 'pair', 'search']
+};
+
+const CONTROLLER_ACTION_REQUIREMENTS = {
+  'ctrl.testOn': 'onOff',
+  'ctrl.testOff': 'onOff',
+  'ctrl.refresh': 'refresh',
+  'ctrl.discover': 'discover',
+  'ctrl.saveLink': null,
+  'ctrl.assignUnknown': null,
+  'ctrl.quarantineUnknown': null
+};
+
+function collectControllerCapabilities(device) {
+  const set = new Set();
+  const push = (value) => {
+    if (typeof value === 'string' && value.trim()) {
+      set.add(value.trim().toLowerCase());
+    }
+  };
+  const visit = (source) => {
+    if (!source) return;
+    if (Array.isArray(source)) {
+      source.forEach(visit);
+      return;
+    }
+    if (typeof source === 'object') {
+      Object.entries(source).forEach(([key, val]) => {
+        if (key) push(key);
+        if (typeof val === 'boolean') {
+          if (val) push(key);
+        } else {
+          visit(val);
+        }
+      });
+      return;
+    }
+    push(String(source || '').trim());
+  };
+  visit(device?.capabilities);
+  visit(device?.hints?.capabilities);
+  visit(device?.supports);
+  visit(device?.traits);
+  return set;
+}
+
+function capabilityMatch(capabilities, requirement) {
+  if (!requirement) return true;
+  if (!(capabilities instanceof Set) || !capabilities.size) return false;
+  const aliases = CONTROLLER_CAPABILITY_RULES[requirement] || [requirement];
+  return aliases.some((alias) => capabilities.has(alias));
+}
+
+function normalizeSmartController(device, index) {
+  const source = device || {};
+  const id = firstNonEmptyString(
+    source.id,
+    source.deviceId,
+    source.device_id,
+    source.address,
+    source.mac,
+    `controller-${index + 1}`
+  );
+  const vendor = firstNonEmptyString(
+    source.vendor,
+    source.brand,
+    source.manufacturer,
+    source.maker,
+    source.hints?.vendor,
+    'Unknown'
+  ).trim();
+  const type = firstNonEmptyString(
+    source.type,
+    source.category,
+    source.kind,
+    source.deviceType,
+    source.hints?.type,
+    source.protocol,
+    'Unknown'
+  ).trim();
+  const protocol = firstNonEmptyString(source.protocol, source.transport, source.conn, 'unknown').trim();
+  const name = firstNonEmptyString(source.name, source.label, `${vendor || ''} ${type || ''}`.trim(), id);
+  const address = firstNonEmptyString(source.address, source.ip, source.host, source.deviceId, source.mac, '');
+  const location = firstNonEmptyString(
+    source.location,
+    source.room,
+    source.zone,
+    source.hints?.location,
+    source.hints?.room,
+    ''
+  );
+  const trust = (firstNonEmptyString(source.trust, '') || 'unknown').toLowerCase();
+  const capabilities = collectControllerCapabilities(source);
+  const supports = {
+    onOff: capabilityMatch(capabilities, 'onOff'),
+    dim: capabilityMatch(capabilities, 'dim'),
+    energy: capabilityMatch(capabilities, 'energy'),
+    refresh: capabilityMatch(capabilities, 'refresh'),
+    discover: capabilityMatch(capabilities, 'discover')
+  };
+  const lastSeen = firstNonEmptyString(source.lastSeen, source.updatedAt, source.hints?.lastSeen, '');
+  const statusRaw = firstNonEmptyString(source.status, source.state, '');
+  const online = typeof source.online === 'boolean'
+    ? source.online
+    : ['online', 'on', 'connected', 'ok'].includes((statusRaw || '').toLowerCase());
+  const status = statusRaw || (online ? 'Online' : 'Offline');
+  const hexValue = typeof source.value === 'string'
+    ? source.value
+    : firstNonEmptyString(source.hex, source.hints?.hex, '');
+  const link = typeof source.link === 'string' ? source.link : '';
+  const unknown = !vendor || vendor.toLowerCase() === 'unknown' || !type || type.toLowerCase() === 'unknown' || trust === 'unknown';
+  return {
+    id,
+    index,
+    name,
+    vendor: vendor || 'Unknown',
+    type: type || 'Unknown',
+    protocol: protocol || 'unknown',
+    address,
+    location,
+    trust,
+    online,
+    status,
+    lastSeen,
+    capabilities,
+    supports,
+    hexValue,
+    link,
+    raw: source,
+    unknown
+  };
+}
+
+function controllerSupportsCapability(controller, requirement) {
+  if (!requirement) return true;
+  if (controller?.supports && Object.prototype.hasOwnProperty.call(controller.supports, requirement)) {
+    return Boolean(controller.supports[requirement]);
+  }
+  return capabilityMatch(controller?.capabilities, requirement);
+}
+
+function renderControllerActionButton(controller, label, action, options = {}) {
+  const requirement = CONTROLLER_ACTION_REQUIREMENTS[action] ?? null;
+  const supported = controllerSupportsCapability(controller, requirement);
+  const classes = ['ghost', 'tiny'];
+  if (options.variant === 'primary') {
+    classes[0] = 'primary';
+  } else if (options.variant === 'secondary') {
+    classes[0] = 'secondary';
+  }
+  const attrs = [`type="button"`, `class="${classes.join(' ')}"`, `data-action="${action}"`];
+  const title = options.title || (supported ? '' : 'Capability not available');
+  if (title) attrs.push(`title="${escapeHtml(title)}"`);
+  if (!supported) {
+    attrs.push('disabled');
+    attrs.push('aria-disabled="true"');
+  }
+  return `<button ${attrs.join(' ')}>${escapeHtml(label)}</button>`;
+}
+
+function buildSmartControllerCard(controller) {
+  const statusLower = (controller.status || '').toLowerCase();
+  let statusClass = 'unknown';
+  if (statusLower.includes('on') || statusLower === 'online') statusClass = 'online';
+  else if (statusLower.includes('off') || statusLower === 'offline' || statusLower.includes('error')) statusClass = 'offline';
+  const capabilityChips = [];
+  if (controllerSupportsCapability(controller, 'onOff')) capabilityChips.push('On/Off');
+  if (controllerSupportsCapability(controller, 'dim')) capabilityChips.push('Dim');
+  if (controllerSupportsCapability(controller, 'energy')) capabilityChips.push('Energy');
+  if (controllerSupportsCapability(controller, 'refresh')) capabilityChips.push('Status');
+  if (controllerSupportsCapability(controller, 'discover')) capabilityChips.push('Discovery');
+  const hexDisplay = (controller.hexValue || '').toUpperCase();
+  return `
+    <article class="smart-controller-card" data-controller-id="${escapeHtml(controller.id)}" data-controller-index="${controller.index}">
+      <header class="smart-controller-card__header">
+        <div>
+          <h3>${escapeHtml(controller.name || controller.id)}</h3>
+          <p class="tiny">${escapeHtml(controller.vendor)} • ${escapeHtml(controller.type)}</p>
+        </div>
+        <span class="smart-controller-card__status smart-controller-card__status--${statusClass}">${escapeHtml(controller.status || 'Unknown')}</span>
+      </header>
+      <dl class="smart-controller-card__meta">
+        <div><dt>Protocol</dt><dd>${escapeHtml(controller.protocol || '—')}</dd></div>
+        <div><dt>Address</dt><dd>${escapeHtml(controller.address || '—')}</dd></div>
+        <div><dt>Last seen</dt><dd>${escapeHtml(controller.lastSeen || '—')}</dd></div>
+      </dl>
+      ${capabilityChips.length ? `<div class="smart-controller-card__capabilities">${capabilityChips.map((chip) => `<span class="smart-controller-card__capability">${escapeHtml(chip)}</span>`).join('')}</div>` : ''}
+      <div class="smart-controller-card__command">
+        <label class="tiny smart-controller-card__command-label">HEX payload
+          <input type="text" data-role="controller-hex" value="${escapeHtml(hexDisplay)}" maxlength="12" placeholder="e.g. 737373730000">
+        </label>
+        <div class="smart-controller-card__actions">
+          ${renderControllerActionButton(controller, 'Test On', 'ctrl.testOn', { variant: 'primary', title: 'Send a safe ON command using the payload above' })}
+          ${renderControllerActionButton(controller, 'Test Off', 'ctrl.testOff', { title: 'Send an OFF command to this controller' })}
+          ${renderControllerActionButton(controller, 'Refresh', 'ctrl.refresh', { title: 'Refresh controller telemetry' })}
+          ${renderControllerActionButton(controller, 'Discover', 'ctrl.discover', { title: 'Run controller discovery' })}
+        </div>
+      </div>
+      <div class="smart-controller-card__footer">
+        <label class="tiny">Equipment link
+          <input type="text" data-role="controller-link" value="${escapeHtml(controller.link || '')}" placeholder="Room / equipment assignment">
+        </label>
+        ${renderControllerActionButton(controller, 'Save link', 'ctrl.saveLink', { title: 'Persist a note linking this controller to equipment' })}
+      </div>
+    </article>
+  `;
+}
+
+function buildUnknownControllersTable(controllers) {
+  if (!controllers.length) return '';
+  const rows = controllers.map((controller) => {
+    const trustValue = controller.trust || 'unknown';
+    return `
+      <tr data-controller-index="${controller.index}" data-controller-id="${escapeHtml(controller.id)}" data-controller-address="${escapeHtml(controller.address || controller.id || '')}">
+        <td>${escapeHtml(controller.address || controller.id || '')}</td>
+        <td><input type="text" data-field="type" value="${escapeHtml(controller.type === 'Unknown' ? '' : controller.type)}" placeholder="Type"></td>
+        <td><input type="text" data-field="vendor" value="${escapeHtml(controller.vendor === 'Unknown' ? '' : controller.vendor)}" placeholder="Vendor"></td>
+        <td><input type="text" data-field="name" value="${escapeHtml(controller.name || '')}" placeholder="Name"></td>
+        <td><input type="text" data-field="location" value="${escapeHtml(controller.location || '')}" placeholder="Location"></td>
+        <td>
+          <select data-field="trust">
+            <option value="unknown"${trustValue === 'unknown' ? ' selected' : ''}>Unknown</option>
+            <option value="trusted"${trustValue === 'trusted' ? ' selected' : ''}>Trusted</option>
+            <option value="quarantine"${trustValue === 'quarantine' ? ' selected' : ''}>Quarantine</option>
+            <option value="ignored"${trustValue === 'ignored' ? ' selected' : ''}>Ignored</option>
+          </select>
+        </td>
+        <td class="smart-controller-unknown__actions">
+          ${renderControllerActionButton(controller, 'Assign', 'ctrl.assignUnknown', { variant: 'primary', title: 'Save details for this controller' })}
+          ${renderControllerActionButton(controller, 'Quarantine', 'ctrl.quarantineUnknown', { title: 'Move controller to quarantine' })}
+        </td>
+      </tr>
+    `;
+  }).join('');
+  return `
+    <section class="smart-controller-unknown">
+      <h3 class="smart-controller-unknown__title">Unknown Devices</h3>
+      <p class="tiny smart-controller-unknown__subtitle">Classify these controllers to unlock actions and assignments.</p>
+      <div class="smart-controller-unknown__table-wrapper">
+        <table class="iot-unknown-table">
+          <thead>
+            <tr>
+              <th>Address</th>
+              <th>Type</th>
+              <th>Vendor</th>
+              <th>Name</th>
+              <th>Location</th>
+              <th>Trust</th>
+              <th>Actions</th>
+            </tr>
+          </thead>
+          <tbody>${rows}</tbody>
+        </table>
+      </div>
+    </section>
+  `;
+}
+
 function renderSmartControllerCards(devices) {
   const list = document.getElementById('smartControllersList');
   if (!list) return;
-  list.innerHTML = '';
+  SMART_CONTROLLER_STATE.lookup.clear();
   if (!Array.isArray(devices) || !devices.length) {
-    list.innerHTML = '';
+    list.innerHTML = '<div class="smart-controller-empty">No smart controllers detected yet. Run a scan to populate this list.</div>';
     return;
   }
-  // Identify unknown devices: no vendor/type or not trusted/assigned/quarantined
-  const unknowns = devices.filter(d => !d.vendor || d.vendor === 'Unknown' || !d.type || d.trust === 'unknown' || d.trust === undefined);
+  const normalized = devices.map((device, index) => normalizeSmartController(device, index));
+  normalized.forEach((controller) => {
+    SMART_CONTROLLER_STATE.lookup.set(controller.id, controller);
+  });
+  const unknowns = normalized.filter((controller) => controller.unknown);
+  const knowns = normalized.filter((controller) => !controller.unknown);
+  const sections = [];
   if (unknowns.length) {
-    let html = `<h3 style="margin:0 0 8px 0;">Unknown Devices</h3>`;
-    html += `<table class="iot-unknown-table" style="width:100%;border-collapse:collapse;margin-bottom:12px;">
-      <thead><tr style="background:#f1f5f9"><th>Address</th><th>Type</th><th>Vendor</th><th>Name</th><th>Location</th><th>Trust</th><th>Actions</th></tr></thead><tbody>`;
-    for (const dev of unknowns) {
-      html += `<tr data-addr="${escapeHtml(dev.address||dev.id||'')}" style="border-bottom:1px solid #e5e7eb;">
-        <td>${escapeHtml(dev.address||dev.id||'')}</td>
-        <td><input type="text" class="iot-unknown-type" value="${escapeHtml(dev.type||'')}" style="width:80px"></td>
-        <td><input type="text" class="iot-unknown-vendor" value="${escapeHtml(dev.vendor||'')}" style="width:90px"></td>
-        <td><input type="text" class="iot-unknown-name" value="${escapeHtml(dev.name||'')}" style="width:90px"></td>
-        <td><input type="text" class="iot-unknown-loc" value="${escapeHtml(dev.location||'')}" style="width:90px"></td>
-        <td>
-          <select class="iot-unknown-trust">
-            <option value="unknown"${!dev.trust||dev.trust==='unknown'?' selected':''}>Unknown</option>
-            <option value="trusted"${dev.trust==='trusted'?' selected':''}>Trusted</option>
-            <option value="quarantine"${dev.trust==='quarantine'?' selected':''}>Quarantine</option>
-            <option value="ignored"${dev.trust==='ignored'?' selected':''}>Ignored</option>
-          </select>
-        </td>
-        <td>
-          <button class="primary tiny iot-unknown-assign">Assign</button>
-          <button class="ghost tiny iot-unknown-quarantine">Quarantine</button>
-        </td>
-      </tr>`;
-    }
-    html += '</tbody></table>';
-    // Insert the table at the top of the list
-    list.insertAdjacentHTML('afterbegin', html);
-    // Add event listeners for actions
-    Array.from(list.querySelectorAll('.iot-unknown-assign')).forEach(btn => {
-      btn.onclick = function(e) {
-        const row = e.target.closest('tr');
-        const addr = row.getAttribute('data-addr');
-        const type = row.querySelector('.iot-unknown-type').value.trim();
-        const vendor = row.querySelector('.iot-unknown-vendor').value.trim();
-        const name = row.querySelector('.iot-unknown-name').value.trim();
-        const loc = row.querySelector('.iot-unknown-loc').value.trim();
-        const trust = row.querySelector('.iot-unknown-trust').value;
-        // Update in window.LAST_SMART_CONTROLLER_SCAN
-        const dev = window.LAST_SMART_CONTROLLER_SCAN.find(d => (d.address||d.id||'') === addr);
-        if (dev) {
-          dev.type = type; dev.vendor = vendor; dev.name = name; dev.location = loc; dev.trust = trust;
-        }
-        showToast({ title: 'Device assigned', msg: `${addr} updated.`, kind: 'success', icon: '✅' });
-        renderSmartControllerCards(window.LAST_SMART_CONTROLLER_SCAN);
-      };
-    });
-    Array.from(list.querySelectorAll('.iot-unknown-quarantine')).forEach(btn => {
-      btn.onclick = function(e) {
-        const row = e.target.closest('tr');
-        const addr = row.getAttribute('data-addr');
-        const dev = window.LAST_SMART_CONTROLLER_SCAN.find(d => (d.address||d.id||'') === addr);
-        if (dev) {
-          dev.trust = 'quarantine';
-        }
-        showToast({ title: 'Device quarantined', msg: `${addr} moved to quarantine.`, kind: 'warn', icon: '🚫' });
-        renderSmartControllerCards(window.LAST_SMART_CONTROLLER_SCAN);
-      };
-    });
+    sections.push(buildUnknownControllersTable(unknowns));
   }
-  // Grouped device cards (excluding unknowns)
-  const knowns = devices.filter(d => unknowns.indexOf(d) === -1);
   if (knowns.length) {
-    const byVendor = groupBy(knowns, d => (d.vendor || d.brand || 'Unknown').toLowerCase());
-    for (const vendor of Object.keys(byVendor)) {
-      let card = document.createElement('section');
-      card.className = 'iot-vendor-card';
-      card.innerHTML = `<h3 style="margin:0 0 8px 0;text-transform:capitalize">${vendor} Devices</h3>`;
-      card.innerHTML += '<ul style="margin:0 0 8px 0;padding:0;list-style:none">' +
-        byVendor[vendor].map(dev => `<li style="margin-bottom:4px"><b>${escapeHtml(dev.name)}</b> <span class="tiny">(${escapeHtml(dev.protocol)})</span> <span class="tiny">${escapeHtml(dev.address||'')}</span></li>`).join('') + '</ul>';
-      list.appendChild(card);
+    sections.push(`<div class="smart-controller-grid">${knowns.map((controller) => buildSmartControllerCard(controller)).join('')}</div>`);
+  }
+  list.innerHTML = sections.join('');
+}
+
+function getControllerFromElement(el) {
+  const host = el?.closest('[data-controller-id]');
+  if (!host) return null;
+  const id = host.getAttribute('data-controller-id');
+  if (!id) return null;
+  return SMART_CONTROLLER_STATE.lookup.get(id) || null;
+}
+
+function setControllerActionPending(btn, pending, label) {
+  if (!btn) return;
+  if (pending) {
+    if (!btn.dataset.originalText) {
+      btn.dataset.originalText = btn.textContent || '';
+    }
+    if (label) btn.textContent = label;
+    btn.disabled = true;
+    btn.classList.add('is-loading');
+  } else {
+    btn.disabled = false;
+    btn.classList.remove('is-loading');
+    if (btn.dataset.originalText !== undefined) {
+      btn.textContent = btn.dataset.originalText;
+      delete btn.dataset.originalText;
     }
   }
 }
+
+function normalizeControllerHex(input) {
+  if (input == null) return null;
+  const cleaned = String(input).trim();
+  if (!cleaned) return null;
+  const normalized = cleaned.replace(/[^0-9a-fA-F]/g, '').toUpperCase();
+  if (!normalized) return null;
+  if (normalized.length !== 12) return null;
+  return normalized;
+}
+
+async function doControllerToggle(controller, turnOn, btn) {
+  if (!controllerSupportsCapability(controller, 'onOff')) {
+    showToast({ title: controller.name || 'Controller', msg: 'On/off control is not supported for this controller.', kind: 'warn', icon: '⚠️' });
+    return;
+  }
+  const host = btn.closest('[data-controller-id]');
+  const hexInput = host?.querySelector('[data-role="controller-hex"]');
+  const rawHex = hexInput?.value || controller.hexValue || '';
+  let payload = turnOn ? { status: 'on' } : { status: 'off', value: null };
+  if (turnOn) {
+    const normalized = normalizeControllerHex(rawHex);
+    if (rawHex.trim() && !normalized) {
+      showToast({ title: 'Invalid HEX payload', msg: 'Enter a 12-digit HEX payload using 0-9 or A-F.', kind: 'error', icon: '⚠️' });
+      if (hexInput) hexInput.focus();
+      return;
+    }
+    if (normalized) {
+      payload.value = normalized;
+    }
+  }
+  setControllerActionPending(btn, true, turnOn ? 'Testing…' : 'Stopping…');
+  try {
+    await controllerPatchDevice(controller.id, payload);
+    if (turnOn && payload.value) {
+      controller.hexValue = payload.value;
+      if (Array.isArray(window.LAST_SMART_CONTROLLER_SCAN) && window.LAST_SMART_CONTROLLER_SCAN[controller.index]) {
+        window.LAST_SMART_CONTROLLER_SCAN[controller.index].value = payload.value;
+      }
+      if (hexInput) hexInput.value = payload.value;
+    }
+    showToast({
+      title: controller.name || 'Controller',
+      msg: turnOn ? 'Command sent successfully.' : 'Off command sent successfully.',
+      kind: 'success',
+      icon: turnOn ? '✅' : '⏹️'
+    });
+  } catch (error) {
+    let msg = error?.message || 'Controller command failed.';
+    if (error && typeof error.status === 'number' && error.status === 400) {
+      msg = 'Controller rejected the payload (HTTP 400). Check HEX12 scale and payload.';
+    }
+    showToast({ title: controller.name || 'Controller', msg, kind: 'error', icon: '⚠️' });
+  } finally {
+    setControllerActionPending(btn, false);
+  }
+}
+
+function saveControllerLink(controller, btn) {
+  const host = btn.closest('[data-controller-id]');
+  const input = host?.querySelector('[data-role="controller-link"]');
+  const value = (input?.value || '').trim();
+  controller.link = value;
+  if (Array.isArray(window.LAST_SMART_CONTROLLER_SCAN) && window.LAST_SMART_CONTROLLER_SCAN[controller.index]) {
+    window.LAST_SMART_CONTROLLER_SCAN[controller.index].link = value;
+  }
+  showToast({
+    title: 'Link saved',
+    msg: value ? `${controller.name || controller.id} linked to ${value}.` : `${controller.name || controller.id} link cleared.`,
+    kind: 'success',
+    icon: '💾'
+  });
+}
+
+async function refreshController(controller, btn) {
+  if (typeof window.scanSmartControllers !== 'function') {
+    showToast({ title: 'Controller refresh unavailable', msg: 'Discovery service is not available in this mode.', kind: 'warn', icon: '⚠️' });
+    return;
+  }
+  setControllerActionPending(btn, true, 'Refreshing…');
+  try {
+    await window.scanSmartControllers();
+  } catch (error) {
+    showToast({ title: 'Controller refresh failed', msg: error?.message || 'Scan failed.', kind: 'error', icon: '⚠️' });
+  } finally {
+    setControllerActionPending(btn, false);
+  }
+}
+
+async function discoverControllers(btn) {
+  if (typeof window.scanSmartControllers !== 'function') {
+    showToast({ title: 'Discovery unavailable', msg: 'Discovery service is not available in this mode.', kind: 'warn', icon: '⚠️' });
+    return;
+  }
+  setControllerActionPending(btn, true, 'Scanning…');
+  try {
+    await window.scanSmartControllers();
+  } catch (error) {
+    showToast({ title: 'Discovery failed', msg: error?.message || 'Scan failed.', kind: 'error', icon: '⚠️' });
+  } finally {
+    setControllerActionPending(btn, false);
+  }
+}
+
+function assignUnknownController(btn) {
+  const row = btn.closest('tr[data-controller-index]');
+  if (!row) return;
+  const index = Number(row.dataset.controllerIndex);
+  if (!Number.isFinite(index)) return;
+  const devices = window.LAST_SMART_CONTROLLER_SCAN || [];
+  const device = devices[index];
+  if (!device) return;
+  const type = row.querySelector('[data-field="type"]')?.value.trim() || '';
+  const vendor = row.querySelector('[data-field="vendor"]')?.value.trim() || '';
+  const name = row.querySelector('[data-field="name"]')?.value.trim() || '';
+  const location = row.querySelector('[data-field="location"]')?.value.trim() || '';
+  const trust = row.querySelector('[data-field="trust"]')?.value || 'unknown';
+  device.type = type;
+  device.vendor = vendor;
+  device.name = name;
+  device.location = location;
+  device.trust = trust;
+  showToast({
+    title: 'Device assigned',
+    msg: `${device.address || device.id || 'Controller'} classified as ${vendor || 'device'}.`,
+    kind: 'success',
+    icon: '✅'
+  });
+  renderSmartControllerCards(devices);
+}
+
+function quarantineUnknownController(btn) {
+  const row = btn.closest('tr[data-controller-index]');
+  if (!row) return;
+  const index = Number(row.dataset.controllerIndex);
+  if (!Number.isFinite(index)) return;
+  const devices = window.LAST_SMART_CONTROLLER_SCAN || [];
+  const device = devices[index];
+  if (!device) return;
+  device.trust = 'quarantine';
+  showToast({
+    title: 'Device quarantined',
+    msg: `${device.address || device.id || 'Controller'} moved to quarantine.`,
+    kind: 'warn',
+    icon: '🚫'
+  });
+  renderSmartControllerCards(devices);
+}
+
+const controllerActions = {
+  'ctrl.testOn': (btn) => {
+    const controller = getControllerFromElement(btn);
+    if (controller) doControllerToggle(controller, true, btn);
+  },
+  'ctrl.testOff': (btn) => {
+    const controller = getControllerFromElement(btn);
+    if (controller) doControllerToggle(controller, false, btn);
+  },
+  'ctrl.saveLink': (btn) => {
+    const controller = getControllerFromElement(btn);
+    if (controller) saveControllerLink(controller, btn);
+  },
+  'ctrl.refresh': (btn) => {
+    const controller = getControllerFromElement(btn);
+    if (controller) refreshController(controller, btn);
+  },
+  'ctrl.discover': (btn) => {
+    discoverControllers(btn);
+  },
+  'ctrl.assignUnknown': (btn) => {
+    assignUnknownController(btn);
+  },
+  'ctrl.quarantineUnknown': (btn) => {
+    quarantineUnknownController(btn);
+  }
+};
+
+document.addEventListener('click', (event) => {
+  const target = event.target.closest('[data-action]');
+  if (!target) return;
+  const action = target.getAttribute('data-action');
+  if (!action || !action.startsWith('ctrl.')) return;
+  const handler = controllerActions[action];
+  if (typeof handler === 'function') {
+    event.preventDefault();
+    handler(target, event);
+  }
+});
 
 // Demo: global stubs for Kasa/Shelly managers
 window.openKasaManager = function() { showToast({ title: 'Kasa Manager', msg: 'Kasa setup wizard coming soon.', kind: 'info', icon: '💡' }); };
@@ -18570,8 +18991,13 @@ function controllerPatchDevice(deviceId, payload) {
     method: 'PATCH',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(payload)
-  }).then((resp) => {
-    if (!resp.ok) throw new Error(`Controller returned ${resp.status}`);
+  }).then(async (resp) => {
+    if (!resp.ok) {
+      const text = await resp.text().catch(() => '');
+      const error = new Error(text || `Controller returned ${resp.status}`);
+      error.status = resp.status;
+      throw error;
+    }
     return resp.json().catch(() => ({}));
   });
 }
