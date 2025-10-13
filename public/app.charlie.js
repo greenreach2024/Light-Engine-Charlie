@@ -4815,6 +4815,7 @@ function groupBy(arr, key) {
 const SMART_CONTROLLER_STATE = {
   lookup: new Map()
 };
+let controllerLinkerOverlay = null;
 
 const CONTROLLER_CAPABILITY_RULES = {
   onOff: ['onoff', 'power', 'power_control', 'toggle', 'switch', 'relay', 'enable'],
@@ -7027,6 +7028,7 @@ STATE.environment = Array.isArray(STATE.environment) ? STATE.environment : [];
 STATE.roomAutomation = STATE.roomAutomation || { rooms: [], meta: {} };
 STATE.aiAdvisory = STATE.aiAdvisory || { summary: '', rooms: [] };
 STATE.envReadings = Array.isArray(STATE.envReadings) ? STATE.envReadings : [];
+STATE.ctrlMap = (STATE.ctrlMap && typeof STATE.ctrlMap === 'object' && !Array.isArray(STATE.ctrlMap)) ? STATE.ctrlMap : {};
 
 // ...existing code...
 class FarmWizard {
@@ -12572,15 +12574,19 @@ async function loadAllData() {
     renderEnvironment();
     renderRooms();
     renderLightSetups();
-    
+
     // Demo/mock light setups removed: only live light setups and devices will be used.
-    
+
     renderLightSetupSummary();
+    await loadControllerLinkMap({ silent: true });
     renderControllerAssignments();
     renderSwitchBotDevices();
     
     // Wire controller assignments buttons
-    document.getElementById('btnRefreshControllerAssignments')?.addEventListener('click', renderControllerAssignments);
+    document.getElementById('btnRefreshControllerAssignments')?.addEventListener('click', async () => {
+      await loadControllerLinkMap({ silent: true });
+      renderControllerAssignments();
+    });
     document.getElementById('btnManageControllers')?.addEventListener('click', () => {
       alert('Controller management interface will be implemented in future update');
     });
@@ -13614,6 +13620,266 @@ function editLightSetup(roomId) {
 }
 
 // Controller Assignments functionality
+const CONTROLLER_METHOD_OPTIONS = [
+  { value: 'wifi', label: 'Wi‑Fi' },
+  { value: 'smartplug', label: 'Smart Plug' },
+  { value: '0-10v', label: '0‑10V' },
+  { value: 'modbus', label: 'Modbus' },
+  { value: 'switchbot', label: 'SwitchBot' }
+];
+
+function formatControlMethodLabel(method) {
+  const normalized = String(method || '').toLowerCase();
+  const found = CONTROLLER_METHOD_OPTIONS.find((option) => option.value === normalized);
+  if (found) return found.label;
+  if (!normalized) return 'Unknown';
+  return normalized.replace(/(^|[-_\s])(\w)/g, (_, sep, chr) => `${sep ? ' ' : ''}${chr.toUpperCase()}`);
+}
+
+function deriveControllerLinkKey(item, index) {
+  if (!item) return `equipment-${index}`;
+  const baseId = firstNonEmptyString(item.uniqueId, item.id, '');
+  if (baseId) return baseId;
+  const roomKey = normalizeIdentifier(firstNonEmptyString(item.room, item.roomId, item.roomName, 'room')) || `room-${index + 1}`;
+  const zonePart = normalizeIdentifier(firstNonEmptyString(item.zone, item.zoneId, item.zoneName, ''));
+  const typeKey = normalizeIdentifier(firstNonEmptyString(item.type, item.category, item.kind, 'equipment')) || 'equipment';
+  const suffix = zonePart ? `${typeKey}@${zonePart}` : typeKey;
+  return `${roomKey}:${suffix}#${index + 1}`;
+}
+
+function resolveControllerLabel(controllerId) {
+  if (!controllerId) return '';
+  const direct = SMART_CONTROLLER_STATE.lookup?.get?.(controllerId);
+  if (direct) {
+    const label = firstNonEmptyString(direct.name, direct.label, direct.deviceName, direct.id, controllerId);
+    return `${label}`;
+  }
+  const devices = Array.isArray(STATE.devices) ? STATE.devices : [];
+  const matched = devices.find((device) => {
+    const id = firstNonEmptyString(device.id, device.deviceId, device.device_id, device.address, device.mac);
+    return id && String(id) === String(controllerId);
+  });
+  if (matched) {
+    const label = firstNonEmptyString(matched.name, matched.deviceName, matched.label, matched.model, controllerId);
+    return `${label}`;
+  }
+  return controllerId;
+}
+
+function getControllerOptions() {
+  const options = [];
+  if (SMART_CONTROLLER_STATE.lookup && SMART_CONTROLLER_STATE.lookup.size) {
+    SMART_CONTROLLER_STATE.lookup.forEach((controller) => {
+      if (!controller) return;
+      const id = firstNonEmptyString(controller.id, controller.deviceId, controller.address);
+      if (!id) return;
+      const label = firstNonEmptyString(controller.name, controller.label, controller.deviceName, id);
+      options.push({ id, label });
+    });
+  }
+  if (options.length === 0 && Array.isArray(STATE.devices)) {
+    STATE.devices.forEach((device) => {
+      if (!device || typeof device !== 'object') return;
+      const id = firstNonEmptyString(device.id, device.deviceId, device.device_id, device.address, device.mac);
+      if (!id) return;
+      const label = firstNonEmptyString(device.name, device.deviceName, device.label, device.model, id);
+      options.push({ id, label });
+    });
+  }
+  const unique = [];
+  const seen = new Set();
+  options.forEach((option) => {
+    if (!option || !option.id) return;
+    const key = String(option.id);
+    if (seen.has(key)) return;
+    seen.add(key);
+    unique.push(option);
+  });
+  return unique;
+}
+
+async function loadControllerLinkMap({ silent = false } = {}) {
+  try {
+    const resp = await fetch(resolveApiUrl('/ui/ctrlmap'));
+    if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+    const data = await resp.json();
+    if (data && typeof data === 'object' && !Array.isArray(data)) {
+      STATE.ctrlMap = data;
+    } else {
+      STATE.ctrlMap = {};
+    }
+  } catch (error) {
+    if (!silent) {
+      console.warn('Failed to load controller link map', error);
+    } else {
+      console.warn('Failed to load controller link map', error?.message || error);
+    }
+    STATE.ctrlMap = STATE.ctrlMap || {};
+  }
+}
+
+async function saveControllerLinkMapping(key, method, controllerId) {
+  const payload = { key, method, controllerId };
+  const resp = await fetch(resolveApiUrl('/ui/ctrlmap'), {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(payload)
+  });
+  if (!resp.ok) {
+    const text = await resp.text().catch(() => '');
+    const error = new Error(text || `HTTP ${resp.status}`);
+    error.status = resp.status;
+    throw error;
+  }
+  try { await resp.json(); } catch {}
+  if (!STATE.ctrlMap || typeof STATE.ctrlMap !== 'object') STATE.ctrlMap = {};
+  STATE.ctrlMap[key] = { method, controllerId, ts: Date.now() };
+}
+
+function closeControllerLinker() {
+  if (controllerLinkerOverlay && controllerLinkerOverlay.parentElement) {
+    controllerLinkerOverlay.parentElement.removeChild(controllerLinkerOverlay);
+  }
+  controllerLinkerOverlay = null;
+}
+
+function openControllerLinker(item, key) {
+  if (!item || !key) return;
+  closeControllerLinker();
+  const existing = (STATE.ctrlMap && STATE.ctrlMap[key]) || {};
+  const overlay = document.createElement('div');
+  overlay.className = 'ctrl-linker-overlay';
+  overlay.innerHTML = `
+    <div class="ctrl-linker-dialog" role="dialog" aria-modal="true">
+      <header class="ctrl-linker-header">
+        <h3>Link controller</h3>
+        <button type="button" class="ctrl-linker-close" aria-label="Close">×</button>
+      </header>
+      <div class="ctrl-linker-body">
+        <div class="ctrl-linker-summary">
+          <div><strong>Equipment:</strong> ${escapeHtml(firstNonEmptyString(item.type, 'Equipment'))}</div>
+          <div><strong>Room:</strong> ${escapeHtml(firstNonEmptyString(item.room, 'Unassigned'))}</div>
+          <div><strong>Zone:</strong> ${escapeHtml(firstNonEmptyString(item.zone, '—'))}</div>
+          <div><strong>ID:</strong> <code>${escapeHtml(firstNonEmptyString(item.uniqueId, key))}</code></div>
+        </div>
+        <label for="ctrl-linker-method">Control Method</label>
+        <select id="ctrl-linker-method" data-field="method"></select>
+        <label for="ctrl-linker-controller">Controller</label>
+        <select id="ctrl-linker-controller" data-field="controller"></select>
+      </div>
+      <footer class="ctrl-linker-actions">
+        <button type="button" class="ghost" data-action="cancel">Cancel</button>
+        <button type="button" class="primary" data-action="save">Save</button>
+      </footer>
+    </div>
+  `;
+  controllerLinkerOverlay = overlay;
+  document.body.appendChild(overlay);
+
+  const methodSelect = overlay.querySelector('[data-field="method"]');
+  const controllerSelect = overlay.querySelector('[data-field="controller"]');
+  const closeBtn = overlay.querySelector('.ctrl-linker-close');
+  const cancelBtn = overlay.querySelector('[data-action="cancel"]');
+  const saveBtn = overlay.querySelector('[data-action="save"]');
+
+  if (methodSelect) {
+    methodSelect.innerHTML = CONTROLLER_METHOD_OPTIONS.map((option) => `
+      <option value="${escapeAttribute(option.value)}">${escapeHtml(option.label)}</option>
+    `).join('');
+    if (existing.method) {
+      methodSelect.value = String(existing.method).toLowerCase();
+    }
+  }
+
+  if (controllerSelect) {
+    const options = getControllerOptions();
+    if (options.length) {
+      controllerSelect.innerHTML = ['<option value="">Select controller…</option>',
+        ...options.map((option) => `
+          <option value="${escapeAttribute(option.id)}">${escapeHtml(`${option.label} (${option.id})`)}</option>
+        `)
+      ].join('');
+    } else {
+      controllerSelect.innerHTML = '<option value="">No controllers detected</option>';
+      controllerSelect.disabled = true;
+    }
+    if (existing.controllerId) {
+      controllerSelect.value = existing.controllerId;
+    }
+  }
+
+  const dismiss = () => closeControllerLinker();
+
+  overlay.addEventListener('click', (event) => {
+    if (event.target === overlay) {
+      dismiss();
+    }
+  });
+  closeBtn?.addEventListener('click', dismiss);
+  cancelBtn?.addEventListener('click', dismiss);
+
+  if (saveBtn) {
+    saveBtn.addEventListener('click', async () => {
+      if (!methodSelect || !controllerSelect) return;
+      const method = methodSelect.value;
+      const controllerId = controllerSelect.value;
+      if (!method) {
+        if (typeof showToast === 'function') {
+          showToast({ title: 'Pick a method', msg: 'Choose a control method to link.', kind: 'warn', icon: '⚠️' });
+        } else {
+          alert('Choose a control method to link.');
+        }
+        return;
+      }
+      if (!controllerId) {
+        if (typeof showToast === 'function') {
+          showToast({ title: 'Pick a controller', msg: 'Select a controller to link.', kind: 'warn', icon: '⚠️' });
+        } else {
+          alert('Select a controller to link.');
+        }
+        return;
+      }
+      saveBtn.disabled = true;
+      saveBtn.textContent = 'Saving…';
+      try {
+        await saveControllerLinkMapping(key, method, controllerId);
+        if (typeof showToast === 'function') {
+          const controllerLabel = resolveControllerLabel(controllerId);
+          showToast({
+            title: 'Controller linked',
+            msg: `${formatControlMethodLabel(method)} → ${controllerLabel}`,
+            kind: 'success',
+            icon: '🔗'
+          });
+        }
+        dismiss();
+        renderControllerAssignments();
+      } catch (error) {
+        saveBtn.disabled = false;
+        saveBtn.textContent = 'Save';
+        const message = error?.message || 'Failed to save controller link.';
+        if (typeof showToast === 'function') {
+          showToast({ title: 'Link failed', msg: message, kind: 'error', icon: '⚠️' });
+        } else {
+          alert(message);
+        }
+      }
+    });
+  }
+
+  document.addEventListener('keydown', function escListener(event) {
+    if (event.key === 'Escape') {
+      event.preventDefault();
+      document.removeEventListener('keydown', escListener);
+      dismiss();
+    }
+  }, { once: true });
+
+  requestAnimationFrame(() => {
+    methodSelect?.focus();
+  });
+}
+
 function generateUniqueId(equipmentType, roomName, zoneName) {
   // Create unique ID format: EQUIPMENTTYPEROOM#ZONE#RANDOM
   // e.g., DEAL037 for Dehumidifier in Alpha room, zone 3, random 7
@@ -13773,7 +14039,18 @@ function getControllerRequiredEquipment() {
       });
     }
   });
-  
+
+  if (STATE.ctrlMap && typeof STATE.ctrlMap === 'object') {
+    equipment.forEach((item, index) => {
+      const key = deriveControllerLinkKey(item, index);
+      const link = STATE.ctrlMap[key];
+      if (link && link.controllerId) {
+        item.controller = link.controllerId;
+        item.controllerMethod = link.method;
+      }
+    });
+  }
+
   return equipment;
 }
 
@@ -13843,54 +14120,73 @@ function renderControllerAssignments() {
             <th style="text-align: left; padding: 12px 8px; font-weight: 600;">Unique ID</th>
             <th style="text-align: left; padding: 12px 8px; font-weight: 600;">Control</th>
             <th style="text-align: left; padding: 12px 8px; font-weight: 600;">Status</th>
-            <th style="text-align: left; padding: 12px 8px; font-weight: 600;">Controller</th>
+            <th style="text-align: left; padding: 12px 8px; font-weight: 600;">Controller Link</th>
             <th style="text-align: center; padding: 12px 8px; font-weight: 600;">Actions</th>
           </tr>
         </thead>
         <tbody>
-          ${equipment.map((item, index) => `
+          ${equipment.map((item, index) => {
+            const key = deriveControllerLinkKey(item, index);
+            const linkInfo = (STATE.ctrlMap && STATE.ctrlMap[key]) || null;
+            const methodLabel = linkInfo ? formatControlMethodLabel(linkInfo.method) : '';
+            const controllerLabel = linkInfo && linkInfo.controllerId
+              ? resolveControllerLabel(linkInfo.controllerId)
+              : '';
+            const controllerDisplay = linkInfo && linkInfo.controllerId
+              ? firstNonEmptyString(
+                  controllerLabel && controllerLabel !== linkInfo.controllerId
+                    ? `${controllerLabel} (${linkInfo.controllerId})`
+                    : linkInfo.controllerId,
+                  linkInfo.controllerId,
+                  'Unknown controller'
+                )
+              : '';
+            const detail = linkInfo
+              ? `${methodLabel} → ${controllerDisplay}`
+              : 'No controller linked';
+            const tsDetail = linkInfo?.ts ? new Date(linkInfo.ts).toLocaleString() : '';
+            if (linkInfo && linkInfo.controllerId) {
+              item.controller = linkInfo.controllerId;
+              item.controllerMethod = linkInfo.method;
+            }
+            return `
             <tr style="border-bottom: 1px solid #e2e8f0;">
               <td style="padding: 12px 8px;">
-                <span class="chip tiny" style="background: #dbeafe; color: #1e40af;">${item.type}</span>
-                ${item.watts ? `<div class="tiny" style="color: #64748b; margin-top: 2px;">${item.watts}W</div>` : ''}
+                <span class="chip tiny" style="background: #dbeafe; color: #1e40af;">${escapeHtml(item.type)}</span>
+                ${item.watts ? `<div class="tiny" style="color: #64748b; margin-top: 2px;">${escapeHtml(String(item.watts))}W</div>` : ''}
               </td>
-              <td style="padding: 12px 8px; font-weight: 500;">${item.make}</td>
+              <td style="padding: 12px 8px; font-weight: 500;">${escapeHtml(item.make)}</td>
               <td style="padding: 12px 8px;">
-                ${item.model}
-                ${item.serial ? `<div class="tiny" style="color: #64748b; margin-top: 2px;">S/N: ${item.serial}</div>` : ''}
+                ${escapeHtml(item.model)}
+                ${item.serial ? `<div class="tiny" style="color: #64748b; margin-top: 2px;">S/N: ${escapeHtml(item.serial)}</div>` : ''}
               </td>
-              <td style="padding: 12px 8px;">${item.room}</td>
-              <td style="padding: 12px 8px;">${item.zone}</td>
+              <td style="padding: 12px 8px;">${escapeHtml(item.room)}</td>
+              <td style="padding: 12px 8px;">${escapeHtml(item.zone)}</td>
               <td style="padding: 12px 8px;">
-                <code style="background: #f1f5f9; padding: 2px 6px; border-radius: 4px; font-family: 'Monaco', monospace; font-size: 12px;">${item.uniqueId}</code>
-              </td>
-              <td style="padding: 12px 8px;">
-                <span class="chip tiny" style="background: #ecfdf5; color: #059669;">${item.controlMethod}</span>
+                <code style="background: #f1f5f9; padding: 2px 6px; border-radius: 4px; font-family: 'Monaco', monospace; font-size: 12px;">${escapeHtml(item.uniqueId)}</code>
               </td>
               <td style="padding: 12px 8px;">
-                ${item.status === 'Operational' ? 
-                  '<span class="chip tiny" style="background: #dcfce7; color: #166534;">Operational</span>' : 
-                  '<span class="chip tiny" style="background: #fef3c7; color: #d97706;">Setup Required</span>'
+                <span class="chip tiny" style="background: #ecfdf5; color: #059669;">${escapeHtml(item.controlMethod)}</span>
+              </td>
+              <td style="padding: 12px 8px;">
+                ${item.status === 'Operational'
+                  ? '<span class="chip tiny" style="background: #dcfce7; color: #166534;">Operational</span>'
+                  : '<span class="chip tiny" style="background: #fef3c7; color: #d97706;">Setup Required</span>'
                 }
               </td>
               <td style="padding: 12px 8px;">
-                <select class="controller-select" data-equipment-index="${index}" style="padding: 4px 8px; border: 1px solid #d1d5db; border-radius: 4px; font-size: 13px;">
-                  <option value="">Select Controller...</option>
-                  <option value="hub-001">Main Hub (HUB-001)</option>
-                  <option value="controller-001">Zone Controller 1 (CTRL-001)</option>
-                  <option value="controller-002">Zone Controller 2 (CTRL-002)</option>
-                  <option value="wifi-bridge">WiFi Bridge (WIFI-001)</option>
-                </select>
+                <button type="button" class="chip chip--link-controller${linkInfo ? ' is-linked' : ''}" data-action="link-controller" data-key="${escapeAttribute(key)}" data-index="${index}">Link controller…</button>
+                <div class="ctrl-linker-detail tiny">${escapeHtml(detail)}${tsDetail ? `<br><span class="text-muted">${escapeHtml(tsDetail)}</span>` : ''}</div>
               </td>
               <td style="padding: 12px 8px; text-align: center;">
                 <button type="button" class="ghost tiny" onclick="editControllerAssignment(${index})">Edit</button>
               </td>
-            </tr>
-          `).join('')}
+            </tr>`;
+          }).join('')}
         </tbody>
       </table>
     </div>
-    
+
     <div style="margin-top: 16px; padding: 12px; background: #f8fafc; border-radius: 8px; border: 1px solid #e2e8f0;">
       <div class="row" style="justify-content: space-between; align-items: center;">
         <div>
@@ -13904,22 +14200,14 @@ function renderControllerAssignments() {
     </div>
   `;
   
-  // Wire up controller selection changes
-  container.querySelectorAll('.controller-select').forEach(select => {
-    select.addEventListener('change', (e) => {
-      const index = parseInt(e.target.getAttribute('data-equipment-index'));
-      const controllerId = e.target.value;
-      
-      if (equipment[index]) {
-        equipment[index].controller = controllerId || 'Unassigned';
-        
-        showToast({
-          title: 'Controller Updated',
-          msg: `${equipment[index].uniqueId} assigned to ${controllerId || 'Unassigned'}`,
-          kind: 'success',
-          icon: '🔗'
-        });
-      }
+  container.querySelectorAll('[data-action="link-controller"]').forEach((btn) => {
+    btn.addEventListener('click', (event) => {
+      const target = event.currentTarget;
+      const idx = Number(target.getAttribute('data-index'));
+      const key = target.getAttribute('data-key');
+      const item = equipment[idx];
+      if (!item || !key) return;
+      openControllerLinker(item, key);
     });
   });
 }
@@ -14090,7 +14378,7 @@ function closeModal() {
 function exportControllerAssignments() {
   const equipment = getControllerRequiredEquipment();
   
-  const csvHeaders = ['Type', 'Make', 'Model', 'Room', 'Zone', 'Unique ID', 'Control Method', 'Controller'];
+  const csvHeaders = ['Type', 'Make', 'Model', 'Room', 'Zone', 'Unique ID', 'Configured Control', 'Link Method', 'Controller'];
   const csvRows = equipment.map(item => [
     item.type,
     item.make,
@@ -14099,7 +14387,8 @@ function exportControllerAssignments() {
     item.zone,
     item.uniqueId,
     item.controlMethod,
-    item.controller
+    item.controllerMethod ? formatControlMethodLabel(item.controllerMethod) : '',
+    item.controller || ''
   ]);
   
   const csvContent = [csvHeaders, ...csvRows]
