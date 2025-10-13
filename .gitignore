@@ -10,3 +10,9 @@ nohup.out
 * 2.json
 # Runtime state
 data/automation/
+
+# Duplicates & logs
+* 2.js
+* 2.json
+*.log
+nohup.out
