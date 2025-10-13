@@ -607,6 +607,74 @@ h3 { font-size: 1.125rem; }
   display: flex;
 }
 
+.dashboard-panel--automation .automation-drawer {
+  display: grid;
+  gap: 24px;
+}
+
+.dashboard-panel--automation .automation-drawer__card {
+  width: 100%;
+}
+
+.dashboard-stage[data-active-panel="automation"] {
+  position: fixed;
+  inset: 0;
+  display: flex;
+  justify-content: flex-end;
+  align-items: stretch;
+  padding: clamp(16px, 4vw, 40px);
+  background: rgba(15, 23, 42, 0.35);
+  backdrop-filter: blur(6px);
+  z-index: 1100;
+  width: 100%;
+}
+
+.dashboard-stage[data-active-panel="automation"] > #automationPanel {
+  display: block;
+  width: min(420px, 100%);
+  max-height: calc(100vh - 2 * clamp(16px, 4vw, 40px));
+  background: rgba(255, 255, 255, 0.98);
+  border-radius: 20px;
+  box-shadow: var(--gr-shadow-xl, 0 32px 64px rgba(15, 23, 42, 0.28));
+  overflow: hidden;
+  padding: 0;
+}
+
+.dashboard-stage[data-active-panel="automation"] > #automationPanel .automation-drawer {
+  display: flex;
+  flex-direction: column;
+  gap: 24px;
+  padding: 24px;
+  max-height: 100%;
+  overflow-y: auto;
+}
+
+.dashboard-stage[data-active-panel="automation"] > #automationPanel .automation-drawer__card {
+  width: 100%;
+  margin: 0;
+}
+
+.dashboard-stage[data-active-panel="automation"] > #automationPanel.is-active {
+  display: block;
+}
+
+@media (max-width: 768px) {
+  .dashboard-stage[data-active-panel="automation"] {
+    padding: 12px;
+    justify-content: center;
+  }
+
+  .dashboard-stage[data-active-panel="automation"] > #automationPanel {
+    width: 100%;
+    max-height: calc(100vh - 24px);
+  }
+
+  .dashboard-stage[data-active-panel="automation"] > #automationPanel .automation-drawer {
+    padding: 20px 18px;
+    gap: 20px;
+  }
+}
+
 [data-panel] {
   display: none;
 }
@@ -2299,8 +2367,9 @@ h3 { font-size: 1.125rem; }
 
 .ia-assist {
   border: 0;
-  width: 28px;
-  height: 28px;
+  width: 24px;
+  height: 24px;
+  border-radius: 50%;
   background: var(--icon-ia) no-repeat center/contain;
   opacity: .7;
   transition: opacity .2s ease, box-shadow .2s ease;

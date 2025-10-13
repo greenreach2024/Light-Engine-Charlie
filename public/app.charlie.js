@@ -2033,7 +2033,7 @@ document.addEventListener('DOMContentLoaded', async () => {
   smartPlugsButtons.forEach((btn) => {
     btn.addEventListener('click', (e) => {
       e.preventDefault();
-      setActivePanel('smart-plugs');
+      openAutomationDrawer('smart-plugs');
     });
   });
 });
@@ -19015,7 +19015,14 @@ function openAutomationDrawer(section = '') {
     setActivePanel('automation');
   }
 
-  const targetId = section === 'ai' ? 'aiAdvisoryCard' : 'roomAutomationCard';
+  const sectionTargets = {
+    ai: 'aiAdvisoryCard',
+    rules: 'roomAutomationCard',
+    'smart-plugs': 'smartPlugsPanel',
+    'smart-controllers': 'smartControllersPanel',
+    'smart-devices': 'smartControllersPanel'
+  };
+  const targetId = sectionTargets[section] || 'roomAutomationCard';
   const target = document.getElementById(targetId) || document.getElementById('roomAutomationCard');
   if (!target) return;
 
@@ -19789,7 +19796,7 @@ function setActivePanel(panelId = 'overview') {
   }
 
   // Ensure the active panel is visible within the main column
-  if (activePanel) {
+  if (activePanel && panelId !== 'automation') {
     const dashboardMain = document.querySelector('.dashboard-main');
     if (dashboardMain) {
       activePanel.scrollIntoView({ behavior: 'smooth', block: 'start' });
@@ -19863,6 +19870,10 @@ function initializeSidebarNavigation() {
         setActivePanel('overview');
         return;
       }
+      if (target === 'smart-plugs' || target === 'smart-controllers') {
+        openAutomationDrawer(target === 'smart-plugs' ? 'smart-plugs' : 'smart-controllers');
+        return;
+      }
       const group = link.closest('.sidebar-group');
       if (group) {
         const trigger = group.querySelector('.sidebar-group__trigger');
@@ -19913,6 +19924,22 @@ document.addEventListener('DOMContentLoaded', async () => {
       openAutomationDrawer('ai');
     });
   }
+  const panelStage = document.querySelector('[data-role="panel-stage"]');
+  if (panelStage) {
+    panelStage.addEventListener('click', (event) => {
+      if (panelStage.dataset.activePanel === 'automation' && event.target === panelStage) {
+        setActivePanel('overview');
+      }
+    });
+  }
+  document.addEventListener('keydown', (event) => {
+    if (event.key === 'Escape') {
+      const stage = document.querySelector('[data-role="panel-stage"]');
+      if (stage && stage.dataset.activePanel === 'automation') {
+        setActivePanel('overview');
+      }
+    }
+  });
   hydrateEquipmentCounters();
   pollIAState();
   setInterval(pollIAState, 30000);
