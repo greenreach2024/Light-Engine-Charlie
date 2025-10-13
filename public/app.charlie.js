@@ -148,9 +148,9 @@
 // runtime flags (safe defaults)
 window.FEATURES = Object.assign({
   researchMode: localStorage.getItem('gr.researchMode') === '1',
-  automation: true,
-  smartPlugs: true,
-  wizards: false
+  automation: true,          // renders the Automation drawer in sidebar
+  smartPlugs: true,          // enables Smart Plugs inside Automation (not main)
+  wizards: false             // hides setup wizards unless explicitly enabled
 }, window.FEATURES || {});
 
 function escapeAttribute(value) {
@@ -20116,15 +20116,9 @@ document.addEventListener('DOMContentLoaded', async () => {
   window.lightWizard = new LightWizard();
   window.freshLightWizard = new FreshLightWizard();
 
-  if (window.FEATURES.automation) {
-    mountAutomationDrawer();
-    if (window.FEATURES.smartPlugs) {
-      mountSmartPlugsCard('#automation-drawer');
-    }
-    if (window.FEATURES.wizards) {
-      mountWizardEntry('#automation-drawer');
-    }
-  }
+  if (window.FEATURES.automation) mountAutomationDrawer(); // sidebar only
+  if (window.FEATURES.smartPlugs) mountSmartPlugsCard('#automation-drawer'); // not main
+  if (window.FEATURES.wizards) mountWizardEntry('#automation-drawer'); // off by default
 
   const aiCopilotBtn = document.getElementById('btnOpenAiCopilot');
   if (aiCopilotBtn) {
