@@ -4639,6 +4639,32 @@ async function fetchSwitchBotDeviceStatus(deviceId, { force = false } = {}) {
   return entry.inFlight;
 }
 
+app.get('/switchbot/devices', async (req, res) => {
+  try {
+    const token = process.env.SWITCHBOT_TOKEN;
+    if (!token) {
+      return res.status(500).json({ error: 'SWITCHBOT_TOKEN not configured' });
+    }
+    const response = await fetch('https://api.switch-bot.com/v1.1/devices', {
+      headers: {
+        'Authorization': token,
+        'Content-Type': 'application/json'
+      }
+    });
+
+    if (!response.ok) {
+      const text = await response.text();
+      return res.status(response.status).send(text);
+    }
+
+    const payload = await response.json();
+    res.json(payload);
+  } catch (error) {
+    console.error('[switchbot] Proxy failed:', error);
+    res.status(500).json({ error: String(error) });
+  }
+});
+
 app.get("/api/switchbot/devices", asyncHandler(async (req, res) => {
   try {
     const force = ['1', 'true', 'yes'].includes(String(req.query.refresh || '').toLowerCase());

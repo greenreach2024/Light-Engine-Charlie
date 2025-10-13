@@ -14824,6 +14824,26 @@ function startEnvPolling(intervalMs = 10000) {
 }
 
 // --- SwitchBot Devices Management ---
+async function loadSwitchBotDevices() {
+  try {
+    const response = await fetch('/switchbot/devices');
+    if (!response.ok) {
+      throw new Error(`SwitchBot proxy returned ${response.status}`);
+    }
+    const payload = await response.json();
+    const items = payload && (payload.body?.deviceList || payload.devices || []);
+    renderSwitchBotList(Array.isArray(items) ? items : []);
+  } catch (error) {
+    console.error('Failed to load SwitchBot devices list:', error);
+    renderSwitchBotList([]);
+  }
+}
+
+function renderSwitchBotList(items) {
+  STATE.switchbotDevices = Array.isArray(items) ? items : [];
+  renderSwitchBotDevices();
+}
+
 function renderSwitchBotDevices() {
   const container = document.getElementById('switchbotDevicesList');
   if (!container) return;
@@ -19907,6 +19927,7 @@ document.addEventListener('DOMContentLoaded', async () => {
     document.getElementById('btnScanSmartControllers')?.addEventListener('click', window.scanSmartControllers);
     document.getElementById('btnOpenSwitchBotManager')?.addEventListener('click', window.openSwitchBotManager);
   } catch (e) { console.warn('SwitchBot panel wiring failed', e); }
+  try { await loadSwitchBotDevices(); } catch (e) { console.warn('SwitchBot devices load failed', e); }
   if (document.getElementById('smartControllersList')) {
     renderSmartControllerCards(window.LAST_SMART_CONTROLLER_SCAN);
   }
