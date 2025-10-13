@@ -5579,6 +5579,30 @@ input[type="range"]#grd {
   min-height: 40px;
 }
 
+.groupsv2-spectra-card__section {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.groupsv2-spectra-card__section + .groupsv2-spectra-card__section {
+  margin-top: 12px;
+}
+
+.groupsv2-spectra-card__section-title {
+  margin: 0;
+  font-weight: 600;
+  color: #0f172a;
+}
+
+.groupsv2-spectra-card__section-desc {
+  margin: 0;
+}
+
+.groupsv2-spectra-card__legend {
+  margin: 0;
+}
+
 .groupsv2-spectra-card__empty {
   margin: 0;
 }

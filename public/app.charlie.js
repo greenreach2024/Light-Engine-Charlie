@@ -440,61 +440,379 @@ function resolveCardMount(targetSelector, cardKey) {
 }
 
 const groupsv2SpectragraphState = {
-  ids: [],
-  mix: null,
-  body: null
+  body: null,
+  plan: null,
+  selection: {
+    ids: [],
+    mix: null,
+  },
 };
+
+function normalizeSpectraMix(mix) {
+  if (!mix || typeof mix !== 'object') return null;
+  const values = {
+    cw: Number(mix.cw) || 0,
+    ww: Number(mix.ww) || 0,
+    bl: Number(mix.bl) || 0,
+    rd: Number(mix.rd) || 0,
+  };
+  const total = values.cw + values.ww + values.bl + values.rd;
+  if (!(total > 0)) {
+    return {
+      weights: { cw: 0, ww: 0, bl: 0, rd: 0 },
+      display: { cw: 0, ww: 0, bl: 0, rd: 0 },
+    };
+  }
+  const toWeight = (value) => (value / total) * 100;
+  const format = (value) => {
+    const rounded = Math.round(value);
+    return Math.abs(value - rounded) < 0.1 ? rounded : Number(value.toFixed(1));
+  };
+  const weights = {
+    cw: toWeight(values.cw),
+    ww: toWeight(values.ww),
+    bl: toWeight(values.bl),
+    rd: toWeight(values.rd),
+  };
+  const display = {
+    cw: format(weights.cw),
+    ww: format(weights.ww),
+    bl: format(weights.bl),
+    rd: format(weights.rd),
+  };
+  return { weights, display };
+}
+
+function createSpectraBar(mixInfo) {
+  if (!mixInfo) return null;
+  const { weights, display } = mixInfo;
+  const cwStop = weights.cw;
+  const wwStop = cwStop + weights.ww;
+  const blStop = wwStop + weights.bl;
+  const bar = document.createElement('div');
+  bar.className = 'spectra-bar';
+  bar.style.background = `linear-gradient(to right,
+     #BBD5FF 0% ${cwStop}%,
+     #FFE4B5 ${cwStop}% ${wwStop}%,
+     #9EC9FF ${wwStop}% ${blStop}%,
+     #FF9999 ${blStop}% 100%)`;
+  bar.title = `CW ${display.cw}% · WW ${display.ww}% · Blue ${display.bl}% · Red ${display.rd}%`;
+  return bar;
+}
+
+function appendSpectraSection(root, heading, description, mixInfo) {
+  if (!root || !mixInfo) return;
+  const section = document.createElement('div');
+  section.className = 'groupsv2-spectra-card__section';
+
+  if (heading) {
+    const header = document.createElement('p');
+    header.className = 'groupsv2-spectra-card__section-title';
+    header.textContent = heading;
+    section.appendChild(header);
+  }
+
+  if (description) {
+    const note = document.createElement('p');
+    note.className = 'tiny text-muted groupsv2-spectra-card__section-desc';
+    note.textContent = description;
+    section.appendChild(note);
+  }
+
+  const bar = createSpectraBar(mixInfo);
+  if (bar) section.appendChild(bar);
+
+  const legend = document.createElement('p');
+  legend.className = 'tiny text-muted groupsv2-spectra-card__legend';
+  legend.textContent = `CW ${mixInfo.display.cw}% · WW ${mixInfo.display.ww}% · Blue ${mixInfo.display.bl}% · Red ${mixInfo.display.rd}%`;
+  section.appendChild(legend);
+
+  root.appendChild(section);
+}
 
 function renderGroupsv2SpectragraphState() {
   const body = groupsv2SpectragraphState.body;
   if (!body) return;
 
   body.innerHTML = '';
-  const ids = Array.isArray(groupsv2SpectragraphState.ids) ? groupsv2SpectragraphState.ids : [];
-  const mix = groupsv2SpectragraphState.mix;
 
-  if (!ids.length || !mix) {
-    const empty = document.createElement('p');
-    empty.className = 'tiny text-muted groupsv2-spectra-card__empty';
-    empty.textContent = 'No lights selected for spectral preview.';
-    body.appendChild(empty);
-    return;
+  const planInfo = groupsv2SpectragraphState.plan && groupsv2SpectragraphState.plan.mix
+    ? normalizeSpectraMix(groupsv2SpectragraphState.plan.mix)
+    : null;
+  if (planInfo) {
+    const planName = groupsv2SpectragraphState.plan.name || groupsv2SpectragraphState.plan.key || '';
+    appendSpectraSection(
+      body,
+      planName ? `Plan: ${planName}` : 'Plan spectrum',
+      'Day 1 mix',
+      planInfo,
+    );
   }
 
-  const normalized = {
-    cw: Number(mix.cw) || 0,
-    ww: Number(mix.ww) || 0,
-    bl: Number(mix.bl) || 0,
-    rd: Number(mix.rd) || 0
-  };
-  const total = (normalized.cw + normalized.ww + normalized.bl + normalized.rd) || 1;
-  const cwW = (normalized.cw / total) * 100;
-  const wwW = (normalized.ww / total) * 100;
-  const blW = (normalized.bl / total) * 100;
-  const rdW = (normalized.rd / total) * 100;
+  const selection = groupsv2SpectragraphState.selection || {};
+  const ids = Array.isArray(selection.ids) ? selection.ids : [];
+  const selectionInfo = selection.mix ? normalizeSpectraMix(selection.mix) : null;
+  if (ids.length && selectionInfo) {
+    const label = ids.length === 1 ? '1 fixture selected' : `${ids.length} fixtures selected`;
+    appendSpectraSection(body, 'Selected fixtures', label, selectionInfo);
+  }
 
-  const bar = document.createElement('div');
-  bar.className = 'spectra-bar';
-  bar.style.background = `linear-gradient(to right,
-     #BBD5FF 0% ${cwW}%,
-     #FFE4B5 ${cwW}% ${cwW + wwW}%,
-     #9EC9FF ${cwW + wwW}% ${cwW + wwW + blW}%,
-     #FF9999 ${cwW + wwW + blW}% 100%)`;
-  bar.title = `CW ${normalized.cw}% · WW ${normalized.ww}% · Blue ${normalized.bl}% · Red ${normalized.rd}%`;
-  body.appendChild(bar);
+  if (!planInfo && !(ids.length && selectionInfo)) {
+    const empty = document.createElement('p');
+    empty.className = 'tiny text-muted groupsv2-spectra-card__empty';
+    if (groupsv2SpectragraphState.plan) {
+      const planName = groupsv2SpectragraphState.plan.name || groupsv2SpectragraphState.plan.key || '';
+      empty.textContent = planName
+        ? `No spectral data found for ${planName}.`
+        : 'No spectral data found for the selected plan.';
+    } else {
+      empty.textContent = 'Select a plan to preview its spectrum.';
+    }
+    body.appendChild(empty);
+  }
 }
 
 function updateGroupsv2Spectragraph(ids, mix) {
-  groupsv2SpectragraphState.ids = Array.isArray(ids) ? ids.slice() : [];
-  groupsv2SpectragraphState.mix = mix && typeof mix === 'object'
-    ? {
-        cw: Number(mix.cw) || 0,
-        ww: Number(mix.ww) || 0,
-        bl: Number(mix.bl) || 0,
-        rd: Number(mix.rd) || 0
-      }
-    : null;
+  groupsv2SpectragraphState.selection = {
+    ids: Array.isArray(ids) ? ids.slice() : [],
+    mix: mix && typeof mix === 'object'
+      ? {
+          cw: Number(mix.cw) || 0,
+          ww: Number(mix.ww) || 0,
+          bl: Number(mix.bl) || 0,
+          rd: Number(mix.rd) || 0,
+        }
+      : null,
+  };
   renderGroupsv2SpectragraphState();
+}
+
+function hex12ToPercentMix(hex12) {
+  if (!hex12 || typeof hex12 !== 'string') return null;
+  const trimmed = hex12.trim();
+  if (trimmed.length < 8) return null;
+  const cleaned = trimmed.replace(/^0x/i, '');
+  if (cleaned.length < 8) return null;
+  const segment = (start) => cleaned.slice(start, start + 2);
+  const parseSegment = (start) => {
+    const part = segment(start);
+    if (!part) return null;
+    const value = Number.parseInt(part, 16);
+    if (!Number.isFinite(value)) return null;
+    const pct = Math.round((value / 0x64) * 100);
+    return Math.max(0, Math.min(100, pct));
+  };
+  const cw = parseSegment(0);
+  const ww = parseSegment(2);
+  const bl = parseSegment(4);
+  const rd = parseSegment(6);
+  if ([cw, ww, bl, rd].some((value) => value == null)) return null;
+  return { cw, ww, bl, rd };
+}
+
+function readMixChannel(source, keys) {
+  if (!source || typeof source !== 'object') return null;
+  for (const key of keys) {
+    if (!Object.prototype.hasOwnProperty.call(source, key)) continue;
+    const value = toNumberOrNull(source[key]);
+    if (value != null) return value;
+  }
+  return null;
+}
+
+function extractMixFromCandidate(candidate) {
+  if (!candidate) return null;
+  if (typeof candidate === 'string') {
+    return hex12ToPercentMix(candidate);
+  }
+  if (typeof candidate !== 'object') return null;
+
+  const hexCandidates = [
+    candidate.hex,
+    candidate.hex12,
+    candidate.mixHex,
+    candidate.mix_hex,
+    candidate.mix?.hex,
+    candidate.mix?.hex12,
+    candidate.mix?.hex_12,
+    candidate.raw?.hex,
+    candidate.raw?.hex12,
+  ];
+  for (const hex of hexCandidates) {
+    if (typeof hex !== 'string') continue;
+    const mix = hex12ToPercentMix(hex);
+    if (mix) return mix;
+  }
+
+  const mixSource = candidate.mix && typeof candidate.mix === 'object' ? candidate.mix : candidate;
+  const cw = readMixChannel(mixSource, ['cw', 'coolWhite', 'cool_white', 'coolwhite', 'cool']);
+  const ww = readMixChannel(mixSource, ['ww', 'warmWhite', 'warm_white', 'warmwhite', 'warm']);
+  const bl = readMixChannel(mixSource, ['bl', 'blue', 'bluePct', 'blue_pct']);
+  const rd = readMixChannel(mixSource, ['rd', 'red', 'redPct', 'red_pct']);
+
+  if ([cw, ww, bl, rd].every((value) => value == null)) return null;
+
+  return {
+    cw: cw != null ? cw : 0,
+    ww: ww != null ? ww : 0,
+    bl: bl != null ? bl : 0,
+    rd: rd != null ? rd : 0,
+  };
+}
+
+function extractPlanDayOneMix(plan) {
+  if (!plan || typeof plan !== 'object') return null;
+  const candidates = [];
+  const derived = plan._derived && typeof plan._derived === 'object' ? plan._derived : null;
+  if (derived) {
+    if (derived.firstDay && typeof derived.firstDay === 'object') {
+      candidates.push(derived.firstDay.mix);
+      candidates.push(derived.firstDay.raw?.mix);
+      candidates.push(derived.firstDay);
+    }
+    candidates.push(derived.spectrum);
+    if (Array.isArray(derived.lightDays) && derived.lightDays.length) {
+      candidates.push(derived.lightDays[0]?.mix);
+      candidates.push(derived.lightDays[0]);
+    }
+  }
+  if (Array.isArray(plan.light?.days) && plan.light.days.length) {
+    candidates.push(plan.light.days[0]?.mix);
+    candidates.push(plan.light.days[0]);
+  }
+  if (Array.isArray(plan.lightDays) && plan.lightDays.length) {
+    candidates.push(plan.lightDays[0]?.mix);
+    candidates.push(plan.lightDays[0]);
+  }
+  if (Array.isArray(plan.days) && plan.days.length) {
+    candidates.push(plan.days[0]?.mix);
+    candidates.push(plan.days[0]);
+  }
+  candidates.push(plan.spectrum, plan.mix, plan);
+  for (const candidate of candidates) {
+    const mix = extractMixFromCandidate(candidate);
+    if (mix) return mix;
+  }
+  return null;
+}
+
+function resolveSpectragraphBody(targetSel) {
+  if (!targetSel && targetSel !== 0) return groupsv2SpectragraphState.body;
+  const container = ensureTarget(targetSel);
+  if (!container) return groupsv2SpectragraphState.body;
+  const inner = container.querySelector('#GVPFLSW29')
+    || container.querySelector('.spectra')
+    || container;
+  return inner;
+}
+
+function updateSpectragraphFromPlan(targetSel, plan) {
+  const body = resolveSpectragraphBody(targetSel);
+  if (body) {
+    groupsv2SpectragraphState.body = body;
+  }
+  if (plan && typeof plan === 'object') {
+    const mix = extractPlanDayOneMix(plan);
+    groupsv2SpectragraphState.plan = {
+      key: plan.id || plan.key || plan.name || '',
+      name: plan.name || plan.label || plan.id || plan.key || '',
+      mix: mix || null,
+    };
+  } else {
+    groupsv2SpectragraphState.plan = null;
+  }
+  renderGroupsv2SpectragraphState();
+}
+
+async function ensurePlanMapLoaded() {
+  if (window.PLANS && typeof window.PLANS === 'object' && Object.keys(window.PLANS).length) {
+    return window.PLANS;
+  }
+  const statePlans = (window.STATE && Array.isArray(window.STATE.plans)) ? window.STATE.plans : [];
+  if (statePlans.length) {
+    const normalized = normalizePlanMap(statePlans);
+    window.PLANS = { ...(window.PLANS || {}), ...normalized };
+    return window.PLANS;
+  }
+  try {
+    const map = await getPlanMap();
+    if (map && typeof map === 'object') {
+      window.PLANS = { ...(window.PLANS || {}), ...map };
+      return window.PLANS;
+    }
+  } catch (error) {
+    console.warn('Failed to load plans for spectragraph', error);
+  }
+  return window.PLANS || {};
+}
+
+async function refreshPlanSpectragraphOptions(planSelect) {
+  if (!planSelect) return;
+  const previousValue = planSelect.value;
+  planSelect.disabled = true;
+  try {
+    const planMap = await ensurePlanMapLoaded();
+    const keys = Object.keys(planMap || {});
+    keys.sort((a, b) => {
+      const aName = planMap[a]?.name || a;
+      const bName = planMap[b]?.name || b;
+      return String(aName).localeCompare(String(bName));
+    });
+    planSelect.innerHTML = '';
+    const placeholder = document.createElement('option');
+    placeholder.value = '';
+    placeholder.textContent = keys.length ? 'Select a plan…' : '(no plans available)';
+    planSelect.appendChild(placeholder);
+    keys.forEach((key) => {
+      const plan = planMap[key];
+      const option = document.createElement('option');
+      option.value = key;
+      option.textContent = plan?.name || plan?.label || key;
+      planSelect.appendChild(option);
+    });
+    let nextValue = '';
+    if (previousValue && planMap[previousValue]) {
+      nextValue = previousValue;
+    } else if (planSelect.dataset.preferredPlan && planMap[planSelect.dataset.preferredPlan]) {
+      nextValue = planSelect.dataset.preferredPlan;
+    } else if (keys.length) {
+      nextValue = keys[0];
+    }
+    planSelect.value = nextValue;
+    planSelect.dataset.preferredPlan = nextValue || '';
+    const plan = nextValue ? planMap[nextValue] : null;
+    updateSpectragraphFromPlan('#groupsv2-spectragraph', plan || null);
+  } catch (error) {
+    console.warn('Failed to refresh plan spectragraph options', error);
+    updateSpectragraphFromPlan('#groupsv2-spectragraph', null);
+  } finally {
+    planSelect.disabled = false;
+  }
+}
+
+async function handlePlanSelectChange(event) {
+  const select = event?.currentTarget;
+  if (!select) return;
+  select.dataset.preferredPlan = select.value || '';
+  if (!select.value) {
+    updateSpectragraphFromPlan('#groupsv2-spectragraph', null);
+    return;
+  }
+  const planMap = await ensurePlanMapLoaded();
+  const plan = planMap[select.value] || null;
+  updateSpectragraphFromPlan('#groupsv2-spectragraph', plan);
+}
+
+async function initPlanSpectragraph(planSelect) {
+  if (!planSelect) {
+    await ensurePlanMapLoaded();
+    return;
+  }
+  if (!planSelect.dataset.spectragraphReady) {
+    planSelect.addEventListener('change', handlePlanSelectChange);
+    planSelect.dataset.spectragraphReady = '1';
+  }
+  await refreshPlanSpectragraphOptions(planSelect);
 }
 
 function ensureTarget(sel) {
@@ -724,7 +1042,7 @@ function renderPlanSpectragraph(root, planSelect) {
       <article class="groupsv2-spectra-card gr-card">
         <header class="groupsv2-spectra-card__header">
           <h3>Spectragraph</h3>
-          <p class="tiny text-muted">Average spectrum for the previewed fixtures.</p>
+          <p class="tiny text-muted">Preview the selected plan spectrum and compare it with selected fixtures.</p>
         </header>
         <div class="groupsv2-spectra-card__body">
           <div id="GVPFLSW29" class="spectra" aria-live="polite"></div>
@@ -735,8 +1053,25 @@ function renderPlanSpectragraph(root, planSelect) {
   root.dataset.hydrated = 'true';
   groupsv2SpectragraphState.body = root.querySelector('#GVPFLSW29');
   renderGroupsv2SpectragraphState();
-  if (planSelect) {
-    planSelect.addEventListener('change', renderGroupsv2SpectragraphState);
+  const select = planSelect || null;
+  if (select) {
+    initPlanSpectragraph(select).catch((error) => {
+      console.warn('Failed to initialize plan spectragraph selector', error);
+    });
+  } else {
+    ensurePlanMapLoaded()
+      .then((plans) => {
+        const keys = Object.keys(plans || {});
+        const firstKey = keys[0];
+        if (firstKey) {
+          updateSpectragraphFromPlan(root, plans[firstKey]);
+        } else {
+          updateSpectragraphFromPlan(root, null);
+        }
+      })
+      .catch((error) => {
+        console.warn('Failed to hydrate plan spectragraph', error);
+      });
   }
 }
 
