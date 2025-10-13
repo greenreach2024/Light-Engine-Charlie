@@ -86,6 +86,7 @@ const UI_DATA_RESOURCES = new Map([
   ['env', 'env.json']
 ]);
 const UI_EQUIP_PATH = path.join(PUBLIC_DIR, 'data', 'ui.equip.json');
+const UI_CTRLMAP_PATH = path.join(PUBLIC_DIR, 'data', 'ui.ctrlmap.json');
 // Device DB (outside public): ./data/devices.nedb
 const DB_DIR = path.resolve('./data');
 const DB_PATH = path.join(DB_DIR, 'devices.nedb');
@@ -6499,6 +6500,52 @@ app.post("/ingest/env", async (req, res) => {
 });
 
 // Namespaced UI config endpoints to avoid collisions with controller routes
+app.get('/ui/ctrlmap', (req, res) => {
+  setCors(req, res);
+  let existing = {};
+  try {
+    if (fs.existsSync(UI_CTRLMAP_PATH)) {
+      const raw = fs.readFileSync(UI_CTRLMAP_PATH, 'utf8');
+      existing = raw ? JSON.parse(raw) : {};
+    }
+  } catch (error) {
+    console.warn('[ui.ctrlmap] Failed to read data:', error?.message || error);
+    existing = {};
+  }
+  res.json(existing);
+});
+
+app.post('/ui/ctrlmap', pinGuard, express.json(), (req, res) => {
+  setCors(req, res);
+  let existing = {};
+  try {
+    if (fs.existsSync(UI_CTRLMAP_PATH)) {
+      const raw = fs.readFileSync(UI_CTRLMAP_PATH, 'utf8');
+      existing = raw ? JSON.parse(raw) : {};
+    }
+  } catch (error) {
+    console.warn('[ui.ctrlmap] Failed to read existing data:', error?.message || error);
+    existing = {};
+  }
+
+  const { key, method, controllerId } = req.body || {};
+  if (!key || !method || !controllerId) {
+    return res.status(400).json({ error: 'key/method/controllerId required' });
+  }
+
+  existing[key] = { method, controllerId, ts: Date.now() };
+
+  try {
+    fs.mkdirSync(path.dirname(UI_CTRLMAP_PATH), { recursive: true });
+    fs.writeFileSync(UI_CTRLMAP_PATH, JSON.stringify(existing, null, 2));
+  } catch (error) {
+    console.warn('[ui.ctrlmap] Failed to persist data:', error?.message || error);
+    return res.status(500).json({ error: 'failed to save' });
+  }
+
+  res.json({ ok: true });
+});
+
 app.options('/ui/:resource', (req, res) => { setCors(req, res); res.status(204).end(); });
 
 app.get('/ui/:resource', (req, res) => {
