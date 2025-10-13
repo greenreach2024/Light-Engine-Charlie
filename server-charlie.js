@@ -75,6 +75,7 @@ const PLANS_PATH = path.join(DATA_DIR, 'plans.json');
 const SCHEDULES_PATH = path.join(DATA_DIR, 'schedules.json');
 const ROOMS_PATH = path.join(DATA_DIR, 'rooms.json');
 const CALIBRATIONS_PATH = path.join(DATA_DIR, 'calibration.json');
+const DEVICES_CACHE_PATH = path.join(DATA_DIR, 'devices.cache.json');
 const CHANNEL_SCALE_PATH = path.resolve('./config/channel-scale.json');
 const MS_PER_DAY = 24 * 60 * 60 * 1000;
 const UI_DATA_RESOURCES = new Map([
@@ -118,6 +119,32 @@ function saveGroupsFile(groups) {
   } catch (err) {
     console.error('[groups] Failed to write groups.json:', err.message);
     return false;
+  }
+}
+
+function readDeviceCache() {
+  try {
+    if (!fs.existsSync(DEVICES_CACHE_PATH)) return null;
+    const raw = JSON.parse(fs.readFileSync(DEVICES_CACHE_PATH, 'utf8'));
+    if (raw && typeof raw === 'object') {
+      return raw;
+    }
+  } catch (err) {
+    console.warn('[devices.cache] Failed to read cache:', err.message);
+  }
+  return null;
+}
+
+function writeDeviceCache(data) {
+  try {
+    ensureDataDir();
+    const payload = {
+      cachedAt: new Date().toISOString(),
+      data
+    };
+    fs.writeFileSync(DEVICES_CACHE_PATH, JSON.stringify(payload, null, 2));
+  } catch (err) {
+    console.warn('[devices.cache] Failed to write cache:', err.message);
   }
 }
 
@@ -5447,12 +5474,33 @@ app.get('/api/devicedatas', async (req, res) => {
   const target = `${CONTROLLER_BASE()}/api/devicedatas`;
   try {
     const response = await fetch(target, { signal: AbortSignal.timeout(5000) });
-    const body = await response.text();
+    const bodyText = await response.text();
+    if (!response.ok) {
+      throw new Error(`upstream_status_${response.status}`);
+    }
+    let parsed;
+    try {
+      parsed = JSON.parse(bodyText);
+    } catch (err) {
+      throw new Error(`upstream_non_json: ${err.message}`);
+    }
+    writeDeviceCache(parsed);
     res
       .status(response.status)
-      .type(response.headers.get('content-type') || 'application/json')
-      .send(body);
+      .type('application/json')
+      .send(JSON.stringify(parsed));
   } catch (error) {
+    const cached = readDeviceCache();
+    if (cached) {
+      res.setHeader('X-Cache', 'hit');
+      const payload = {
+        stale: true,
+        cachedAt: cached.cachedAt,
+        data: cached.data ?? cached
+      };
+      res.status(200).json(payload);
+      return;
+    }
     res.status(502).json({ error: 'proxy_error', target, detail: String(error) });
   }
 });
