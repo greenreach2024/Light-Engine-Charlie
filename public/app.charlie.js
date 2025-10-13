@@ -20923,14 +20923,23 @@ document.addEventListener('DOMContentLoaded', async () => {
       }
     }
   });
-  const dehumTarget = window.FEATURES.dehumOnMain ? '#main-cards' : '#equip-dehum-setup';
-  mountDehumidifierSetup(dehumTarget);
+  if (window.FEATURES.dehumOnMain) {
+    mountDehumidifierSetup('#main-cards');
+  } else {
+    mountDehumidifierSetup('#equip-dehum-setup');
+  }
 
-  const unassignedTarget = window.FEATURES.unassignedOnMain ? '#main-cards' : '#groupsv2-unassigned';
-  mountUnassignedLights(unassignedTarget);
+  if (window.FEATURES.unassignedOnMain) {
+    mountUnassignedLights('#main-cards');
+  } else {
+    mountUnassignedLights('#groupsv2-unassigned');
+  }
 
-  const spectragraphTarget = window.FEATURES.spectragraphOnMain ? '#main-cards' : '#groupsv2-spectragraph';
-  mountSpectragraph(spectragraphTarget);
+  if (window.FEATURES.spectragraphOnMain) {
+    mountSpectragraph('#main-cards');
+  } else {
+    mountSpectragraph('#groupsv2-spectragraph');
+  }
   hydrateEquipmentCounters();
   pollIAState();
   setInterval(pollIAState, 30000);
