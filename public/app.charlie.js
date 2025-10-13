@@ -357,39 +357,6 @@ function renderLightInfoCard(light) {
 
 // Show light info card when a light is highlighted in the unassigned lights field
 document.addEventListener('DOMContentLoaded', () => {
-  // Populate Assigned Lights select beside Unassigned Lights
-  const renderAssignedLights = () => {
-    const select = document.getElementById('assignedLightsSelect');
-    if (!select) return;
-    select.innerHTML = '';
-    // Find the current group (assume last created or selected)
-    const groups = (window.STATE && Array.isArray(window.STATE.groups)) ? window.STATE.groups : [];
-    const lights = (window.STATE && Array.isArray(window.STATE.lights)) ? window.STATE.lights : [];
-    // Use the last group as the current group for now
-    const group = groups.length ? groups[groups.length - 1] : null;
-    if (!group || !Array.isArray(group.lights) || !group.lights.length) {
-      const opt = document.createElement('option');
-      opt.value = '';
-      opt.textContent = '(none assigned)';
-      select.appendChild(opt);
-      return;
-    }
-    group.lights.forEach(member => {
-      const light = lights.find(l => l.id === member.id || l.serial === member.id);
-      const label = light ? `${light.name || light.id} (S/N: ${light.id || ''})` : (member.id || '(unknown)');
-      const opt = document.createElement('option');
-      opt.value = light ? light.id : member.id;
-      opt.textContent = label;
-      select.appendChild(opt);
-    });
-  };
-
-  document.addEventListener('groups-updated', renderAssignedLights);
-  document.addEventListener('lights-updated', renderAssignedLights);
-  // Initial render once DOM is ready
-  renderAssignedLights();
-  // Ensure any late async updates still populate the list
-  setTimeout(renderAssignedLights, 200);
   const unassignedSelect = document.getElementById('groupsV2UnassignedLightsSelect');
   const card = document.getElementById('lightInfoCard');
   const cardBody = document.getElementById('lightInfoCardBody');
