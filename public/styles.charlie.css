@@ -671,6 +671,11 @@ h3 { font-size: 1.125rem; }
   color: var(--medium, #475569);
 }
 
+.overview__legend-button {
+  flex-shrink: 0;
+  white-space: nowrap;
+}
+
 .overview__legend-item {
   display: inline-flex;
   align-items: center;
@@ -1719,6 +1724,16 @@ h3 { font-size: 1.125rem; }
   align-items: flex-start;
   justify-content: space-between;
   gap: 12px;
+}
+
+.card.std.ai-advisory-card .ai-advisory-card__actions {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.card.std.ai-advisory-card .ai-advisory-card__actions .ghost {
+  white-space: nowrap;
 }
 
 .card.std.ai-advisory-card .badge--ai {
