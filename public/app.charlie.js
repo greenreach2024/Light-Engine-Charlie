@@ -20230,6 +20230,28 @@ document.addEventListener('DOMContentLoaded', async () => {
       }
     }
   });
+  const dehumHost = document.getElementById('equip-dehum-setup');
+  if (dehumHost && dehumHost.dataset.hydrated !== 'true') {
+    dehumHost.innerHTML = `
+      <article class="equip-micro equip-micro--dehum">
+        <header class="equip-micro__header">
+          <h3 class="equip-micro__title">Dehumidifier Setup</h3>
+          <p class="tiny text-muted equip-micro__hint">Quickly adjust counts for each grow room.</p>
+        </header>
+        <div class="equip-micro__body">
+          <div class="equip-micro__row">
+            <span class="equip-micro__label">Room 1</span>
+            <div class="equip-row" data-equip="dehum" data-room="room1">
+              <button type="button" data-op="dec" data-target="dehum:room1" aria-label="Decrease Room 1 dehumidifiers">–</button>
+              <input data-input="dehum:room1" value="0" inputmode="numeric" aria-label="Room 1 dehumidifier count" />
+              <button type="button" data-op="inc" data-target="dehum:room1" aria-label="Increase Room 1 dehumidifiers">+</button>
+            </div>
+          </div>
+        </div>
+      </article>
+    `;
+    dehumHost.dataset.hydrated = 'true';
+  }
   hydrateEquipmentCounters();
   pollIAState();
   setInterval(pollIAState, 30000);
@@ -20304,10 +20326,62 @@ document.addEventListener('DOMContentLoaded', async () => {
 
     // --- Unassigned lights → Active cards → Spectragraph ---
     try {
-      const unassignedRoot = document.getElementById('GRUL32');
-      const activeRoot = document.getElementById('GRACB28');
-      const spectraRoot = document.getElementById('GVPFLSW29');
-      if (!unassignedRoot || !activeRoot || !spectraRoot) return;
+      const unassignedMount = document.getElementById('groupsv2-unassigned');
+      const spectragraphMount = document.getElementById('groupsv2-spectragraph');
+      if (!unassignedMount || !spectragraphMount) return;
+
+      let unassignedRoot = unassignedMount.querySelector('#GRUL32');
+      let activeRoot = unassignedMount.querySelector('#GRACB28');
+      let applyBtn = unassignedMount.querySelector('#GRUL32-apply');
+      let clearBtn = unassignedMount.querySelector('#GRUL32-clear');
+
+      if (!unassignedRoot || !activeRoot || !applyBtn || !clearBtn) {
+        unassignedMount.innerHTML = '';
+        const wrapper = document.createElement('article');
+        wrapper.className = 'groupsv2-unassigned-card gr-card';
+        wrapper.innerHTML = `
+          <header class="groupsv2-unassigned-card__header">
+            <h3>Unassigned Lights</h3>
+            <p class="tiny text-muted">Select fixtures to preview their plan coverage and spectra.</p>
+          </header>
+          <div class="groupsv2-unassigned-card__body">
+            <div id="GRUL32" class="gr-list groupsv2-unassigned-card__list" aria-live="polite"></div>
+            <div class="groupsv2-unassigned-card__actions" role="group" aria-label="Preview controls">
+              <button id="GRUL32-apply" type="button" class="primary">Preview Selection</button>
+              <button id="GRUL32-clear" type="button" class="ghost">Clear</button>
+            </div>
+          </div>
+          <div class="groupsv2-unassigned-card__active">
+            <h4 class="groupsv2-unassigned-card__active-title">Previewed Lights</h4>
+            <div id="GRACB28" class="cards grid groupsv2-unassigned-card__active-cards" aria-live="polite"></div>
+          </div>
+        `;
+        unassignedMount.appendChild(wrapper);
+        unassignedRoot = wrapper.querySelector('#GRUL32');
+        activeRoot = wrapper.querySelector('#GRACB28');
+        applyBtn = wrapper.querySelector('#GRUL32-apply');
+        clearBtn = wrapper.querySelector('#GRUL32-clear');
+      }
+
+      let spectraRoot = spectragraphMount.querySelector('#GVPFLSW29');
+      if (!spectraRoot) {
+        spectragraphMount.innerHTML = '';
+        const spectraCard = document.createElement('article');
+        spectraCard.className = 'groupsv2-spectra-card gr-card';
+        spectraCard.innerHTML = `
+          <header class="groupsv2-spectra-card__header">
+            <h3>Spectragraph</h3>
+            <p class="tiny text-muted">Average spectrum for the previewed fixtures.</p>
+          </header>
+          <div class="groupsv2-spectra-card__body">
+            <div id="GVPFLSW29" class="spectra" aria-live="polite"></div>
+          </div>
+        `;
+        spectragraphMount.appendChild(spectraCard);
+        spectraRoot = spectraCard.querySelector('#GVPFLSW29');
+      }
+
+      if (!unassignedRoot || !activeRoot || !applyBtn || !clearBtn || !spectraRoot) return;
 
       // Boot only if our new containers exist
       const API = (window.API_BASE || ''); // per Charlie guardrails
@@ -20363,25 +20437,39 @@ document.addEventListener('DOMContentLoaded', async () => {
 
       const renderActive = (ids) => {
         activeRoot.innerHTML = '';
+        if (!ids.length) {
+          const empty = document.createElement('p');
+          empty.className = 'tiny text-muted groupsv2-unassigned-card__empty';
+          empty.textContent = 'Select lights to preview their details here.';
+          activeRoot.appendChild(empty);
+          return;
+        }
         ids.forEach(id => {
           const d = devices.find(x => String(x.id) === String(id));
           const card = document.createElement('div');
-          card.className = 'card';
+          card.className = 'card groupsv2-active-card';
           card.dataset.id = id;
           card.innerHTML =
-            `<div class="row space-between">
+            `<div class="row space-between groupsv2-active-card__header">
                 <strong>${(d && d.deviceName) || '(unnamed)'}</strong>
                 <span class="mono">ID ${id}</span>
               </div>
               <div class="mini mix" data-hex="${deviceMixHex(id)}"></div>
-              <button class="btn-ghost remove" data-id="${id}">Remove</button>`;
+              <button class="btn-ghost remove" data-id="${id}" type="button">Remove</button>`;
           activeRoot.appendChild(card);
         });
       };
 
       const renderSpectra = (ids) => {
-        const m = averageMix(ids);
         spectraRoot.innerHTML = '';
+        if (!ids.length) {
+          const empty = document.createElement('p');
+          empty.className = 'tiny text-muted groupsv2-spectra-card__empty';
+          empty.textContent = 'No lights selected for spectral preview.';
+          spectraRoot.appendChild(empty);
+          return;
+        }
+        const m = averageMix(ids);
         const bar = document.createElement('div');
         bar.className = 'spectra-bar';
         const total = (m.cw + m.ww + m.bl + m.rd) || 1;
@@ -20402,32 +20490,32 @@ document.addEventListener('DOMContentLoaded', async () => {
       listEl.innerHTML = '';
       unassigned.forEach(d => {
         const row = document.createElement('label');
-        row.className = 'row gap8 align-center';
+        row.className = 'groupsv2-unassigned-card__row';
         row.innerHTML =
           `<input type="checkbox" class="gr-pick" value="${d.id}">
            <span class="mono">${d.deviceName || '(unnamed)'} · ${d.id}</span>`;
         listEl.appendChild(row);
       });
 
-      const picks = () => [...document.querySelectorAll('#GRUL32 .gr-pick:checked')].map(x => x.value);
+      const picks = () => [...unassignedRoot.querySelectorAll('.gr-pick:checked')].map(x => x.value);
       const apply = () => {
         const ids = picks();
         renderActive(ids);
         renderSpectra(ids);
       };
       const clear = () => {
-        document.querySelectorAll('#GRUL32 .gr-pick').forEach(cb => { cb.checked = false; });
+        unassignedRoot.querySelectorAll('.gr-pick').forEach(cb => { cb.checked = false; });
         renderActive([]);
         renderSpectra([]);
       };
 
-      document.getElementById('GRUL32-apply')?.addEventListener('click', apply);
-      document.getElementById('GRUL32-clear')?.addEventListener('click', clear);
+      applyBtn.addEventListener('click', apply);
+      clearBtn.addEventListener('click', clear);
       activeRoot.addEventListener('click', (e) => {
         const t = e.target.closest('.remove');
         if (!t) return;
         const id = String(t.dataset.id);
-        const cb = document.querySelector(`#GRUL32 .gr-pick[value="${id}"]`);
+        const cb = unassignedRoot.querySelector(`.gr-pick[value="${id}"]`);
         if (cb) cb.checked = false;
         apply();
       });
