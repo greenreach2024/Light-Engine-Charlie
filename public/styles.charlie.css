@@ -612,6 +612,28 @@ h3 { font-size: 1.125rem; }
   gap: 24px;
 }
 
+.automation-wizards__header {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin-bottom: 16px;
+}
+
+.automation-wizards__actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-bottom: 12px;
+}
+
+.automation-wizards__actions .ghost {
+  font-weight: 600;
+}
+
+.automation-wizards__note {
+  margin: 0;
+}
+
 .dashboard-panel--automation .automation-drawer__card {
   width: 100%;
 }
