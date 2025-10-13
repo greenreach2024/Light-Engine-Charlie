@@ -2026,8 +2026,9 @@ async function jpatch(path, body) {
 }
 
 function pctToHex(p) {
-  const v = Math.round(Math.max(0, Math.min(100, Number(p) || 0)) * 0.64);
-  return v.toString(16).padStart(2, '0');
+  const clamped = Math.max(0, Math.min(100, Number(p) || 0));
+  const whole = Math.round(clamped);
+  return whole.toString(16).toUpperCase().padStart(2, '0');
 }
 
 function mixHEX12(ch) {
