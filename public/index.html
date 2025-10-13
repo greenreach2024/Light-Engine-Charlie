@@ -7,6 +7,7 @@
   <link rel="icon" href="./favicon.svg" type="image/svg+xml">
   <link rel="stylesheet" href="./styles.charlie.css?v=charlie-0.5">
   <script src="./app.charlie.js?v=charlie-0.5" defer></script>
+  <script src="./groups-v2.js?v=charlie-0.5" defer></script>
 </head>
 <body>
   <div class="dashboard-shell">
@@ -76,6 +77,9 @@
   <div class="sidebar-standalone">
     <button type="button" class="sidebar-link" data-sidebar-link data-target="groups">
       Groups
+    </button>
+    <button type="button" class="sidebar-link" data-sidebar-link data-target="groups-v2">
+      Groups V2
     </button>
     <button type="button" class="sidebar-link" data-sidebar-link data-target="calibration">
       Calibration
@@ -728,6 +732,155 @@
     </div>
   </form>
 </section>
+      <section id="groupsV2Panel" class="card hud-shell gr-card" data-panel="groups-v2" data-card-prefix="GR" data-card-code="GV2" hidden>
+        <div class="row row--between row--center hud-shell__header">
+          <h2 class="hud-shell__title">Groups V2</h2>
+          <span id="groupsV2Status" class="tiny" aria-live="polite"></span>
+        </div>
+        <div class="panel-body" style="display:flex;flex-direction:column;gap:18px;">
+          <div class="gr-card" id="groupsV2PlanForm" style="padding:16px;border:1px solid #cbd5e1;border-radius:12px;background:linear-gradient(120deg,#f8fafc 0%,#e0f2fe 100%);display:flex;flex-direction:column;gap:16px;">
+            <div class="row row--wrap" style="gap:12px;align-items:flex-end;" id="groupsV2PlanControls">
+              <label class="tiny" style="display:flex;flex-direction:column;min-width:180px;">
+                Room
+                <select id="groupsV2RoomSelect" style="margin-top:4px;min-height:32px;border-radius:6px;border:1px solid #cbd5e1;">
+                  <option value="GreenReach">GreenReach</option>
+                </select>
+              </label>
+              <label class="tiny" style="display:flex;flex-direction:column;min-width:160px;">
+                Zone
+                <select id="groupsV2ZoneSelect" style="margin-top:4px;min-height:32px;border-radius:6px;border:1px solid #cbd5e1;">
+                  <option value="">(none)</option>
+                </select>
+              </label>
+              <label class="tiny" style="display:flex;flex-direction:column;min-width:200px;">
+                Zone name
+                <input id="groupsV2ZoneName" type="text" placeholder="Propagation North — Bench A" style="margin-top:4px;min-height:32px;border-radius:6px;border:1px solid #cbd5e1;">
+              </label>
+              <div class="row" style="gap:8px;flex-wrap:wrap;">
+                <button id="groupsV2SaveGroup" type="button" class="primary">Save Group</button>
+                <label class="tiny" style="display:flex;flex-direction:column;min-width:160px;">
+                  Load group
+                  <select id="groupsV2LoadGroup" style="margin-top:4px;min-height:32px;border-radius:6px;border:1px solid #cbd5e1;">
+                    <option value="">(none)</option>
+                  </select>
+                </label>
+              </div>
+            </div>
+
+            <div class="row row--wrap" style="gap:12px;align-items:flex-start;">
+              <label class="tiny" style="display:flex;flex-direction:column;min-width:200px;">
+                Plan
+                <select id="groupsV2PlanSelect" style="margin-top:4px;min-height:32px;border-radius:6px;border:1px solid #cbd5e1;">
+                  <option value="">(none)</option>
+                </select>
+              </label>
+              <label class="tiny" style="display:flex;flex-direction:column;min-width:200px;">
+                Search plans
+                <select id="groupsV2PlanSearch" style="margin-top:4px;min-height:32px;border-radius:6px;border:1px solid #cbd5e1;">
+                  <option value="">All plans</option>
+                </select>
+              </label>
+              <label class="tiny" style="display:flex;flex-direction:column;min-width:200px;">
+                Schedule
+                <select id="groupsV2ScheduleSelect" style="margin-top:4px;min-height:32px;border-radius:6px;border:1px solid #cbd5e1;">
+                  <option value="">(none)</option>
+                </select>
+              </label>
+              <button id="applyPlanToGroupBtn" type="button" class="primary">Apply to Current Plan</button>
+            </div>
+
+            <div class="row row--wrap" style="gap:12px;align-items:center;">
+              <span class="tiny" style="font-weight:600;">Anchor</span>
+              <label class="chip-option"><input type="radio" name="groupsV2AnchorMode" value="seedDate" checked><span>Seed date</span></label>
+              <input id="groupsV2SeedDate" type="date" style="min-height:32px;border-radius:6px;border:1px solid #cbd5e1;">
+              <label class="chip-option"><input type="radio" name="groupsV2AnchorMode" value="dps"><span>DPS</span></label>
+              <input id="groupsV2Dps" type="number" min="0" step="1" value="1" style="width:90px;min-height:32px;border-radius:6px;border:1px solid #cbd5e1;">
+            </div>
+
+            <div class="row row--wrap" style="gap:16px;align-items:flex-start;">
+              <div class="tiny" style="display:flex;flex-direction:column;gap:6px;min-width:180px;padding:12px;border-radius:8px;border:1px solid #cbd5e1;background:#f8fafc;">
+                <strong>Cycle 1</strong>
+                <label style="display:flex;flex-direction:column;gap:4px;">
+                  <span>Start</span>
+                  <input id="groupsV2Cycle1On" type="time" value="08:00" style="min-height:32px;border-radius:6px;border:1px solid #cbd5e1;">
+                </label>
+                <label style="display:flex;flex-direction:column;gap:4px;">
+                  <span>ON duration (h)</span>
+                  <input id="groupsV2Cycle1Hours" type="number" min="0" max="24" step="0.25" value="12" style="min-height:32px;border-radius:6px;border:1px solid #cbd5e1;">
+                </label>
+                <div id="groupsV2Cycle1End" class="tiny text-muted">End: 20:00</div>
+              </div>
+              <div id="groupsV2Cycle2Container" class="tiny" style="display:none;flex-direction:column;gap:6px;min-width:180px;padding:12px;border-radius:8px;border:1px solid #cbd5e1;background:#eff6ff;">
+                <strong>Cycle 2</strong>
+                <label style="display:flex;flex-direction:column;gap:4px;">
+                  <span>Start</span>
+                  <input id="groupsV2Cycle2On" type="time" value="20:00" readonly aria-readonly="true" style="min-height:32px;border-radius:6px;border:1px solid #cbd5e1;background:#e2e8f0;color:#475569;">
+                </label>
+                <label style="display:flex;flex-direction:column;gap:4px;">
+                  <span>ON duration (h)</span>
+                  <input id="groupsV2Cycle2Hours" type="number" min="0" max="24" step="0.5" value="12" readonly aria-readonly="true" style="min-height:32px;border-radius:6px;border:1px solid #cbd5e1;background:#e2e8f0;color:#475569;">
+                </label>
+                <div id="groupsV2Cycle2End" class="tiny text-muted">End: 08:00</div>
+              </div>
+              <div class="row row--wrap" style="gap:8px;align-items:center;">
+                <label class="chip-option"><input type="radio" name="groupsV2ScheduleMode" value="one" checked><span>One cycle</span></label>
+                <label class="chip-option"><input type="radio" name="groupsV2ScheduleMode" value="two"><span>Two cycles</span></label>
+                <button id="groupsV2SplitEvenBtn" type="button" class="ghost">Split evenly</button>
+                <button id="groupsV2MaxLightBtn" type="button" class="ghost">Maximize light</button>
+                <button id="groupsV2ResetRampsBtn" type="button" class="ghost">Reset ramps</button>
+              </div>
+            </div>
+
+            <div id="groupsV2ScheduleSummary" class="tiny text-muted"></div>
+
+            <div class="row row--wrap" style="gap:12px;">
+              <label class="tiny" style="display:flex;flex-direction:column;min-width:120px;">
+                PPFD Δ (µmol)
+                <input id="groupsV2GradientPpfd" type="number" step="1" value="0" style="margin-top:4px;min-height:32px;border-radius:6px;border:1px solid #cbd5e1;">
+              </label>
+              <label class="tiny" style="display:flex;flex-direction:column;min-width:120px;">
+                Blue Δ (%)
+                <input id="groupsV2GradientBlue" type="number" step="0.5" value="0" style="margin-top:4px;min-height:32px;border-radius:6px;border:1px solid #cbd5e1;">
+              </label>
+              <label class="tiny" style="display:flex;flex-direction:column;min-width:120px;">
+                Temp Δ (°C)
+                <input id="groupsV2GradientTemp" type="number" step="0.5" value="0" style="margin-top:4px;min-height:32px;border-radius:6px;border:1px solid #cbd5e1;">
+              </label>
+              <label class="tiny" style="display:flex;flex-direction:column;min-width:120px;">
+                RH Δ (%)
+                <input id="groupsV2GradientRh" type="number" step="0.5" value="0" style="margin-top:4px;min-height:32px;border-radius:6px;border:1px solid #cbd5e1;">
+              </label>
+            </div>
+
+            <div id="groupsV2PlanPreview" class="gr-card" style="padding:12px;border:1px dashed #38bdf8;border-radius:10px;background:linear-gradient(120deg,#f0f9ff 0%,#e0f2fe 100%);"></div>
+          </div>
+
+          <div class="grid" style="display:grid;gap:16px;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));">
+            <div class="gr-card" style="padding:16px;border:1px solid #cbd5e1;border-radius:12px;">
+              <h3 style="margin-top:0;margin-bottom:8px;font-size:16px;">Unassigned Lights</h3>
+              <select id="groupsV2UnassignedLightsSelect" multiple size="6" style="width:100%;min-height:180px;border-radius:8px;border:1px solid #cbd5e1;"></select>
+              <div class="row row--gap-sm" style="margin-top:8px;flex-wrap:wrap;">
+                <button id="assignLightsToGroupBtn" type="button" class="primary">Assign to group</button>
+                <button id="assignLightsToZoneBtn" type="button" class="ghost">Mark zone assignment</button>
+              </div>
+            </div>
+            <div id="lightInfoCard" class="gr-card" style="padding:16px;border:1px solid #cbd5e1;border-radius:12px;display:none;">
+              <h3 style="margin-top:0;margin-bottom:8px;font-size:16px;">Light details</h3>
+              <div id="lightInfoCardBody" class="tiny" style="display:flex;flex-direction:column;gap:4px;"></div>
+            </div>
+            <div class="gr-card" style="padding:16px;border:1px solid #cbd5e1;border-radius:12px;">
+              <h3 style="margin-top:0;margin-bottom:8px;font-size:16px;">Unassigned Equipment</h3>
+              <select id="groupsV2UnassignedEquipSelect" multiple size="5" style="width:100%;min-height:160px;border-radius:8px;border:1px solid #cbd5e1;"></select>
+              <button id="assignEquipToZoneBtn" type="button" class="ghost" style="margin-top:8px;">Assign to zone</button>
+            </div>
+            <div class="gr-card" style="padding:16px;border:1px solid #cbd5e1;border-radius:12px;">
+              <h3 style="margin-top:0;margin-bottom:8px;font-size:16px;">Assigned Equipment</h3>
+              <select id="assignedEquipSelect" multiple size="5" style="width:100%;min-height:160px;border-radius:8px;border:1px solid #cbd5e1;"></select>
+              <ul id="assignedEquipList" class="tiny" style="margin-top:8px;padding-left:16px;display:none;"></ul>
+            </div>
+          </div>
+        </div>
+      </section>
     </main>
 
   </div>
