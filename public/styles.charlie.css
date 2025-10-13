@@ -1398,6 +1398,234 @@ h3 { font-size: 1.125rem; }
   margin-top: 0;
 }
 
+.panel {
+  background: var(--gr-surface, #ffffff);
+  border: 1px solid var(--gr-border, #dce5e5);
+  border-radius: 12px;
+  padding: 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.panel > h2 {
+  margin: 0;
+  font-size: 1.1rem;
+  color: var(--gr-heading, #0f172a);
+}
+
+.gr-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.gr-list__item {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 4px;
+  padding: 12px;
+  border: 1px solid var(--gr-border, #dce5e5);
+  border-radius: 10px;
+  background: #f8fafc;
+  color: inherit;
+  text-align: left;
+  font-size: 0.95rem;
+  font-weight: 500;
+  cursor: pointer;
+  transition: border-color 0.2s ease, box-shadow 0.2s ease, background-color 0.2s ease;
+}
+
+.gr-list__item:hover:not([disabled]) {
+  border-color: var(--gr-primary, #0d7d7d);
+  box-shadow: 0 0 0 2px rgba(13, 125, 125, 0.12);
+}
+
+.gr-list__item:focus-visible {
+  outline: 2px solid var(--gr-primary, #0d7d7d);
+  outline-offset: 2px;
+}
+
+.gr-list__item.is-selected {
+  background: #ecfeff;
+  border-color: var(--gr-primary, #0d7d7d);
+  box-shadow: 0 0 0 2px rgba(14, 116, 144, 0.15);
+}
+
+.gr-list__item.is-active {
+  background: #e2e8f0;
+  border-style: dashed;
+  color: #475569;
+  cursor: not-allowed;
+}
+
+.gr-list__item[disabled] {
+  cursor: not-allowed;
+  opacity: 0.7;
+}
+
+.gr-list__primary {
+  font-weight: 600;
+}
+
+.gr-list__meta {
+  font-size: 0.8rem;
+  color: #64748b;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.gr-list__location {
+  font-size: 0.8rem;
+  color: #475569;
+}
+
+.gr-empty-state {
+  margin: 0;
+  padding: 16px;
+  border: 1px dashed var(--gr-border, #dce5e5);
+  border-radius: 10px;
+  background: #f8fafc;
+  color: #64748b;
+  font-size: 0.9rem;
+  text-align: center;
+}
+
+.light-card {
+  border: 1px solid var(--gr-border, #dce5e5);
+  border-radius: 12px;
+  padding: 16px;
+  background: #ffffff;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  box-shadow: 0 1px 2px rgba(15, 23, 42, 0.08);
+}
+
+.light-card__header {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 12px;
+}
+
+.light-card__title h3 {
+  margin: 0;
+  font-size: 1.05rem;
+  color: var(--gr-heading, #0f172a);
+}
+
+.light-card__id {
+  margin: 2px 0 0;
+  font-size: 0.85rem;
+  color: #475569;
+}
+
+.light-card__location {
+  margin: 4px 0 0;
+  font-size: 0.8rem;
+  color: #64748b;
+}
+
+.light-card__remove {
+  background: transparent;
+  border: 1px solid var(--gr-border, #dce5e5);
+  border-radius: 999px;
+  padding: 6px 14px;
+  font-size: 0.85rem;
+  font-weight: 600;
+  color: #b91c1c;
+  cursor: pointer;
+  transition: background-color 0.2s ease, color 0.2s ease, border-color 0.2s ease;
+}
+
+.light-card__remove:hover,
+.light-card__remove:focus-visible {
+  border-color: #ef4444;
+  color: #ef4444;
+  background: #fef2f2;
+  outline: none;
+}
+
+.light-card__details {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+  gap: 12px;
+  margin: 0;
+}
+
+.light-card__details dt {
+  font-size: 0.75rem;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: #64748b;
+  margin-bottom: 4px;
+}
+
+.light-card__details dd {
+  margin: 0;
+  font-size: 0.95rem;
+  color: #1e293b;
+  font-weight: 500;
+}
+
+.spectra-bar {
+  display: flex;
+  width: 100%;
+  min-height: 60px;
+  border-radius: 999px;
+  overflow: hidden;
+  border: 1px solid var(--gr-border, #dce5e5);
+  background: #f1f5f9;
+}
+
+.spectra-segment {
+  flex: 0 0 var(--spectra-width, 0%);
+  min-width: 60px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+  padding: 8px 6px;
+  color: #0f172a;
+  font-weight: 600;
+  text-align: center;
+}
+
+.spectra-label {
+  font-size: 0.75rem;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.spectra-value {
+  font-size: 0.8rem;
+  font-weight: 500;
+}
+
+.spectra-summary {
+  margin: 12px 0 0;
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(100px, 1fr));
+  gap: 8px;
+}
+
+.spectra-summary dt {
+  font-size: 0.75rem;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: #64748b;
+}
+
+.spectra-summary dd {
+  margin: 0;
+  font-size: 0.95rem;
+  font-weight: 600;
+  color: #0f172a;
+}
+
 .automation-card__header {
   display: flex;
   align-items: flex-start;
