@@ -4941,3 +4941,32 @@ input[type="range"]#grd {
 .delta-grid th:first-child, .delta-grid td:first-child { text-align: left; }
 .delta-pos { color: #0a7; font-weight: 600; }
 .delta-neg { color: #c33; font-weight: 600; }
+
+.gr-list label {
+  display: flex;
+  gap: 0.5rem;
+  padding: 0.25rem 0;
+}
+
+.cards.grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+  gap: 12px;
+}
+
+.card {
+  border: 1px solid #ddd;
+  border-radius: 8px;
+  padding: 10px;
+  background: #fff;
+}
+
+.spectra-bar {
+  height: 16px;
+  border-radius: 8px;
+  border: 1px solid #ddd;
+}
+
+.mono {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, "Liberation Mono", monospace;
+}

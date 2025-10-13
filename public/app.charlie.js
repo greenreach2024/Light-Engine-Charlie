@@ -6549,420 +6549,6 @@ document.addEventListener('DOMContentLoaded', () => {
 // ===== End Spectra helpers =====
 
 // ===== Light selection + spectragraph panels =====
-const GR_LIGHT_PANEL_STATE = {
-  devices: new Map(),
-  order: [],
-  unassigned: [],
-  pending: new Set(),
-  active: new Set(),
-  loading: false,
-  needsRefresh: false,
-};
-
-const GR_SPECTRA_CHANNELS = [
-  { key: 'cw', label: 'CW', color: '#bae6fd' },
-  { key: 'ww', label: 'WW', color: '#fde68a' },
-  { key: 'bl', label: 'Blue', color: '#c7d2fe' },
-  { key: 'rd', label: 'Red', color: '#fecdd3' },
-];
-
-function stripDevicePrefix(value) {
-  if (typeof value !== 'string') return '';
-  const text = value.trim();
-  if (!text) return '';
-  const match = text.match(/^(?:dev|device)[#:\-]?(.+)$/i);
-  return match ? match[1].trim() : text;
-}
-
-function deriveDeviceMix(device) {
-  if (!device || typeof device !== 'object') {
-    return normalizeMixInput({});
-  }
-  if (device.driverMix && typeof device.driverMix === 'object') {
-    return normalizeMixInput(device.driverMix);
-  }
-  const candidateObjects = [device.mix, device.currentMix, device.state?.mix];
-  for (const candidate of candidateObjects) {
-    if (candidate && typeof candidate === 'object') {
-      return normalizeMixInput(candidate);
-    }
-  }
-  const candidateStrings = [
-    device.driverHex,
-    device.lastHex,
-    device.value,
-    device.hex12,
-    device.hex,
-    device.state?.value,
-    device.state?.hex,
-  ];
-  for (const candidate of candidateStrings) {
-    const parsed = parseHex12(candidate);
-    if (parsed) {
-      return normalizeMixInput(parsed);
-    }
-  }
-  return normalizeMixInput({});
-}
-
-function describeDeviceLocation(device) {
-  if (!device || typeof device !== 'object') return '';
-  const room = firstNonEmptyString(
-    device?.room,
-    device?.meta?.room,
-    device?.roomName,
-    device?.meta?.roomName,
-  );
-  const zone = firstNonEmptyString(device?.zone, device?.meta?.zone, device?.zoneName);
-  if (room && zone) return `${room} • ${zone}`;
-  if (room) return room;
-  if (zone) return zone;
-  return '';
-}
-
-function normalizeDeviceListEntry(raw) {
-  const normalized = normalizeControllerDeviceForGroups(raw);
-  if (!normalized) return null;
-  const mix = deriveDeviceMix(normalized);
-  const isLight = (() => {
-    const type = String(
-      raw?.type || raw?.deviceType || raw?.category || raw?.meta?.type || raw?.meta?.category || '',
-    ).toLowerCase();
-    if (type.includes('light') || type.includes('fixture')) return true;
-    if (raw?.capabilities && Array.isArray(raw.capabilities)) {
-      if (raw.capabilities.some((cap) => typeof cap === 'string' && cap.toLowerCase().includes('light'))) {
-        return true;
-      }
-    }
-    const valueMix = Object.values(mix || {}).reduce((acc, value) => acc + (Number(value) || 0), 0);
-    return valueMix > 0;
-  })();
-  if (!isLight) return null;
-  const name = firstNonEmptyString(
-    normalized.deviceName,
-    normalized.name,
-    normalized.label,
-    raw?.name,
-    normalized.id,
-  );
-  return {
-    id: normalized.id,
-    name,
-    raw,
-    normalized,
-    mix,
-    status: raw?.status || raw?.state?.status || raw?.power || raw?.online,
-    location: describeDeviceLocation(raw),
-  };
-}
-
-function computeUnassignedDevices(devices, groups) {
-  const deviceList = Array.isArray(devices) ? devices : [];
-  const groupList = Array.isArray(groups) ? groups : [];
-  const assigned = new Set();
-  groupList.forEach((group) => {
-    const memberIds = extractGroupMemberIds(group);
-    memberIds.forEach((member) => {
-      const id = stripDevicePrefix(member);
-      if (id) assigned.add(id);
-    });
-  });
-  return deviceList.filter((device) => !assigned.has(device.id));
-}
-
-function renderUnassignedLights() {
-  const container = document.getElementById('GRUL32');
-  const applyBtn = document.getElementById('GRUL32-apply');
-  const clearBtn = document.getElementById('GRUL32-clear');
-  if (!container) return;
-
-  container.innerHTML = '';
-  const { unassigned, pending, active, loading } = GR_LIGHT_PANEL_STATE;
-
-  if (loading) {
-    const loadingEl = document.createElement('p');
-    loadingEl.className = 'gr-empty-state';
-    loadingEl.textContent = 'Loading available lights…';
-    container.appendChild(loadingEl);
-  } else if (!unassigned.length) {
-    const empty = document.createElement('p');
-    empty.className = 'gr-empty-state';
-    empty.textContent = 'All lights are assigned to groups.';
-    container.appendChild(empty);
-  } else {
-    unassigned.forEach((device) => {
-      const button = document.createElement('button');
-      button.type = 'button';
-      button.className = 'gr-list__item';
-      button.dataset.id = device.id;
-      if (pending.has(device.id)) button.classList.add('is-selected');
-      if (active.has(device.id)) button.classList.add('is-active');
-      button.innerHTML = `
-        <span class="gr-list__primary">${escapeHtml(device.name || device.id)}</span>
-        <span class="gr-list__meta">${escapeHtml(device.id)}</span>
-      `;
-      if (device.location) {
-        button.setAttribute('data-location', device.location);
-        const location = document.createElement('span');
-        location.className = 'gr-list__location';
-        location.textContent = device.location;
-        button.appendChild(location);
-      }
-      if (active.has(device.id)) {
-        button.disabled = true;
-        button.setAttribute('aria-disabled', 'true');
-        button.title = 'Already added to Active Cards';
-      } else {
-        button.addEventListener('click', () => {
-          if (pending.has(device.id)) {
-            pending.delete(device.id);
-          } else {
-            pending.add(device.id);
-          }
-          renderUnassignedLights();
-          updateLightPanelActions();
-        });
-      }
-      container.appendChild(button);
-    });
-  }
-
-  if (applyBtn) applyBtn.disabled = pending.size === 0;
-  if (clearBtn) clearBtn.disabled = active.size === 0;
-}
-
-function renderActiveLightCards() {
-  const container = document.getElementById('GRACB28');
-  if (!container) return;
-  container.innerHTML = '';
-  const { active, devices } = GR_LIGHT_PANEL_STATE;
-  const activeIds = Array.from(active);
-  if (!activeIds.length) {
-    const empty = document.createElement('p');
-    empty.className = 'gr-empty-state';
-    empty.textContent = 'No active lights selected. Choose lights from the Unassigned panel to preview.';
-    container.appendChild(empty);
-    renderSpectragraph();
-    updateLightPanelActions();
-    return;
-  }
-
-  activeIds.forEach((id) => {
-    const device = devices.get(id);
-    if (!device) return;
-    const card = document.createElement('article');
-    card.className = 'light-card';
-    const statusText = firstNonEmptyString(
-      typeof device.status === 'string' ? device.status : '',
-      typeof device.status === 'boolean' ? (device.status ? 'on' : 'off') : '',
-    ) || 'unknown';
-    const mix = device.mix || normalizeMixInput({});
-    const mixSummary = `${Math.round(mix.cw)}% CW • ${Math.round(mix.ww)}% WW • ${Math.round(mix.bl)}% Blue • ${Math.round(mix.rd)}% Red`;
-    card.innerHTML = `
-      <header class="light-card__header">
-        <div class="light-card__title">
-          <h3>${escapeHtml(device.name || device.id)}</h3>
-          <p class="light-card__id">${escapeHtml(device.id)}</p>
-          ${device.location ? `<p class="light-card__location">${escapeHtml(device.location)}</p>` : ''}
-        </div>
-        <button type="button" class="light-card__remove" data-remove="${escapeAttribute(device.id)}" aria-label="Remove ${escapeAttribute(device.name || device.id)}">Remove</button>
-      </header>
-      <dl class="light-card__details">
-        <div>
-          <dt>Status</dt>
-          <dd>${escapeHtml(statusText)}</dd>
-        </div>
-        <div>
-          <dt>HEX12 Mix</dt>
-          <dd>${escapeHtml(mixSummary)}</dd>
-        </div>
-      </dl>
-    `;
-    const removeBtn = card.querySelector('[data-remove]');
-    if (removeBtn) {
-      removeBtn.addEventListener('click', () => {
-        GR_LIGHT_PANEL_STATE.active.delete(id);
-        renderUnassignedLights();
-        renderActiveLightCards();
-      });
-    }
-    container.appendChild(card);
-  });
-
-  renderSpectragraph();
-  updateLightPanelActions();
-}
-
-function renderSpectragraph() {
-  const container = document.getElementById('GVPFLSW29');
-  if (!container) return;
-  container.innerHTML = '';
-  const { active, devices } = GR_LIGHT_PANEL_STATE;
-  const lights = Array.from(active).map((id) => devices.get(id)).filter(Boolean);
-  if (!lights.length) {
-    const empty = document.createElement('p');
-    empty.className = 'gr-empty-state';
-    empty.textContent = 'Select active lights to view their combined spectrum.';
-    container.appendChild(empty);
-    return;
-  }
-  const totals = { cw: 0, ww: 0, bl: 0, rd: 0 };
-  lights.forEach((device) => {
-    const mix = device.mix || normalizeMixInput({});
-    totals.cw += Number(mix.cw) || 0;
-    totals.ww += Number(mix.ww) || 0;
-    totals.bl += Number(mix.bl) || 0;
-    totals.rd += Number(mix.rd) || 0;
-  });
-  const count = lights.length;
-  const averages = {
-    cw: totals.cw / count,
-    ww: totals.ww / count,
-    bl: totals.bl / count,
-    rd: totals.rd / count,
-  };
-  const totalValue = GR_SPECTRA_CHANNELS.reduce((acc, channel) => acc + (averages[channel.key] || 0), 0);
-
-  const bar = document.createElement('div');
-  bar.className = 'spectra-bar';
-  GR_SPECTRA_CHANNELS.forEach((channel) => {
-    const avg = averages[channel.key] || 0;
-    const width = totalValue > 0 ? (avg / totalValue) * 100 : 0;
-    const segment = document.createElement('div');
-    segment.className = `spectra-segment spectra-${channel.key}`;
-    segment.style.setProperty('--spectra-width', `${width}%`);
-    segment.style.backgroundColor = channel.color;
-    segment.title = `${channel.label}: ${avg.toFixed(1)}% average`;
-    segment.innerHTML = `
-      <span class="spectra-label">${channel.label}</span>
-      <span class="spectra-value">${avg.toFixed(1)}%</span>
-    `;
-    bar.appendChild(segment);
-  });
-  container.appendChild(bar);
-
-  const meta = document.createElement('dl');
-  meta.className = 'spectra-summary';
-  GR_SPECTRA_CHANNELS.forEach((channel) => {
-    const avg = averages[channel.key] || 0;
-    const dt = document.createElement('dt');
-    dt.textContent = channel.label;
-    const dd = document.createElement('dd');
-    dd.textContent = `${avg.toFixed(1)}%`; 
-    meta.appendChild(dt);
-    meta.appendChild(dd);
-  });
-  container.appendChild(meta);
-}
-
-function updateLightPanelActions() {
-  const applyBtn = document.getElementById('GRUL32-apply');
-  const clearBtn = document.getElementById('GRUL32-clear');
-  if (applyBtn) applyBtn.disabled = GR_LIGHT_PANEL_STATE.pending.size === 0;
-  if (clearBtn) clearBtn.disabled = GR_LIGHT_PANEL_STATE.active.size === 0;
-}
-
-async function loadLightPanelData() {
-  if (GR_LIGHT_PANEL_STATE.loading) {
-    GR_LIGHT_PANEL_STATE.needsRefresh = true;
-    return;
-  }
-  GR_LIGHT_PANEL_STATE.loading = true;
-  GR_LIGHT_PANEL_STATE.needsRefresh = false;
-  renderUnassignedLights();
-  try {
-    const [devicesRaw, groupsRaw] = await Promise.all([
-      (async () => {
-        try {
-          const response = await jget('/api/devicedatas');
-          return Array.isArray(response?.data) ? response.data : Array.isArray(response) ? response : [];
-        } catch (err) {
-          console.error('Failed to load device data for light panel', err);
-          return [];
-        }
-      })(),
-      (async () => {
-        try {
-          const response = await jget('/groups');
-          if (Array.isArray(response?.groups)) return response.groups;
-          if (Array.isArray(response)) return response;
-          return [];
-        } catch (err) {
-          console.warn('Failed to load groups for light panel', err);
-          return [];
-        }
-      })(),
-    ]);
-
-    const devices = devicesRaw
-      .map((entry) => normalizeDeviceListEntry(entry))
-      .filter(Boolean);
-    const map = new Map();
-    devices.forEach((device) => {
-      map.set(device.id, device);
-    });
-    GR_LIGHT_PANEL_STATE.devices = map;
-    GR_LIGHT_PANEL_STATE.order = devices.map((device) => device.id);
-    GR_LIGHT_PANEL_STATE.unassigned = computeUnassignedDevices(devices, groupsRaw);
-    const unassignedSet = new Set(GR_LIGHT_PANEL_STATE.unassigned.map((device) => device.id));
-    // Remove active entries that disappeared
-    Array.from(GR_LIGHT_PANEL_STATE.active).forEach((id) => {
-      if (!map.has(id)) GR_LIGHT_PANEL_STATE.active.delete(id);
-    });
-    Array.from(GR_LIGHT_PANEL_STATE.pending).forEach((id) => {
-      if (!map.has(id) || !unassignedSet.has(id)) GR_LIGHT_PANEL_STATE.pending.delete(id);
-    });
-    renderUnassignedLights();
-    renderActiveLightCards();
-  } finally {
-    GR_LIGHT_PANEL_STATE.loading = false;
-    if (GR_LIGHT_PANEL_STATE.needsRefresh) {
-      GR_LIGHT_PANEL_STATE.needsRefresh = false;
-      loadLightPanelData();
-    }
-  }
-}
-
-function attachLightPanelHandlers() {
-  const applyBtn = document.getElementById('GRUL32-apply');
-  if (applyBtn) {
-    applyBtn.addEventListener('click', () => {
-      GR_LIGHT_PANEL_STATE.pending.forEach((id) => {
-        if (GR_LIGHT_PANEL_STATE.devices.has(id)) {
-          GR_LIGHT_PANEL_STATE.active.add(id);
-        }
-      });
-      GR_LIGHT_PANEL_STATE.pending.clear();
-      renderUnassignedLights();
-      renderActiveLightCards();
-    });
-  }
-  const clearBtn = document.getElementById('GRUL32-clear');
-  if (clearBtn) {
-    clearBtn.addEventListener('click', () => {
-      GR_LIGHT_PANEL_STATE.active.clear();
-      GR_LIGHT_PANEL_STATE.pending.clear();
-      renderUnassignedLights();
-      renderActiveLightCards();
-    });
-  }
-}
-
-function initLightPanels() {
-  const unassigned = document.getElementById('GRUL32');
-  const active = document.getElementById('GRACB28');
-  const spectra = document.getElementById('GVPFLSW29');
-  if (!unassigned || !active || !spectra) return;
-  attachLightPanelHandlers();
-  renderUnassignedLights();
-  renderActiveLightCards();
-  loadLightPanelData();
-}
-
-document.addEventListener('DOMContentLoaded', initLightPanels);
-document.addEventListener('groups-updated', () => loadLightPanelData());
-document.addEventListener('lights-updated', () => loadLightPanelData());
-// ===== End light selection + spectragraph panels =====
 
 // Global farm normalization stub
 function normalizeFarmDoc(farm) {
@@ -19548,6 +19134,142 @@ document.addEventListener('DOMContentLoaded', async () => {
 
     document.getElementById('btnRefreshSmartPlugs')?.addEventListener('click', () => loadSmartPlugs());
     document.getElementById('btnDiscoverSmartPlugs')?.addEventListener('click', () => discoverSmartPlugs());
+
+    // --- Unassigned lights → Active cards → Spectragraph ---
+    try {
+      const unassignedRoot = document.getElementById('GRUL32');
+      const activeRoot = document.getElementById('GRACB28');
+      const spectraRoot = document.getElementById('GVPFLSW29');
+      if (!unassignedRoot || !activeRoot || !spectraRoot) return;
+
+      // Boot only if our new containers exist
+      const API = (window.API_BASE || ''); // per Charlie guardrails
+      const jget = async (p) => (await fetch(`${API}${p}`)).json();
+
+      // Fetch canonical devices, groups (for membership), schedules (for HEX12 mix)
+      const devsRaw = await jget('/api/devicedatas');
+      const groups = await jget('/groups').catch(() => ({ items: [] }));
+      const sched = await jget('/sched').catch(() => ({ items: [] }));
+
+      const devices = (devsRaw && devsRaw.data) ? devsRaw.data : [];
+      const groupMembers = new Set(
+        (groups.items || []).flatMap(g => (g.members || [])).map(x => (x || '').replace(/^dev:/, ''))
+      );
+
+      // Unassigned = devices with no group membership
+      const unassigned = devices.filter(d => !groupMembers.has(String(d.id)));
+
+      const HEX12_TO_PCTS = (hex12) => {
+        if (!hex12 || hex12.length < 8) return { cw: 0, ww: 0, bl: 0, rd: 0 };
+        const h = hex12.toLowerCase();
+        const toPct = v => Math.round((parseInt(v, 16) / 0x64) * 100);
+        return {
+          cw: toPct(h.slice(0, 2)),
+          ww: toPct(h.slice(2, 4)),
+          bl: toPct(h.slice(4, 6)),
+          rd: toPct(h.slice(6, 8)),
+        };
+      };
+
+      const deviceMixHex = (devId) => {
+        const si = (sched.items || []).find(it => (it.id === `dev:${devId}`));
+        if (si && si.mix) return (si.mix || '').trim();
+        const d = devices.find(x => String(x.id) === String(devId));
+        if (d && d.value) return (d.value || '').trim();
+        return '000000000000';
+      };
+
+      const averageMix = (ids) => {
+        if (!ids.length) return { cw: 0, ww: 0, bl: 0, rd: 0 };
+        let sum = { cw: 0, ww: 0, bl: 0, rd: 0 };
+        ids.forEach(id => {
+          const p = HEX12_TO_PCTS(deviceMixHex(id));
+          sum.cw += p.cw; sum.ww += p.ww; sum.bl += p.bl; sum.rd += p.rd;
+        });
+        return {
+          cw: Math.round(sum.cw / ids.length),
+          ww: Math.round(sum.ww / ids.length),
+          bl: Math.round(sum.bl / ids.length),
+          rd: Math.round(sum.rd / ids.length),
+        };
+      };
+
+      const renderActive = (ids) => {
+        activeRoot.innerHTML = '';
+        ids.forEach(id => {
+          const d = devices.find(x => String(x.id) === String(id));
+          const card = document.createElement('div');
+          card.className = 'card';
+          card.dataset.id = id;
+          card.innerHTML =
+            `<div class="row space-between">
+                <strong>${(d && d.deviceName) || '(unnamed)'}</strong>
+                <span class="mono">ID ${id}</span>
+              </div>
+              <div class="mini mix" data-hex="${deviceMixHex(id)}"></div>
+              <button class="btn-ghost remove" data-id="${id}">Remove</button>`;
+          activeRoot.appendChild(card);
+        });
+      };
+
+      const renderSpectra = (ids) => {
+        const m = averageMix(ids);
+        spectraRoot.innerHTML = '';
+        const bar = document.createElement('div');
+        bar.className = 'spectra-bar';
+        const total = (m.cw + m.ww + m.bl + m.rd) || 1;
+        const cwW = (m.cw / total) * 100;
+        const wwW = (m.ww / total) * 100;
+        const blW = (m.bl / total) * 100;
+        const rdW = (m.rd / total) * 100;
+        bar.style.background = `linear-gradient(to right,
+           #BBD5FF 0% ${cwW}%,
+           #FFE4B5 ${cwW}% ${cwW + wwW}%,
+           #9EC9FF ${cwW + wwW}% ${cwW + wwW + blW}%,
+           #FF9999 ${cwW + wwW + blW}% 100%)`;
+        bar.title = `CW ${m.cw}% · WW ${m.ww}% · Blue ${m.bl}% · Red ${m.rd}%`;
+        spectraRoot.appendChild(bar);
+      };
+
+      const listEl = unassignedRoot;
+      listEl.innerHTML = '';
+      unassigned.forEach(d => {
+        const row = document.createElement('label');
+        row.className = 'row gap8 align-center';
+        row.innerHTML =
+          `<input type="checkbox" class="gr-pick" value="${d.id}">
+           <span class="mono">${d.deviceName || '(unnamed)'} · ${d.id}</span>`;
+        listEl.appendChild(row);
+      });
+
+      const picks = () => [...document.querySelectorAll('#GRUL32 .gr-pick:checked')].map(x => x.value);
+      const apply = () => {
+        const ids = picks();
+        renderActive(ids);
+        renderSpectra(ids);
+      };
+      const clear = () => {
+        document.querySelectorAll('#GRUL32 .gr-pick').forEach(cb => { cb.checked = false; });
+        renderActive([]);
+        renderSpectra([]);
+      };
+
+      document.getElementById('GRUL32-apply')?.addEventListener('click', apply);
+      document.getElementById('GRUL32-clear')?.addEventListener('click', clear);
+      activeRoot.addEventListener('click', (e) => {
+        const t = e.target.closest('.remove');
+        if (!t) return;
+        const id = String(t.dataset.id);
+        const cb = document.querySelector(`#GRUL32 .gr-pick[value="${id}"]`);
+        if (cb) cb.checked = false;
+        apply();
+      });
+
+      renderActive([]);
+      renderSpectra([]);
+    } catch (err) {
+      console.error('[GR-UI] boot error', err);
+    }
 
     const smartPlugTable = document.getElementById('smartPlugsTable');
     if (smartPlugTable) {
