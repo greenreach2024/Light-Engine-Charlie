@@ -62,7 +62,9 @@ function checkCorsConfigOrExit() {
 checkCorsConfigOrExit();
 // Default controller target. Can be overridden with the CTRL env var.
 // Use the Pi forwarder when available for remote device reachability during development.
-let CURRENT_CONTROLLER = process.env.CTRL || "http://100.65.187.59:8089";
+const DEFAULT_CONTROLLER = "http://100.65.187.59:8089";
+let CURRENT_CONTROLLER = process.env.CTRL || DEFAULT_CONTROLLER;
+let hasPersistedController = false;
 // IFTTT integration config (optional)
 const IFTTT_KEY = process.env.IFTTT_KEY || process.env.IFTTT_WEBHOOK_KEY || "";
 const IFTTT_INBOUND_TOKEN = process.env.IFTTT_INBOUND_TOKEN || "";
@@ -591,6 +593,7 @@ function parseIncomingSchedules(body) {
 function loadControllerFromDisk(){
   try {
     if (fs.existsSync(CONTROLLER_PATH)) {
+      hasPersistedController = true;
       const obj = JSON.parse(fs.readFileSync(CONTROLLER_PATH, 'utf8'));
       if (obj && typeof obj.url === 'string' && isHttpUrl(obj.url)) {
         CURRENT_CONTROLLER = obj.url.trim();
@@ -600,13 +603,61 @@ function loadControllerFromDisk(){
 }
 function persistControllerToDisk(url){
   ensureDataDir();
-  try { fs.writeFileSync(CONTROLLER_PATH, JSON.stringify({ url }, null, 2)); } catch {}
+  try {
+    fs.writeFileSync(CONTROLLER_PATH, JSON.stringify({ url }, null, 2));
+    hasPersistedController = true;
+  } catch {}
 }
 function getController(){ return CURRENT_CONTROLLER; }
 function setController(url){ CURRENT_CONTROLLER = url; persistControllerToDisk(url); console.log(`[charlie] controller set → ${url}`); }
 
 // Initialize controller from disk if available
 loadControllerFromDisk();
+
+async function maybeAutoDetectLocalController() {
+  if (process.env.CTRL) return; // explicit override wins
+  if (CURRENT_CONTROLLER && CURRENT_CONTROLLER !== DEFAULT_CONTROLLER) return; // already customised
+
+  const candidates = [];
+  const manualCandidate = process.env.PY_BACKEND_URL && process.env.PY_BACKEND_URL.trim();
+  if (manualCandidate) candidates.push(manualCandidate);
+  candidates.push('http://127.0.0.1:8000', 'http://localhost:8000');
+
+  const timeoutMs = Number.parseInt(process.env.PY_BACKEND_HEALTH_TIMEOUT_MS ?? '', 10);
+  const healthTimeout = Number.isFinite(timeoutMs) ? timeoutMs : 900;
+
+  for (const candidate of candidates) {
+    const base = (candidate || '').trim();
+    if (!base) continue;
+    try {
+      const normalized = base.replace(/\/$/, '');
+      const ac = new AbortController();
+      const timer = setTimeout(() => ac.abort(), healthTimeout);
+      try {
+        const res = await fetch(`${normalized}/healthz`, { method: 'GET', signal: ac.signal });
+        if (res.ok) {
+          setController(normalized);
+          console.log(`[charlie] auto-detected Python backend controller at ${normalized}`);
+          return;
+        }
+      } finally {
+        clearTimeout(timer);
+      }
+    } catch (error) {
+      const message = error?.message || String(error);
+      if (process.env.NODE_ENV === 'development') {
+        console.debug(`[charlie] Python backend candidate ${candidate} unavailable: ${message}`);
+      }
+    }
+  }
+}
+
+if (!RUNNING_UNDER_NODE_TEST && (!hasPersistedController || CURRENT_CONTROLLER === DEFAULT_CONTROLLER)) {
+  maybeAutoDetectLocalController().catch((error) => {
+    const message = error?.message || String(error);
+    console.debug('[charlie] python backend auto-detect failed:', message);
+  });
+}
 
 // Global error handlers to prevent server crashes
 process.on('uncaughtException', (error) => {

@@ -121,6 +121,8 @@ pip install -r requirements.txt  # ensure fastapi, uvicorn, paho-mqtt, python-ka
 python -m backend
 ```
 
+When the Node.js server (`npm start`) boots without a saved controller or `CTRL` override it now probes common local targets (default `http://127.0.0.1:8000`) and automatically points the proxy at a healthy Python backend. You can customise the probe list with `PY_BACKEND_URL` or tweak the timeout via `PY_BACKEND_HEALTH_TIMEOUT_MS`.
+
 ## SwitchBot Integration
 
 ### Direct API Access (Node.js)
