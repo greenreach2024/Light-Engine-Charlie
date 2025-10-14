@@ -10258,16 +10258,24 @@ function callRenderSearch(scope, options = [], config = {}) {
 }
 
 async function getLightOptions() {
+  const apiBase = (typeof window !== 'undefined' && window.API_BASE) ? window.API_BASE : '';
+  const endpoint = `${apiBase}/api/devicedatas`;
   try {
-    const response = await fetch('/api/devicedatas');
+    const response = await fetch(endpoint);
     if (!response.ok) throw new Error(`HTTP ${response.status}`);
     const payload = await response.json();
-    const rawList = Array.isArray(payload?.data)
+    const devices = payload && payload.data
       ? payload.data
-      : Array.isArray(payload)
-        ? payload
-        : [];
-    return rawList
+      : Array.isArray(payload?.devices)
+        ? payload.devices
+        : Array.isArray(payload)
+          ? payload
+          : [];
+    if (!Array.isArray(devices)) {
+      console.warn('lights list payload malformed');
+      return [];
+    }
+    return devices
       .map((entry) => {
         const id = entry?.id != null ? String(entry.id) : '';
         if (!id) return null;
@@ -10291,7 +10299,8 @@ async function initLightSearch() {
 
 async function initDehumSearch() {
   try {
-    const response = await fetch('/ui/catalog');
+    const apiBase = (typeof window !== 'undefined' && window.API_BASE) ? window.API_BASE : '';
+    const response = await fetch(`${apiBase}/ui/catalog`);
     if (!response.ok) throw new Error(`HTTP ${response.status}`);
     const payload = await response.json();
     const dehums = Array.isArray(payload?.dehumidifiers) ? payload.dehumidifiers : [];
