@@ -13637,10 +13637,518 @@ function renderGrowRoomOverview() {
   const zoneCount = zones.length;
   const summaries = [
     {
-      // ...existing summary logic...
+      label: 'Grow Rooms',
+      value:
+        roomCount
+          ? `${roomCount} room${roomCount === 1 ? '' : 's'}`
+          : zoneCount
+          ? `${zoneCount} zone${zoneCount === 1 ? '' : 's'}`
+          : 'None'
+    },
+    {
+      label: 'Plans running',
+      value:
+        plans.length === 0
+          ? 'None'
+          : (() => {
+              const names = plans.map((plan) => plan.name || 'Untitled plan').filter(Boolean);
+              const preview = names.slice(0, 2).join(', ');
+              const extra = names.length > 2 ? ` +${names.length - 2}` : '';
+              return `${preview}${extra}`;
+            })()
+    },
+    {
+      label: 'Schedules',
+      value:
+        schedules.length === 0
+          ? 'None'
+          : (() => {
+              const names = schedules.map((sched) => sched.name || 'Unnamed schedule').filter(Boolean);
+              const preview = names.slice(0, 2).join(', ');
+              const extra = names.length > 2 ? ` +${names.length - 2}` : '';
+              return `${preview}${extra}`;
+            })()
     }
   ];
-  // ...existing code to update DOM...
+
+  summaryEl.innerHTML = summaries
+    .map(
+      (item) => `
+        <div class="grow-overview__summary-item">
+          <span class="grow-overview__summary-label">${escapeHtml(item.label)}</span>
+          <span class="grow-overview__summary-value">${escapeHtml(item.value)}</span>
+        </div>`
+    )
+    .join('');
+
+  const activeFeatures = Array.from(document.querySelectorAll('.ai-feature-card.active h3'))
+    .map((el) => el.textContent?.trim())
+    .filter(Boolean);
+
+  const matchZoneForRoom = (room) => {
+    if (!room) return null;
+    const identifiers = new Set(
+      [room.id, room.name]
+        .filter((value) => value !== undefined && value !== null)
+        .map((value) => String(value).toLowerCase())
+    );
+    if (!identifiers.size) return null;
+    return zones.find((zone) => {
+      const id = zone.id ? String(zone.id).toLowerCase() : '';
+      const name = zone.name ? String(zone.name).toLowerCase() : '';
+      const location = zone.location ? String(zone.location).toLowerCase() : '';
+      return identifiers.has(id) || identifiers.has(name) || identifiers.has(location);
+    }) || null;
+  };
+
+  const metricKeys = [
+    { key: 'tempC', label: 'Temp', unit: '°C', precision: 1 },
+    { key: 'rh', label: 'Humidity', unit: '%', precision: 1 },
+    { key: 'co2', label: 'CO2', unit: ' ppm', precision: 0 },
+    { key: 'vpd', label: 'VPD', unit: ' kPa', precision: 2 }
+  ];
+
+  const formatMetricValue = (sensor, meta) => {
+    if (!sensor || typeof sensor.current !== 'number' || !Number.isFinite(sensor.current)) {
+      return '—';
+    }
+    const value = meta.precision != null ? sensor.current.toFixed(meta.precision) : String(sensor.current);
+    if (meta.unit.trim() === '%') {
+      return `${value}${meta.unit}`;
+    }
+    return `${value}${meta.unit}`;
+  };
+
+  const metricStatus = (sensor) => {
+    if (!sensor || typeof sensor.current !== 'number' || !Number.isFinite(sensor.current)) {
+      return 'unknown';
+    }
+    const min = sensor.setpoint?.min;
+    const max = sensor.setpoint?.max;
+    if (typeof min === 'number' && typeof max === 'number') {
+      return sensor.current >= min && sensor.current <= max ? 'ok' : 'warn';
+    }
+    return 'unknown';
+  };
+
+  const buildMetrics = (zone) => {
+    if (!zone || !zone.sensors) return '';
+    const items = metricKeys
+      .map((meta) => {
+        const sensor = zone.sensors?.[meta.key];
+        if (!sensor) return '';
+        const status = metricStatus(sensor);
+        const value = formatMetricValue(sensor, meta);
+        return `
+          <div class="grow-room-card__metric grow-room-card__metric--${status}">
+            <span class="grow-room-card__metric-label">${escapeHtml(meta.label)}</span>
+            <span class="grow-room-card__metric-value">${escapeHtml(value)}</span>
+          </div>`;
+      })
+      .filter(Boolean)
+      .join('');
+    return items;
+  };
+
+  const buildAiSection = () => {
+    if (!activeFeatures.length) {
+      return '<p class="tiny text-muted">AI features inactive.</p>';
+    }
+    return `
+      <ul class="grow-room-card__ai-list">
+        ${activeFeatures.map((name) => `<li class="grow-room-card__ai-chip">${escapeHtml(name)}</li>`).join('')}
+      </ul>`;
+  };
+
+  const isRecord = (value) => value !== null && typeof value === 'object' && !Array.isArray(value);
+
+  const toKeySet = (...values) => {
+    const keys = new Set();
+    const add = (value) => {
+      if (Array.isArray(value)) {
+        value.forEach(add);
+        return;
+      }
+      if (value === undefined || value === null) {
+        return;
+      }
+      const str = String(value).trim();
+      if (str) {
+        keys.add(str.toLowerCase());
+      }
+    };
+    values.forEach(add);
+    return keys;
+  };
+
+  const collectIdentityKeys = (room, zone) => {
+    return toKeySet(
+      room?.id,
+      room?.name,
+      room?.room,
+      room?.roomId,
+      room?.scopeId,
+      room?.zone,
+      room?.groupId,
+      room?.groupName,
+      room?.plan,
+      room?.planId,
+      room?.planKey,
+      room?.match?.room,
+      room?.match?.zone,
+      room?.location,
+      Array.isArray(room?.zones) ? room.zones : null,
+      zone?.id,
+      zone?.name,
+      zone?.location,
+      zone?.zone,
+      zone?.scopeId
+    );
+  };
+
+  const readBoolean = (...candidates) => {
+    for (const value of candidates) {
+      if (typeof value === 'boolean') return value;
+      if (typeof value === 'string') {
+        const normalized = value.trim().toLowerCase();
+        if (['true', 'on', 'enabled', 'active', 'yes'].includes(normalized)) {
+          return true;
+        }
+        if (['false', 'off', 'disabled', 'inactive', 'no'].includes(normalized)) {
+          return false;
+        }
+      }
+    }
+    return undefined;
+  };
+
+  const readString = (...candidates) => {
+    for (const value of candidates) {
+      if (typeof value === 'string' && value.trim().length > 0) {
+        return value.trim();
+      }
+    }
+    return '';
+  };
+
+  const pickControlRecord = (room, zone) => {
+    const candidates = [];
+    if (isRecord(room)) {
+      ['control', 'controls', 'automation', 'ai'].forEach((key) => {
+        if (isRecord(room[key])) {
+          candidates.push(room[key]);
+        }
+      });
+    }
+    if (isRecord(zone)) {
+      ['control', 'controls', 'automation', 'ai'].forEach((key) => {
+        if (isRecord(zone[key])) {
+          candidates.push(zone[key]);
+        }
+      });
+    }
+
+    const controlMap = STATE.control;
+    if (isRecord(controlMap)) {
+      const keys = collectIdentityKeys(room, zone);
+      for (const [key, value] of Object.entries(controlMap)) {
+        if (keys.has(String(key).toLowerCase()) && isRecord(value)) {
+          candidates.push(value);
+        }
+        if (isRecord(value)) {
+          const nestedKeys = toKeySet(
+            value.id,
+            value.name,
+            value.room,
+            value.roomId,
+            value.scopeId,
+            value.zone,
+            value.groupId,
+            value.groupName
+          );
+          let matched = false;
+          for (const nestedKey of nestedKeys) {
+            if (keys.has(nestedKey)) {
+              candidates.push(value);
+              matched = true;
+              break;
+            }
+          }
+          if (!matched && Array.isArray(value?.zones)) {
+            const zoneMatch = value.zones.find((entry) => {
+              if (typeof entry === 'string') {
+                return keys.has(entry.toLowerCase());
+              }
+              if (isRecord(entry)) {
+                const zoneKeys = toKeySet(entry.id, entry.name, entry.zone, entry.scopeId);
+                for (const zoneKey of zoneKeys) {
+                  if (keys.has(zoneKey)) return true;
+                }
+              }
+              return false;
+            });
+            if (zoneMatch) {
+              candidates.push(value);
+            }
+          }
+        }
+      }
+    }
+
+    for (const candidate of candidates) {
+      if (isRecord(candidate)) {
+        return candidate;
+      }
+    }
+    return {};
+  };
+
+  const deriveAiStatus = (control, room, zone) => {
+    const mode = readString(
+      control.mode,
+      control.aiMode,
+      control.status,
+      room?.aiMode,
+      room?.controlMode,
+      room?.mode,
+      zone?.aiMode
+    ).toLowerCase();
+    const enabled = readBoolean(
+      control.enable,
+      control.enabled,
+      control.active,
+      control.on,
+      room?.aiEnabled,
+      room?.controlEnabled,
+      room?.enable,
+      room?.enabled,
+      zone?.aiEnabled
+    );
+    if (mode.includes('advis') || mode.includes('assist') || mode.includes('train')) {
+      return 'advisory';
+    }
+    if (mode.includes('auto') || mode.includes('pilot') || mode.includes('always')) {
+      return enabled === false ? 'off' : 'autopilot';
+    }
+    if (mode.includes('on')) {
+      return enabled === false ? 'off' : 'autopilot';
+    }
+    if (mode.includes('off')) {
+      return 'off';
+    }
+    if (enabled === true) return 'autopilot';
+    if (enabled === false) return 'off';
+    return 'off';
+  };
+
+  const deriveAutomationStatus = (control, room, zone) => {
+    const automationFlag = readBoolean(
+      room?.automation?.enable,
+      room?.automation?.enabled,
+      room?.automation?.active,
+      room?.automationEnabled,
+      control.automation,
+      control.automationEnabled,
+      control.enable,
+      control.enabled,
+      control.active,
+      zone?.automation?.enable,
+      zone?.automation?.enabled
+    );
+    if (automationFlag === true) return 'on';
+    if (automationFlag === false) return 'off';
+    if (readBoolean(control.enable, control.enabled, control.active) === true) {
+      return 'on';
+    }
+    if (zone?.meta?.managedByPlugs) {
+      return 'on';
+    }
+    if (Array.isArray(STATE.preAutomationRules) && STATE.preAutomationRules.length > 0) {
+      const keys = collectIdentityKeys(room, zone);
+      const matchesRule = STATE.preAutomationRules.some((rule) => {
+        if (!rule) return false;
+        const scope = rule.scope || rule.zone || rule.room || rule.target;
+        if (!scope) return false;
+        if (typeof scope === 'string') {
+          return keys.has(scope.trim().toLowerCase());
+        }
+        if (isRecord(scope)) {
+          const scopeKeys = toKeySet(scope.id, scope.name, scope.zone, scope.room, scope.scopeId);
+          for (const candidateKey of scopeKeys) {
+            if (keys.has(candidateKey)) {
+              return true;
+            }
+          }
+        }
+        return false;
+      });
+      if (matchesRule) return 'on';
+    }
+    return 'off';
+  };
+
+  const deriveSpectraStatus = (room, zone) => {
+    const keys = collectIdentityKeys(room, zone);
+    const planResolver = STATE.planResolver;
+    const planGroups = Array.isArray(planResolver?.groups)
+      ? planResolver.groups
+      : Array.isArray(planResolver)
+      ? planResolver
+      : [];
+    const groupMatch = planGroups.find((group) => {
+      if (!group) return false;
+      const groupKeys = toKeySet(
+        group.groupId,
+        group.groupName,
+        group.room,
+        group.roomId,
+        group.scopeId,
+        group.zone,
+        group.id,
+        group.name
+      );
+      for (const key of groupKeys) {
+        if (keys.has(key)) {
+          return true;
+        }
+      }
+      return false;
+    });
+    if (groupMatch) {
+      const should = groupMatch.shouldPowerOn;
+      if (typeof should === 'string') {
+        const normalized = should.toLowerCase();
+        if (['off', 'idle', 'false'].includes(normalized)) {
+          return 'idle';
+        }
+      } else if (should === false) {
+        return 'idle';
+      }
+      return 'active';
+    }
+
+    const hasPlan =
+      Boolean(room && (room.plan || room.planId || room.planKey)) ||
+      Boolean(room?.targets && (room.targets.planName || room.targets.planKey)) ||
+      Boolean(zone && (zone.plan || zone.planId || zone.planKey)) ||
+      Boolean(zone?.targets && (zone.targets.planName || zone.targets.planKey));
+    if (hasPlan) {
+      return 'active';
+    }
+
+    const hasSpectrum =
+      Boolean(room?.lighting && (room.lighting.spectrum || room.lighting.plan)) ||
+      Boolean(room?.spectra) ||
+      Boolean(zone?.lighting && zone.lighting.spectrum) ||
+      Boolean(zone?.sensors && (zone.sensors.ppfd || zone.sensors.spectrum));
+    if (hasSpectrum) {
+      return 'active';
+    }
+
+    const spectaCard = document.getElementById('spectraSyncFeature');
+    if (spectaCard?.classList.contains('active')) {
+      return 'active';
+    }
+
+    return 'idle';
+  };
+
+  const renderStatusIcons = (room, zone) => {
+    const control = pickControlRecord(room, zone);
+    const aiStatus = deriveAiStatus(control, room, zone) || 'off';
+    const automationStatus = deriveAutomationStatus(control, room, zone) || 'off';
+    const spectraStatus = deriveSpectraStatus(room, zone) || 'idle';
+
+    const aiStatusLabel = { autopilot: 'Autopilot', advisory: 'Advisory', off: 'Off' };
+    const automationStatusLabel = { on: 'On', off: 'Off' };
+    const spectraStatusLabel = { active: 'Active', idle: 'Idle' };
+
+    const iconMarkup = (type, status, text, ariaLabel) => {
+      const statusClass = status ? ` is-${status}` : '';
+      return `<span class="overview-icon overview-icon--${type}${statusClass}" aria-label="${escapeHtml(ariaLabel)}"><span class="overview-icon__dot" aria-hidden="true"></span>${escapeHtml(text)}</span>`;
+    };
+
+    const markup = `
+      <div class="overview-tile__icons" role="group" aria-label="Automation and AI status">
+        ${iconMarkup('ai', aiStatus, 'IA', `IA ${aiStatusLabel[aiStatus] || 'status'}`)}
+        ${iconMarkup('automation', automationStatus, 'Automation', `Automation ${automationStatusLabel[automationStatus] || 'status'}`)}
+        ${iconMarkup('spectra', spectraStatus, 'SpectraSync', `SpectraSync ${spectraStatusLabel[spectraStatus] || 'status'}`)}
+      </div>
+    `;
+    return markup.trim();
+  };
+
+  const cards = [];
+  if (rooms.length) {
+    rooms.forEach((room) => {
+      const zone = matchZoneForRoom(room);
+      const name = room.name || room.id || 'Grow Room';
+      const details = [];
+      const zonesList = Array.isArray(room.zones) ? room.zones.filter(Boolean) : [];
+      if (zonesList.length) {
+        details.push(`Zones: ${zonesList.map((item) => escapeHtml(item)).join(', ')}`);
+      }
+      if (room.layout?.type) {
+        details.push(`Layout: ${escapeHtml(room.layout.type)}`);
+      }
+      if (room.controlMethod) {
+        details.push(`Control: ${escapeHtml(room.controlMethod)}`);
+      }
+      const metaParts = [];
+      if (zone?.meta?.source) metaParts.push(`Source: ${escapeHtml(zone.meta.source)}`);
+      if (typeof zone?.meta?.battery === 'number') metaParts.push(`Battery: ${escapeHtml(`${zone.meta.battery}%`)}`);
+      if (typeof zone?.meta?.rssi === 'number') metaParts.push(`RSSI: ${escapeHtml(`${zone.meta.rssi} dBm`)}`);
+      const metrics = buildMetrics(zone);
+      const statusIcons = renderStatusIcons(room, zone);
+      cards.push(`
+        <article class="grow-room-card">
+          <div class="grow-room-card__header">
+            <h3>${escapeHtml(name)}</h3>
+            ${room.roomType ? `<span class="chip tiny">${escapeHtml(room.roomType)}</span>` : ''}
+          </div>
+          ${statusIcons}
+          ${details.length ? `<div class="tiny text-muted">${details.join(' • ')}</div>` : ''}
+          ${metaParts.length ? `<div class="tiny text-muted">${metaParts.join(' • ')}</div>` : ''}
+          ${metrics ? `<div class="grow-room-card__metrics">${metrics}</div>` : '<p class="tiny text-muted">No telemetry available.</p>'}
+          <div class="grow-room-card__ai">
+            <span class="tiny text-muted">AI Features</span>
+            ${buildAiSection()}
+          </div>
+        </article>`);
+    });
+  } else if (zones.length) {
+    zones.forEach((zone) => {
+      const name = zone.name || zone.id || 'Zone';
+      const location = zone.location ? `Location: ${escapeHtml(zone.location)}` : '';
+      const metaParts = [];
+      if (zone.meta?.source) metaParts.push(`Source: ${escapeHtml(zone.meta.source)}`);
+      if (typeof zone.meta?.battery === 'number') metaParts.push(`Battery: ${escapeHtml(`${zone.meta.battery}%`)}`);
+      if (typeof zone.meta?.rssi === 'number') metaParts.push(`RSSI: ${escapeHtml(`${zone.meta.rssi} dBm`)}`);
+      const metrics = buildMetrics(zone);
+      const statusIcons = renderStatusIcons(null, zone);
+      cards.push(`
+        <article class="grow-room-card">
+          <div class="grow-room-card__header">
+            <h3>${escapeHtml(name)}</h3>
+          </div>
+          ${statusIcons}
+          ${location ? `<div class="tiny text-muted">${location}</div>` : ''}
+          ${metaParts.length ? `<div class="tiny text-muted">${metaParts.join(' • ')}</div>` : ''}
+          ${metrics ? `<div class="grow-room-card__metrics">${metrics}</div>` : '<p class="tiny text-muted">No telemetry available.</p>'}
+          <div class="grow-room-card__ai">
+            <span class="tiny text-muted">AI Features</span>
+            ${buildAiSection()}
+          </div>
+        </article>`);
+    });
+  }
+
+  if (!cards.length) {
+    gridEl.innerHTML = '<p class="tiny text-muted">Add a grow room to view live status and telemetry.</p>';
+    return;
+  }
+
+  gridEl.innerHTML = cards.join('');
 }
 
 // --- Top Card and AI Features Management ---
