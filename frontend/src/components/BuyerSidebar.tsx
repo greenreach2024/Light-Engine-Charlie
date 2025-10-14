@@ -10,6 +10,7 @@ type SidebarItem = {
 const NAV_ITEMS: SidebarItem[] = [
   { id: "wishlists", label: "Review your Wishlist", href: "/buyers/wishlists" },
   { id: "budget", label: "Budget Coach", href: "/buyers/budget-coach" },
+  { id: "groups-v3", label: "Groups v3", href: "/buyers/groups-v3" },
   { id: "messages", label: "Messages", href: "/buyers/messages" },
   { id: "account", label: "Account", href: "/buyers/account" },
 ];
