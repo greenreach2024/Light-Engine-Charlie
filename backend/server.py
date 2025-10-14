@@ -29,6 +29,7 @@ from .state import (
     DeviceDataStore,
     DeviceRegistry,
     EnvironmentStateStore,
+    EnvironmentTelemetryStore,
     GroupScheduleStore,
     LightingState,
     PlanStore,
@@ -58,6 +59,7 @@ SCHEDULES = ScheduleStore()
 GROUP_SCHEDULES = GroupScheduleStore()
 PLAN_STORE = PlanStore()
 ENVIRONMENT_STATE = EnvironmentStateStore()
+ENVIRONMENT_TELEMETRY = EnvironmentTelemetryStore()
 DEVICE_DATA = DeviceDataStore()
 AUTOMATION = AutomationEngine(CONTROLLER, SCHEDULES)
 AI_ASSIST_SERVICE: Optional[SetupAssistService] = None
@@ -97,6 +99,117 @@ for index, fixture in enumerate(FIXTURE_INVENTORY, start=1):
 
 _AUTOMATION_TASK: Optional[asyncio.Task] = None
 _DISCOVERY_TASK: Optional[asyncio.Task] = None
+
+
+def _parse_time_range(value: Optional[Any]) -> Optional[int]:
+    if value is None:
+        return None
+    if isinstance(value, (int, float)):
+        seconds = int(float(value))
+        return seconds if seconds > 0 else None
+    text = str(value).strip().lower()
+    if not text:
+        return None
+    factors = {"h": 3600, "m": 60, "s": 1}
+    for suffix, factor in factors.items():
+        if text.endswith(suffix):
+            number_text = text[:-1].strip()
+            try:
+                amount = float(number_text)
+            except ValueError:
+                return None
+            seconds = int(amount * factor)
+            return seconds if seconds > 0 else None
+    try:
+        seconds = int(float(text))
+    except ValueError:
+        return None
+    return seconds if seconds > 0 else None
+
+
+def _parse_timestamp(value: Any) -> datetime:
+    if value is None:
+        return datetime.now(timezone.utc)
+    if isinstance(value, datetime):
+        return value.astimezone(timezone.utc)
+    if isinstance(value, (int, float)):
+        ts = float(value)
+        if ts > 1e12:
+            ts /= 1000.0
+        return datetime.fromtimestamp(ts, tz=timezone.utc)
+    if isinstance(value, str):
+        text = value.strip()
+        if not text:
+            return datetime.now(timezone.utc)
+        try:
+            numeric = float(text)
+        except ValueError:
+            numeric = None
+        if numeric is not None:
+            return _parse_timestamp(numeric)
+        normalised = text
+        if normalised.endswith("Z"):
+            normalised = normalised[:-1] + "+00:00"
+        try:
+            return datetime.fromisoformat(normalised).astimezone(timezone.utc)
+        except ValueError as exc:
+            raise ValueError("Invalid timestamp format") from exc
+    raise ValueError("Invalid timestamp format")
+
+
+def _extract_scope(payload: Dict[str, Any]) -> Optional[str]:
+    for key in ("scope", "zoneId", "zone", "room", "roomId"):
+        value = payload.get(key)
+        if isinstance(value, str) and value.strip():
+            return value.strip()
+    return None
+
+
+def _collect_metadata(payload: Dict[str, Any]) -> Dict[str, Any]:
+    metadata: Dict[str, Any] = {}
+    meta_payload = payload.get("meta")
+    if isinstance(meta_payload, dict):
+        for key, value in meta_payload.items():
+            if value is not None:
+                metadata[key] = value
+    alias_map = {"device_id": "deviceId", "sensor_id": "sensorId"}
+    for key in ("name", "label", "battery", "rssi", "source", "deviceId", "device_id", "sensorId", "sensor_id", "location"):
+        if key in payload and payload[key] is not None:
+            target = alias_map.get(key, key)
+            metadata[target] = payload[key]
+    return metadata
+
+
+def _is_telemetry_payload(payload: Dict[str, Any]) -> bool:
+    if not isinstance(payload, dict):
+        return False
+    if not isinstance(payload.get("sensors"), dict):
+        return False
+    return _extract_scope(payload) is not None
+
+
+def _ingest_environment_telemetry(payload: Dict[str, Any]) -> Dict[str, Any]:
+    scope = _extract_scope(payload)
+    if not scope:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="scope is required for telemetry payloads")
+    sensors = payload.get("sensors")
+    if not isinstance(sensors, dict) or not sensors:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="sensors must be a non-empty object")
+    timestamp_value = payload.get("ts") or payload.get("timestamp")
+    try:
+        moment = _parse_timestamp(timestamp_value)
+    except ValueError as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+    metadata = _collect_metadata(payload)
+    zone = ENVIRONMENT_TELEMETRY.add_reading(scope, moment, sensors, metadata)
+    response: Dict[str, Any] = {"status": "ok", "zone": zone}
+    last_updated = ENVIRONMENT_TELEMETRY.last_updated()
+    if last_updated:
+        response["updatedAt"] = last_updated
+    env_snapshot = ENVIRONMENT_STATE.snapshot()
+    if env_snapshot:
+        response["env"] = env_snapshot
+    return response
 
 
 @app.get("/")
@@ -532,23 +645,70 @@ async def publish_plans(payload: Dict[str, Any] = Body(...)) -> Dict[str, Any]:
 
 
 @app.get("/env")
-async def get_environment(zone_id: Optional[str] = Query(None, alias="zoneId")) -> Dict[str, Any]:
-    if zone_id:
-        zone = ENVIRONMENT_STATE.get_zone(zone_id)
-        if zone is None:
-            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Zone not found")
-        return {"status": "ok", "zone": zone}
-    snapshot = ENVIRONMENT_STATE.snapshot()
-    return {"status": "ok", **snapshot}
+async def get_environment(
+    scope: Optional[str] = Query(None),
+    time_range: Optional[str] = Query(None, alias="range"),
+    zone_id: Optional[str] = Query(None, alias="zoneId"),
+) -> Dict[str, Any]:
+    range_seconds = _parse_time_range(time_range)
+    identifier = (scope or zone_id or "").strip()
+    response: Dict[str, Any] = {"status": "ok"}
+
+    if identifier:
+        telemetry_zone = ENVIRONMENT_TELEMETRY.get_zone(identifier, range_seconds)
+        if telemetry_zone:
+            response["zone"] = telemetry_zone
+        else:
+            zone = ENVIRONMENT_STATE.get_zone(identifier)
+            if zone is None:
+                raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Scope not found")
+            response["zone"] = zone
+    else:
+        response["zones"] = ENVIRONMENT_TELEMETRY.list_zones(range_seconds)
+
+    env_snapshot = ENVIRONMENT_STATE.snapshot()
+    if env_snapshot:
+        response["env"] = env_snapshot
+
+    last_updated = ENVIRONMENT_TELEMETRY.last_updated()
+    if last_updated:
+        response["updatedAt"] = last_updated
+
+    return response
 
 
 @app.post("/env", status_code=status.HTTP_200_OK)
 async def upsert_environment(payload: Dict[str, Any] = Body(...)) -> Dict[str, Any]:
+    if isinstance(payload, list):
+        ingested = []
+        for item in payload:
+            if not isinstance(item, dict) or not _is_telemetry_payload(item):
+                continue
+            result = _ingest_environment_telemetry(item)
+            if "zone" in result:
+                ingested.append(result["zone"])
+        if not ingested:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="No valid telemetry entries supplied",
+            )
+        response: Dict[str, Any] = {"status": "ok", "zones": ingested}
+        last_updated = ENVIRONMENT_TELEMETRY.last_updated()
+        if last_updated:
+            response["updatedAt"] = last_updated
+        env_snapshot = ENVIRONMENT_STATE.snapshot()
+        if env_snapshot:
+            response["env"] = env_snapshot
+        return response
+
     if not isinstance(payload, dict) or not payload:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="Request body must be a non-empty object",
         )
+
+    if _is_telemetry_payload(payload):
+        return _ingest_environment_telemetry(payload)
 
     response: Dict[str, Any] = {"status": "ok"}
 

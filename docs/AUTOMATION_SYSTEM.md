@@ -79,15 +79,19 @@ THEN: Webhooks "Make a web request"
 Send sensor readings to trigger automations:
 
 ```bash
-curl -X POST http://127.0.0.1:8091/ingest/env \
+curl -X POST http://127.0.0.1:8091/env \
   -H "Content-Type: application/json" \
   -d '{
-    "zoneId": "greenhouse-1",
-    "name": "Main Greenhouse", 
-    "temperature": 32.5,
-    "humidity": 45,
-    "co2": 1200,
-    "source": "switchbot"
+    "scope": "greenhouse-1",
+    "sensors": {
+      "temp": 32.5,
+      "rh": 45,
+      "co2": 1200
+    },
+    "meta": {
+      "name": "Main Greenhouse",
+      "source": "switchbot"
+    }
   }'
 ```
 

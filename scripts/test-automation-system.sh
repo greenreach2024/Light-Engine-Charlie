@@ -51,16 +51,20 @@ curl -X POST "$BASE_URL/integrations/ifttt/incoming/weather_temp_change?token=te
 
 echo
 echo "🏠 Testing Environmental Data Ingest (Multiple Sensors):"
-curl -X POST $BASE_URL/ingest/env \
+curl -X POST $BASE_URL/env \
   -H "Content-Type: application/json" \
   -d '{
-    "zoneId": "greenhouse-2",
-    "name": "Secondary Greenhouse",
-    "temperature": 35.0,
-    "humidity": 35,
-    "co2": 1800,
-    "source": "sensor-hub"
-  }' | jq -r 'if .ok then "Environmental data ingested successfully" else .error end'
+    "scope": "greenhouse-2",
+    "sensors": {
+      "temp": 35.0,
+      "rh": 35,
+      "co2": 1800
+    },
+    "meta": {
+      "name": "Secondary Greenhouse",
+      "source": "sensor-hub"
+    }
+  }' | jq -r 'if .status == "ok" then "Environmental data ingested successfully" else .detail // .error // "Failed" end'
 
 echo
 echo "📈 Automation Execution History (Last 5):"
@@ -86,4 +90,4 @@ echo "- POST /api/automation/rules         - Add/update rules"
 echo "- POST /api/automation/test          - Test with sensor data"
 echo "- GET  /api/automation/history       - View execution log"
 echo "- POST /integrations/ifttt/incoming  - IFTTT webhooks"
-echo "- POST /ingest/env                   - Environmental data"
+echo "- POST /env                          - Environmental data"
