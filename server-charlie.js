@@ -28,33 +28,36 @@ const RUNNING_UNDER_NODE_TEST = process.argv.some((arg) =>
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 const PUBLIC_DIR = path.join(__dirname, 'public');
+const BUILD_TIME = Date.now().toString();
+const INDEX_CHARLIE_PATH = path.join(PUBLIC_DIR, 'index.charlie.html');
+let INDEX_CHARLIE_HTML = null;
+let indexCharlieLoadErrorLogged = false;
 
-// --- CORS guardrail: always answer OPTIONS and echo request headers ---
-app.use((req, res, next) => {
-  const origin = req.headers.origin || '*';
-  res.setHeader('Access-Control-Allow-Origin', origin);
-  res.setHeader('Vary', 'Origin');
-  res.setHeader('Access-Control-Allow-Methods', 'GET,POST,PATCH,DELETE,OPTIONS');
-  const reqH = req.header('Access-Control-Request-Headers');
-  if (reqH) res.setHeader('Access-Control-Allow-Headers', reqH);
-  if (req.method === 'OPTIONS') return res.sendStatus(204);
-  next();
-});
-
-// --- Health probe: refuse to start if CORS config is missing ---
-function checkCorsConfigOrExit() {
-  // Check if CORS middleware is present by inspecting app._router.stack
-  const hasCors = app._router && app._router.stack && app._router.stack.some(
-    (layer) => layer && layer.handle && layer.handle.toString().includes('Access-Control-Allow-Origin')
-  );
-  if (!hasCors) {
-    console.error('[health] CORS middleware missing. Refusing to start.');
-    process.exit(1);
+function loadIndexCharlieHtml() {
+  if (INDEX_CHARLIE_HTML) return INDEX_CHARLIE_HTML;
+  try {
+    const template = fs.readFileSync(INDEX_CHARLIE_PATH, 'utf8');
+    INDEX_CHARLIE_HTML = template.replace(/\{\{BUILD_TIME\}\}/g, BUILD_TIME);
+    return INDEX_CHARLIE_HTML;
+  } catch (error) {
+    if (!indexCharlieLoadErrorLogged) {
+      indexCharlieLoadErrorLogged = true;
+      console.error('[charlie] Failed to load index.charlie.html:', error?.message || error);
+    }
+    return null;
   }
 }
 
-// Call CORS check after CORS middleware is registered
-checkCorsConfigOrExit();
+// --- CORS guardrail: always answer OPTIONS and echo request headers ---
+app.use((req,res,next)=>{
+  res.setHeader('Access-Control-Allow-Origin', req.headers.origin || '*');
+  res.setHeader('Vary', 'Origin');
+  res.setHeader('Access-Control-Allow-Methods','GET,POST,PATCH,DELETE,OPTIONS');
+  res.setHeader('Access-Control-Allow-Headers','Content-Type, Authorization, X-Requested-With');
+  res.setHeader('Access-Control-Max-Age','600');
+  if (req.method === 'OPTIONS') return res.status(204).end();
+  next();
+});
 // Default controller target. Can be overridden with the CTRL env var.
 // Use the Pi forwarder when available for remote device reachability during development.
 const DEFAULT_CONTROLLER = "http://192.168.2.80:3000";
@@ -77,6 +80,7 @@ const PLANS_PATH = path.join(DATA_DIR, 'plans.json');
 const SCHEDULES_PATH = path.join(DATA_DIR, 'schedules.json');
 const ROOMS_PATH = path.join(DATA_DIR, 'rooms.json');
 const CALIBRATIONS_PATH = path.join(DATA_DIR, 'calibration.json');
+const CALIBRATION_MULTIPLIERS_PATH = path.join(DATA_DIR, 'calibration.multipliers.json');
 const DEVICES_CACHE_PATH = path.join(DATA_DIR, 'devices.cache.json');
 const SWITCHBOT_CACHE_PATH = path.join(PUBLIC_DIR, 'data', 'switchbot.cache.json');
 const EQUIPMENT_CATALOG_PATH = path.join(PUBLIC_DIR, 'data', 'equipment.catalog.json');
@@ -119,6 +123,94 @@ function ensureDataDir() {
 }
 function ensureDbDir(){ try { fs.mkdirSync(DB_DIR, { recursive: true }); } catch {} }
 function isHttpUrl(u){ try { const x=new URL(u); return x.protocol==='http:'||x.protocol==='https:'; } catch { return false; } }
+
+const DEFAULT_DEVICE_MULTIPLIERS = { cw: 1, ww: 1, b: 1, r: 1 };
+
+function clampMultiplier(value) {
+  const num = Number(value);
+  if (!Number.isFinite(num)) return 1;
+  if (num < 0) return 0;
+  if (num > 10) return 10;
+  return Math.round(num * 1000) / 1000;
+}
+
+function normalizeMultiplierDoc(doc) {
+  if (!doc || typeof doc !== 'object') return { ...DEFAULT_DEVICE_MULTIPLIERS };
+  return {
+    cw: clampMultiplier(doc.cw ?? doc.c ?? doc.cold ?? doc.coldWhite ?? 1),
+    ww: clampMultiplier(doc.ww ?? doc.w ?? doc.warm ?? doc.warmWhite ?? 1),
+    b: clampMultiplier(doc.b ?? doc.bl ?? doc.blue ?? 1),
+    r: clampMultiplier(doc.r ?? doc.rd ?? doc.red ?? 1),
+  };
+}
+
+function readCalibrationMultipliers() {
+  ensureDataDir();
+  try {
+    if (!fs.existsSync(CALIBRATION_MULTIPLIERS_PATH)) {
+      return {};
+    }
+    const raw = JSON.parse(fs.readFileSync(CALIBRATION_MULTIPLIERS_PATH, 'utf8'));
+    const entries = raw && typeof raw === 'object' ? raw.devices || raw : {};
+    return Object.entries(entries).reduce((acc, [deviceId, value]) => {
+      const key = String(deviceId || '').trim();
+      if (!key) return acc;
+      acc[key] = normalizeMultiplierDoc(value);
+      return acc;
+    }, {});
+  } catch (error) {
+    console.warn('[calibration] Failed to read calibration multipliers:', error.message || error);
+    return {};
+  }
+}
+
+function writeCalibrationMultipliers(map) {
+  ensureDataDir();
+  const payload = { devices: {} };
+  Object.entries(map || {}).forEach(([deviceId, value]) => {
+    const key = String(deviceId || '').trim();
+    if (!key) return;
+    payload.devices[key] = normalizeMultiplierDoc(value);
+  });
+  try {
+    fs.writeFileSync(CALIBRATION_MULTIPLIERS_PATH, JSON.stringify(payload, null, 2));
+    return payload.devices;
+  } catch (error) {
+    console.error('[calibration] Failed to write calibration multipliers:', error.message || error);
+    throw error;
+  }
+}
+
+function getDeviceMultipliers(map, deviceId) {
+  const id = String(deviceId ?? '').trim();
+  if (!id) return { ...DEFAULT_DEVICE_MULTIPLIERS };
+  const source = (map && typeof map === 'object' && map[id]) || {};
+  return normalizeMultiplierDoc(source);
+}
+
+function applyMultipliersToHexPayload(hexValue, multipliers, maxByte = 255) {
+  if (typeof hexValue !== 'string') return hexValue;
+  const trimmed = hexValue.trim();
+  if (!/^[0-9a-fA-F]{12}$/.test(trimmed)) return hexValue;
+  const safeMax = Number.isFinite(maxByte) && maxByte > 0 ? Math.min(Math.round(maxByte), 255) : 255;
+  const parts = trimmed.toUpperCase().match(/.{2}/g);
+  if (!parts || parts.length !== 6) return hexValue;
+  const keys = ['cw', 'ww', 'b', 'r'];
+  let changed = false;
+  for (let index = 0; index < keys.length; index += 1) {
+    const base = parseInt(parts[index], 16);
+    if (!Number.isFinite(base)) continue;
+    const factor = Number.isFinite(multipliers?.[keys[index]]) ? multipliers[keys[index]] : 1;
+    const scaled = Math.round(base * factor);
+    const clamped = Math.max(0, Math.min(safeMax, scaled));
+    if (clamped !== base) changed = true;
+    parts[index] = clamped.toString(16).padStart(2, '0').toUpperCase();
+  }
+  if (!changed) {
+    return parts.join('');
+  }
+  return parts.join('');
+}
 
 function loadGroupsFile() {
   ensureDataDir();
@@ -307,6 +399,15 @@ function normalizeGroupForResponse(group) {
   const membersSource = Array.isArray(group.members) ? group.members : Array.isArray(group.lights) ? group.lights : [];
   const members = membersSource.map(normalizeMemberEntry).filter(Boolean);
 
+  const deviceIds = members
+    .map((entry) => {
+      if (!entry) return '';
+      if (typeof entry === 'string') return entry.trim();
+      if (typeof entry.id === 'string') return entry.id.trim();
+      return '';
+    })
+    .filter(Boolean);
+
   const response = { id, name: name || label || id };
   if (label) response.label = label;
   if (room) response.room = room;
@@ -319,6 +420,7 @@ function normalizeGroupForResponse(group) {
   if (!response.members && Array.isArray(group.lights)) {
     response.members = group.lights.map(normalizeMemberEntry).filter(Boolean);
   }
+  response.devices = deviceIds;
   return response;
 }
 
@@ -334,7 +436,12 @@ function parseIncomingGroup(raw, knownDeviceIds = null) {
   if (!room) throw new Error('Group room is required.');
   const zone = String(raw.zone ?? raw.zoneId ?? matchRaw?.zone ?? '').trim();
 
-  const membersSource = Array.isArray(raw.members) ? raw.members : Array.isArray(raw.lights) ? raw.lights : [];
+  const devicesSource = Array.isArray(raw.devices) ? raw.devices : [];
+  const membersSource = Array.isArray(raw.members)
+    ? raw.members
+    : Array.isArray(raw.lights)
+      ? raw.lights
+      : devicesSource;
   const members = membersSource.map(normalizeMemberEntry).filter(Boolean);
   if (!members.length) throw new Error('Group requires a non-empty members[] list.');
 
@@ -359,6 +466,7 @@ function parseIncomingGroup(raw, knownDeviceIds = null) {
     match: { room, zone },
     lights: normalizedMembers.map((entry) => ({ id: entry.id })),
     members: normalizedMembers.map((entry) => entry.id),
+    devices: normalizedMembers.map((entry) => entry.id),
   };
   if (typeof stored.plan === 'string') stored.plan = stored.plan.trim();
   if (typeof stored.schedule === 'string') stored.schedule = stored.schedule.trim();
@@ -577,36 +685,314 @@ function parseIncomingPlans(body) {
   return { ...envelope, plans: normalized };
 }
 
+const TIME_PATTERN = /^(\d{1,2}):(\d{2})$/;
+
+function normalizeTimeString(value, fallback = null) {
+  if (typeof value === 'string') {
+    const trimmed = value.trim();
+    const match = TIME_PATTERN.exec(trimmed);
+    if (match) {
+      let hours = Number(match[1]);
+      const minutes = Number(match[2]);
+      if (Number.isInteger(hours) && Number.isInteger(minutes) && minutes >= 0 && minutes < 60) {
+        if (hours >= 0 && hours < 24) {
+          return `${String(hours).padStart(2, '0')}:${String(minutes).padStart(2, '0')}`;
+        }
+      }
+    }
+  }
+  return fallback;
+}
+
+function timeToMinutes(time) {
+  if (!time) return null;
+  const parts = time.split(':');
+  if (parts.length !== 2) return null;
+  const hours = Number(parts[0]);
+  const minutes = Number(parts[1]);
+  if (!Number.isInteger(hours) || !Number.isInteger(minutes)) return null;
+  if (hours < 0 || hours > 23 || minutes < 0 || minutes > 59) return null;
+  return hours * 60 + minutes;
+}
+
+function minutesToTime(totalMinutes) {
+  if (!Number.isFinite(totalMinutes)) return null;
+  const normalized = ((Math.round(totalMinutes) % 1440) + 1440) % 1440;
+  const hours = Math.floor(normalized / 60);
+  const minutes = normalized % 60;
+  return `${String(hours).padStart(2, '0')}:${String(minutes).padStart(2, '0')}`;
+}
+
+function diffMinutes(start, end) {
+  const startMinutes = timeToMinutes(start);
+  const endMinutes = timeToMinutes(end);
+  if (startMinutes == null || endMinutes == null) return null;
+  const delta = (endMinutes - startMinutes + 1440) % 1440;
+  return delta;
+}
+
+function computeHoursBetween(start, end) {
+  const minutes = diffMinutes(start, end);
+  if (minutes == null) return null;
+  return minutes / 60;
+}
+
+function normalizeRampPayload(rawRamp, fallback = null) {
+  if (rawRamp == null) {
+    return fallback && (fallback.up != null || fallback.down != null)
+      ? { up: fallback.up ?? null, down: fallback.down ?? null }
+      : null;
+  }
+  if (typeof rawRamp === 'number' && Number.isFinite(rawRamp)) {
+    const clamped = Math.max(0, rawRamp);
+    return { up: clamped, down: clamped };
+  }
+  if (typeof rawRamp === 'object') {
+    const up = toNumberOrNull(rawRamp.up ?? rawRamp.rampUp ?? rawRamp.rise);
+    const down = toNumberOrNull(rawRamp.down ?? rawRamp.rampDown ?? rawRamp.fade);
+    if (up == null && down == null) {
+      return fallback && (fallback.up != null || fallback.down != null)
+        ? { up: fallback.up ?? null, down: fallback.down ?? null }
+        : null;
+    }
+    return {
+      up: up != null ? Math.max(0, up) : fallback?.up ?? null,
+      down: down != null ? Math.max(0, down) : fallback?.down ?? null,
+    };
+  }
+  return fallback && (fallback.up != null || fallback.down != null)
+    ? { up: fallback.up ?? null, down: fallback.down ?? null }
+    : null;
+}
+
+function normalizeScheduleCycle(rawCycle, fallbackRamp = null) {
+  if (!rawCycle || typeof rawCycle !== 'object') return null;
+  const start = normalizeTimeString(rawCycle.start ?? rawCycle.on ?? rawCycle.begin);
+  if (!start) return null;
+  let off = normalizeTimeString(rawCycle.off ?? rawCycle.end);
+  let photo = toNumberOrNull(rawCycle.photo ?? rawCycle.hours ?? rawCycle.onHours ?? rawCycle.durationHours);
+  if (!Number.isFinite(photo) || photo < 0) {
+    const inferred = off ? computeHoursBetween(start, off) : null;
+    photo = inferred != null ? inferred : null;
+  }
+  if (!Number.isFinite(photo) || photo < 0) {
+    photo = 0;
+  }
+  photo = Math.max(0, Math.min(24, photo));
+  if (!off) {
+    off = minutesToTime((timeToMinutes(start) ?? 0) + Math.round(photo * 60));
+  }
+  const rampRaw = normalizeRampPayload(
+    rawCycle.ramp ?? rawCycle.ramps ?? {
+      up: rawCycle.rampUp ?? rawCycle.rampUpMin,
+      down: rawCycle.rampDown ?? rawCycle.rampDownMin,
+    },
+    fallbackRamp,
+  );
+  const spectrum = rawCycle.spectrum && typeof rawCycle.spectrum === 'object'
+    ? rawCycle.spectrum
+    : null;
+  const cycle = {
+    start,
+    on: start,
+    off: off ?? start,
+    photo,
+    hours: photo,
+  };
+  if (rampRaw) {
+    cycle.ramp = { up: rampRaw.up ?? null, down: rampRaw.down ?? null };
+    cycle.rampUpMin = rampRaw.up ?? null;
+    cycle.rampDownMin = rampRaw.down ?? null;
+  }
+  if (spectrum) {
+    cycle.spectrum = spectrum;
+  }
+  return cycle;
+}
+
+function summarizeRampFromCycles(cycles, fallbackRamp = null) {
+  for (const cycle of cycles) {
+    if (cycle && typeof cycle === 'object' && cycle.ramp) {
+      return { up: cycle.ramp.up ?? null, down: cycle.ramp.down ?? null };
+    }
+  }
+  return fallbackRamp && (fallbackRamp.up != null || fallbackRamp.down != null)
+    ? { up: fallbackRamp.up ?? null, down: fallbackRamp.down ?? null }
+    : { up: null, down: null };
+}
+
+function serializeScheduleForStorage(schedule) {
+  if (!schedule || typeof schedule !== 'object') return null;
+  const cycles = Array.isArray(schedule.cycles)
+    ? schedule.cycles.slice(0, 2).map((cycle) => ({
+        start: cycle.start ?? cycle.on ?? null,
+        off: cycle.off ?? null,
+        photo: cycle.photo ?? cycle.hours ?? null,
+        ramp: cycle.ramp ?? null,
+        spectrum: cycle.spectrum ?? null,
+      }))
+    : [];
+  return {
+    id: schedule.id,
+    groupId: schedule.groupId,
+    name: schedule.name,
+    mode: schedule.mode,
+    timezone: schedule.timezone ?? null,
+    photoperiodHours: schedule.photoperiodHours ?? null,
+    ramp: schedule.ramp ?? null,
+    cycles,
+    updatedAt: schedule.updatedAt ?? null,
+  };
+}
+
+function mergeScheduleEntries(existingRaw, incomingSchedules) {
+  const map = new Map();
+  existingRaw.forEach((entry) => {
+    const normalized = normalizeScheduleEntry(entry);
+    if (normalized && normalized.groupId) {
+      map.set(normalized.groupId, normalized);
+    }
+  });
+
+  const now = new Date().toISOString();
+  incomingSchedules.forEach((schedule) => {
+    if (!schedule || typeof schedule !== 'object') return;
+    const groupId = typeof schedule.groupId === 'string' ? schedule.groupId.trim() : '';
+    if (!groupId) return;
+    const stamped = {
+      ...schedule,
+      id: schedule.id || `group:${groupId}`,
+      groupId,
+      updatedAt: now,
+    };
+    map.set(groupId, stamped);
+  });
+
+  const merged = Array.from(map.values());
+  const stored = merged.map(serializeScheduleForStorage).filter(Boolean);
+  return { merged, stored };
+}
+
 function normalizeScheduleEntry(raw) {
   if (!raw || typeof raw !== 'object') return null;
   const idCandidate = [raw.id, raw.scheduleId, raw.deviceId, raw.device_id, raw.deviceID]
     .map((value) => (typeof value === 'string' ? value.trim() : ''))
     .find((value) => !!value);
-  if (!idCandidate) return null;
-  const schedule = { ...raw, id: idCandidate };
-  if (typeof schedule.planKey === 'string') schedule.planKey = schedule.planKey.trim();
-  if (typeof schedule.period === 'string') schedule.period = schedule.period.trim();
-  if (typeof schedule.start === 'string') schedule.start = schedule.start.trim();
+  const groupIdCandidate = [
+    raw.groupId,
+    raw.group_id,
+    raw.group,
+    raw.groupID,
+    idCandidate && idCandidate.startsWith('group:') ? idCandidate.split(':', 2)[1] : null,
+  ]
+    .map((value) => (typeof value === 'string' ? value.trim() : ''))
+    .find((value) => !!value);
+  if (!groupIdCandidate) return null;
+
+  const fallbackRamp = {
+    up: toNumberOrNull(raw.rampUpMin ?? raw.rampUpMinutes ?? raw.ramp?.up),
+    down: toNumberOrNull(raw.rampDownMin ?? raw.rampDownMinutes ?? raw.ramp?.down),
+  };
+
+  let cycles = [];
+  if (Array.isArray(raw.cycles) && raw.cycles.length) {
+    cycles = raw.cycles
+      .slice(0, 2)
+      .map((entry) => normalizeScheduleCycle(entry, fallbackRamp))
+      .filter(Boolean);
+  }
+
+  if (!cycles.length) {
+    const start = normalizeTimeString(raw.start ?? raw.startTime ?? '08:00', '08:00');
+    let durationHours = toNumberOrNull(
+      raw.durationHours ?? raw.photoperiodHours ?? raw.hours ?? raw.photoperiod,
+    );
+    if (!Number.isFinite(durationHours) || durationHours < 0) {
+      const photoperiodArray = Array.isArray(raw.photoperiod) ? raw.photoperiod : [];
+      const firstPhotoperiod = photoperiodArray.length ? photoperiodArray[0] : null;
+      durationHours = toNumberOrNull(firstPhotoperiod);
+    }
+    if (!Number.isFinite(durationHours) || durationHours <= 0) {
+      durationHours = 12;
+    }
+    durationHours = Math.max(0, Math.min(24, durationHours));
+    const off = minutesToTime((timeToMinutes(start) ?? 0) + Math.round(durationHours * 60));
+    cycles = [
+      normalizeScheduleCycle(
+        {
+          start,
+          off,
+          photo: durationHours,
+        },
+        fallbackRamp,
+      ),
+    ].filter(Boolean);
+  }
+
+  if (!cycles.length) return null;
+
+  const mode = cycles.length > 1 ? 'two' : 'one';
+  const photoperiodHours = cycles.reduce((total, cycle) => {
+    const hours = Number.isFinite(cycle?.photo) ? cycle.photo : 0;
+    return total + (hours > 0 ? hours : 0);
+  }, 0);
+
+  const rampSummary = summarizeRampFromCycles(cycles, fallbackRamp);
+  const timezone = typeof raw.timezone === 'string' && raw.timezone.trim() ? raw.timezone.trim() : null;
+  const updatedAt = typeof raw.updatedAt === 'string' && raw.updatedAt.trim()
+    ? raw.updatedAt
+    : new Date().toISOString();
+
+  const schedule = {
+    id: idCandidate || `group:${groupIdCandidate}`,
+    groupId: groupIdCandidate,
+    name: typeof raw.name === 'string' && raw.name.trim()
+      ? raw.name.trim()
+      : `Schedule for ${groupIdCandidate}`,
+    mode,
+    cycles,
+    photoperiodHours,
+    totalOnHours: photoperiodHours,
+    totalOffHours: Math.max(0, 24 - photoperiodHours),
+    timezone,
+    ramp: rampSummary,
+    rampUpMin: rampSummary.up ?? null,
+    rampDownMin: rampSummary.down ?? null,
+    updatedAt,
+  };
+
+  if (cycles[0]) {
+    schedule.start = cycles[0].start;
+  }
+
+  if (typeof raw.planKey === 'string' && raw.planKey.trim()) {
+    schedule.planKey = raw.planKey.trim();
+  }
+
   return schedule;
 }
 
 function parseIncomingSchedules(body) {
   if (!body) throw new Error('Schedule payload required.');
   let entries = [];
+  let bulk = false;
   if (Array.isArray(body)) {
     entries = body;
+    bulk = true;
   } else if (Array.isArray(body.schedules)) {
     entries = body.schedules;
+    bulk = true;
   } else if (typeof body === 'object') {
     entries = [body];
   }
   const normalized = entries.map(normalizeScheduleEntry).filter(Boolean);
   if (!normalized.length) {
-    if (Array.isArray(body?.schedules) && body.schedules.length === 0) return [];
-    if (Array.isArray(body) && body.length === 0) return [];
+    if (bulk && entries.length === 0) {
+      return { schedules: [], bulk };
+    }
     throw new Error('At least one schedule entry is required.');
   }
-  return normalized;
+  return { schedules: normalized, bulk };
 }
 function loadControllerFromDisk(){
   try {
@@ -5562,8 +5948,16 @@ function streamLiveFile(res, filePath, type) {
 
 // Phase 9 testing guardrails: serve the live files from disk
 app.get('/tmp/live.index.html', (req, res) => {
-  const filePath = path.join(PUBLIC_DIR, 'index.html');
-  streamLiveFile(res, filePath, 'html');
+  const html = loadIndexCharlieHtml();
+  if (html) {
+    res.setHeader('Cache-Control', 'no-store, max-age=0');
+    res.type('html').send(html);
+    return;
+  }
+  const fallbackPath = path.join(PUBLIC_DIR, 'index.html');
+  res.setHeader('Cache-Control', 'no-store, max-age=0');
+  res.type('html');
+  res.sendFile(fallbackPath);
 });
 
 app.get('/tmp/live.app.new.js', (req, res) => {
@@ -5597,13 +5991,55 @@ app.get('/api/devicedatas', async (req, res) => {
   }
 });
 
+app.get('/calibration', (req, res) => {
+  try {
+    const devices = readCalibrationMultipliers();
+    res.json({ devices });
+  } catch (error) {
+    res.status(500).json({ error: 'calibration_read_failed', detail: String(error) });
+  }
+});
+
+app.post('/calibration', express.json(), (req, res) => {
+  try {
+    const body = req.body && typeof req.body === 'object' ? req.body : {};
+    const deviceId = typeof body.deviceId === 'string' ? body.deviceId.trim() : '';
+    if (!deviceId) {
+      res.status(400).json({ error: 'missing_device_id' });
+      return;
+    }
+    const source = body.multipliers && typeof body.multipliers === 'object' ? body.multipliers : body;
+    const multipliers = normalizeMultiplierDoc(source);
+    const existing = readCalibrationMultipliers();
+    existing[deviceId] = multipliers;
+    const saved = writeCalibrationMultipliers(existing);
+    res.json({ deviceId, multipliers: saved[deviceId] || multipliers });
+  } catch (error) {
+    res.status(500).json({ error: 'calibration_write_failed', detail: String(error) });
+  }
+});
+
 app.patch('/api/devicedatas/device/:id', pinGuard, express.json(), async (req, res) => {
   try {
     const target = `${CONTROLLER_BASE()}/api/devicedatas/device/${encodeURIComponent(req.params.id)}`;
+    const payload = req.body && typeof req.body === 'object' ? { ...req.body } : {};
+    const status = typeof payload.status === 'string' ? payload.status.toLowerCase() : '';
+    const shouldApplyCalibration = status === 'on';
+    if (shouldApplyCalibration && typeof payload.value === 'string') {
+      try {
+        const multipliersMap = readCalibrationMultipliers();
+        const multipliers = getDeviceMultipliers(multipliersMap, req.params.id);
+        const { maxByte } = loadChannelScaleConfig();
+        const calibratedHex = applyMultipliersToHexPayload(payload.value, multipliers, maxByte);
+        payload.value = calibratedHex;
+      } catch (error) {
+        console.warn('[calibration] Failed to apply multipliers:', error?.message || error);
+      }
+    }
     const upstream = await fetch(target, {
       method: 'PATCH',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(req.body || {}),
+      body: JSON.stringify(payload),
       signal: AbortSignal.timeout(5000)
     });
     const text = await upstream.text();
@@ -5732,9 +6168,32 @@ app.use('/controller', proxyCorsMiddleware, createProxyMiddleware({
   }
 }));
 
+// Dev-only live asset snapshots for cache validation
+app.get('/tmp/live.index.html', (req, res) => {
+  const html = loadIndexCharlieHtml();
+  if (html) {
+    res.setHeader('Cache-Control', 'no-store, max-age=0');
+    res.type('html').send(html);
+    return;
+  }
+  res.setHeader('Cache-Control', 'no-store, max-age=0');
+  res.type('html').sendFile(path.join(__dirname, 'public', 'index.charlie.html'));
+});
+
+app.get('/tmp/live.app.charlie.js', (req, res) => {
+  res.type('text').sendFile(path.join(__dirname, 'public', 'app.charlie.js'));
+});
+
 // Static files
+app.get(['/', '/index.charlie.html'], (req, res, next) => {
+  const html = loadIndexCharlieHtml();
+  if (!html) return next();
+  res.setHeader('Cache-Control', 'no-store, max-age=0');
+  res.type('html').send(html);
+});
+
 // Serve static files
-app.use(express.static("./public"));
+app.use(express.static(PUBLIC_DIR));
 
 // Allow direct access to JSON data files in /public/data with CORS headers
 app.use('/data', (req, res, next) => {
@@ -6753,7 +7212,7 @@ app.get('/groups', (req, res) => {
   setCors(req, res);
   try {
     const groups = loadGroupsFile().map(normalizeGroupForResponse).filter(Boolean);
-    return res.json({ ok: true, groups });
+    return res.json(groups);
   } catch (err) {
     return res.status(500).json({ ok: false, error: err.message });
   }
@@ -6853,29 +7312,85 @@ app.get('/sched', (req, res) => {
 app.post('/sched', pinGuard, (req, res) => {
   try {
     setCors(req, res);
-    const incoming = parseIncomingSchedules(req.body);
-    if ((Array.isArray(req.body?.schedules) && req.body.schedules.length === 0) ||
-        (Array.isArray(req.body) && req.body.length === 0)) {
+    const { schedules: incoming, bulk } = parseIncomingSchedules(req.body);
+    if (bulk && incoming.length === 0) {
       if (!saveSchedulesFile([])) {
         return res.status(500).json({ ok: false, error: 'Failed to persist schedules.' });
       }
       return res.json({ ok: true, schedules: [] });
     }
     const existing = loadSchedulesFile();
-    const map = new Map(existing.map((entry) => {
-      const normalized = normalizeScheduleEntry(entry);
-      return normalized ? [normalized.id, normalized] : null;
-    }).filter(Boolean));
-    for (const schedule of incoming) {
-      map.set(schedule.id, schedule);
-    }
-    const merged = Array.from(map.values());
-    if (!saveSchedulesFile(merged)) {
+    const { merged, stored } = mergeScheduleEntries(existing, incoming);
+    if (!saveSchedulesFile(stored)) {
       return res.status(500).json({ ok: false, error: 'Failed to persist schedules.' });
     }
-    res.json({ ok: true, schedules: merged });
+    const responsePayload = { ok: true, schedules: merged };
+    if (!bulk && incoming.length === 1) {
+      const targetGroupId = incoming[0]?.groupId;
+      if (targetGroupId) {
+        responsePayload.schedule = merged.find((entry) => entry.groupId === targetGroupId) || incoming[0];
+      }
+    }
+    res.json(responsePayload);
   } catch (err) {
     res.status(400).json({ ok: false, error: err.message });
+  }
+});
+
+app.put('/sched/:groupId', pinGuard, (req, res) => {
+  try {
+    setCors(req, res);
+    const groupId = String(req.params.groupId || '').trim();
+    if (!groupId) {
+      return res.status(400).json({ ok: false, error: 'groupId is required.' });
+    }
+    const payload = { ...(req.body || {}), groupId };
+    const { schedules: incoming } = parseIncomingSchedules(payload);
+    if (!incoming.length) {
+      return res.status(400).json({ ok: false, error: 'Valid schedule payload required.' });
+    }
+    const existing = loadSchedulesFile();
+    const { merged, stored } = mergeScheduleEntries(existing, incoming);
+    if (!saveSchedulesFile(stored)) {
+      return res.status(500).json({ ok: false, error: 'Failed to persist schedules.' });
+    }
+    const updated = merged.find((entry) => entry.groupId === groupId) || null;
+    return res.json({ ok: true, schedule: updated, schedules: merged });
+  } catch (err) {
+    return res.status(400).json({ ok: false, error: err.message });
+  }
+});
+
+app.delete('/sched/:groupId', pinGuard, (req, res) => {
+  try {
+    setCors(req, res);
+    const groupId = String(req.params.groupId || '').trim();
+    if (!groupId) {
+      return res.status(400).json({ ok: false, error: 'groupId is required.' });
+    }
+    const existing = loadSchedulesFile();
+    let removed = false;
+    const remainingNormalized = existing
+      .map((entry) => normalizeScheduleEntry(entry))
+      .filter((entry) => {
+        if (!entry) return false;
+        if (!entry.groupId) return true;
+        if (entry.groupId === groupId) {
+          removed = true;
+          return false;
+        }
+        return true;
+      });
+    const stored = remainingNormalized.map(serializeScheduleForStorage).filter(Boolean);
+    if (!saveSchedulesFile(stored)) {
+      return res.status(500).json({ ok: false, error: 'Failed to persist schedules.' });
+    }
+    if (!removed) {
+      return res.status(404).json({ ok: false, error: `Schedule for group '${groupId}' not found.` });
+    }
+    return res.json({ ok: true, removed: true, schedules: remainingNormalized });
+  } catch (err) {
+    return res.status(400).json({ ok: false, error: err.message });
   }
 });
 

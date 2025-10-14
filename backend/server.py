@@ -18,6 +18,7 @@ from .automation import AutomationEngine, lux_balancing_rule, occupancy_rule
 from .config import EnvironmentConfig, LightingFixture, build_environment_config
 from .device_discovery import fetch_switchbot_status, full_discovery_cycle
 from .device_models import (
+    Device,
     GroupSchedule,
     PhotoperiodScheduleConfig,
     Schedule as ScheduleModel,
@@ -29,6 +30,7 @@ from .state import (
     DeviceDataStore,
     DeviceRegistry,
     EnvironmentStateStore,
+    EnvironmentTelemetryStore,
     GroupScheduleStore,
     LightingState,
     PlanStore,
@@ -79,6 +81,7 @@ SCHEDULES = ScheduleStore()
 GROUP_SCHEDULES = GroupScheduleStore()
 PLAN_STORE = PlanStore()
 ENVIRONMENT_STATE = EnvironmentStateStore()
+ENVIRONMENT_TELEMETRY = EnvironmentTelemetryStore()
 DEVICE_DATA = DeviceDataStore()
 AUTOMATION = AutomationEngine(CONTROLLER, SCHEDULES)
 AI_ASSIST_SERVICE: Optional[SetupAssistService] = None
@@ -120,6 +123,117 @@ _AUTOMATION_TASK: Optional[asyncio.Task] = None
 _DISCOVERY_TASK: Optional[asyncio.Task] = None
 
 
+def _parse_time_range(value: Optional[Any]) -> Optional[int]:
+    if value is None:
+        return None
+    if isinstance(value, (int, float)):
+        seconds = int(float(value))
+        return seconds if seconds > 0 else None
+    text = str(value).strip().lower()
+    if not text:
+        return None
+    factors = {"h": 3600, "m": 60, "s": 1}
+    for suffix, factor in factors.items():
+        if text.endswith(suffix):
+            number_text = text[:-1].strip()
+            try:
+                amount = float(number_text)
+            except ValueError:
+                return None
+            seconds = int(amount * factor)
+            return seconds if seconds > 0 else None
+    try:
+        seconds = int(float(text))
+    except ValueError:
+        return None
+    return seconds if seconds > 0 else None
+
+
+def _parse_timestamp(value: Any) -> datetime:
+    if value is None:
+        return datetime.now(timezone.utc)
+    if isinstance(value, datetime):
+        return value.astimezone(timezone.utc)
+    if isinstance(value, (int, float)):
+        ts = float(value)
+        if ts > 1e12:
+            ts /= 1000.0
+        return datetime.fromtimestamp(ts, tz=timezone.utc)
+    if isinstance(value, str):
+        text = value.strip()
+        if not text:
+            return datetime.now(timezone.utc)
+        try:
+            numeric = float(text)
+        except ValueError:
+            numeric = None
+        if numeric is not None:
+            return _parse_timestamp(numeric)
+        normalised = text
+        if normalised.endswith("Z"):
+            normalised = normalised[:-1] + "+00:00"
+        try:
+            return datetime.fromisoformat(normalised).astimezone(timezone.utc)
+        except ValueError as exc:
+            raise ValueError("Invalid timestamp format") from exc
+    raise ValueError("Invalid timestamp format")
+
+
+def _extract_scope(payload: Dict[str, Any]) -> Optional[str]:
+    for key in ("scope", "zoneId", "zone", "room", "roomId"):
+        value = payload.get(key)
+        if isinstance(value, str) and value.strip():
+            return value.strip()
+    return None
+
+
+def _collect_metadata(payload: Dict[str, Any]) -> Dict[str, Any]:
+    metadata: Dict[str, Any] = {}
+    meta_payload = payload.get("meta")
+    if isinstance(meta_payload, dict):
+        for key, value in meta_payload.items():
+            if value is not None:
+                metadata[key] = value
+    alias_map = {"device_id": "deviceId", "sensor_id": "sensorId"}
+    for key in ("name", "label", "battery", "rssi", "source", "deviceId", "device_id", "sensorId", "sensor_id", "location"):
+        if key in payload and payload[key] is not None:
+            target = alias_map.get(key, key)
+            metadata[target] = payload[key]
+    return metadata
+
+
+def _is_telemetry_payload(payload: Dict[str, Any]) -> bool:
+    if not isinstance(payload, dict):
+        return False
+    if not isinstance(payload.get("sensors"), dict):
+        return False
+    return _extract_scope(payload) is not None
+
+
+def _ingest_environment_telemetry(payload: Dict[str, Any]) -> Dict[str, Any]:
+    scope = _extract_scope(payload)
+    if not scope:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="scope is required for telemetry payloads")
+    sensors = payload.get("sensors")
+    if not isinstance(sensors, dict) or not sensors:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="sensors must be a non-empty object")
+    timestamp_value = payload.get("ts") or payload.get("timestamp")
+    try:
+        moment = _parse_timestamp(timestamp_value)
+    except ValueError as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+    metadata = _collect_metadata(payload)
+    zone = ENVIRONMENT_TELEMETRY.add_reading(scope, moment, sensors, metadata)
+    response: Dict[str, Any] = {"status": "ok", "zone": zone}
+    last_updated = ENVIRONMENT_TELEMETRY.last_updated()
+    if last_updated:
+        response["updatedAt"] = last_updated
+    env_snapshot = ENVIRONMENT_STATE.snapshot()
+    if env_snapshot:
+        response["env"] = env_snapshot
+    return response
+
+
 @app.get("/")
 def root() -> Dict[str, str]:
     return {"message": "Light Engine Charlie API is running. See /docs for API documentation."}
@@ -133,6 +247,33 @@ class DeviceResponse(BaseModel):
     online: bool
     capabilities: dict
     details: dict
+
+
+class PlugStateResponse(BaseModel):
+    online: Optional[bool] = None
+    on: Optional[bool] = None
+    power: Optional[float] = None
+    power_w: Optional[float] = Field(None, alias="powerW")
+    wattage: Optional[float] = None
+
+    class Config:
+        allow_population_by_field_name = True
+
+
+class PlugResponse(BaseModel):
+    id: str
+    deviceId: str
+    name: str
+    vendor: Optional[str] = None
+    model: Optional[str] = None
+    category: Optional[str] = None
+    protocol: Optional[str] = None
+    state: PlugStateResponse = Field(default_factory=PlugStateResponse)
+    capabilities: Dict[str, Any] = Field(default_factory=dict)
+    details: Dict[str, Any] = Field(default_factory=dict)
+
+    class Config:
+        allow_population_by_field_name = True
 
 
 class ScheduleRequest(BaseModel):
@@ -354,6 +495,92 @@ def _iso_now() -> str:
     return datetime.now(timezone.utc).replace(microsecond=0).isoformat().replace("+00:00", "Z")
 
 
+def _is_plug_device(device: Device) -> bool:
+    category = (device.category or "").lower()
+    name = (device.name or "").lower()
+    details = device.details or {}
+    detail_category = str(
+        details.get("category")
+        or details.get("deviceType")
+        or details.get("type")
+        or details.get("kind")
+        or ""
+    ).lower()
+    detail_name = str(details.get("label") or details.get("name") or "").lower()
+    protocol = (device.protocol or "").lower()
+
+    if any("plug" in value for value in (category, name, detail_category, detail_name)):
+        return True
+
+    if protocol in {"kasa", "tplink", "shelly", "tasmota", "switchbot"}:
+        if any("outlet" in value or "switch" in value for value in (category, detail_category)):
+            return True
+
+    return False
+
+
+def _build_plug_state(device: Device) -> PlugStateResponse:
+    details = device.details or {}
+    state_payload: Dict[str, Any] = {"online": device.online}
+
+    for key in ("on", "power", "powerW", "power_w", "wattage"):
+        if key in details and details[key] is not None:
+            if key in {"powerW", "power_w"}:
+                state_payload["powerW"] = details[key]
+            else:
+                state_payload[key] = details[key]
+
+    status = details.get("status")
+    if isinstance(status, dict):
+        for key in ("on", "power", "powerW", "power_w"):
+            if key in status and status[key] is not None:
+                if key in {"powerW", "power_w"}:
+                    state_payload["powerW"] = status[key]
+                else:
+                    state_payload[key] = status[key]
+
+    try:
+        return PlugStateResponse.parse_obj(state_payload)
+    except Exception:  # pylint: disable=broad-except
+        LOGGER.debug("Failed to parse plug state payload: %s", state_payload)
+        return PlugStateResponse(online=device.online)
+
+
+def _serialize_plug(device: Device) -> PlugResponse:
+    details = dict(device.details or {})
+    vendor = details.get("vendor") or details.get("manufacturer") or device.protocol
+    model = details.get("model") or details.get("deviceType") or device.category
+
+    state = _build_plug_state(device)
+
+    return PlugResponse(
+        id=device.device_id,
+        deviceId=device.device_id,
+        name=device.name,
+        vendor=(vendor or None),
+        model=(model or None),
+        category=device.category,
+        protocol=device.protocol,
+        state=state,
+        capabilities=dict(device.capabilities or {}),
+        details=details,
+    )
+
+
+def _collect_plug_payloads() -> List[Dict[str, Any]]:
+    plugs: Dict[str, Dict[str, Any]] = {}
+    for device in REGISTRY.list():
+        if not _is_plug_device(device):
+            continue
+        plug_payload = _serialize_plug(device).dict(by_alias=True)
+        plug_id = plug_payload.get("id") or plug_payload.get("deviceId")
+        if plug_id:
+            plugs[str(plug_id)] = plug_payload
+        else:
+            plugs[str(len(plugs))] = plug_payload
+    return list(plugs.values())
+
+
 def _resolve_fixture(device_identifier: str) -> tuple[str, LightingFixture]:
     candidate = device_identifier.strip()
     if candidate in DEVICE_ID_MAP:
@@ -553,23 +780,70 @@ async def publish_plans(payload: Dict[str, Any] = Body(...)) -> Dict[str, Any]:
 
 
 @app.get("/env")
-async def get_environment(zone_id: Optional[str] = Query(None, alias="zoneId")) -> Dict[str, Any]:
-    if zone_id:
-        zone = ENVIRONMENT_STATE.get_zone(zone_id)
-        if zone is None:
-            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Zone not found")
-        return {"status": "ok", "zone": zone}
-    snapshot = ENVIRONMENT_STATE.snapshot()
-    return {"status": "ok", **snapshot}
+async def get_environment(
+    scope: Optional[str] = Query(None),
+    time_range: Optional[str] = Query(None, alias="range"),
+    zone_id: Optional[str] = Query(None, alias="zoneId"),
+) -> Dict[str, Any]:
+    range_seconds = _parse_time_range(time_range)
+    identifier = (scope or zone_id or "").strip()
+    response: Dict[str, Any] = {"status": "ok"}
+
+    if identifier:
+        telemetry_zone = ENVIRONMENT_TELEMETRY.get_zone(identifier, range_seconds)
+        if telemetry_zone:
+            response["zone"] = telemetry_zone
+        else:
+            zone = ENVIRONMENT_STATE.get_zone(identifier)
+            if zone is None:
+                raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Scope not found")
+            response["zone"] = zone
+    else:
+        response["zones"] = ENVIRONMENT_TELEMETRY.list_zones(range_seconds)
+
+    env_snapshot = ENVIRONMENT_STATE.snapshot()
+    if env_snapshot:
+        response["env"] = env_snapshot
+
+    last_updated = ENVIRONMENT_TELEMETRY.last_updated()
+    if last_updated:
+        response["updatedAt"] = last_updated
+
+    return response
 
 
 @app.post("/env", status_code=status.HTTP_200_OK)
 async def upsert_environment(payload: Dict[str, Any] = Body(...)) -> Dict[str, Any]:
+    if isinstance(payload, list):
+        ingested = []
+        for item in payload:
+            if not isinstance(item, dict) or not _is_telemetry_payload(item):
+                continue
+            result = _ingest_environment_telemetry(item)
+            if "zone" in result:
+                ingested.append(result["zone"])
+        if not ingested:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="No valid telemetry entries supplied",
+            )
+        response: Dict[str, Any] = {"status": "ok", "zones": ingested}
+        last_updated = ENVIRONMENT_TELEMETRY.last_updated()
+        if last_updated:
+            response["updatedAt"] = last_updated
+        env_snapshot = ENVIRONMENT_STATE.snapshot()
+        if env_snapshot:
+            response["env"] = env_snapshot
+        return response
+
     if not isinstance(payload, dict) or not payload:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="Request body must be a non-empty object",
         )
+
+    if _is_telemetry_payload(payload):
+        return _ingest_environment_telemetry(payload)
 
     response: Dict[str, Any] = {"status": "ok"}
 
@@ -744,6 +1018,19 @@ async def setup_assist(request: SetupAssistRequest) -> SetupAssistResponse:
 @app.get("/devices", response_model=List[DeviceResponse])
 async def list_devices() -> List[DeviceResponse]:
     return [DeviceResponse(**device.__dict__) for device in REGISTRY.list()]
+
+
+@app.get("/plugs")
+async def list_plugs() -> Dict[str, Any]:
+    plugs = _collect_plug_payloads()
+    return {"ok": True, "count": len(plugs), "plugs": plugs}
+
+
+@app.post("/plugs/discover")
+async def discover_plugs() -> Dict[str, Any]:
+    await full_discovery_cycle(CONFIG, REGISTRY, BUFFER, event_handler=AUTOMATION.publish)
+    plugs = _collect_plug_payloads()
+    return {"ok": True, "refreshedAt": _iso_now(), "count": len(plugs), "plugs": plugs}
 
 
 @app.get("/api/devicedatas")

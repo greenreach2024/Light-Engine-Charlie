@@ -5,6 +5,7 @@ export type DeviceProtocol = "kasa" | "mqtt" | "switchbot" | "other";
 export interface DeviceAssignment {
   roomId: string | null;
   equipmentId: string | null;
+  channels?: number[] | Record<string, number>;
 }
 
 export interface Device {
@@ -23,8 +24,8 @@ interface DeviceContextValue {
   loading: boolean;
   error: string | null;
   refresh: () => Promise<void>;
-  assignDevice: (deviceId: string, assignment: DeviceAssignment) => Promise<Device>;
-  unassignDevice: (deviceId: string) => Promise<Device>;
+  assignDevice: (deviceId: string, assignment: DeviceAssignment) => Promise<Device | undefined>;
+  unassignDevice: (deviceId: string) => Promise<Device | undefined>;
 }
 
 const DeviceContext = createContext<DeviceContextValue | undefined>(undefined);
@@ -91,7 +92,183 @@ const normalizeAssignment = (value: unknown): DeviceAssignment => {
       : null;
   const roomId = roomIdCandidate && roomIdCandidate.length > 0 ? roomIdCandidate : null;
   const equipmentId = equipmentIdCandidate && equipmentIdCandidate.length > 0 ? equipmentIdCandidate : null;
-  return { roomId, equipmentId };
+  const rawChannels = (source as Record<string, unknown>).channels;
+  let channels: DeviceAssignment["channels"];
+  if (Array.isArray(rawChannels)) {
+    const normalized = rawChannels.map((entry) => {
+      if (typeof entry === "number" && Number.isFinite(entry)) {
+        return entry;
+      }
+      const parsed = Number.parseFloat(String(entry ?? ""));
+      return Number.isFinite(parsed) ? parsed : 0;
+    });
+    if (normalized.some((value) => value !== 0)) {
+      channels = normalized;
+    }
+  } else if (isRecord(rawChannels)) {
+    const normalizedEntries = Object.entries(rawChannels).reduce<Record<string, number>>((acc, [key, value]) => {
+      const parsed =
+        typeof value === "number" && Number.isFinite(value)
+          ? value
+          : Number.parseFloat(String(value ?? ""));
+      if (Number.isFinite(parsed)) {
+        acc[key] = parsed;
+      }
+      return acc;
+    }, {});
+    if (Object.keys(normalizedEntries).length > 0) {
+      channels = normalizedEntries;
+    }
+  }
+
+  return channels ? { roomId, equipmentId, channels } : { roomId, equipmentId };
+};
+
+const toFiniteNumber = (value: unknown): number | null => {
+  if (typeof value === "number" && Number.isFinite(value)) {
+    return value;
+  }
+  if (typeof value === "string") {
+    const parsed = Number.parseFloat(value);
+    return Number.isFinite(parsed) ? parsed : null;
+  }
+  return null;
+};
+
+interface ChannelState {
+  values: number[];
+  total: number;
+  apply: (next: number[]) => DeviceAssignment;
+}
+
+const getChannelState = (assignment: DeviceAssignment): ChannelState | null => {
+  const raw = assignment.channels;
+  if (!raw) {
+    return null;
+  }
+  if (Array.isArray(raw)) {
+    const values = raw.map((value) => (typeof value === "number" && Number.isFinite(value) ? value : 0));
+    const total = values.reduce((sum, value) => sum + Math.max(0, value), 0);
+    return total > 0
+      ? {
+          values,
+          total,
+          apply: (next) => ({ ...assignment, channels: next }),
+        }
+      : null;
+  }
+  if (isRecord(raw)) {
+    const entries = Object.entries(raw)
+      .map(([key, value]) => {
+        const parsed = toFiniteNumber(value);
+        return parsed === null ? null : ([key, parsed] as const);
+      })
+      .filter((entry): entry is readonly [string, number] => Array.isArray(entry));
+    if (!entries.length) {
+      return null;
+    }
+    const keys = entries.map(([key]) => key);
+    const values = entries.map(([, value]) => value);
+    const total = values.reduce((sum, value) => sum + Math.max(0, value), 0);
+    if (total <= 0) {
+      return null;
+    }
+    return {
+      values,
+      total,
+      apply: (next) => ({
+        ...assignment,
+        channels: next.reduce<Record<string, number>>((acc, value, index) => {
+          acc[keys[index]] = value;
+          return acc;
+        }, {}),
+      }),
+    };
+  }
+  return null;
+};
+
+const scaleChannelValues = (values: number[], cap: number): number[] | null => {
+  if (!Number.isFinite(cap) || cap <= 0) {
+    return null;
+  }
+  const total = values.reduce((sum, value) => sum + Math.max(0, value), 0);
+  if (total <= cap || total <= 0) {
+    return null;
+  }
+  const factor = cap / total;
+  const scaled = values.map((value) => Number((Math.max(0, value) * factor).toFixed(3)));
+  const scaledTotal = scaled.reduce((sum, value) => sum + value, 0);
+  if (scaledTotal > cap && scaled.length) {
+    const diff = scaledTotal - cap;
+    const lastIndex = scaled.length - 1;
+    scaled[lastIndex] = Number(Math.max(0, scaled[lastIndex] - diff).toFixed(3));
+  }
+  return scaled;
+};
+
+const parseJsonSafe = (text: string): unknown => {
+  if (!text) {
+    return null;
+  }
+  try {
+    return JSON.parse(text);
+  } catch {
+    return text;
+  }
+};
+
+const includesPowerCap = (payload: unknown, statusText: string): boolean => {
+  const textCandidates: string[] = [];
+  if (typeof statusText === "string" && statusText.trim()) {
+    textCandidates.push(statusText);
+  }
+  if (typeof payload === "string") {
+    textCandidates.push(payload);
+  }
+  if (isRecord(payload)) {
+    const keys = ["error", "message", "detail", "reason", "status"];
+    for (const key of keys) {
+      const value = payload[key];
+      if (typeof value === "string") {
+        textCandidates.push(value);
+      }
+    }
+  }
+  return textCandidates.some((entry) => entry.toLowerCase().includes("power cap"));
+};
+
+const extractPowerCap = (payload: unknown, response: Response, fallback: number): number | null => {
+  const headerCandidates = ["x-power-cap", "x-power-limit", "x-max-power", "x-controller-cap"]
+    .map((key) => response.headers.get(key))
+    .map((value) => toFiniteNumber(value))
+    .filter((value): value is number => value !== null);
+  if (headerCandidates.length > 0) {
+    return headerCandidates[0];
+  }
+  if (isRecord(payload)) {
+    const valueCandidates = [
+      payload.cap,
+      payload.limit,
+      payload.max,
+      payload.maxPower,
+      payload.powerCap,
+      payload.power_cap,
+      payload.powerLimit,
+      payload.allowed,
+    ];
+    for (const candidate of valueCandidates) {
+      const parsed = toFiniteNumber(candidate);
+      if (parsed !== null) {
+        return parsed;
+      }
+    }
+  }
+  if (Number.isFinite(fallback) && fallback > 0) {
+    const reduced = Number((fallback * 0.95).toFixed(3));
+    return reduced > 0 ? reduced : null;
+  }
+  return null;
 };
 
 const normalizeDevice = (raw: unknown): Device => {
@@ -168,44 +345,79 @@ export const DeviceProvider: React.FC<React.PropsWithChildren<unknown>> = ({ chi
     try {
       const response = await fetch("/devices");
       if (!response.ok) {
-        throw new Error(`Failed to load devices (${response.status})`);
+        throw new Error(response.statusText);
       }
-      const payload = await response.json();
-      const list: unknown[] = Array.isArray(payload?.devices) ? payload.devices : Array.isArray(payload) ? payload : [];
+      const payload = await response.json().catch(() => null);
+      const list: unknown[] = Array.isArray((payload as { devices?: unknown[] } | null)?.devices)
+        ? ((payload as { devices?: unknown[] }).devices as unknown[])
+        : Array.isArray(payload)
+        ? (payload as unknown[])
+        : [];
       setDevices(list.map((item: unknown) => normalizeDevice(item)));
     } catch (err) {
-      setError((err as Error).message);
+      console.warn("[net]", err);
+      return;
     } finally {
       setLoading(false);
     }
   }, []);
 
   const updateAssignment = useCallback(
-    async (deviceId: string, assignment: DeviceAssignment): Promise<Device> => {
-      try {
-        const response = await fetch(`/devices/${encodeURIComponent(deviceId)}`, {
-          method: "PATCH",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ assignedEquipment: assignment }),
-        });
-        if (!response.ok) {
-          throw new Error(`Failed to update assignment (${response.status})`);
-        }
-        const body = await response
-          .json()
-          .catch(() => ({ device: { device_id: deviceId, assignedEquipment: assignment } }));
-        const updated = normalizeDevice((body as Record<string, unknown>)?.device ?? body);
-        setDevices((prev: Device[]) => {
-          const next = prev.map((device: Device) => (device.device_id === updated.device_id ? updated : device));
-          if (next.some((device: Device) => device.device_id === updated.device_id)) {
-            return next;
+    async (deviceId: string, assignment: DeviceAssignment): Promise<Device | undefined> => {
+      let attempt = 0;
+      let payload = assignment;
+      while (attempt < 2) {
+        try {
+          const response = await fetch(`/devices/${encodeURIComponent(deviceId)}`, {
+            method: "PATCH",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ assignedEquipment: payload }),
+          });
+
+          if (response.status === 400) {
+            const errorText = await response.text();
+            const parsedError = parseJsonSafe(errorText);
+            if (attempt === 0 && includesPowerCap(parsedError, response.statusText)) {
+              const channelState = getChannelState(payload);
+              if (channelState) {
+                const cap = extractPowerCap(parsedError, response, channelState.total);
+                const scaledValues = cap !== null ? scaleChannelValues(channelState.values, cap) : null;
+                if (scaledValues) {
+                  payload = channelState.apply(scaledValues);
+                  attempt += 1;
+                  continue;
+                }
+              }
+            }
+            throw new Error(response.statusText);
           }
-          return [...next, updated];
-        });
-        return updated;
-      } catch (err) {
-        throw err instanceof Error ? err : new Error(String(err));
+
+          if (!response.ok) {
+            throw new Error(response.statusText);
+          }
+
+          const responseText = await response.text();
+          const parsed = parseJsonSafe(responseText);
+          const candidate =
+            (isRecord(parsed) && "device" in parsed ? (parsed as Record<string, unknown>).device : parsed) ?? {
+              device_id: deviceId,
+              assignedEquipment: payload,
+            };
+          const updated = normalizeDevice(candidate);
+          setDevices((prev: Device[]) => {
+            const next = prev.map((device: Device) => (device.device_id === updated.device_id ? updated : device));
+            if (next.some((device: Device) => device.device_id === updated.device_id)) {
+              return next;
+            }
+            return [...next, updated];
+          });
+          return updated;
+        } catch (err) {
+          console.warn("[net]", err);
+          return;
+        }
       }
+      return undefined;
     },
     [setDevices]
   );

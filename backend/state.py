@@ -1,6 +1,7 @@
 """In-memory state containers for devices, schedules, and lighting."""
 from __future__ import annotations
 
+import math
 import threading
 from copy import deepcopy
 from datetime import datetime, timezone
@@ -241,6 +242,187 @@ class EnvironmentStateStore:
             self._state = {"rooms": {}, "zones": {}}
 
 
+class EnvironmentTelemetryStore:
+    """Track live environmental telemetry for scopes/rooms with history retention."""
+
+    _ALIASES = {
+        "temperature": "tempC",
+        "temp": "tempC",
+        "tempc": "tempC",
+        "temp_c": "tempC",
+        "temp_celsius": "tempC",
+        "humidity": "rh",
+        "relativehumidity": "rh",
+        "rel_humidity": "rh",
+        "co2": "co2",
+        "co₂": "co2",
+        "co2ppm": "co2",
+        "carbon_dioxide": "co2",
+    }
+
+    def __init__(self, retention_hours: int = 168, max_samples: int = 288) -> None:
+        self._scopes: Dict[str, Dict[str, Any]] = {}
+        self._lookup: Dict[str, str] = {}
+        self._retention_seconds = max(retention_hours, 0) * 3600
+        self._max_samples = max(max_samples, 1)
+        self._lock = threading.RLock()
+        self._last_updated: Optional[float] = None
+
+    def _normalise_key(self, key: str) -> Optional[str]:
+        if not isinstance(key, str):
+            return None
+        trimmed = key.strip()
+        if not trimmed:
+            return None
+        lowered = trimmed.lower()
+        alias = self._ALIASES.get(lowered)
+        if alias:
+            return alias
+        safe = lowered.replace(" ", "_")
+        return safe
+
+    @staticmethod
+    def _coerce_value(value: Any) -> Optional[float]:
+        if value is None:
+            return None
+        if isinstance(value, bool):
+            return None
+        try:
+            number = float(value)
+        except (TypeError, ValueError):
+            return None
+        if not math.isfinite(number):
+            return None
+        return number
+
+    def add_reading(
+        self,
+        scope: str,
+        timestamp: datetime,
+        sensors: Dict[str, Any],
+        metadata: Optional[Dict[str, Any]] = None,
+    ) -> Dict[str, Any]:
+        if not isinstance(scope, str) or not scope.strip():
+            raise ValueError("scope must be a non-empty string")
+        if not isinstance(timestamp, datetime):
+            raise ValueError("timestamp must be a datetime instance")
+        if not isinstance(sensors, dict) or not sensors:
+            raise ValueError("sensors must be a non-empty mapping")
+
+        scope_key = scope.strip()
+        moment = timestamp.astimezone(timezone.utc)
+        epoch = moment.timestamp()
+
+        with self._lock:
+            entry = self._scopes.setdefault(
+                scope_key,
+                {
+                    "scope": scope_key,
+                    "name": scope_key,
+                    "sensors": {},
+                    "meta": {},
+                    "updatedAt": None,
+                },
+            )
+            self._lookup[scope_key.lower()] = scope_key
+
+            if metadata:
+                meta = entry.setdefault("meta", {})
+                for key, value in metadata.items():
+                    if value is None:
+                        continue
+                    meta[key] = value
+                    if key in {"name", "label"} and isinstance(value, str) and value.strip():
+                        entry["name"] = value.strip()
+                        self._lookup[value.strip().lower()] = scope_key
+
+            sensors_map = entry.setdefault("sensors", {})
+            for raw_key, raw_value in sensors.items():
+                normalised_key = self._normalise_key(raw_key)
+                if not normalised_key:
+                    continue
+                coerced = self._coerce_value(raw_value)
+                if coerced is None:
+                    continue
+                metric = sensors_map.setdefault(normalised_key, {"samples": []})
+                samples = metric.setdefault("samples", [])
+                samples.insert(0, {"ts": epoch, "value": coerced})
+
+                if self._retention_seconds:
+                    cutoff = epoch - self._retention_seconds
+                    samples[:] = [sample for sample in samples if sample["ts"] >= cutoff]
+                if len(samples) > self._max_samples:
+                    del samples[self._max_samples :]
+
+                metric["current"] = coerced
+                metric["updatedAt"] = _utc_isoformat(moment)
+
+            entry["updatedAt"] = _utc_isoformat(moment)
+            self._last_updated = epoch
+            return self._render_zone(entry)
+
+    def _render_zone(self, entry: Dict[str, Any], range_seconds: Optional[int] = None) -> Dict[str, Any]:
+        sensors = {}
+        now_epoch = datetime.now(timezone.utc).timestamp()
+        for key, metric in entry.get("sensors", {}).items():
+            samples = list(metric.get("samples", []))
+            if range_seconds:
+                cutoff = now_epoch - max(range_seconds, 0)
+                samples = [sample for sample in samples if sample["ts"] >= cutoff]
+            history = [sample["value"] for sample in samples]
+            timestamps = [
+                datetime.fromtimestamp(sample["ts"], timezone.utc)
+                for sample in samples
+            ]
+            sensors[key] = {
+                "current": metric.get("current"),
+                "history": history,
+                "timestamps": [
+                    ts.isoformat().replace("+00:00", "Z") for ts in timestamps
+                ],
+                "setpoint": metric.get("setpoint"),
+                "updatedAt": metric.get("updatedAt"),
+            }
+
+        return {
+            "id": entry.get("scope"),
+            "scope": entry.get("scope"),
+            "name": entry.get("name") or entry.get("scope"),
+            "meta": dict(entry.get("meta", {})),
+            "sensors": sensors,
+            "updatedAt": entry.get("updatedAt"),
+        }
+
+    def list_zones(self, range_seconds: Optional[int] = None) -> List[Dict[str, Any]]:
+        with self._lock:
+            zones = [self._render_zone(entry, range_seconds) for entry in self._scopes.values()]
+            return sorted(zones, key=lambda zone: (zone.get("name") or "").lower())
+
+    def get_zone(self, scope: str, range_seconds: Optional[int] = None) -> Optional[Dict[str, Any]]:
+        with self._lock:
+            entry = self._scopes.get(scope)
+            if entry is None and isinstance(scope, str):
+                key = self._lookup.get(scope.lower())
+                if key:
+                    entry = self._scopes.get(key)
+            if not entry:
+                return None
+            return self._render_zone(entry, range_seconds)
+
+    def last_updated(self) -> Optional[str]:
+        with self._lock:
+            if self._last_updated is None:
+                return None
+            ts = datetime.fromtimestamp(self._last_updated, timezone.utc)
+            return _utc_isoformat(ts)
+
+    def clear(self) -> None:
+        with self._lock:
+            self._scopes.clear()
+            self._lookup.clear()
+            self._last_updated = None
+
+
 class DeviceDataStore:
     """Persist best-effort controller state for /api/devicedatas."""
 
@@ -279,5 +461,6 @@ __all__ = [
     "GroupScheduleStore",
     "PlanStore",
     "EnvironmentStateStore",
+    "EnvironmentTelemetryStore",
     "DeviceDataStore",
 ]

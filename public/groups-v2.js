@@ -245,7 +245,7 @@ document.addEventListener('DOMContentLoaded', () => {
 document.addEventListener('DOMContentLoaded', () => {
   const saveBtn = document.getElementById('groupsV2SaveGroup');
   if (saveBtn) {
-    saveBtn.addEventListener('click', () => {
+    saveBtn.addEventListener('click', async () => {
       const nameInput = document.getElementById('groupsV2ZoneName');
       const zoneSelect = document.getElementById('groupsV2ZoneSelect');
       const roomSelect = document.getElementById('groupsV2RoomSelect');
@@ -275,6 +275,25 @@ document.addEventListener('DOMContentLoaded', () => {
       const config = buildGroupsV2PlanConfig(plan);
       if (config) groupRecord.planConfig = config;
       window.STATE.groups.push(groupRecord);
+      const statusEl = document.getElementById('groupsV2Status');
+      let scheduleMessage = '';
+      try {
+        const scheduleConfig = buildGroupsV2ScheduleConfig();
+        const result = await upsertGroupScheduleForGroup(id, scheduleConfig, { name: `${groupName} Schedule` });
+        const schedule = result?.schedule
+          || (Array.isArray(result?.schedules) ? result.schedules.find((entry) => entry && entry.groupId === id) : null);
+        if (schedule) {
+          mergeScheduleIntoState(schedule);
+          groupRecord.schedule = schedule.id || schedule.groupId;
+          scheduleMessage = ' • Schedule linked';
+        }
+      } catch (error) {
+        console.warn('[groups-v2] Failed to upsert schedule', error);
+        if (typeof showToast === 'function') {
+          showToast({ title: 'Schedule not saved', msg: error?.message || 'Failed to sync schedule.', kind: 'warn', icon: '⚠️' });
+        }
+        scheduleMessage = ' • Schedule sync failed';
+      }
       // Dispatch event to update dropdown
       document.dispatchEvent(new Event('groups-updated'));
       // Optionally clear the input
@@ -283,7 +302,14 @@ document.addEventListener('DOMContentLoaded', () => {
       if (typeof showToast === 'function') {
         const details = [`${groupName} (${room}:${zone})`];
         if (planId) details.push(`Plan ${plan?.name || planId}`);
-        showToast({ title: 'Group Saved', msg: details.join(' • '), kind: 'success', icon: '✅' });
+        if (scheduleMessage.includes('failed')) {
+          showToast({ title: 'Group Saved', msg: `${details.join(' • ')}${scheduleMessage}`, kind: 'warn', icon: '⚠️' });
+        } else {
+          showToast({ title: 'Group Saved', msg: `${details.join(' • ')}${scheduleMessage}`, kind: 'success', icon: '✅' });
+        }
+      }
+      if (statusEl) {
+        statusEl.textContent = `Saved group ${groupName}${scheduleMessage}`;
       }
     });
   }
@@ -751,6 +777,118 @@ function buildGroupsV2ScheduleConfig() {
     scheduleConfig.constraints = { windowHours };
   }
   return scheduleConfig;
+}
+
+function getApiBase() {
+  if (typeof window !== 'undefined' && typeof window.API_BASE === 'string') {
+    const trimmed = window.API_BASE.trim();
+    return trimmed.endsWith('/') ? trimmed.slice(0, -1) : trimmed;
+  }
+  return '';
+}
+
+function buildScheduleCyclesPayload(scheduleConfig) {
+  const cycles = Array.isArray(scheduleConfig?.cycles) ? scheduleConfig.cycles : [];
+  const rampUp = toNumberOrNull(scheduleConfig?.rampUpMin);
+  const rampDown = toNumberOrNull(scheduleConfig?.rampDownMin);
+  const rampPayload = {};
+  if (Number.isFinite(rampUp) && rampUp >= 0) rampPayload.up = rampUp;
+  if (Number.isFinite(rampDown) && rampDown >= 0) rampPayload.down = rampDown;
+  const includeRamp = Object.keys(rampPayload).length > 0;
+
+  return cycles.slice(0, 2).map((cycle) => {
+    if (!cycle) return null;
+    const rawStart = typeof cycle.on === 'string' && cycle.on ? cycle.on : cycle.start;
+    const start = normalizeTimeString(rawStart, '00:00');
+    const rawOff = typeof cycle.off === 'string' && cycle.off ? cycle.off : cycle.end;
+    let off = rawOff ? normalizeTimeString(rawOff, null) : null;
+    let photo = toNumberOrNull(cycle.hours ?? cycle.photo);
+    if (!Number.isFinite(photo)) {
+      const duration = typeof computeCycleDuration === 'function'
+        ? computeCycleDuration(rawStart || start, rawOff || off || start)
+        : null;
+      if (Number.isFinite(duration)) {
+        photo = duration / 60;
+      }
+    }
+    if (!Number.isFinite(photo)) photo = 0;
+    photo = Math.max(0, Math.min(24, photo));
+    if (!off) {
+      const baseMinutes = typeof toMinutes === 'function' ? toMinutes(start) : null;
+      const computedMinutes = Number.isFinite(baseMinutes)
+        ? baseMinutes + Math.round(photo * 60)
+        : Math.round(photo * 60);
+      off = minutesToHHMM(computedMinutes);
+    }
+    const payload = {
+      start,
+      off,
+      photo,
+    };
+    if (includeRamp) {
+      payload.ramp = { ...rampPayload };
+    }
+    if (cycle.spectrum && typeof cycle.spectrum === 'object') {
+      payload.spectrum = cycle.spectrum;
+    }
+    return payload;
+  }).filter(Boolean);
+}
+
+function buildSchedulePayload(groupId, scheduleConfig, metadata = {}) {
+  if (!groupId) return null;
+  const cycles = buildScheduleCyclesPayload(scheduleConfig);
+  if (!cycles.length) return null;
+  const payload = {
+    groupId,
+    cycles,
+  };
+  if (metadata && typeof metadata.name === 'string' && metadata.name.trim()) {
+    payload.name = metadata.name.trim();
+  }
+  if (typeof scheduleConfig?.mode === 'string') {
+    payload.mode = scheduleConfig.mode;
+  }
+  if (typeof scheduleConfig?.timezone === 'string' && scheduleConfig.timezone) {
+    payload.timezone = scheduleConfig.timezone;
+  }
+  const photoperiod = toNumberOrNull(scheduleConfig?.photoperiodHours);
+  if (Number.isFinite(photoperiod)) {
+    payload.photoperiodHours = photoperiod;
+  }
+  return payload;
+}
+
+async function upsertGroupScheduleForGroup(groupId, scheduleConfig, metadata = {}) {
+  const payload = buildSchedulePayload(groupId, scheduleConfig, metadata);
+  if (!payload) {
+    throw new Error('Unable to build schedule payload.');
+  }
+  const apiBase = getApiBase();
+  const url = `${apiBase}/sched/${encodeURIComponent(groupId)}`;
+  const response = await fetch(url, {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(payload),
+  });
+  if (!response.ok) {
+    const message = await response.text().catch(() => '');
+    throw new Error(message || `Failed to save schedule (HTTP ${response.status})`);
+  }
+  return response.json();
+}
+
+function mergeScheduleIntoState(schedule) {
+  if (!schedule || typeof schedule !== 'object') return;
+  if (!window.STATE) window.STATE = {};
+  if (!Array.isArray(window.STATE.schedules)) window.STATE.schedules = [];
+  const idx = window.STATE.schedules.findIndex((entry) => entry && entry.groupId === schedule.groupId);
+  if (idx >= 0) {
+    window.STATE.schedules[idx] = schedule;
+  } else {
+    window.STATE.schedules.push(schedule);
+  }
+  document.dispatchEvent(new Event('schedules-updated'));
 }
 
 function updateGroupsV2ScheduleUI() {
