@@ -1,0 +1,7 @@
+{
+  "dehumidifiers": [
+    {"brand": "GE", "model": "35 Pint ADEL35", "pintsPerDay": 35},
+    {"brand": "hOmeLabs", "model": "50 Pint HME020031N", "pintsPerDay": 50},
+    {"brand": "Quest", "model": "155", "pintsPerDay": 155}
+  ]
+}
