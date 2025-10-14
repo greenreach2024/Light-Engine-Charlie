@@ -1,4 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useState } from "react";
+import { ZERO_RESULTS_TEXT } from "../constants/zeroState";
 import { Device, DeviceAssignment, useDevices } from "../store/devices";
 
 const DEVICE_METRIC_STYLE_ID = "device-manager-metrics";
@@ -72,6 +73,7 @@ const DEVICE_METRIC_STYLES = `
     margin-left: 2px;
   }
 `;
+
 
 const isRecord = (value: unknown): value is Record<string, unknown> =>
   value !== null && typeof value === "object" && !Array.isArray(value);
@@ -428,7 +430,7 @@ const normalizeEquipment = (item: unknown, index: number): EquipmentOption => {
 };
 
 export const DeviceManager: React.FC = () => {
-  const { devices, loading, error, refresh, assignDevice, unassignDevice } = useDevices();
+  const { devices, loading, refresh, assignDevice, unassignDevice } = useDevices();
   const [protocolFilter, setProtocolFilter] = useState<string>("all");
   const [search, setSearch] = useState<string>("");
   const [rooms, setRooms] = useState<RoomOption[]>([]);
@@ -454,9 +456,16 @@ export const DeviceManager: React.FC = () => {
     setAssignmentDrafts(() => {
       const next: Record<string, DeviceAssignment> = {};
       devices.forEach((device) => {
+        const assigned = device.assignedEquipment ?? { roomId: null, equipmentId: null };
+        const channels = Array.isArray(assigned.channels)
+          ? [...assigned.channels]
+          : assigned.channels && typeof assigned.channels === "object"
+          ? { ...assigned.channels }
+          : undefined;
         next[device.device_id] = {
-          roomId: device.assignedEquipment?.roomId ?? null,
-          equipmentId: device.assignedEquipment?.equipmentId ?? null,
+          roomId: assigned.roomId ?? null,
+          equipmentId: assigned.equipmentId ?? null,
+          ...(channels ? { channels } : {}),
         };
       });
       return next;
@@ -470,9 +479,9 @@ export const DeviceManager: React.FC = () => {
       try {
         const response = await fetch("/farm");
         if (!response.ok) {
-          throw new Error(`Failed to load rooms (${response.status})`);
+          throw new Error(response.statusText);
         }
-        const data = (await response.json()) as {
+        const data = (await response.json().catch(() => null)) as {
           rooms?: unknown[];
           farm?: { rooms?: unknown[] };
         };
@@ -489,9 +498,11 @@ export const DeviceManager: React.FC = () => {
           setRooms(unique);
         }
       } catch (err) {
+        console.warn("[net]", err);
         if (!cancelled) {
           setRooms([]);
         }
+        return;
       }
     };
 
@@ -499,9 +510,9 @@ export const DeviceManager: React.FC = () => {
       try {
         const response = await fetch("/data/equipment-kb.json");
         if (!response.ok) {
-          throw new Error(`Failed to load equipment (${response.status})`);
+          throw new Error(response.statusText);
         }
-        const data = (await response.json()) as { equipment?: unknown[] };
+        const data = (await response.json().catch(() => null)) as { equipment?: unknown[] };
         const rawEquipment = Array.isArray(data.equipment) ? data.equipment : [];
         if (!cancelled) {
           const normalized = (rawEquipment as unknown[]).map((item, index) => normalizeEquipment(item, index));
@@ -512,9 +523,11 @@ export const DeviceManager: React.FC = () => {
           setEquipment(deduped);
         }
       } catch (err) {
+        console.warn("[net]", err);
         if (!cancelled) {
           setEquipment([]);
         }
+        return;
       }
     };
 
@@ -557,7 +570,10 @@ export const DeviceManager: React.FC = () => {
   }, []);
 
   const setDraft = useCallback((deviceId: string, draft: DeviceAssignment) => {
-    setAssignmentDrafts((prev) => ({ ...prev, [deviceId]: draft }));
+    setAssignmentDrafts((prev) => {
+      const existing = prev[deviceId] ?? { roomId: null, equipmentId: null };
+      return { ...prev, [deviceId]: { ...existing, ...draft } };
+    });
   }, []);
 
   const setPendingState = useCallback((deviceId: string, value: boolean) => {
@@ -590,6 +606,9 @@ export const DeviceManager: React.FC = () => {
       setPendingState(device.device_id, true);
       try {
         const updated = await assignDevice(device.device_id, draft);
+        if (!updated) {
+          return;
+        }
         const roomName = updated.assignedEquipment.roomId
           ? roomLookup[updated.assignedEquipment.roomId]?.name || updated.assignedEquipment.roomId
           : "room";
@@ -622,7 +641,10 @@ export const DeviceManager: React.FC = () => {
     async (device: Device) => {
       setPendingState(device.device_id, true);
       try {
-        await unassignDevice(device.device_id);
+        const updated = await unassignDevice(device.device_id);
+        if (!updated) {
+          return;
+        }
         emitToast({
           title: "Device unassigned",
           msg: `${device.name} is now unassigned.`,
@@ -667,10 +689,11 @@ export const DeviceManager: React.FC = () => {
         </div>
       </header>
 
-      {error && <p className="device-manager__error">{error}</p>}
       {loading && <p className="device-manager__loading">Loading devices…</p>}
 
-      {!loading && filteredDevices.length === 0 && <p className="device-manager__empty">No devices match the current filters.</p>}
+      {!loading && filteredDevices.length === 0 && (
+        <p className="device-manager__empty">{ZERO_RESULTS_TEXT}</p>
+      )}
 
       <div className="device-manager__grid">
         {filteredDevices.map((device) => {
@@ -847,9 +870,7 @@ export const DeviceManager: React.FC = () => {
                     </form>
                   ) : (
                     <div className="device-manager__assign-form device-manager__assign-form--empty">
-                      <p className="tiny">
-                        Add rooms and equipment data to enable assignments.
-                      </p>
+                      <p className="device-manager__empty">{ZERO_RESULTS_TEXT}</p>
                     </div>
                   )
                 )}

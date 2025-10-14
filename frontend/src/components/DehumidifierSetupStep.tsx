@@ -1,6 +1,8 @@
 
 import React, { useState, useEffect } from "react";
 
+import { ZERO_RESULTS_TEXT } from "../constants/zeroState";
+
 interface Dehumidifier {
   id: string;
   name: string;
@@ -32,28 +34,44 @@ export const DehumidifierSetupStep: React.FC = () => {
   const [dehumidifiers, setDehumidifiers] = useState<Dehumidifier[]>([]);
   const [selected, setSelected] = useState<Dehumidifier | null>(null);
   const [loading, setLoading] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-
   // Fetch dehumidifiers from backend
   useEffect(() => {
-    setLoading(true);
-    setError(null);
-    fetch("/devices")
-      .then(res => {
-        if (!res.ok) throw new Error("Failed to fetch devices");
-        return res.json();
-      })
-      .then((devices: any) => {
+    let cancelled = false;
+    const loadDevices = async () => {
+      setLoading(true);
+      try {
+        const response = await fetch("/devices");
+        if (!response.ok) {
+          throw new Error(response.statusText);
+        }
+        const devices = await response.json().catch(() => null);
         const deviceList: any[] = Array.isArray(devices)
           ? devices
-          : (devices && Array.isArray(devices.devices))
-            ? devices.devices
-            : [];
+          : devices && Array.isArray((devices as any).devices)
+          ? (devices as any).devices
+          : [];
         const filtered = deviceList.filter((d: any) => (d.category || "").toLowerCase().includes("dehumidifier"));
-        setDehumidifiers(filtered.map(deviceToDehumidifier));
-      })
-      .catch(e => setError(e.message))
-      .finally(() => setLoading(false));
+        if (!cancelled) {
+          setDehumidifiers(filtered.map(deviceToDehumidifier));
+        }
+      } catch (e) {
+        console.warn("[net]", e);
+        if (!cancelled) {
+          setDehumidifiers([]);
+        }
+        return;
+      } finally {
+        if (!cancelled) {
+          setLoading(false);
+        }
+      }
+    };
+
+    loadDevices();
+
+    return () => {
+      cancelled = true;
+    };
   }, []);
 
   const handleAdd = () => setQty(q => q + 1);
@@ -81,7 +99,6 @@ export const DehumidifierSetupStep: React.FC = () => {
           onChange={e => setSearch(e.target.value)}
         />
         {loading && <div style={{ color: "#64748b", fontSize: 13 }}>Loading dehumidifiers...</div>}
-        {error && <div style={{ color: "#ef4444", fontSize: 13 }}>{error}</div>}
         {search && filteredDehums.length > 0 && (
           <div style={{ background: "#f1f5f9", border: "1px solid #e2e8f0", borderRadius: 6, marginTop: 8 }}>
             {filteredDehums.map(d => (
@@ -101,7 +118,9 @@ export const DehumidifierSetupStep: React.FC = () => {
           </div>
         )}
         {search && !loading && filteredDehums.length === 0 && (
-          <div style={{ color: "#64748b", fontSize: 13, marginTop: 8 }}>No matching dehumidifiers found.</div>
+          <div className="device-manager__empty" style={{ color: "#64748b", fontSize: 13, marginTop: 8 }}>
+            {ZERO_RESULTS_TEXT}
+          </div>
         )}
       </div>
       <div style={{ margin: "16px 0" }}>
