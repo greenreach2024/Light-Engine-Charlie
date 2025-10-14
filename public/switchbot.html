@@ -4310,33 +4310,6 @@ function toNumberOrNull(val) {
     const lastApiCall = {};
     const API_RATE_LIMIT = 3000; // 3 seconds between calls per device
 
-    function buildSwitchBotError(response, rawText, contextLabel) {
-      const statusPart = typeof response.status === 'number' && response.status !== 0
-        ? `HTTP ${response.status}`
-        : 'Network error';
-      const snippet = rawText ? rawText.replace(/\s+/g, ' ').trim().slice(0, 200) : '';
-      const base = snippet || response.statusText || 'Unexpected response from server';
-      const prefix = contextLabel ? `${contextLabel}: ` : '';
-      return new Error(`${prefix}${statusPart}${base ? ` – ${base}` : ''}`);
-    }
-
-    async function parseSwitchBotResponse(response, contextLabel) {
-      let data;
-      try {
-        data = await response.clone().json();
-      } catch (parseError) {
-        const rawText = await response.text().catch(() => '');
-        throw buildSwitchBotError(response, rawText, contextLabel);
-      }
-
-      if (!response.ok) {
-        const message = data?.message || data?.error || response.statusText || `HTTP ${response.status}`;
-        throw new Error(contextLabel ? `${contextLabel}: ${message}` : message);
-      }
-
-      return data;
-    }
-
     async function refreshDeviceData(deviceId) {
       try {
         // Check rate limiting
@@ -4353,9 +4326,9 @@ function toNumberOrNull(val) {
 
         // Call SwitchBot status API for individual device
         const response = await fetch(`/api/switchbot/devices/${deviceId}/status`);
-        const data = await parseSwitchBotResponse(response, 'Unable to refresh device');
+        const data = await response.json();
 
-        if (data?.statusCode === 100) {
+        if (data.statusCode === 100) {
           // Update device with fresh data
           const device = targetDevice || devices.find(d => d.deviceId === deviceId);
           if (device) {
@@ -4411,10 +4384,10 @@ function toNumberOrNull(val) {
             parameter: 'default'
           })
         });
+        
+        const data = await response.json();
 
-        const data = await parseSwitchBotResponse(response, 'Failed to send command');
-
-        if (data?.statusCode === 100) {
+        if (data.statusCode === 100) {
           showInfo(`Successfully sent ${safeCommand} command to ${safeDeviceName}.`);
           // Refresh device data after command
           setTimeout(() => refreshDeviceData(deviceId), 2000);

@@ -1307,17 +1307,6 @@ function renderIoTDeviceCards(devices) {
 // Demo: global stubs for Kasa/Shelly managers
 window.openKasaManager = function() { showToast({ title: 'Kasa Manager', msg: 'Kasa setup wizard coming soon.', kind: 'info', icon: '💡' }); };
 window.openShellyManager = function() { showToast({ title: 'Shelly Manager', msg: 'Shelly setup wizard coming soon.', kind: 'info', icon: '🔌' }); };
-window.openSwitchBotManager = function() {
-  const modal = document.getElementById('switchBotModal');
-  if (modal) {
-    modal.style.display = 'flex';
-    // Optionally reload iframe for fresh data
-    // document.getElementById('switchBotIframe').src = './switchbot.html';
-  } else {
-    showToast({ title: 'SwitchBot Manager', msg: 'SwitchBot manager UI not found.', kind: 'error', icon: '🤖' });
-  }
-};
-
 // Modal close handler
 document.addEventListener('DOMContentLoaded', function() {
   const modal = document.getElementById('switchBotModal');
@@ -2314,11 +2303,100 @@ function normalizeFarmDoc(farm) {
   // TODO: Replace with real normalization logic if needed
   return farm;
 }
-// Global JSON loader
-async function loadJSON(url) {
-  const resp = await fetch(url);
-  if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
-  return await resp.json();
+function cloneFallback(value) {
+  if (typeof value === 'function') {
+    try { return value(); } catch (err) { console.warn('[loadJSON] Fallback function threw error:', err); return null; }
+  }
+  if (Array.isArray(value)) return value.slice();
+  if (value && typeof value === 'object') return { ...value };
+  return value;
+}
+
+// Global JSON loader with graceful fallback
+async function loadJSON(url, fallbackValue = null) {
+  try {
+    const resp = await fetch(url, { cache: 'no-store' });
+    if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+    return await resp.json();
+  } catch (error) {
+    console.warn(`[loadJSON] Falling back for ${url}:`, error);
+    return cloneFallback(fallbackValue);
+  }
+}
+// Persist JSON via backend helper
+async function saveJSON(url, data) {
+  try {
+    const fileName = url.split('/').filter(Boolean).pop();
+    if (!fileName) throw new Error('Invalid save target');
+    const resp = await fetch(`/data/${encodeURIComponent(fileName)}`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(data)
+    });
+    if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+    return true;
+  } catch (error) {
+    console.error(`[saveJSON] Failed to persist ${url}:`, error);
+    return false;
+  }
+}
+
+async function fetchPlansDocument() {
+  try {
+    const resp = await fetch('/plans', { cache: 'no-store' });
+    if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+    return await resp.json();
+  } catch (error) {
+    console.warn('[plans] Failed to fetch /plans', error);
+    return null;
+  }
+}
+
+async function fetchSchedulesDocument() {
+  try {
+    const resp = await fetch('/sched', { cache: 'no-store' });
+    if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+    return await resp.json();
+  } catch (error) {
+    console.warn('[sched] Failed to fetch /sched', error);
+    return null;
+  }
+}
+
+async function publishPlansDocument(doc) {
+  try {
+    const payload = Array.isArray(doc)
+      ? { plans: doc }
+      : (doc && typeof doc === 'object' ? doc : { plans: [] });
+    const resp = await fetch('/plans', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload)
+    });
+    if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+    return await resp.json();
+  } catch (error) {
+    console.error('[plans] Failed to publish plans', error);
+    return null;
+  }
+}
+
+async function publishSchedulesDocument(doc) {
+  try {
+    const payload = Array.isArray(doc)
+      ? { schedules: doc }
+      : (doc && typeof doc === 'object' ? doc : { schedules: [] });
+    const resp = await fetch('/sched', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload)
+    });
+    if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+    return await resp.json();
+  } catch (error) {
+    console.error('[sched] Failed to publish schedules', error);
+    return null;
+  }
 }
 // Light Engine Charlie - Comprehensive Dashboard Application
 // Global API fetch helper
@@ -2327,6 +2405,188 @@ async function api(url, opts = {}) {
   if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
   return await resp.json();
 }
+<<<<<<< HEAD
+=======
+
+async function safeApi(url, fallbackValue = null, opts = {}) {
+  try {
+    return await api(url, opts);
+  } catch (error) {
+    console.warn(`API request to ${url} failed`, error);
+    return fallbackValue;
+  }
+}
+
+function unwrapDeviceList(payload) {
+  if (Array.isArray(payload)) return payload;
+  if (payload && typeof payload === 'object') {
+    if (Array.isArray(payload.data)) return payload.data;
+    if (Array.isArray(payload.devices)) return payload.devices;
+    if (Array.isArray(payload.deviceList)) return payload.deviceList;
+  }
+  return [];
+}
+
+function summarizeSwitchBotDevices(devices = [], meta = {}) {
+  const list = Array.isArray(devices) ? devices : [];
+  const total = list.length;
+  const active = list.filter((d) => String(d.status || '').toLowerCase() !== 'offline').length;
+  const lowBattery = list.filter((d) => typeof d.battery === 'number' && d.battery < 30).length;
+  return {
+    total_devices: total,
+    active_devices: active,
+    offline_devices: total - active,
+    low_battery_devices: lowBattery,
+    last_updated: meta.last_updated || new Date().toISOString(),
+    hub_status: meta.hub_status || 'unknown',
+    hub_model: meta.hub_model || null,
+    hub_firmware: meta.hub_firmware || null
+  };
+}
+
+function extractSwitchBotDeviceCandidates(payload) {
+  if (!payload || typeof payload !== 'object') return [];
+  if (Array.isArray(payload?.body?.deviceList)) return payload.body.deviceList;
+  if (Array.isArray(payload.devices)) return payload.devices;
+  if (Array.isArray(payload.deviceList)) return payload.deviceList;
+  if (Array.isArray(payload.items)) return payload.items;
+  return [];
+}
+
+function normalizeSwitchBotDeviceEntry(device, index) {
+  const fallbackId = `switchbot-${index + 1}`;
+  const fallbackName = `SwitchBot device ${index + 1}`;
+  if (!device || typeof device !== 'object') {
+    return {
+      id: fallbackId,
+      deviceId: fallbackId,
+      name: fallbackName,
+      deviceName: fallbackName,
+      type: 'Unknown device',
+      location: '',
+      equipment_controlled: '',
+      status: 'unknown',
+      battery: null,
+      lastSeen: null,
+      readings: {}
+    };
+  }
+
+  const normalized = { ...device };
+  const rawId = normalized.deviceId || normalized.device_id || normalized.id || fallbackId;
+  const displayName = normalized.deviceName || normalized.name || fallbackName;
+
+  normalized.id = rawId;
+  normalized.deviceId = normalized.deviceId || normalized.device_id || rawId;
+  normalized.name = displayName;
+  normalized.deviceName = displayName;
+  normalized.type = normalized.type || normalized.deviceType || normalized.category || 'SwitchBot device';
+  normalized.location = normalized.location || normalized.room || '';
+  normalized.equipment_controlled = normalized.equipment_controlled || normalized.equipment || '';
+
+  if (typeof normalized.battery !== 'number') {
+    if (typeof normalized.batteryLevel === 'number') normalized.battery = normalized.batteryLevel;
+    else if (typeof normalized.battery_percent === 'number') normalized.battery = normalized.battery_percent;
+    else normalized.battery = null;
+  }
+
+  if (!normalized.lastSeen) {
+    normalized.lastSeen = normalized.last_seen || normalized.updateTime || normalized.timestamp || null;
+  }
+
+  if (!normalized.readings || typeof normalized.readings !== 'object') {
+    const fallbackReadings = normalized.data || normalized.metrics || null;
+    normalized.readings = (fallbackReadings && typeof fallbackReadings === 'object') ? fallbackReadings : {};
+  }
+
+  if (!normalized.status) {
+    normalized.status = normalized.online === false ? 'offline' : 'active';
+  }
+
+  return normalized;
+}
+
+function normalizeSwitchBotDevicesList(list) {
+  if (!Array.isArray(list)) return [];
+  return list.map((item, index) => normalizeSwitchBotDeviceEntry(item, index));
+}
+
+function interpretSwitchBotPayload(payload) {
+  const rawDevices = extractSwitchBotDeviceCandidates(payload);
+  const devices = normalizeSwitchBotDevicesList(rawDevices);
+  const summaryMeta = (payload && typeof payload === 'object' && payload.summary && typeof payload.summary === 'object') ? payload.summary : {};
+  const summary = summarizeSwitchBotDevices(devices, summaryMeta);
+  const meta = (payload && typeof payload === 'object' && payload.meta && typeof payload.meta === 'object') ? payload.meta : {};
+  const statusCode = typeof payload?.statusCode === 'number' ? payload.statusCode : null;
+  const message = typeof payload?.message === 'string' ? payload.message : null;
+  return { rawDevices, devices, summary, summaryMeta, meta, statusCode, message };
+}
+
+async function loadSwitchBotDevices() {
+  try {
+    const response = await fetch('/switchbot/devices');
+    const cache = {
+      status: response.headers?.get?.('X-Cache') || null,
+      freshness: response.headers?.get?.('X-Cache-Freshness') || null
+    };
+
+    if (!response.ok) {
+      console.warn('switchbot list failed', response.status);
+      renderSwitchBotList([]);
+      return {
+        devices: [],
+        summary: summarizeSwitchBotDevices([]),
+        meta: {},
+        cache,
+        httpStatus: response.status,
+        statusCode: null,
+        message: null
+      };
+    }
+
+    const payload = await response.json();
+    const interpreted = interpretSwitchBotPayload(payload);
+    const rendered = renderSwitchBotList(interpreted.rawDevices, interpreted.summaryMeta);
+    return {
+      ...interpreted,
+      devices: rendered.devices,
+      summary: rendered.summary,
+      payload,
+      cache
+    };
+  } catch (error) {
+    console.warn('switchbot list failed', error);
+    renderSwitchBotList([]);
+    return {
+      devices: [],
+      summary: summarizeSwitchBotDevices([]),
+      meta: {},
+      error
+    };
+  }
+}
+
+function formatSwitchBotPreviewReadings(readings) {
+  if (!readings || typeof readings !== 'object') return 'No readings reported yet';
+  const entries = Object.entries(readings).filter(([key]) => key !== 'timestamp');
+  if (!entries.length) return 'No readings reported yet';
+  return entries.slice(0, 3).map(([key, value]) => `${key.replace(/_/g, ' ')}: ${value}`).join(' • ');
+}
+
+function formatSwitchBotTimestamp(ts) {
+  if (!ts) return 'Unknown';
+  const date = new Date(ts);
+  if (Number.isNaN(date.getTime())) return 'Unknown';
+  return date.toLocaleString();
+}
+
+function getSwitchBotStatusColor(status) {
+  const normalized = String(status || '').toLowerCase();
+  if (['active', 'online', 'on', 'ready'].includes(normalized)) return '#10b981';
+  if (['offline', 'inactive', 'error'].includes(normalized)) return '#ef4444';
+  return '#f59e0b';
+}
+>>>>>>> d9ae1097e3caa851c8d00d42999c76aebdefd32b
 // Ensure STATE is globally defined
 var STATE = window.STATE = window.STATE || {};
 STATE.rooms = Array.isArray(STATE.rooms) ? STATE.rooms : [];
@@ -7377,27 +7637,32 @@ class RoomWizard {
       
       // Fetch LIVE SwitchBot devices from the API - NO DEMO/MOCK DATA
       console.log('🔌 Fetching LIVE SwitchBot device data (no mock fallbacks)...');
-      const response = await fetch('/api/switchbot/devices?refresh=1');
-      
+      const response = await fetch('/switchbot/devices');
+
       if (!response.ok) {
         const errorText = await response.text();
         throw new Error(`SwitchBot API returned HTTP ${response.status}: ${errorText}`);
       }
-      
-      const data = await response.json();
-      const meta = data.meta || {};
+
+      const payload = await response.json();
+      const interpreted = interpretSwitchBotPayload(payload);
+      const meta = interpreted.meta || {};
+      const headers = {
+        status: response.headers?.get?.('X-Cache') || null,
+        freshness: response.headers?.get?.('X-Cache-Freshness') || null
+      };
 
       // Check for rate limiting
-      if (response.status === 429 || data.statusCode === 429) {
-        const retryAfter = data.retryAfter || 60;
+      if (response.status === 429 || interpreted.statusCode === 429) {
+        const retryAfter = payload?.retryAfter || 60;
         console.warn(`⏱️ SwitchBot API rate limited. Retry after ${retryAfter} seconds.`);
-        showToast({ 
-          title: 'API Rate Limited', 
-          msg: `SwitchBot API is rate limited. Please wait ${retryAfter} seconds and refresh.`, 
-          kind: 'warn', 
-          icon: '⏱️' 
+        showToast({
+          title: 'API Rate Limited',
+          msg: `SwitchBot API is rate limited. Please wait ${retryAfter} seconds and refresh.`,
+          kind: 'warn',
+          icon: '⏱️'
         });
-        
+
         // NO FALLBACK - Live data only
         if (this.statusEl) {
           this.statusEl.textContent = `Rate limited - retry in ${retryAfter}s`;
@@ -7405,68 +7670,69 @@ class RoomWizard {
         return;
       }
 
-      if (meta.cached && meta.stale) {
+      const cacheStatus = (headers.status || '').toLowerCase();
+      const cacheFreshness = (headers.freshness || '').toLowerCase();
+
+      if ((meta.cached && meta.stale) || (cacheStatus === 'hit' && cacheFreshness === 'stale')) {
         console.warn('⚠️ Using stale cached SwitchBot data:', meta.error || 'Unknown error');
-        showToast({ 
-          title: 'Using Cached Data', 
-          msg: 'SwitchBot API unavailable, using cached device data.', 
-          kind: 'info', 
-          icon: '💾' 
+        showToast({
+          title: 'Using Cached Data',
+          msg: 'SwitchBot API unavailable, using cached device data.',
+          kind: 'info',
+          icon: '💾'
         });
-      } else if (meta.cached) {
+      } else if (meta.cached || cacheStatus === 'hit') {
         console.info('📋 Using cached SwitchBot device list (within TTL).');
       }
 
-      if (data.statusCode === 100 && data.body && data.body.deviceList) {
-        const realDevices = data.body.deviceList;
+      const rawDevices = interpreted.rawDevices.length ? interpreted.rawDevices : interpreted.devices;
+      const normalizedDevices = normalizeSwitchBotDevicesList(rawDevices);
 
-        if (realDevices.length === 0) {
-          console.warn('⚠️ No SwitchBot devices found in your account');
-          showToast({ 
-            title: 'No Devices Found', 
-            msg: 'No SwitchBot devices found in your account. Add devices in the SwitchBot app first.', 
-            kind: 'warn', 
-            icon: '📱' 
-          });
-          
-          if (this.statusEl) {
-            this.statusEl.textContent = 'No devices found in SwitchBot account';
-          }
-          return;
-        }
-
-        // Add real devices only
-        realDevices.forEach((device, index) => {
-          const liveDevice = {
-            name: device.deviceName || `SwitchBot ${device.deviceType} ${index + 1}`,
-            vendor: 'SwitchBot',
-            model: device.deviceType,
-            host: 'live-switchbot-api',
-            switchBotId: device.deviceId,
-            hubId: device.hubDeviceId,
-            setup: this.getSetupForDeviceType(device.deviceType),
-            isReal: true,
-            isLive: true, // Mark as live data
-            realDeviceData: device,
-            lastUpdate: new Date().toISOString()
-          };
-          this.data.devices.push(liveDevice);
-        });
-        
-        console.log(`✅ Loaded ${realDevices.length} LIVE SwitchBot device(s) from greenreach network`, meta);
-        showToast({ 
-          title: 'Live Devices Connected', 
-          msg: `Successfully connected to ${realDevices.length} live SwitchBot devices on greenreach network.`, 
-          kind: 'success', 
-          icon: '🔌' 
+      if (!normalizedDevices.length) {
+        console.warn('⚠️ No SwitchBot devices found in your account');
+        showToast({
+          title: 'No Devices Found',
+          msg: 'No SwitchBot devices found in your account. Add devices in the SwitchBot app first.',
+          kind: 'warn',
+          icon: '📱'
         });
 
         if (this.statusEl) {
-          this.statusEl.textContent = `${realDevices.length} live devices connected on greenreach`;
+          this.statusEl.textContent = 'No devices found in SwitchBot account';
         }
+        return;
+      }
 
-      } else {
-        throw new Error(`Invalid API response: statusCode ${data.statusCode || 'unknown'}`);
+      // Add real devices only
+      normalizedDevices.forEach((device, index) => {
+        const liveDevice = {
+          name: device.name || device.deviceName || `SwitchBot ${device.type || 'device'} ${index + 1}`,
+          vendor: 'SwitchBot',
+          model: device.type || device.deviceType || 'SwitchBot device',
+          host: 'live-switchbot-api',
+          switchBotId: device.deviceId || device.id || '',
+          hubId: device.hubDeviceId || device.hub_id || null,
+          setup: this.getSetupForDeviceType(device.type || device.deviceType || 'device'),
+          isReal: true,
+          isLive: true, // Mark as live data
+          realDeviceData: device,
+          lastUpdate: new Date().toISOString()
+        };
+        this.data.devices.push(liveDevice);
+      });
+
+      this.renderDeviceList();
+
+      console.log(`✅ Loaded ${normalizedDevices.length} LIVE SwitchBot device(s) from greenreach network`, meta);
+      showToast({
+        title: 'Live Devices Connected',
+        msg: `Successfully connected to ${normalizedDevices.length} live SwitchBot devices on greenreach network.`,
+        kind: 'success',
+        icon: '🔌'
+      });
+
+      if (this.statusEl) {
+        this.statusEl.textContent = `${normalizedDevices.length} live devices connected on greenreach`;
       }
     } catch (error) {
       console.error('❌ Failed to load live SwitchBot devices:', error);
@@ -7757,10 +8023,11 @@ async function loadAllData() {
           deviceResponse = await api('/api/devicedatas');
         } catch (e) {
           console.error('Failed to load device list from /api/devicedatas', e);
-          deviceResponse = { data: [] };
+          deviceResponse = { data: [], meta: { source: 'fallback', error: e?.message || String(e) } };
         }
       }
-      STATE.devices = deviceResponse?.data || [];
+      STATE.devicesMeta = deviceResponse?.meta || {};
+      STATE.devices = unwrapDeviceList(deviceResponse);
     }
     
     // Ensure all devices have proper online status for research mode
@@ -7789,6 +8056,7 @@ async function loadAllData() {
     });
     
     // Load static data files
+<<<<<<< HEAD
     const [groups, schedules, plans, environment, calibrations, spdLibrary, deviceMeta, deviceKB, equipmentKB, deviceManufacturers, farm, rooms, switchbotDevices] = await Promise.all([
       loadJSON('./data/groups.json'),
       loadJSON('./data/schedules.json'),
@@ -7809,6 +8077,33 @@ async function loadAllData() {
     STATE.schedules = schedules?.schedules || [];
     STATE.plans = plans?.plans || [];
   STATE.environment = environment?.zones || [];
+=======
+    const [groups, schedulesDocRaw, plansDocRaw, environment, calibrations, spdLibrary, deviceMeta, deviceKB, equipmentKB, deviceManufacturers, farm, rooms, switchbotDevices] = await Promise.all([
+      loadJSON('./data/groups.json', { groups: [] }),
+      fetchSchedulesDocument(),
+      fetchPlansDocument(),
+      safeApi('/env', { zones: [] }),
+      loadJSON('./data/calibration.json', { calibrations: [] }),
+      loadJSON('./data/spd-library.json', null),
+      loadJSON('./data/device-meta.json', { devices: {} }),
+      loadJSON('./data/device-kb.json', { fixtures: [] }),
+      loadJSON('./data/equipment-kb.json', { equipment: [] }),
+      loadJSON('./data/device-manufacturers.json', { manufacturers: [] }),
+      loadJSON('./data/farm.json', {}),
+      loadJSON('./data/rooms.json', { rooms: [] }),
+      loadJSON('./data/switchbot-devices.json', { devices: [], summary: null })
+    ]);
+
+    STATE.groups = groups?.groups || [];
+    const schedulesDoc = (schedulesDocRaw && typeof schedulesDocRaw === 'object') ? schedulesDocRaw : null;
+    STATE.scheduleDocument = schedulesDoc;
+    STATE.schedules = Array.isArray(schedulesDoc?.schedules) ? schedulesDoc.schedules : [];
+    const plansDoc = (plansDocRaw && typeof plansDocRaw === 'object') ? plansDocRaw : null;
+    STATE.planDocumentInfo = plansDoc;
+    STATE.plans = Array.isArray(plansDoc?.plans) ? plansDoc.plans : [];
+    updatePlansStatusIndicator({ doc: STATE.planDocumentInfo, plans: STATE.plans });
+    STATE.environment = environment?.zones || [];
+>>>>>>> d9ae1097e3caa851c8d00d42999c76aebdefd32b
     STATE.calibrations = calibrations?.calibrations || [];
     STATE._calibrationCache = new Map();
     STATE.spdLibrary = normalizeSpdLibrary(spdLibrary);
@@ -7818,6 +8113,7 @@ async function loadAllData() {
       console.warn('⚠️ SPD library missing or invalid');
     }
     hydrateDeviceDriverState();
+<<<<<<< HEAD
   STATE.deviceMeta = deviceMeta?.devices || {};
   normalizeGroupsInState();
   STATE.switchbotDevices = switchbotDevices?.devices || [];
@@ -7825,6 +8121,16 @@ async function loadAllData() {
   STATE.farm = normalizeFarmDoc(rawFarm);
   try { if (STATE.farm && Object.keys(STATE.farm).length) localStorage.setItem('gr.farm', JSON.stringify(STATE.farm)); } catch {}
   STATE.rooms = rooms?.rooms || [];
+=======
+    STATE.deviceMeta = deviceMeta?.devices || {};
+    normalizeGroupsInState();
+    STATE.switchbotDevices = switchbotDevices?.devices || [];
+    STATE.switchbotSummary = switchbotDevices?.summary || summarizeSwitchBotDevices(STATE.switchbotDevices);
+    const rawFarm = farm || (() => { try { return JSON.parse(localStorage.getItem('gr.farm') || 'null'); } catch { return null; } })() || {};
+    STATE.farm = normalizeFarmDoc(rawFarm);
+    try { if (STATE.farm && Object.keys(STATE.farm).length) localStorage.setItem('gr.farm', JSON.stringify(STATE.farm)); } catch {}
+    STATE.rooms = rooms?.rooms || [];
+>>>>>>> d9ae1097e3caa851c8d00d42999c76aebdefd32b
   if (deviceKB && Array.isArray(deviceKB.fixtures)) {
     // Assign a unique id to each fixture if missing
     deviceKB.fixtures.forEach(fixture => {
@@ -7871,7 +8177,19 @@ async function loadAllData() {
     renderLightSetupSummary();
     renderControllerAssignments();
     renderSwitchBotDevices();
-    
+
+    try {
+      await initLightSearch();
+    } catch (error) {
+      console.warn('Light search init failed', error);
+    }
+
+    try {
+      await initDehumSearch();
+    } catch (error) {
+      console.warn('Dehumidifier search init failed', error);
+    }
+
     // Wire controller assignments buttons
     document.getElementById('btnRefreshControllerAssignments')?.addEventListener('click', renderControllerAssignments);
     document.getElementById('btnManageControllers')?.addEventListener('click', () => {
@@ -9500,103 +9818,263 @@ function startEnvPolling(intervalMs = 10000) {
 }
 
 // --- SwitchBot Devices Management ---
+function renderSwitchBotList(items, summaryMeta = {}) {
+  const normalized = normalizeSwitchBotDevicesList(Array.isArray(items) ? items : []);
+  const summary = summarizeSwitchBotDevices(normalized, summaryMeta);
+  STATE.switchbotDevices = normalized;
+  STATE.switchbotSummary = summary;
+  renderSwitchBotDevices();
+  renderSwitchBotManager();
+  return { devices: normalized, summary };
+}
+
 function renderSwitchBotDevices() {
   const container = document.getElementById('switchbotDevicesList');
   if (!container) return;
 
-  // Show a summary view with a link to the full manager
-  container.innerHTML = `
-    <div class="row" style="justify-content:space-between;align-items:center;padding:12px;background:#f8fafc;border-radius:8px;border:1px solid #e2e8f0">
-      <div>
-        <div class="row" style="align-items:center;gap:8px;margin-bottom:4px">
-          <div style="width:8px;height:8px;border-radius:50%;background:#10b981"></div>
-          <strong>Live SwitchBot Integration Active</strong>
+  const devices = Array.isArray(STATE.switchbotDevices) ? STATE.switchbotDevices : [];
+  const summary = STATE.switchbotSummary || summarizeSwitchBotDevices(devices);
+
+  if (!devices.length) {
+    container.innerHTML = `
+      <div class="switchbot-card">
+        <div class="switchbot-card__header">
+          <div>
+            <div class="switchbot-card__title"><span class="switchbot-dot switchbot-dot--warn"></span><strong>No SwitchBot devices found</strong></div>
+            <p class="tiny" style="margin:4px 0 0;color:#64748b">Connect your SwitchBot account in the manager to view live sensors and plugs.</p>
+          </div>
+          <button type="button" class="primary" id="switchBotOpenManagerEmpty">🏠 Open Manager</button>
         </div>
-        <p class="tiny" style="margin:0;color:#64748b">Real-time monitoring of environmental sensors and smart devices</p>
+      </div>`;
+    container.querySelector('#switchBotOpenManagerEmpty')?.addEventListener('click', openSwitchBotManager);
+    return;
+  }
+
+  const deviceRows = devices.slice(0, 4).map((device) => {
+    const status = device.status || 'unknown';
+    const statusColor = getSwitchBotStatusColor(status);
+    const readingText = formatSwitchBotPreviewReadings(device.readings);
+    const lastSeen = formatSwitchBotTimestamp(device.lastSeen);
+    const battery = typeof device.battery === 'number' ? `${device.battery}%` : '—';
+    return `
+      <div class="switchbot-device-item">
+        <div class="switchbot-device-item__main">
+          <div class="switchbot-device-item__title">${escapeHtml(device.name || device.deviceName || 'SwitchBot device')}</div>
+          <div class="switchbot-device-item__meta">${escapeHtml(device.type || device.deviceType || 'Unknown type')}</div>
+          <div class="switchbot-device-item__location">${escapeHtml(device.location || 'Unassigned location')}</div>
+          <div class="switchbot-device-item__readings">${escapeHtml(readingText)}</div>
+        </div>
+        <div class="switchbot-device-item__aside">
+          <div class="switchbot-device-status" style="color:${statusColor}">
+            <span class="switchbot-dot" style="background:${statusColor}"></span>
+            <span>${escapeHtml(status)}</span>
+          </div>
+          <div class="switchbot-device-detail">Battery: ${escapeHtml(battery)}</div>
+          <div class="switchbot-device-detail">Last seen: ${escapeHtml(lastSeen)}</div>
+        </div>
+      </div>`;
+  }).join('');
+
+  container.innerHTML = `
+    <div class="switchbot-card">
+      <div class="switchbot-card__header">
+        <div>
+          <div class="switchbot-card__title"><span class="switchbot-dot"></span><strong>SwitchBot devices (${devices.length})</strong></div>
+          <p class="tiny" style="margin:4px 0 0;color:#64748b">Active: ${summary.active_devices} • Offline: ${summary.offline_devices} • Low battery: ${summary.low_battery_devices}</p>
+        </div>
+        <div class="switchbot-card__actions">
+          <button type="button" class="ghost" id="switchBotRefreshBtn">Refresh</button>
+          <button type="button" class="primary" id="switchBotOpenManager">🏠 Open Manager</button>
+        </div>
       </div>
-      <button onclick="openSwitchBotManager()" class="primary">🏠 Open Manager</button>
+      <div class="switchbot-device-list">${deviceRows}</div>
+      ${devices.length > 4 ? `<div class="tiny" style="text-align:right;color:#64748b">Showing first 4 devices. Open the manager to see all.</div>` : ''}
+    </div>`;
+
+  container.querySelector('#switchBotOpenManager')?.addEventListener('click', openSwitchBotManager);
+  const refreshBtn = container.querySelector('#switchBotRefreshBtn');
+  if (refreshBtn) {
+    refreshBtn.addEventListener('click', async () => {
+      const originalText = refreshBtn.textContent;
+      refreshBtn.disabled = true;
+      refreshBtn.textContent = 'Refreshing…';
+      try {
+        await refreshSwitchBotDevices();
+      } finally {
+        refreshBtn.disabled = false;
+        refreshBtn.textContent = originalText;
+      }
+    });
+  }
+}
+
+function renderSwitchBotManager() {
+  const host = document.getElementById('switchBotManagerContent');
+  if (!host) return;
+  const devices = Array.isArray(STATE.switchbotDevices) ? STATE.switchbotDevices : [];
+  const summary = STATE.switchbotSummary || summarizeSwitchBotDevices(devices);
+
+  if (!devices.length) {
+    host.innerHTML = '<div class="switchbot-manager-empty">No SwitchBot devices available. Check credentials or refresh.</div>';
+    return;
+  }
+
+  const cards = devices.map((device) => {
+    const status = device.status || 'unknown';
+    const statusColor = getSwitchBotStatusColor(status);
+    const readingText = formatSwitchBotPreviewReadings(device.readings);
+    const battery = typeof device.battery === 'number' ? `${device.battery}%` : '—';
+    return `
+      <div class="switchbot-manager-card">
+        <div class="switchbot-manager-card__title">
+          <h3>${escapeHtml(device.name || device.deviceName || 'SwitchBot device')}</h3>
+          <span class="switchbot-badge" style="background:${statusColor}22;color:${statusColor}">
+            <span class="switchbot-dot" style="background:${statusColor}"></span>
+            ${escapeHtml(status)}
+          </span>
+        </div>
+        <div class="switchbot-manager-meta">${escapeHtml(device.type || device.deviceType || 'Unknown type')} • ${escapeHtml(device.location || 'Unassigned location')}</div>
+        <div class="switchbot-manager-readings">${escapeHtml(readingText)}</div>
+        <div class="switchbot-manager-footer">
+          <span>Battery: ${escapeHtml(battery)}</span>
+          <span>Last seen: ${escapeHtml(formatSwitchBotTimestamp(device.lastSeen))}</span>
+        </div>
+      </div>`;
+  }).join('');
+
+  host.innerHTML = `
+    <div class="switchbot-manager-header">
+      <div>
+        <h2>SwitchBot Manager</h2>
+        <p class="tiny" style="margin:4px 0 0;color:#475569">${devices.length} device(s) connected • Last updated ${escapeHtml(formatSwitchBotTimestamp(summary.last_updated))}</p>
+      </div>
+      <div class="switchbot-manager-actions">
+        <button type="button" class="ghost" id="switchBotManagerRefresh">Refresh</button>
+      </div>
     </div>
-    <div class="tiny" style="margin-top:8px;color:#64748b;text-align:center">
-      Click "Open Device Manager" above for full device control and live status monitoring
-    </div>
-  `;
+    <div class="switchbot-manager-grid">${cards}</div>`;
+
+  host.querySelector('#switchBotManagerRefresh')?.addEventListener('click', async (ev) => {
+    const btn = ev.currentTarget;
+    if (!(btn instanceof HTMLButtonElement)) return;
+    const original = btn.textContent;
+    btn.disabled = true;
+    btn.textContent = 'Refreshing…';
+    try {
+      await refreshSwitchBotDevices();
+      renderSwitchBotManager();
+    } finally {
+      btn.disabled = false;
+      btn.textContent = original;
+    }
+  });
 }
 
 function openSwitchBotManager() {
-  const width = Math.min(1400, window.screen.width * 0.9);
-  const height = Math.min(900, window.screen.height * 0.9);
-  const left = (window.screen.width - width) / 2;
-  const top = (window.screen.height - height) / 2;
-  
-  window.open(
-    '/switchbot.html',
-    'switchbot-manager',
-    `width=${width},height=${height},left=${left},top=${top},scrollbars=yes,resizable=yes`
-  );
+  const modal = document.getElementById('switchBotModal');
+  if (!modal) {
+    showToast({ title: 'SwitchBot Manager', msg: 'SwitchBot manager UI not found.', kind: 'error', icon: '🤖' });
+    return;
+  }
+  modal.style.display = 'flex';
+  renderSwitchBotManager();
 }
 
 async function refreshSwitchBotDevices() {
-  try {
-    // Try to fetch live data from SwitchBot API
-    const response = await fetch('/api/switchbot/devices?refresh=1');
-    if (!response.ok) {
-      const text = await response.text();
-      throw new Error(`SwitchBot API request failed (${response.status}): ${text || 'No response body'}`);
-    }
+  const result = await loadSwitchBotDevices();
 
-    const data = await response.json();
-    const meta = data.meta || {};
+  if (!result) return;
 
-    if (meta.cached && meta.stale) {
-      console.warn('SwitchBot device refresh using stale cache because live request failed:', meta.error || 'Unknown error');
-    }
-
-    if (data.statusCode === 100 && data.body?.deviceList) {
-      // Update the local data file with live data
-      const devices = data.body.deviceList.map(device => ({
-        id: device.deviceId,
-        name: device.deviceName,
-        type: device.deviceType,
-        location: '', // This would need to be set by user
-        equipment_controlled: '', // This would need to be set by user
-        status: 'active',
-        battery: null, // Would be fetched from individual device status
-        lastSeen: new Date().toISOString(),
-        readings: {} // Would be populated from device status
-      }));
-      
-      // Save to local data file
-      const ok = await saveJSON('./data/switchbot-devices.json', { devices });
-
-      if (ok) {
-        STATE.switchbotDevices = devices;
-        renderSwitchBotDevices();
-        const toastKind = meta.cached && meta.stale ? 'warn' : 'success';
-        showToast({
-          title: 'SwitchBot Sync Complete',
-          msg: meta.cached && meta.stale
-            ? `Loaded ${devices.length} cached device(s); live refresh failed`
-            : `Found ${devices.length} device(s) from SwitchBot API`,
-          kind: toastKind,
-          icon: toastKind === 'warn' ? '⚠️' : '🏠'
-        }, 3000);
-      }
-    } else {
-      throw new Error(data.message || 'Failed to fetch devices');
-    }
-  } catch (error) {
-    console.error('Failed to refresh SwitchBot devices:', error);
+  if (result.error) {
+    console.error('Failed to refresh SwitchBot devices:', result.error);
     showToast({
       title: 'SwitchBot Sync Failed',
       msg: 'Could not connect to SwitchBot API. Check connection.',
       kind: 'error',
       icon: '❌'
     }, 4000);
+    return;
   }
+
+  if (result.httpStatus && result.httpStatus >= 400) {
+    showToast({
+      title: 'SwitchBot Sync Failed',
+      msg: `SwitchBot API request failed (${result.httpStatus}). Check credentials or network.`,
+      kind: 'error',
+      icon: '❌'
+    }, 4000);
+    return;
+  }
+
+  if (result.statusCode && result.statusCode !== 100 && !result.devices.length) {
+    showToast({
+      title: 'SwitchBot Sync Failed',
+      msg: result.message || `SwitchBot API returned status ${result.statusCode}.`,
+      kind: 'error',
+      icon: '❌'
+    }, 4000);
+    return;
+  }
+
+  const saved = await saveJSON('./data/switchbot-devices.json', {
+    devices: result.devices,
+    summary: result.summary
+  });
+
+  if (!saved) {
+    console.warn('Failed to persist SwitchBot devices locally');
+  }
+
+  const cacheStatus = (result.cache?.status || '').toLowerCase();
+  const cacheFreshness = (result.cache?.freshness || '').toLowerCase();
+  const usedCache = cacheStatus === 'hit';
+  const stale = cacheFreshness === 'stale';
+  const toastKind = usedCache && stale ? 'warn' : 'success';
+  const icon = toastKind === 'warn' ? '⚠️' : '🏠';
+  const msg = usedCache && stale
+    ? `Loaded ${result.devices.length} cached device(s); live refresh failed`
+    : `Found ${result.devices.length} device(s) from SwitchBot API`;
+
+  showToast({
+    title: 'SwitchBot Sync Complete',
+    msg,
+    kind: toastKind,
+    icon
+  }, 3000);
 }
 
 // Make functions globally available
 window.openSwitchBotManager = openSwitchBotManager;
+
+function updatePlansStatusIndicator(context = {}) {
+  const statusEl = document.getElementById('plansStatus');
+  if (!statusEl) return;
+  const doc = context.doc ?? STATE?.planDocumentInfo ?? null;
+  const plans = Array.isArray(context.plans)
+    ? context.plans
+    : (Array.isArray(STATE?.plans) ? STATE.plans : []);
+  const isDocObject = doc && typeof doc === 'object' && !Array.isArray(doc);
+  const isEmptyObject = isDocObject && Object.keys(doc).length === 0;
+  const shouldShowUnavailable = doc === null && plans.length === 0;
+  const shouldShowEmpty = !shouldShowUnavailable && (isEmptyObject || plans.length === 0);
+
+  if (shouldShowUnavailable) {
+    statusEl.innerHTML = '<span class="badge badge--warn">Plans unavailable — check controller connection.</span>';
+    statusEl.dataset.source = 'auto-empty';
+    return;
+  }
+
+  if (shouldShowEmpty) {
+    statusEl.innerHTML = '<span class="badge badge--muted">No plans yet — run Recipe Bridge or add one.</span>';
+    statusEl.dataset.source = 'auto-empty';
+    return;
+  }
+
+  if (statusEl.dataset.source === 'auto-empty') {
+    statusEl.textContent = '';
+    delete statusEl.dataset.source;
+  }
+}
 
 function renderPlans() {
   // Populate the Group Plan select with current plans
@@ -9742,6 +10220,113 @@ function renderPlansPanel() {
       console.warn('Failed to refresh group cards after plan update', e);
     }
   }
+  updatePlansStatusIndicator();
+}
+
+// --- Search helpers for quick pickers --------------------------------------
+function callRenderSearch(scope, options = [], config = {}) {
+  const customRenderer = typeof window.renderSearch === 'function' ? window.renderSearch : null;
+  if (customRenderer && customRenderer !== callRenderSearch) {
+    try {
+      customRenderer(scope, options, config);
+      return;
+    } catch (error) {
+      console.warn(`[search:${scope}] custom renderer failed`, error);
+    }
+  }
+
+  const host =
+    document.querySelector(`[data-search-scope="${scope}"]`) ||
+    document.getElementById(`${scope}Search`) ||
+    document.getElementById(`${scope}SearchRoot`) ||
+    document.querySelector(`[data-search="${scope}"]`);
+
+  if (!host) {
+    console.warn(`[search:${scope}] no host element found`);
+    return;
+  }
+
+  const list =
+    host.querySelector('[data-search-list]') ||
+    host.querySelector('[data-search-results]') ||
+    host;
+
+  if (!options.length) {
+    list.innerHTML = `<p class="tiny text-muted">${escapeHtml(config.emptyText || 'No results found.')}</p>`;
+    return;
+  }
+
+  list.innerHTML = options
+    .map((option) => {
+      const id = option?.id != null ? String(option.id) : '';
+      const labelSource = option?.label != null ? String(option.label) : id;
+      const label = labelSource || id;
+      return `<button type="button" class="ghost" data-search-option="${escapeHtml(id)}">${escapeHtml(label)}</button>`;
+    })
+    .join('');
+}
+
+async function getLightOptions() {
+  try {
+    const response = await fetch('/api/devicedatas');
+    if (!response.ok) throw new Error(`HTTP ${response.status}`);
+    const payload = await response.json();
+    const rawList = Array.isArray(payload?.data)
+      ? payload.data
+      : Array.isArray(payload)
+        ? payload
+        : [];
+    return rawList
+      .map((entry) => {
+        const id = entry?.id != null ? String(entry.id) : '';
+        if (!id) return null;
+        const name = entry?.deviceName || entry?.name || id;
+        const status = entry?.onOffStatus ? ` · ${entry.onOffStatus}` : '';
+        return { id, label: `${name}${status}` };
+      })
+      .filter(Boolean);
+  } catch (error) {
+    console.warn('lights list unavailable', error);
+    return [];
+  }
+}
+
+async function initLightSearch() {
+  const options = await getLightOptions();
+  callRenderSearch('lights', options, {
+    emptyText: 'No lights available — check controller connection.'
+  });
+}
+
+async function initDehumSearch() {
+  try {
+    const response = await fetch('/ui/catalog');
+    if (!response.ok) throw new Error(`HTTP ${response.status}`);
+    const payload = await response.json();
+    const dehums = Array.isArray(payload?.dehumidifiers) ? payload.dehumidifiers : [];
+    const options = dehums.map((item) => {
+      const brand = item?.brand ? String(item.brand) : '';
+      const model = item?.model ? String(item.model) : '';
+      const id = [brand, model].filter(Boolean).join(' ').trim();
+      const pints = Number(item?.pintsPerDay);
+      const ppd = Number.isFinite(pints) ? `${pints} PPD` : 'PPD unknown';
+      const label = `${brand} ${model}`.trim() || id || 'Dehumidifier';
+      return { id: id || label, label: `${label} · ${ppd}` };
+    });
+    callRenderSearch('dehum', options, {
+      emptyText: 'No models found — edit catalog.'
+    });
+  } catch (error) {
+    console.warn('dehumidifier catalog unavailable', error);
+    callRenderSearch('dehum', [], { emptyText: 'Catalog unavailable.' });
+  }
+}
+
+window.getLightOptions = getLightOptions;
+window.initLightSearch = initLightSearch;
+window.initDehumSearch = initDehumSearch;
+if (typeof window.renderSearch !== 'function') {
+  window.renderSearch = callRenderSearch;
 }
 
 // --- Config banner and modal helpers ---
@@ -9798,6 +10383,47 @@ window.startForwarderHealthPolling = startForwarderHealthPolling;
   tick();
   FORWARDER_POLL_TIMER = setInterval(tick, intervalMs);
 }
+
+let HEALTHZ_TIMER = 0;
+let HEALTHZ_BACKOFF = 5000;
+
+async function pollHealthz() {
+  try {
+    const response = await fetch('/healthz', { cache: 'no-store' });
+    if (!response.ok) throw new Error(`healthz:${response.status}`);
+    const body = await response.json().catch(() => ({ status: 'Controller reachable' }));
+    const message = (typeof body?.statusMessage === 'string' && body.statusMessage.trim())
+      ? body.statusMessage.trim()
+      : (typeof body?.status === 'string' && body.status.trim())
+        ? body.status.trim()
+        : 'Controller reachable';
+    const statusEl = document.getElementById('communicationStatus');
+    if (statusEl) {
+      statusEl.textContent = message;
+      statusEl.style.color = '#16a34a';
+      statusEl.dataset.state = 'ok';
+    }
+    HEALTHZ_BACKOFF = 5000;
+  } catch (error) {
+    console.warn('healthz failed', error);
+    const statusEl = document.getElementById('communicationStatus');
+    if (statusEl) {
+      statusEl.textContent = 'Controller offline';
+      statusEl.style.color = '#b91c1c';
+      statusEl.dataset.state = 'error';
+    }
+    HEALTHZ_BACKOFF = Math.min(HEALTHZ_BACKOFF * 2, 60000);
+  } finally {
+    clearTimeout(HEALTHZ_TIMER);
+    HEALTHZ_TIMER = window.setTimeout(pollHealthz, HEALTHZ_BACKOFF);
+  }
+}
+
+document.addEventListener('DOMContentLoaded', () => {
+  clearTimeout(HEALTHZ_TIMER);
+  HEALTHZ_BACKOFF = 5000;
+  pollHealthz().catch((error) => console.warn('initial healthz poll failed', error));
+});
 
 function openEnvModal(zone, metricKey) {
   const modal = document.getElementById('envModal');
@@ -10677,10 +11303,13 @@ function wireGlobalEvents() {
       const idx = STATE.schedules.findIndex(s=>s.id===edited.id);
       if (idx>=0) STATE.schedules[idx] = { ...STATE.schedules[idx], ...edited, active:true }; else STATE.schedules.push({ ...edited, active:true });
       if (group) group.schedule = edited.id;
-      await Promise.all([
-        saveJSON('./data/schedules.json', { schedules: STATE.schedules }),
+      const [schedResult] = await Promise.all([
+        publishSchedulesDocument(STATE.schedules),
         saveJSON('./data/groups.json', { groups: STATE.groups })
       ]);
+      if (schedResult && Array.isArray(schedResult?.schedules)) {
+        STATE.schedules = schedResult.schedules;
+      }
       updateGroupUI(group);
       setStatus('Saved group schedule');
     };
@@ -10928,8 +11557,17 @@ function wireGlobalEvents() {
   });
 
   async function saveSchedules() {
-    const ok = await saveJSON('./data/schedules.json', { schedules: STATE.schedules });
-    if (ok) setStatus('Schedules saved'); else alert('Failed to save schedules');
+    const result = await publishSchedulesDocument(STATE.schedules);
+    const ok = !!(result && result.ok !== false);
+    if (ok && Array.isArray(result?.schedules)) {
+      STATE.schedules = result.schedules;
+    }
+    if (ok) {
+      setStatus('Schedules saved');
+    } else {
+      alert('Failed to save schedules');
+    }
+    return ok;
   }
 
   $('#btnSaveSched')?.addEventListener('click', async () => {
@@ -10955,16 +11593,18 @@ function wireGlobalEvents() {
       while (existingIds.has(id)) { id = `${base}-${i++}`; }
       STATE.schedules.push({ ...edited, id, active: true });
     }
-    await saveSchedules();
+    const ok = await saveSchedules();
     renderSchedules();
-    setStatus('Schedule saved');
+    if (ok) {
+      setStatus('Schedule saved');
+    }
   });
 
   $('#btnReloadSched')?.addEventListener('click', async () => {
-    const sched = await loadJSON('./data/schedules.json');
-    STATE.schedules = sched?.schedules || [];
+    const doc = await fetchSchedulesDocument();
+    STATE.schedules = Array.isArray(doc?.schedules) ? doc.schedules : [];
     renderSchedules();
-    setStatus('Schedules reloaded');
+    setStatus(doc ? 'Schedules reloaded' : 'Schedules unavailable');
   });
 
   $('#btnDeleteSched')?.addEventListener('click', async () => {
@@ -11099,10 +11739,16 @@ function wireGlobalEvents() {
         STATE.plans.push(plan);
         // Assign to group and persist
         STATE.currentGroup.plan = id;
-        await Promise.all([
-          saveJSON('./data/plans.json', { plans: STATE.plans }),
+        const [planResult] = await Promise.all([
+          publishPlansDocument({ plans: STATE.plans }),
           saveGroups()
         ]);
+        if (planResult && planResult.ok !== false) {
+          STATE.planDocumentInfo = planResult;
+          if (Array.isArray(planResult.plans)) {
+            STATE.plans = planResult.plans;
+          }
+        }
         renderPlans(); renderPlansPanel(); updateGroupUI(STATE.currentGroup);
         showToast({ title: 'Plan saved', msg: `Created “${name}” and assigned to group`, kind: 'success', icon: '✅' });
       });
@@ -12777,12 +13423,21 @@ document.addEventListener('DOMContentLoaded', async () => {
     });
     document.getElementById('btnSavePlans')?.addEventListener('click', async () => {
       try {
-        const ok = await saveJSON('./data/plans.json', { plans: STATE.plans });
-        const status = document.getElementById('plansStatus'); if (status) status.textContent = ok ? 'Saved' : 'Save failed';
+        const result = await publishPlansDocument({ plans: STATE.plans });
+        const ok = !!(result && result.ok !== false);
+        if (ok && result && typeof result === 'object') {
+          STATE.planDocumentInfo = result;
+          if (Array.isArray(result.plans)) {
+            STATE.plans = result.plans;
+          }
+        }
+        const status = document.getElementById('plansStatus');
+        if (status) status.textContent = ok ? 'Saved' : 'Save failed';
         renderPlans();
         renderPlansPanel();
         if (typeof renderGroups === 'function') renderGroups();
       } catch (e) {
+        console.warn('Failed to publish plans', e);
         const status = document.getElementById('plansStatus'); if (status) status.textContent = 'Save failed';
       }
     });

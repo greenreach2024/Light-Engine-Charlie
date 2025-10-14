@@ -5302,3 +5302,172 @@ input[type="range"]#grd {
   border-color: #38bdf8;
   box-shadow: 0 0 0 3px rgba(56, 189, 248, 0.25);
 }
+
+/* SwitchBot device overview */
+.switchbot-card {
+  background: #f8fafc;
+  border: 1px solid #e2e8f0;
+  border-radius: 12px;
+  padding: 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+.switchbot-card__header {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 16px;
+  flex-wrap: wrap;
+}
+.switchbot-card__title {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 15px;
+  color: #0f172a;
+}
+.switchbot-card__actions {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+}
+.switchbot-dot {
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  background: #10b981;
+  display: inline-block;
+}
+.switchbot-dot--warn {
+  background: #f97316;
+}
+.switchbot-device-list {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+.switchbot-device-item {
+  display: flex;
+  justify-content: space-between;
+  gap: 16px;
+  border: 1px solid #e2e8f0;
+  border-radius: 10px;
+  background: #ffffff;
+  padding: 12px;
+  flex-wrap: wrap;
+}
+.switchbot-device-item__main {
+  flex: 1 1 60%;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.switchbot-device-item__title {
+  font-weight: 600;
+  font-size: 14px;
+  color: #0f172a;
+}
+.switchbot-device-item__meta,
+.switchbot-device-item__location {
+  font-size: 12px;
+  color: #64748b;
+}
+.switchbot-device-item__readings {
+  font-size: 12px;
+  color: #334155;
+}
+.switchbot-device-item__aside {
+  min-width: 160px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  font-size: 12px;
+  color: #475569;
+}
+.switchbot-device-status {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-weight: 600;
+}
+.switchbot-device-detail {
+  font-size: 12px;
+  color: #475569;
+}
+
+/* SwitchBot manager modal */
+.switchbot-manager-content {
+  padding: 24px;
+}
+.switchbot-manager-empty {
+  text-align: center;
+  color: #64748b;
+  padding: 48px 0;
+  font-size: 14px;
+}
+.switchbot-manager-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 16px;
+  flex-wrap: wrap;
+}
+.switchbot-manager-header h2 {
+  margin: 0;
+  font-size: 20px;
+  color: #0f172a;
+}
+.switchbot-manager-actions {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+}
+.switchbot-manager-grid {
+  margin-top: 16px;
+  display: grid;
+  gap: 16px;
+  grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+}
+.switchbot-manager-card {
+  background: #f8fafc;
+  border: 1px solid #e2e8f0;
+  border-radius: 12px;
+  padding: 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.switchbot-manager-card__title {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 12px;
+}
+.switchbot-manager-card__title h3 {
+  margin: 0;
+  font-size: 15px;
+  color: #0f172a;
+}
+.switchbot-manager-meta,
+.switchbot-manager-readings,
+.switchbot-manager-footer span {
+  font-size: 12px;
+  color: #475569;
+}
+.switchbot-manager-footer {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+.switchbot-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 10px;
+  border-radius: 999px;
+  font-size: 12px;
+  background: #e2e8f0;
+  color: #0f172a;
+}
