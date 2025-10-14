@@ -28,6 +28,25 @@ const RUNNING_UNDER_NODE_TEST = process.argv.some((arg) =>
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 const PUBLIC_DIR = path.join(__dirname, 'public');
+const BUILD_TIME = Date.now().toString();
+const INDEX_CHARLIE_PATH = path.join(PUBLIC_DIR, 'index.charlie.html');
+let INDEX_CHARLIE_HTML = null;
+let indexCharlieLoadErrorLogged = false;
+
+function loadIndexCharlieHtml() {
+  if (INDEX_CHARLIE_HTML) return INDEX_CHARLIE_HTML;
+  try {
+    const template = fs.readFileSync(INDEX_CHARLIE_PATH, 'utf8');
+    INDEX_CHARLIE_HTML = template.replace(/\{\{BUILD_TIME\}\}/g, BUILD_TIME);
+    return INDEX_CHARLIE_HTML;
+  } catch (error) {
+    if (!indexCharlieLoadErrorLogged) {
+      indexCharlieLoadErrorLogged = true;
+      console.error('[charlie] Failed to load index.charlie.html:', error?.message || error);
+    }
+    return null;
+  }
+}
 
 // --- CORS guardrail: always answer OPTIONS and echo request headers ---
 app.use((req,res,next)=>{
@@ -5546,8 +5565,16 @@ function streamLiveFile(res, filePath, type) {
 
 // Phase 9 testing guardrails: serve the live files from disk
 app.get('/tmp/live.index.html', (req, res) => {
-  const filePath = path.join(PUBLIC_DIR, 'index.html');
-  streamLiveFile(res, filePath, 'html');
+  const html = loadIndexCharlieHtml();
+  if (html) {
+    res.setHeader('Cache-Control', 'no-store, max-age=0');
+    res.type('html').send(html);
+    return;
+  }
+  const fallbackPath = path.join(PUBLIC_DIR, 'index.html');
+  res.setHeader('Cache-Control', 'no-store, max-age=0');
+  res.type('html');
+  res.sendFile(fallbackPath);
 });
 
 app.get('/tmp/live.app.new.js', (req, res) => {
@@ -5718,7 +5745,14 @@ app.use('/controller', proxyCorsMiddleware, createProxyMiddleware({
 
 // Dev-only live asset snapshots for cache validation
 app.get('/tmp/live.index.html', (req, res) => {
-  res.type('text').sendFile(path.join(__dirname, 'public', 'index.charlie.html'));
+  const html = loadIndexCharlieHtml();
+  if (html) {
+    res.setHeader('Cache-Control', 'no-store, max-age=0');
+    res.type('html').send(html);
+    return;
+  }
+  res.setHeader('Cache-Control', 'no-store, max-age=0');
+  res.type('html').sendFile(path.join(__dirname, 'public', 'index.charlie.html'));
 });
 
 app.get('/tmp/live.app.charlie.js', (req, res) => {
@@ -5726,8 +5760,15 @@ app.get('/tmp/live.app.charlie.js', (req, res) => {
 });
 
 // Static files
+app.get(['/', '/index.charlie.html'], (req, res, next) => {
+  const html = loadIndexCharlieHtml();
+  if (!html) return next();
+  res.setHeader('Cache-Control', 'no-store, max-age=0');
+  res.type('html').send(html);
+});
+
 // Serve static files
-app.use(express.static("./public"));
+app.use(express.static(PUBLIC_DIR));
 
 // Allow direct access to JSON data files in /public/data with CORS headers
 app.use('/data', (req, res, next) => {
