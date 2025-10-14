@@ -10149,9 +10149,53 @@ function renderEnvironment() {
 let ENV_POLL_TIMER = null;
 async function reloadEnvironment() {
   try {
-    const payload = await api('/env');
-    STATE.preAutomationEnv = payload?.env || { scopes: {} };
-    STATE.environment = Array.isArray(payload?.zones) ? payload.zones : [];
+    const existingZones = Array.isArray(STATE.environment) ? STATE.environment : [];
+    const resolveScopeId = (zone) => {
+      if (!zone || typeof zone !== 'object') return null;
+      const candidates = [zone.scope, zone.id, zone.name];
+      for (const candidate of candidates) {
+        if (candidate === undefined || candidate === null) continue;
+        const trimmed = String(candidate).trim();
+        if (trimmed) return trimmed;
+      }
+      return null;
+    };
+
+    const scopeIds = [...new Set(existingZones.map(resolveScopeId).filter(Boolean))];
+
+    let envSnapshot = null;
+    let zones = [];
+
+    if (!scopeIds.length) {
+      const initial = await api('/env?range=24h');
+      envSnapshot = initial?.env || null;
+      if (Array.isArray(initial?.zones)) zones = initial.zones;
+      else if (initial?.zone) zones = [initial.zone];
+    } else {
+      const requests = scopeIds.map(async (scopeId) => {
+        try {
+          const payload = await api(`/env?scope=${encodeURIComponent(scopeId)}&range=24h`);
+          if (!envSnapshot && payload?.env) envSnapshot = payload.env;
+          if (payload?.zone) return payload.zone;
+          if (Array.isArray(payload?.zones) && payload.zones.length) return payload.zones[0];
+        } catch (error) {
+          console.warn(`[env] scope fetch failed for ${scopeId}`, error);
+        }
+        return null;
+      });
+      const results = await Promise.all(requests);
+      zones = results.filter((zone) => zone && typeof zone === 'object');
+
+      if (!zones.length) {
+        const fallback = await api('/env?range=24h');
+        envSnapshot = envSnapshot || fallback?.env || null;
+        if (Array.isArray(fallback?.zones)) zones = fallback.zones;
+        else if (fallback?.zone) zones = [fallback.zone];
+      }
+    }
+
+    STATE.preAutomationEnv = envSnapshot || { scopes: {} };
+    STATE.environment = zones;
     renderEnvironment();
     $('#envStatus')?.replaceChildren(document.createTextNode(`Updated ${new Date().toLocaleTimeString()}`));
   } catch (e) {

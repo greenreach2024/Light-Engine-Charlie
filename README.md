@@ -213,7 +213,7 @@ Troubleshooting:
 
 ## Direct SwitchBot ingestion (no Azure)
 
-You can pull readings from SwitchBot OpenAPI and push directly into Charlie's `/ingest/env`.
+You can pull readings from SwitchBot OpenAPI and push directly into Charlie's `/env` endpoint.
 
 Environment variables (do NOT commit these):
 
@@ -240,8 +240,8 @@ INCLUDE_REGEX="CO2|TempHumid" npm run switchbot:once
 EXCLUDE_REGEX="Button|Curtain" npm run switchbot:once
 ```
 
-The script maps common SwitchBot device status fields into `{ zoneId, name, temperature, humidity, co2, battery, rssi, source }`
-and posts them to `/ingest/env`, which updates `public/data/env.json` and UI tiles/sparklines.
+The script maps common SwitchBot device status fields into the telemetry schema `{ scope, sensors, ts, meta }`
+and posts them to `/env`, which updates the in-memory telemetry store powering the HUD.
 
 ## Frontend Integration
 

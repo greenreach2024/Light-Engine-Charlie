@@ -1,5 +1,5 @@
-{"zoneId":"GH-1","name":"Greenhouse 1","temperature":24.1,"humidity":61.5,"vpd":1.2,"co2":850,"battery":88,"rssi":-62,"source":"SwitchBot"}
-{"zoneId":"GH-2","name":"Greenhouse 2","temperature":22.6,"humidity":58.2,"vpd":1.0,"co2":780,"battery":76,"rssi":-70,"source":"Azure"}
-{"zoneId":"GH-1","temperature":24.3}
-{"zoneId":"GH-1","humidity":62.1}
-{"zoneId":"GH-2","co2":820}
+{"scope":"GH-1","sensors":{"temp":24.1,"rh":61.5,"vpd":1.2,"co2":850},"meta":{"name":"Greenhouse 1","battery":88,"rssi":-62,"source":"SwitchBot"}}
+{"scope":"GH-2","sensors":{"temp":22.6,"rh":58.2,"vpd":1.0,"co2":780},"meta":{"name":"Greenhouse 2","battery":76,"rssi":-70,"source":"Azure"}}
+{"scope":"GH-1","sensors":{"temp":24.3}}
+{"scope":"GH-1","sensors":{"rh":62.1}}
+{"scope":"GH-2","sensors":{"co2":820}}

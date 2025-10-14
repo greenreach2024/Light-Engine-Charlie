@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /**
- * Poll SwitchBot OpenAPI for devices and push environment readings to Charlie's /ingest/env.
+ * Poll SwitchBot OpenAPI for devices and push environment readings to Charlie's /env endpoint.
  *
  * Env vars:
  *  - SWITCHBOT_TOKEN:    Required. The token from SwitchBot app.
@@ -68,10 +68,10 @@ function httpsGet(path) {
   });
 }
 
-function postIngest(payload) {
+function postEnvironment(payload) {
   return new Promise((resolve, reject) => {
     const data = Buffer.from(JSON.stringify(payload));
-    const req = http.request({ hostname: HOST, port: PORT, path: '/ingest/env', method: 'POST', headers: { 'Content-Type': 'application/json', 'Content-Length': data.length } },
+    const req = http.request({ hostname: HOST, port: PORT, path: '/env', method: 'POST', headers: { 'Content-Type': 'application/json', 'Content-Length': data.length } },
       (res) => { const chunks=[]; res.on('data', c=>chunks.push(c)); res.on('end', ()=>resolve({status:res.statusCode, body:Buffer.concat(chunks).toString('utf8')})); });
     req.on('error', reject);
     req.write(data);
@@ -109,22 +109,37 @@ async function pollOnce() {
     if (st.status !== 200 || st.body.statusCode !== 100) continue;
     const s = st.body.body || {};
 
-    const payload = {
-      zoneId: ZONE,
-      name: name,
-      temperature: pickNumber(s.temperature ?? s.temp ?? s.Temperature),
-      humidity: pickNumber(s.humidity ?? s.Humidity),
-      co2: pickNumber(s.co2 ?? s.CO2),
+    const temperature = pickNumber(s.temperature ?? s.temp ?? s.Temperature);
+    const humidity = pickNumber(s.humidity ?? s.Humidity);
+    const co2 = pickNumber(s.co2 ?? s.CO2);
+
+    const sensors = {};
+    if (temperature != null) sensors.temp = temperature;
+    if (humidity != null) sensors.rh = humidity;
+    if (co2 != null) sensors.co2 = co2;
+
+    if (!Object.keys(sensors).length) continue;
+
+    const meta = {
+      name,
+      deviceId: d.deviceId,
+      location: d.roomName || d.room,
       battery: pickNumber(s.battery ?? s.Battery),
       rssi: pickNumber(s.rssi ?? s.RSSI),
-      source: 'switchbot'
+      source: 'switchbot',
+      type: d.deviceType,
+    };
+    Object.keys(meta).forEach((key) => { if (meta[key] == null) delete meta[key]; });
+
+    const payload = {
+      scope: ZONE,
+      sensors,
+      ts: Date.now() / 1000,
+      meta,
     };
 
-    // At least one primary reading should exist
-    if (payload.temperature == null && payload.humidity == null && payload.co2 == null) continue;
-
     try {
-      const r = await postIngest(payload);
+      const r = await postEnvironment(payload);
       if (r.status !== 200) console.error('ingest failed', r.status, r.body);
       else sent++;
     } catch (e) {
