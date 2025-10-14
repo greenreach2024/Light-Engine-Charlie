@@ -11457,18 +11457,125 @@ function wireGlobalEvents() {
   const deltaEl = $('#schedDelta');
   const warningEl = $('#schedMathWarning');
   const previewBar = $('#schedEditorBar');
+  const scheduleModeContainer = $('.schedule-mode');
+  let schedKeepEqualLabel = null;
+  let schedKeepEqualInput = document.getElementById('schedKeepEqual');
+  if (!schedKeepEqualInput && scheduleModeContainer) {
+    const label = document.createElement('label');
+    label.className = 'chip-option';
+    const checkbox = document.createElement('input');
+    checkbox.type = 'checkbox';
+    checkbox.id = 'schedKeepEqual';
+    checkbox.checked = true;
+    const span = document.createElement('span');
+    span.textContent = 'Keep equal';
+    label.append(checkbox, span);
+    scheduleModeContainer.appendChild(label);
+    schedKeepEqualInput = checkbox;
+    schedKeepEqualLabel = label;
+  } else if (schedKeepEqualInput) {
+    schedKeepEqualLabel = schedKeepEqualInput.closest('label');
+  }
   const splitBtn = document.createElement('button');
   splitBtn.type = 'button';
   splitBtn.className = 'ghost';
   splitBtn.textContent = 'Split 24 h evenly';
-  $('.schedule-mode')?.appendChild(splitBtn);
+  scheduleModeContainer?.appendChild(splitBtn);
   const fixBtn = document.createElement('button');
   fixBtn.type = 'button';
   fixBtn.className = 'ghost';
   fixBtn.textContent = 'Fix to 24 h';
-  $('.schedule-mode')?.appendChild(fixBtn);
+  scheduleModeContainer?.appendChild(fixBtn);
+
+  const formatHoursInputValue = (value) => {
+    const num = Number(value);
+    if (!Number.isFinite(num)) return '0';
+    const clamped = Math.max(0, Math.min(24, num));
+    if (Math.abs(clamped - Math.round(clamped)) < 1e-6) {
+      return String(Math.round(clamped));
+    }
+    if (Math.abs(clamped * 10 - Math.round(clamped * 10)) < 1e-6) {
+      return (Math.round(clamped * 10) / 10).toFixed(1).replace(/\.0$/, '');
+    }
+    return (Math.round(clamped * 100) / 100)
+      .toFixed(2)
+      .replace(/\.00$/, '')
+      .replace(/(\.\d)0$/, '$1');
+  };
+
+  const modMinutes = (value) => {
+    const num = Math.round(Number(value) || 0);
+    return ((num % 1440) + 1440) % 1440;
+  };
+
+  let lastSchedModeValue = schedModeRadios.find(r => r.checked)?.value || 'one';
+
+  function normalizeTwoCycleInputs(forceDefaults = false) {
+    const mode = schedModeRadios.find(r => r.checked)?.value || 'one';
+    if (mode !== 'two') {
+      lastSchedModeValue = mode;
+      return;
+    }
+    const cycle1OnEl = $('#schedCycle1On');
+    const cycle1HoursEl = $('#schedC1Hours');
+    const cycle2OnEl = $('#schedCycle2On');
+    const cycle2HoursEl = $('#schedC2Hours');
+    if (!cycle1OnEl || !cycle1HoursEl || !cycle2OnEl || !cycle2HoursEl) {
+      lastSchedModeValue = mode;
+      return;
+    }
+    const keepEqual = !!schedKeepEqualInput?.checked;
+    const startAMin = modMinutes(toMinutes(cycle1OnEl.value || '00:00'));
+    cycle1OnEl.value = minutesToHHMM(startAMin);
+    let photoAMin = Math.max(0, Math.round((Number(cycle1HoursEl.value) || 0) * 60));
+    let photoBMin = Math.max(0, Math.round((Number(cycle2HoursEl.value) || 0) * 60));
+    photoAMin = Math.min(photoAMin, 24 * 60);
+    photoBMin = Math.min(photoBMin, 24 * 60);
+    const justEnabled = forceDefaults || lastSchedModeValue !== 'two';
+    if (justEnabled) {
+      photoAMin = 12 * 60;
+      photoBMin = 12 * 60;
+      const startBInit = modMinutes(startAMin + photoAMin);
+      cycle1HoursEl.value = '12';
+      cycle2HoursEl.value = '12';
+      cycle2OnEl.value = minutesToHHMM(startBInit);
+      lastSchedModeValue = 'two';
+      return;
+    }
+    let startBMin = modMinutes(toMinutes(cycle2OnEl.value || '00:00'));
+    if (!Number.isFinite(startBMin)) {
+      startBMin = modMinutes(startAMin + photoAMin);
+    }
+    if (keepEqual) {
+      photoAMin = Math.min(photoAMin, 12 * 60);
+      const offPerCycle = Math.max(0, 12 * 60 - photoAMin);
+      photoBMin = photoAMin;
+      startBMin = modMinutes(startAMin + photoAMin + offPerCycle);
+      cycle1HoursEl.value = formatHoursInputValue(photoAMin / 60);
+      cycle2HoursEl.value = formatHoursInputValue(photoBMin / 60);
+      cycle2OnEl.value = minutesToHHMM(startBMin);
+      lastSchedModeValue = 'two';
+      return;
+    }
+    if (photoAMin + photoBMin > 1440) {
+      photoBMin = Math.max(0, 1440 - photoAMin);
+    }
+    const endBGuess = modMinutes(startBMin + photoBMin);
+    let offBMin = modMinutes(startAMin - endBGuess);
+    let offAMin = 1440 - photoAMin - photoBMin - offBMin;
+    if (offAMin < 0) {
+      offBMin = Math.max(0, 1440 - photoAMin - photoBMin);
+      offAMin = 0;
+    }
+    startBMin = modMinutes(startAMin + photoAMin + offAMin);
+    cycle1HoursEl.value = formatHoursInputValue(photoAMin / 60);
+    cycle2HoursEl.value = formatHoursInputValue(photoBMin / 60);
+    cycle2OnEl.value = minutesToHHMM(startBMin);
+    lastSchedModeValue = 'two';
+  }
 
   function getEditorSchedule() {
+    normalizeTwoCycleInputs();
     const name = ($('#schedName')?.value || '').trim();
     const tz = $('#schedTz')?.value || 'America/Toronto';
     const mode = schedModeRadios.find(r=>r.checked)?.value || 'one';
@@ -11511,6 +11618,14 @@ function wireGlobalEvents() {
   renderScheduleBar(previewBar, s.cycles);
     // Show/hide cycle 2 controls based on mode
     const isTwo = s.mode === 'two';
+    if (schedKeepEqualLabel) {
+      schedKeepEqualLabel.style.display = isTwo ? '' : 'none';
+      schedKeepEqualLabel.setAttribute('aria-hidden', isTwo ? 'false' : 'true');
+    }
+    if (schedKeepEqualInput) {
+      schedKeepEqualInput.disabled = !isTwo;
+      schedKeepEqualInput.setAttribute('aria-disabled', isTwo ? 'false' : 'true');
+    }
     const c2 = document.querySelector('.schedule-cycle[data-cycle="2"]');
     if (c2) {
       c2.style.display = isTwo ? 'flex' : 'none';
@@ -11518,8 +11633,18 @@ function wireGlobalEvents() {
     }
   }
 
-  schedModeRadios.forEach(r => r.addEventListener('change', updateScheduleMathUI));
-  schedInputs.forEach(inp => inp?.addEventListener('input', updateScheduleMathUI));
+  schedModeRadios.forEach(r => r.addEventListener('change', () => {
+    normalizeTwoCycleInputs(true);
+    updateScheduleMathUI();
+  }));
+  schedInputs.forEach(inp => inp?.addEventListener('input', () => {
+    normalizeTwoCycleInputs();
+    updateScheduleMathUI();
+  }));
+  schedKeepEqualInput?.addEventListener('change', () => {
+    normalizeTwoCycleInputs();
+    updateScheduleMathUI();
+  });
   // Initialize preview and math on load
   try { updateScheduleMathUI(); } catch (e) { console.warn('sched math init failed', e); }
   splitBtn.addEventListener('click', () => {
@@ -11530,6 +11655,8 @@ function wireGlobalEvents() {
     $('#schedC2Hours').value = '12';
     // Switch mode to two
     schedModeRadios.forEach(r=> r.checked = r.value==='two');
+    if (schedKeepEqualInput) schedKeepEqualInput.checked = true;
+    normalizeTwoCycleInputs(true);
     updateScheduleMathUI();
   });
 
@@ -11553,6 +11680,7 @@ function wireGlobalEvents() {
       $('#schedCycle2On').value = c2On;
       $('#schedC2Hours').value = String(targetC2Hours);
     }
+    normalizeTwoCycleInputs();
     updateScheduleMathUI();
   });
 
