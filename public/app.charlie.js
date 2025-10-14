@@ -26,6 +26,213 @@ async function sendDeviceCommand(deviceId, command, params = {}) {
     return null;
   }
 }
+const CALIBRATION_MULTIPLIER_KEYS = ['cw', 'ww', 'b', 'r'];
+const CALIBRATION_DEFAULT_MULTIPLIERS = { cw: 1, ww: 1, b: 1, r: 1 };
+let calibrationMultipliersCache = null;
+
+function getDeviceIdentifier(device) {
+  if (!device || typeof device !== 'object') return '';
+  const candidates = [device.id, device.device_id, device.deviceId, device.uuid, device._id];
+  for (const candidate of candidates) {
+    if (candidate === undefined || candidate === null) continue;
+    const value = String(candidate).trim();
+    if (value) return value;
+  }
+  return '';
+}
+
+function clampCalibrationMultiplier(value) {
+  if (value === undefined || value === null) return 1;
+  const parsed = typeof value === 'number' ? value : Number.parseFloat(String(value).trim());
+  if (!Number.isFinite(parsed)) return 1;
+  if (parsed < 0) return 0;
+  if (parsed > 10) return 10;
+  return Math.round(parsed * 1000) / 1000;
+}
+
+function normalizeCalibrationMultipliersDoc(doc) {
+  const base = { ...CALIBRATION_DEFAULT_MULTIPLIERS };
+  if (!doc || typeof doc !== 'object') return base;
+  CALIBRATION_MULTIPLIER_KEYS.forEach((key) => {
+    let sourceKey = key;
+    if (!(key in doc)) {
+      if (key === 'b') sourceKey = 'bl';
+      else if (key === 'r') sourceKey = 'rd';
+      else if (key === 'cw') sourceKey = 'cold';
+      else if (key === 'ww') sourceKey = 'warm';
+    }
+    const value = doc[key] ?? doc[sourceKey];
+    base[key] = clampCalibrationMultiplier(value);
+  });
+  return base;
+}
+
+function formatCalibrationMultiplier(value) {
+  const normalised = clampCalibrationMultiplier(value);
+  const fixed = normalised.toFixed(3);
+  return fixed.replace(/\.0+$/, '').replace(/0+$/, '').replace(/\.$/, '') || '0';
+}
+
+async function loadCalibrationMultipliers(force = false) {
+  if (!force && calibrationMultipliersCache) return calibrationMultipliersCache;
+  try {
+    const response = await fetch('/calibration');
+    if (!response.ok) throw new Error(`HTTP ${response.status}`);
+    const payload = await response.json().catch(() => ({}));
+    const devices = payload && typeof payload === 'object' ? payload.devices : {};
+    const normalized = {};
+    if (devices && typeof devices === 'object') {
+      Object.entries(devices).forEach(([deviceId, value]) => {
+        const key = String(deviceId || '').trim();
+        if (!key) return;
+        normalized[key] = normalizeCalibrationMultipliersDoc(value);
+      });
+    }
+    calibrationMultipliersCache = normalized;
+  } catch (error) {
+    console.warn('[calibration] Failed to load multipliers', error);
+    calibrationMultipliersCache = calibrationMultipliersCache || {};
+    throw error;
+  }
+  return calibrationMultipliersCache;
+}
+
+async function saveCalibrationMultipliers(deviceId, multipliers) {
+  const id = String(deviceId || '').trim();
+  if (!id) throw new Error('Missing device id');
+  const normalized = normalizeCalibrationMultipliersDoc(multipliers);
+  const response = await fetch('/calibration', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ deviceId: id, multipliers: normalized })
+  });
+  if (!response.ok) {
+    throw new Error(`HTTP ${response.status}`);
+  }
+  const payload = await response.json().catch(() => ({}));
+  const result = normalizeCalibrationMultipliersDoc(payload?.multipliers || normalized);
+  calibrationMultipliersCache = { ...(calibrationMultipliersCache || {}), [id]: result };
+  return result;
+}
+
+async function setupCalibrationMultipliersCard(card, devices = []) {
+  if (!card) return;
+  const selectEl = card.querySelector('#calibrationDeviceSelect');
+  const statusEl = card.querySelector('#calibrationStatus');
+  const inputs = {
+    cw: card.querySelector('#calibrationMultiplierCw'),
+    ww: card.querySelector('#calibrationMultiplierWw'),
+    b: card.querySelector('#calibrationMultiplierB'),
+    r: card.querySelector('#calibrationMultiplierR'),
+  };
+  const saveBtn = card.querySelector('#calibrationSave');
+  const resetBtn = card.querySelector('#calibrationReset');
+  const setDisabled = (disabled) => {
+    CALIBRATION_MULTIPLIER_KEYS.forEach((key) => {
+      if (inputs[key]) inputs[key].disabled = disabled;
+    });
+    if (saveBtn) saveBtn.disabled = disabled;
+    if (resetBtn) resetBtn.disabled = disabled;
+  };
+  const showStatus = (message) => {
+    if (statusEl) statusEl.textContent = message || '';
+  };
+
+  if (!selectEl) {
+    setDisabled(true);
+    showStatus('No selectable lights');
+    return;
+  }
+
+  const availableDevices = Array.isArray(devices)
+    ? devices.map((device) => ({ id: getDeviceIdentifier(device) })).filter((entry) => entry.id)
+    : [];
+
+  if (!availableDevices.length || !selectEl.options.length) {
+    setDisabled(true);
+    showStatus(availableDevices.length ? 'Select a light' : 'No compatible lights');
+    return;
+  }
+
+  const applyMultipliersToInputs = (deviceId, cache) => {
+    const multipliers = (cache && cache[deviceId]) || normalizeCalibrationMultipliersDoc();
+    CALIBRATION_MULTIPLIER_KEYS.forEach((key) => {
+      if (inputs[key]) inputs[key].value = formatCalibrationMultiplier(multipliers[key]);
+    });
+  };
+
+  let cache = {};
+  try {
+    cache = await loadCalibrationMultipliers(false);
+    showStatus('');
+  } catch (error) {
+    showStatus('Load failed');
+    cache = calibrationMultipliersCache || {};
+  }
+
+  const handleDeviceChange = (deviceId) => {
+    if (!deviceId) {
+      setDisabled(true);
+      showStatus('Select a light');
+      return;
+    }
+    setDisabled(false);
+    showStatus('');
+    applyMultipliersToInputs(deviceId, cache);
+  };
+
+  const initialDeviceId = selectEl.value || (availableDevices[0] ? availableDevices[0].id : '');
+  if (initialDeviceId && !selectEl.value) {
+    selectEl.value = initialDeviceId;
+  }
+  handleDeviceChange(selectEl.value);
+
+  selectEl.addEventListener('change', () => {
+    showStatus('');
+    handleDeviceChange(selectEl.value);
+  });
+
+  saveBtn?.addEventListener('click', async () => {
+    const deviceId = selectEl.value;
+    if (!deviceId) {
+      handleDeviceChange('');
+      return;
+    }
+    const multipliers = {};
+    CALIBRATION_MULTIPLIER_KEYS.forEach((key) => {
+      multipliers[key] = clampCalibrationMultiplier(inputs[key]?.value);
+    });
+    CALIBRATION_MULTIPLIER_KEYS.forEach((key) => {
+      if (inputs[key]) inputs[key].value = formatCalibrationMultiplier(multipliers[key]);
+    });
+    showStatus('Saving…');
+    if (saveBtn) saveBtn.disabled = true;
+    try {
+      const saved = await saveCalibrationMultipliers(deviceId, multipliers);
+      cache[deviceId] = saved;
+      showStatus('Saved');
+      setTimeout(() => {
+        if (statusEl && statusEl.textContent === 'Saved') statusEl.textContent = '';
+      }, 2000);
+    } catch (error) {
+      console.warn('[calibration] Failed to save multipliers', error);
+      showStatus('Save failed');
+    } finally {
+      if (saveBtn) saveBtn.disabled = false;
+    }
+  });
+
+  resetBtn?.addEventListener('click', () => {
+    CALIBRATION_MULTIPLIER_KEYS.forEach((key) => {
+      if (inputs[key]) inputs[key].value = formatCalibrationMultiplier(1);
+    });
+    showStatus('Reset values');
+    setTimeout(() => {
+      if (statusEl && statusEl.textContent === 'Reset values') statusEl.textContent = '';
+    }, 2000);
+  });
+}
+
 // --- Grow3 Manager Modal Logic with Controller Info ---
 function getGrow3ControllerConfig() {
   let config = { name: 'Grow3 Controller', address: '127.0.0.1', port: '8091' };
@@ -94,29 +301,79 @@ window.openGrow3Manager = async function() {
     return;
   }
   // Render device controls
+  const deviceOptions = grow3s
+    .map((dev, index) => {
+      const id = getDeviceIdentifier(dev);
+      if (!id) return '';
+      const label = dev.name || dev.model || id;
+      const selected = index === 0 ? ' selected' : '';
+      return `<option value="${escapeHtml(id)}"${selected}>${escapeHtml(label)}</option>`;
+    })
+    .filter(Boolean)
+    .join('');
+
   body.querySelector('#grow3DevicesLoading').outerHTML = `
-    <div style="overflow-x:auto;">
-      <table style="width:100%;border-collapse:collapse;">
-        <thead><tr style="background:#f1f5f9"><th>Name</th><th>Device ID</th><th>Status</th><th>HEX</th><th>Actions</th></tr></thead>
-        <tbody>
-          ${grow3s.map(dev => `
-            <tr data-id="${dev.id}">
-              <td>${escapeHtml(dev.name||dev.model||'Grow3')}</td>
-              <td>${escapeHtml(dev.id||'')}</td>
-              <td class="grow3-status">${escapeHtml(dev.status||'—')}</td>
-              <td><input type="text" class="grow3-hex" value="${escapeHtml(dev.value||dev.lastHex||'')}" placeholder="HEX payload" style="width:120px" maxlength="12"></td>
-              <td>
-                <button class="ghost grow3-on">ON</button>
-                <button class="ghost grow3-off">OFF</button>
-                <button class="primary grow3-send">Send HEX</button>
-              </td>
-            </tr>
-          `).join('')}
-        </tbody>
-      </table>
+    <div style="display:flex;flex-direction:column;gap:16px;">
+      <div id="calibrationMultipliersCard" class="gr-card" style="padding:16px;border:1px solid #cbd5e1;border-radius:12px;background:#fff;">
+        <div class="row row--between row--center" style="margin-bottom:12px;gap:12px;">
+          <h3 style="margin:0">Calibration Multipliers</h3>
+          <span id="calibrationStatus" class="tiny" aria-live="polite"></span>
+        </div>
+        <div class="row row--wrap" style="gap:16px;align-items:flex-end;">
+          <label class="tiny" style="display:flex;flex-direction:column;gap:4px;min-width:200px;">
+            Device
+            <select id="calibrationDeviceSelect" style="min-height:32px;border-radius:6px;border:1px solid #cbd5e1;padding:0 8px;">
+              ${deviceOptions || '<option value="">No controllable lights</option>'}
+            </select>
+          </label>
+          <div class="grid cols-2" style="gap:12px;flex:1;min-width:240px;">
+            <label class="tiny" style="display:flex;flex-direction:column;gap:4px;">
+              CW
+              <input id="calibrationMultiplierCw" type="number" step="0.01" min="0" max="10" value="1" style="min-height:32px;border-radius:6px;border:1px solid #cbd5e1;padding:0 8px;">
+            </label>
+            <label class="tiny" style="display:flex;flex-direction:column;gap:4px;">
+              WW
+              <input id="calibrationMultiplierWw" type="number" step="0.01" min="0" max="10" value="1" style="min-height:32px;border-radius:6px;border:1px solid #cbd5e1;padding:0 8px;">
+            </label>
+            <label class="tiny" style="display:flex;flex-direction:column;gap:4px;">
+              Blue
+              <input id="calibrationMultiplierB" type="number" step="0.01" min="0" max="10" value="1" style="min-height:32px;border-radius:6px;border:1px solid #cbd5e1;padding:0 8px;">
+            </label>
+            <label class="tiny" style="display:flex;flex-direction:column;gap:4px;">
+              Red
+              <input id="calibrationMultiplierR" type="number" step="0.01" min="0" max="10" value="1" style="min-height:32px;border-radius:6px;border:1px solid #cbd5e1;padding:0 8px;">
+            </label>
+          </div>
+        </div>
+        <div class="row row--gap-sm" style="margin-top:12px;">
+          <button id="calibrationSave" type="button" class="primary">Save Multipliers</button>
+          <button id="calibrationReset" type="button" class="ghost">Reset</button>
+        </div>
+      </div>
+      <div style="overflow-x:auto;">
+        <table style="width:100%;border-collapse:collapse;">
+          <thead><tr style="background:#f1f5f9"><th>Name</th><th>Device ID</th><th>Status</th><th>HEX</th><th>Actions</th></tr></thead>
+          <tbody>
+            ${grow3s.map(dev => `
+              <tr data-id="${dev.id}">
+                <td>${escapeHtml(dev.name||dev.model||'Grow3')}</td>
+                <td>${escapeHtml(dev.id||'')}</td>
+                <td class="grow3-status">${escapeHtml(dev.status||'—')}</td>
+                <td><input type="text" class="grow3-hex" value="${escapeHtml(dev.value||dev.lastHex||'')}" placeholder="HEX payload" style="width:120px" maxlength="12"></td>
+                <td>
+                  <button class="ghost grow3-on">ON</button>
+                  <button class="ghost grow3-off">OFF</button>
+                  <button class="primary grow3-send">Send HEX</button>
+                </td>
+              </tr>
+            `).join('')}
+          </tbody>
+        </table>
+      </div>
+      <div class="tiny" style="margin-top:16px;color:#64748b">Controller API: <code>${apiBase}/api/devicedatas</code> (GET), <code>${apiBase}/api/devicedatas/device/:id</code> (PATCH)</div>
     </div>
-    <div class="tiny" style="margin-top:16px;color:#64748b">Controller API: <code>${apiBase}/api/devicedatas</code> (GET), <code>${apiBase}/api/devicedatas/device/:id</code> (PATCH)</div>
   `;
+  await setupCalibrationMultipliersCard(body.querySelector('#calibrationMultipliersCard'), grow3s);
   // Wire up actions
   Array.from(body.querySelectorAll('.grow3-on')).forEach(btn => {
     btn.onclick = async function() {

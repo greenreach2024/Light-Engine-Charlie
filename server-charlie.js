@@ -80,6 +80,7 @@ const PLANS_PATH = path.join(DATA_DIR, 'plans.json');
 const SCHEDULES_PATH = path.join(DATA_DIR, 'schedules.json');
 const ROOMS_PATH = path.join(DATA_DIR, 'rooms.json');
 const CALIBRATIONS_PATH = path.join(DATA_DIR, 'calibration.json');
+const CALIBRATION_MULTIPLIERS_PATH = path.join(DATA_DIR, 'calibration.multipliers.json');
 const DEVICES_CACHE_PATH = path.join(DATA_DIR, 'devices.cache.json');
 const SWITCHBOT_CACHE_PATH = path.join(PUBLIC_DIR, 'data', 'switchbot.cache.json');
 const EQUIPMENT_CATALOG_PATH = path.join(PUBLIC_DIR, 'data', 'equipment.catalog.json');
@@ -122,6 +123,94 @@ function ensureDataDir() {
 }
 function ensureDbDir(){ try { fs.mkdirSync(DB_DIR, { recursive: true }); } catch {} }
 function isHttpUrl(u){ try { const x=new URL(u); return x.protocol==='http:'||x.protocol==='https:'; } catch { return false; } }
+
+const DEFAULT_DEVICE_MULTIPLIERS = { cw: 1, ww: 1, b: 1, r: 1 };
+
+function clampMultiplier(value) {
+  const num = Number(value);
+  if (!Number.isFinite(num)) return 1;
+  if (num < 0) return 0;
+  if (num > 10) return 10;
+  return Math.round(num * 1000) / 1000;
+}
+
+function normalizeMultiplierDoc(doc) {
+  if (!doc || typeof doc !== 'object') return { ...DEFAULT_DEVICE_MULTIPLIERS };
+  return {
+    cw: clampMultiplier(doc.cw ?? doc.c ?? doc.cold ?? doc.coldWhite ?? 1),
+    ww: clampMultiplier(doc.ww ?? doc.w ?? doc.warm ?? doc.warmWhite ?? 1),
+    b: clampMultiplier(doc.b ?? doc.bl ?? doc.blue ?? 1),
+    r: clampMultiplier(doc.r ?? doc.rd ?? doc.red ?? 1),
+  };
+}
+
+function readCalibrationMultipliers() {
+  ensureDataDir();
+  try {
+    if (!fs.existsSync(CALIBRATION_MULTIPLIERS_PATH)) {
+      return {};
+    }
+    const raw = JSON.parse(fs.readFileSync(CALIBRATION_MULTIPLIERS_PATH, 'utf8'));
+    const entries = raw && typeof raw === 'object' ? raw.devices || raw : {};
+    return Object.entries(entries).reduce((acc, [deviceId, value]) => {
+      const key = String(deviceId || '').trim();
+      if (!key) return acc;
+      acc[key] = normalizeMultiplierDoc(value);
+      return acc;
+    }, {});
+  } catch (error) {
+    console.warn('[calibration] Failed to read calibration multipliers:', error.message || error);
+    return {};
+  }
+}
+
+function writeCalibrationMultipliers(map) {
+  ensureDataDir();
+  const payload = { devices: {} };
+  Object.entries(map || {}).forEach(([deviceId, value]) => {
+    const key = String(deviceId || '').trim();
+    if (!key) return;
+    payload.devices[key] = normalizeMultiplierDoc(value);
+  });
+  try {
+    fs.writeFileSync(CALIBRATION_MULTIPLIERS_PATH, JSON.stringify(payload, null, 2));
+    return payload.devices;
+  } catch (error) {
+    console.error('[calibration] Failed to write calibration multipliers:', error.message || error);
+    throw error;
+  }
+}
+
+function getDeviceMultipliers(map, deviceId) {
+  const id = String(deviceId ?? '').trim();
+  if (!id) return { ...DEFAULT_DEVICE_MULTIPLIERS };
+  const source = (map && typeof map === 'object' && map[id]) || {};
+  return normalizeMultiplierDoc(source);
+}
+
+function applyMultipliersToHexPayload(hexValue, multipliers, maxByte = 255) {
+  if (typeof hexValue !== 'string') return hexValue;
+  const trimmed = hexValue.trim();
+  if (!/^[0-9a-fA-F]{12}$/.test(trimmed)) return hexValue;
+  const safeMax = Number.isFinite(maxByte) && maxByte > 0 ? Math.min(Math.round(maxByte), 255) : 255;
+  const parts = trimmed.toUpperCase().match(/.{2}/g);
+  if (!parts || parts.length !== 6) return hexValue;
+  const keys = ['cw', 'ww', 'b', 'r'];
+  let changed = false;
+  for (let index = 0; index < keys.length; index += 1) {
+    const base = parseInt(parts[index], 16);
+    if (!Number.isFinite(base)) continue;
+    const factor = Number.isFinite(multipliers?.[keys[index]]) ? multipliers[keys[index]] : 1;
+    const scaled = Math.round(base * factor);
+    const clamped = Math.max(0, Math.min(safeMax, scaled));
+    if (clamped !== base) changed = true;
+    parts[index] = clamped.toString(16).padStart(2, '0').toUpperCase();
+  }
+  if (!changed) {
+    return parts.join('');
+  }
+  return parts.join('');
+}
 
 function loadGroupsFile() {
   ensureDataDir();
@@ -5902,13 +5991,55 @@ app.get('/api/devicedatas', async (req, res) => {
   }
 });
 
+app.get('/calibration', (req, res) => {
+  try {
+    const devices = readCalibrationMultipliers();
+    res.json({ devices });
+  } catch (error) {
+    res.status(500).json({ error: 'calibration_read_failed', detail: String(error) });
+  }
+});
+
+app.post('/calibration', express.json(), (req, res) => {
+  try {
+    const body = req.body && typeof req.body === 'object' ? req.body : {};
+    const deviceId = typeof body.deviceId === 'string' ? body.deviceId.trim() : '';
+    if (!deviceId) {
+      res.status(400).json({ error: 'missing_device_id' });
+      return;
+    }
+    const source = body.multipliers && typeof body.multipliers === 'object' ? body.multipliers : body;
+    const multipliers = normalizeMultiplierDoc(source);
+    const existing = readCalibrationMultipliers();
+    existing[deviceId] = multipliers;
+    const saved = writeCalibrationMultipliers(existing);
+    res.json({ deviceId, multipliers: saved[deviceId] || multipliers });
+  } catch (error) {
+    res.status(500).json({ error: 'calibration_write_failed', detail: String(error) });
+  }
+});
+
 app.patch('/api/devicedatas/device/:id', pinGuard, express.json(), async (req, res) => {
   try {
     const target = `${CONTROLLER_BASE()}/api/devicedatas/device/${encodeURIComponent(req.params.id)}`;
+    const payload = req.body && typeof req.body === 'object' ? { ...req.body } : {};
+    const status = typeof payload.status === 'string' ? payload.status.toLowerCase() : '';
+    const shouldApplyCalibration = status === 'on';
+    if (shouldApplyCalibration && typeof payload.value === 'string') {
+      try {
+        const multipliersMap = readCalibrationMultipliers();
+        const multipliers = getDeviceMultipliers(multipliersMap, req.params.id);
+        const { maxByte } = loadChannelScaleConfig();
+        const calibratedHex = applyMultipliersToHexPayload(payload.value, multipliers, maxByte);
+        payload.value = calibratedHex;
+      } catch (error) {
+        console.warn('[calibration] Failed to apply multipliers:', error?.message || error);
+      }
+    }
     const upstream = await fetch(target, {
       method: 'PATCH',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(req.body || {}),
+      body: JSON.stringify(payload),
       signal: AbortSignal.timeout(5000)
     });
     const text = await upstream.text();
