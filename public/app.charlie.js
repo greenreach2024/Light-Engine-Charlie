@@ -10040,6 +10040,55 @@ async function discoverSmartPlugs() {
   }
 }
 
+function registerSmartPlugDevRefreshAction() {
+  if (typeof window === 'undefined') return;
+  const handler = async () => {
+    try {
+      await discoverSmartPlugs();
+    } catch (error) {
+      console.warn('Dev menu smart plug refresh failed', error);
+      throw error;
+    }
+  };
+
+  const action = {
+    id: 'refresh-smart-plugs',
+    key: 'refresh-smart-plugs',
+    label: 'Refresh devices',
+    title: 'Refresh devices',
+    description: 'Trigger SwitchBot discovery and refresh smart plug inventory.',
+    section: 'devices',
+    group: 'devices',
+    run: handler,
+    handler,
+    onSelect: handler,
+    action: handler
+  };
+
+  const candidates = [
+    window.devMenu && window.devMenu.registerAction,
+    window.devMenu && window.devMenu.registerCommand,
+    window.registerDevMenuAction,
+    window.registerDevAction,
+    window.__registerDevMenuAction__
+  ].filter((fn) => typeof fn === 'function');
+
+  if (!candidates.length) {
+    if (typeof console !== 'undefined' && console.debug) {
+      console.debug('Dev menu registration unavailable; smart plug refresh action pending.');
+    }
+    return;
+  }
+
+  try {
+    const registrar = candidates[0];
+    const context = registrar === (window.devMenu && window.devMenu.registerAction || window.devMenu && window.devMenu.registerCommand) ? window.devMenu : window;
+    registrar.call(context || window, action);
+  } catch (error) {
+    console.warn('Failed to register smart plug refresh action with dev menu', error);
+  }
+}
+
 async function assignPlugRules(plugId, ruleIds) {
   try {
     await api(`/plugs/${encodeURIComponent(plugId)}/rules`, {
@@ -13873,6 +13922,7 @@ document.addEventListener('DOMContentLoaded', async () => {
 
     document.getElementById('btnRefreshSmartPlugs')?.addEventListener('click', () => loadSmartPlugs());
     document.getElementById('btnDiscoverSmartPlugs')?.addEventListener('click', () => discoverSmartPlugs());
+    registerSmartPlugDevRefreshAction();
 
     const smartPlugTable = document.getElementById('smartPlugsTable');
     if (smartPlugTable) {

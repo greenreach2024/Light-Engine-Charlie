@@ -18,6 +18,7 @@ from .automation import AutomationEngine, lux_balancing_rule, occupancy_rule
 from .config import EnvironmentConfig, LightingFixture, build_environment_config
 from .device_discovery import fetch_switchbot_status, full_discovery_cycle
 from .device_models import (
+    Device,
     GroupSchedule,
     PhotoperiodScheduleConfig,
     Schedule as ScheduleModel,
@@ -225,6 +226,33 @@ class DeviceResponse(BaseModel):
     online: bool
     capabilities: dict
     details: dict
+
+
+class PlugStateResponse(BaseModel):
+    online: Optional[bool] = None
+    on: Optional[bool] = None
+    power: Optional[float] = None
+    power_w: Optional[float] = Field(None, alias="powerW")
+    wattage: Optional[float] = None
+
+    class Config:
+        allow_population_by_field_name = True
+
+
+class PlugResponse(BaseModel):
+    id: str
+    deviceId: str
+    name: str
+    vendor: Optional[str] = None
+    model: Optional[str] = None
+    category: Optional[str] = None
+    protocol: Optional[str] = None
+    state: PlugStateResponse = Field(default_factory=PlugStateResponse)
+    capabilities: Dict[str, Any] = Field(default_factory=dict)
+    details: Dict[str, Any] = Field(default_factory=dict)
+
+    class Config:
+        allow_population_by_field_name = True
 
 
 class ScheduleRequest(BaseModel):
@@ -444,6 +472,92 @@ def _serialize_group_schedule(schedule: GroupSchedule) -> Dict[str, Any]:
 
 def _iso_now() -> str:
     return datetime.now(timezone.utc).replace(microsecond=0).isoformat().replace("+00:00", "Z")
+
+
+def _is_plug_device(device: Device) -> bool:
+    category = (device.category or "").lower()
+    name = (device.name or "").lower()
+    details = device.details or {}
+    detail_category = str(
+        details.get("category")
+        or details.get("deviceType")
+        or details.get("type")
+        or details.get("kind")
+        or ""
+    ).lower()
+    detail_name = str(details.get("label") or details.get("name") or "").lower()
+    protocol = (device.protocol or "").lower()
+
+    if any("plug" in value for value in (category, name, detail_category, detail_name)):
+        return True
+
+    if protocol in {"kasa", "tplink", "shelly", "tasmota", "switchbot"}:
+        if any("outlet" in value or "switch" in value for value in (category, detail_category)):
+            return True
+
+    return False
+
+
+def _build_plug_state(device: Device) -> PlugStateResponse:
+    details = device.details or {}
+    state_payload: Dict[str, Any] = {"online": device.online}
+
+    for key in ("on", "power", "powerW", "power_w", "wattage"):
+        if key in details and details[key] is not None:
+            if key in {"powerW", "power_w"}:
+                state_payload["powerW"] = details[key]
+            else:
+                state_payload[key] = details[key]
+
+    status = details.get("status")
+    if isinstance(status, dict):
+        for key in ("on", "power", "powerW", "power_w"):
+            if key in status and status[key] is not None:
+                if key in {"powerW", "power_w"}:
+                    state_payload["powerW"] = status[key]
+                else:
+                    state_payload[key] = status[key]
+
+    try:
+        return PlugStateResponse.parse_obj(state_payload)
+    except Exception:  # pylint: disable=broad-except
+        LOGGER.debug("Failed to parse plug state payload: %s", state_payload)
+        return PlugStateResponse(online=device.online)
+
+
+def _serialize_plug(device: Device) -> PlugResponse:
+    details = dict(device.details or {})
+    vendor = details.get("vendor") or details.get("manufacturer") or device.protocol
+    model = details.get("model") or details.get("deviceType") or device.category
+
+    state = _build_plug_state(device)
+
+    return PlugResponse(
+        id=device.device_id,
+        deviceId=device.device_id,
+        name=device.name,
+        vendor=(vendor or None),
+        model=(model or None),
+        category=device.category,
+        protocol=device.protocol,
+        state=state,
+        capabilities=dict(device.capabilities or {}),
+        details=details,
+    )
+
+
+def _collect_plug_payloads() -> List[Dict[str, Any]]:
+    plugs: Dict[str, Dict[str, Any]] = {}
+    for device in REGISTRY.list():
+        if not _is_plug_device(device):
+            continue
+        plug_payload = _serialize_plug(device).dict(by_alias=True)
+        plug_id = plug_payload.get("id") or plug_payload.get("deviceId")
+        if plug_id:
+            plugs[str(plug_id)] = plug_payload
+        else:
+            plugs[str(len(plugs))] = plug_payload
+    return list(plugs.values())
 
 
 def _resolve_fixture(device_identifier: str) -> tuple[str, LightingFixture]:
@@ -883,6 +997,19 @@ async def setup_assist(request: SetupAssistRequest) -> SetupAssistResponse:
 @app.get("/devices", response_model=List[DeviceResponse])
 async def list_devices() -> List[DeviceResponse]:
     return [DeviceResponse(**device.__dict__) for device in REGISTRY.list()]
+
+
+@app.get("/plugs")
+async def list_plugs() -> Dict[str, Any]:
+    plugs = _collect_plug_payloads()
+    return {"ok": True, "count": len(plugs), "plugs": plugs}
+
+
+@app.post("/plugs/discover")
+async def discover_plugs() -> Dict[str, Any]:
+    await full_discovery_cycle(CONFIG, REGISTRY, BUFFER, event_handler=AUTOMATION.publish)
+    plugs = _collect_plug_payloads()
+    return {"ok": True, "refreshedAt": _iso_now(), "count": len(plugs), "plugs": plugs}
 
 
 @app.get("/api/devicedatas")
