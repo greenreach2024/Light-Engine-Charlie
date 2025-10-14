@@ -2403,7 +2403,34 @@ async function publishSchedulesDocument(doc) {
 async function api(url, opts = {}) {
   const resp = await fetch(url, opts);
   if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
-  return await resp.json();
+
+  const contentType = resp.headers?.get?.('content-type') || resp.headers?.get?.('Content-Type') || '';
+  const rawBody = await resp.text();
+  const trimmedBody = rawBody.trim();
+  const expectsJson = /json/i.test(contentType);
+
+  if (!trimmedBody) {
+    if (expectsJson) {
+      throw new Error(`Empty JSON response from ${url}`);
+    }
+    return rawBody;
+  }
+  if (expectsJson) {
+    try {
+      return JSON.parse(rawBody);
+    } catch (error) {
+      const snippet = rawBody.slice(0, 120).replace(/\s+/g, ' ').trim();
+      throw new Error(`Invalid JSON response from ${url}: ${error.message}${snippet ? ` — snippet: ${snippet}` : ''}`);
+    }
+  }
+
+  try {
+    return JSON.parse(rawBody);
+  } catch (error) {
+    const snippet = rawBody.slice(0, 120).replace(/\s+/g, ' ').trim();
+    if (!snippet) return rawBody;
+    throw new Error(`Expected JSON from ${url} but received: ${snippet}`);
+  }
 }
 
 async function safeApi(url, fallbackValue = null, opts = {}) {
