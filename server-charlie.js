@@ -33,17 +33,12 @@ const PUBLIC_DIR = path.join(__dirname, 'public');
 app.use((req, res, next) => {
   const origin = req.headers.origin || '*';
   res.setHeader('Access-Control-Allow-Origin', origin);
-  res.setHeader('Vary', 'Origin'); // allow per-origin caching
-  res.setHeader('Access-Control-Allow-Methods', 'GET,POST,PUT,PATCH,DELETE,OPTIONS');
-  const reqHdrs = req.headers['access-control-request-headers'];
-  res.setHeader('Access-Control-Allow-Headers', reqHdrs || 'Content-Type, Authorization, X-Requested-With');
+  res.setHeader('Vary', 'Origin');
+  res.setHeader('Access-Control-Allow-Methods', 'GET,POST,PATCH,DELETE,OPTIONS');
+  const reqH = req.header('Access-Control-Request-Headers');
+  if (reqH) res.setHeader('Access-Control-Allow-Headers', reqH);
   if (req.method === 'OPTIONS') return res.sendStatus(204);
   next();
-});
-
-app.options('*', (req, res) => {
-  applyCorsHeaders(req, res, 'GET,POST,PUT,PATCH,DELETE,OPTIONS');
-  res.status(204).end();
 });
 
 // --- Health probe: refuse to start if CORS config is missing ---
@@ -83,6 +78,26 @@ const SCHEDULES_PATH = path.join(DATA_DIR, 'schedules.json');
 const ROOMS_PATH = path.join(DATA_DIR, 'rooms.json');
 const CALIBRATIONS_PATH = path.join(DATA_DIR, 'calibration.json');
 const DEVICES_CACHE_PATH = path.join(DATA_DIR, 'devices.cache.json');
+const SWITCHBOT_CACHE_PATH = path.join(PUBLIC_DIR, 'data', 'switchbot.cache.json');
+const EQUIPMENT_CATALOG_PATH = path.join(PUBLIC_DIR, 'data', 'equipment.catalog.json');
+const SAMPLE_PLAN_DOCUMENT = {
+  sample: true,
+  plans: [
+    {
+      id: 'sample-plan',
+      key: 'sample-plan',
+      name: 'Sample Photoperiod',
+      description: 'Fallback spectrum mix (16/8 photoperiod) until recipes are published.',
+      photoperiod: 16,
+      photoperiodLabel: '16/8',
+      ramp: { sunrise: 10, sunset: 10 },
+      spectrum: { cw: 40, ww: 40, bl: 35, rd: 30 },
+      days: [
+        { stage: 'Static', cw: 40, ww: 40, bl: 35, rd: 30 }
+      ]
+    }
+  ]
+};
 const CHANNEL_SCALE_PATH = path.resolve('./config/channel-scale.json');
 const MS_PER_DAY = 24 * 60 * 60 * 1000;
 const UI_DATA_RESOURCES = new Map([
@@ -134,24 +149,17 @@ function saveGroupsFile(groups) {
 function readDeviceCache() {
   try {
     if (!fs.existsSync(DEVICES_CACHE_PATH)) return null;
-    const raw = JSON.parse(fs.readFileSync(DEVICES_CACHE_PATH, 'utf8'));
-    if (raw && typeof raw === 'object') {
-      return raw;
-    }
+    return fs.readFileSync(DEVICES_CACHE_PATH, 'utf8');
   } catch (err) {
     console.warn('[devices.cache] Failed to read cache:', err.message);
+    return null;
   }
-  return null;
 }
 
-function writeDeviceCache(data) {
+function writeDeviceCache(rawJson) {
   try {
     ensureDataDir();
-    const payload = {
-      cachedAt: new Date().toISOString(),
-      data
-    };
-    fs.writeFileSync(DEVICES_CACHE_PATH, JSON.stringify(payload, null, 2));
+    fs.writeFileSync(DEVICES_CACHE_PATH, rawJson);
   } catch (err) {
     console.warn('[devices.cache] Failed to write cache:', err.message);
   }
@@ -159,7 +167,7 @@ function writeDeviceCache(data) {
 
 function sanitizePlansEnvelope(source, excludeKeys = []) {
   if (!source || typeof source !== 'object') return {};
-  const skip = new Set(['plans', 'ok', ...excludeKeys]);
+  const skip = new Set(['plans', 'ok', 'sample', ...excludeKeys]);
   const envelope = {};
   for (const [key, value] of Object.entries(source)) {
     if (skip.has(key)) continue;
@@ -168,21 +176,31 @@ function sanitizePlansEnvelope(source, excludeKeys = []) {
   return envelope;
 }
 
+function cloneSamplePlanDocument() {
+  return JSON.parse(JSON.stringify(SAMPLE_PLAN_DOCUMENT));
+}
+
 function loadPlansDocument() {
   ensureDataDir();
   try {
-    if (!fs.existsSync(PLANS_PATH)) return { plans: [] };
+    if (!fs.existsSync(PLANS_PATH)) return cloneSamplePlanDocument();
     const raw = JSON.parse(fs.readFileSync(PLANS_PATH, 'utf8'));
     if (Array.isArray(raw)) return { plans: raw };
     if (raw && typeof raw === 'object') {
       const doc = { ...raw };
-      if (!Array.isArray(doc.plans)) doc.plans = [];
+      if (!Array.isArray(doc.plans)) {
+        doc.plans = [];
+      }
+      if (!doc.plans.length) {
+        const sample = cloneSamplePlanDocument();
+        return { ...sample, ...doc, plans: sample.plans };
+      }
       return doc;
     }
   } catch (err) {
     console.warn('[plans] Failed to read plans.json:', err.message);
   }
-  return { plans: [] };
+  return cloneSamplePlanDocument();
 }
 
 function savePlansDocument(document) {
@@ -4694,49 +4712,46 @@ async function fetchSwitchBotDeviceStatus(deviceId, { force = false } = {}) {
   return entry.inFlight;
 }
 
-const SWITCHBOT_PROXY_CACHE = {
-  payload: null,
-  fetchedAt: 0,
-};
-
 app.get('/switchbot/devices', async (req, res) => {
+  const token = process.env.SWITCHBOT_TOKEN || '';
+  if (!token.trim()) {
+    return res.status(400).json({ error: 'missing_switchbot_token' });
+  }
+
   try {
-    const token = process.env.SWITCHBOT_TOKEN;
-    if (!token) {
-      return res.status(500).json({ error: 'SWITCHBOT_TOKEN not configured' });
+    const response = await fetch('https://api.switch-bot.com/v1.1/devices', {
+      headers: {
+        Authorization: token,
+        'Content-Type': 'application/json'
+      },
+      signal: AbortSignal.timeout(5000)
+    });
+
+    if (!response.ok) {
+      const text = await response.text();
+      throw new Error(`upstream_error:${response.status}:${text}`);
     }
 
-    const now = Date.now();
-    const cacheTtlMs = 60_000;
-    if (SWITCHBOT_PROXY_CACHE.payload && (now - SWITCHBOT_PROXY_CACHE.fetchedAt) < cacheTtlMs) {
-      res.setHeader('X-Cache', 'hit');
-      res.setHeader('X-Cache-Freshness', 'fresh');
-      return res.json(SWITCHBOT_PROXY_CACHE.payload);
-    }
-
+    const txt = await response.text();
     try {
-      const result = await fetchSwitchBotDevices({ force: true });
-      const payload = result?.payload ?? null;
-      if (!payload) {
-        throw new Error('Empty SwitchBot response');
-      }
-      SWITCHBOT_PROXY_CACHE.payload = payload;
-      SWITCHBOT_PROXY_CACHE.fetchedAt = Date.now();
-      res.setHeader('X-Cache', result?.fromCache ? 'hit' : 'miss');
-      res.setHeader('X-Cache-Freshness', result?.stale ? 'stale' : 'fresh');
-      return res.json(payload);
-    } catch (fetchError) {
-      console.warn('[switchbot] Primary fetch failed, checking cache:', fetchError.message || fetchError);
-      if (SWITCHBOT_PROXY_CACHE.payload) {
-        res.setHeader('X-Cache', 'hit');
-        res.setHeader('X-Cache-Freshness', 'stale');
-        return res.status(200).json(SWITCHBOT_PROXY_CACHE.payload);
-      }
-      throw fetchError;
+      ensureDataDir();
+      fs.mkdirSync(path.dirname(SWITCHBOT_CACHE_PATH), { recursive: true });
+      fs.writeFileSync(SWITCHBOT_CACHE_PATH, txt);
+    } catch (writeError) {
+      console.warn('[switchbot] Failed to persist cache:', writeError.message || writeError);
     }
+    res.set('X-Cache', 'miss').type('application/json').send(txt);
   } catch (error) {
-    console.error('[switchbot] Proxy failed:', error);
-    res.status(500).json({ error: String(error) });
+    if (fs.existsSync(SWITCHBOT_CACHE_PATH)) {
+      try {
+        const cached = fs.readFileSync(SWITCHBOT_CACHE_PATH, 'utf8');
+        res.set('X-Cache', 'hit').type('application/json').send(cached);
+        return;
+      } catch (readError) {
+        console.warn('[switchbot] Failed to read cache file:', readError.message || readError);
+      }
+    }
+    res.status(502).json({ error: 'switchbot_proxy_error', detail: String(error) });
   }
 });
 
@@ -5593,148 +5608,44 @@ const CONTROLLER_BASE = () => getController().replace(/\/+$/, '');
 
 // Targeted proxies for controller device data
 app.get('/api/devicedatas', async (req, res) => {
-  const target = `${CONTROLLER_BASE()}/api/devicedatas`;
   try {
-    const response = await fetch(target, { signal: AbortSignal.timeout(5000) });
-    const bodyText = await response.text();
-    if (!response.ok) {
-      throw new Error(`upstream_status_${response.status}`);
-    }
+    const target = `${CONTROLLER_BASE()}/api/devicedatas`;
+    const upstream = await fetch(target, { signal: AbortSignal.timeout(5000) });
+    const bodyText = await upstream.text();
     let parsed;
     try {
       parsed = JSON.parse(bodyText);
-    } catch (err) {
-      throw new Error(`upstream_non_json: ${err.message}`);
+    } catch {
+      throw new Error('upstream_non_json');
     }
-    writeDeviceCache(parsed);
-    res.setHeader('X-Cache', 'miss');
-    res
-      .status(response.status)
-      .type('application/json')
-      .send(JSON.stringify(parsed));
+    writeDeviceCache(bodyText);
+    res.set('X-Cache', 'miss').type('application/json').send(JSON.stringify(parsed));
   } catch (error) {
     const cached = readDeviceCache();
     if (cached) {
-      res.setHeader('X-Cache', 'hit');
-      const payload = {
-        stale: true,
-        cachedAt: cached.cachedAt,
-        data: cached.data ?? cached
-      };
-      res.status(200).json(payload);
+      res.set('X-Cache', 'hit').type('application/json').send(cached);
       return;
     }
-    res.status(502).json({ error: 'proxy_error', target, detail: String(error) });
+    res.status(502).json({ error: 'proxy_error', detail: String(error) });
   }
 });
 
-function sanitizeControllerPatchPayload(rawBody) {
-  if (!rawBody || typeof rawBody !== 'object') {
-    return { ok: false, error: 'Request body required' };
-  }
-
-  const statusValue = typeof rawBody.status === 'string' ? rawBody.status.trim().toLowerCase() : '';
-  if (statusValue !== 'on' && statusValue !== 'off') {
-    return { ok: false, error: 'status must be "on" or "off"' };
-  }
-
-  const channelScale = loadChannelScaleConfig();
-  const allowedMax = Math.min(Math.max(channelScale.maxByte || 0, 0), 255) || 255;
-  const sanitized = { status: statusValue };
-
-  if (statusValue === 'off') {
-    sanitized.value = null;
-    return { ok: true, payload: sanitized, meta: { maxByte: allowedMax, channels: [0, 0, 0, 0] } };
-  }
-
-  const rawValue = typeof rawBody.value === 'string' ? rawBody.value.trim() : '';
-  if (!/^[0-9a-fA-F]{12}$/.test(rawValue)) {
-    return { ok: false, error: 'value must be a 12-character HEX string' };
-  }
-
-  const upper = rawValue.toUpperCase();
-  const pairs = upper.match(/.{2}/g) || [];
-  if (pairs.length < 6) {
-    return { ok: false, error: 'HEX payload must include 6 bytes' };
-  }
-
-  const channelPairs = pairs.slice(0, 4);
-  const channelValues = channelPairs.map((pair) => parseInt(pair, 16));
-  for (const value of channelValues) {
-    if (!Number.isFinite(value) || value < 0 || value > allowedMax) {
-      return { ok: false, error: `channel bytes must be between 00 and ${allowedMax.toString(16).toUpperCase().padStart(2, '0')}` };
-    }
-  }
-
-  sanitized.value = `${channelPairs.join('')}${pairs.slice(4).join('')}`;
-  return { ok: true, payload: sanitized, meta: { maxByte: allowedMax, channels: channelValues } };
-}
-
-function rescaleHexPayload(hex, fromMax, toMax) {
-  if (!hex || typeof hex !== 'string' || fromMax <= 0 || toMax <= 0) return null;
-  if (fromMax <= toMax) return null;
-  const pairs = hex.match(/.{2}/g);
-  if (!pairs || pairs.length < 6) return null;
-  const scaled = pairs.map((pair, index) => {
-    if (index >= 4) {
-      return index < 6 ? '00' : pair;
-    }
-    const value = parseInt(pair, 16);
-    if (!Number.isFinite(value)) return '00';
-    const scaledValue = Math.min(toMax, Math.max(0, Math.round((value / fromMax) * toMax)));
-    return scaledValue.toString(16).toUpperCase().padStart(2, '0');
-  });
-  return `${scaled.slice(0, 6).join('')}`;
-}
-
 app.patch('/api/devicedatas/device/:id', pinGuard, express.json(), async (req, res) => {
-  const target = `${CONTROLLER_BASE()}/api/devicedatas/device/${encodeURIComponent(req.params.id)}`;
-  const validation = sanitizeControllerPatchPayload(req.body || {});
-  if (!validation.ok) {
-    return res.status(400).json({ error: 'invalid_payload', detail: validation.error });
-  }
-
-  let payload = validation.payload;
-  const meta = validation.meta || { maxByte: 255 };
-  const attemptRequest = async (body) => {
-    return fetch(target, {
+  try {
+    const target = `${CONTROLLER_BASE()}/api/devicedatas/device/${encodeURIComponent(req.params.id)}`;
+    const upstream = await fetch(target, {
       method: 'PATCH',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(body || {}),
+      body: JSON.stringify(req.body || {}),
       signal: AbortSignal.timeout(5000)
     });
-  };
-
-  try {
-    let response = await attemptRequest(payload);
-    let bodyText = await response.text();
-
-    const shouldRetry = () => {
-      if (response.status !== 400) return false;
-      if (typeof bodyText !== 'string' || !bodyText) return false;
-      return /power[-\s]?cap/i.test(bodyText) && /400/.test(bodyText);
-    };
-
-    if (!response.ok && shouldRetry()) {
-      const fallbackMax = 0x64; // 100 decimal → HEX 64
-      const scaledHex = payload.value ? rescaleHexPayload(payload.value, meta.maxByte || 255, fallbackMax) : null;
-      if (scaledHex && scaledHex !== payload.value) {
-        console.warn(`[proxy] Power cap triggered for device ${req.params.id}; autoscaling payload`);
-        payload = { ...payload, value: scaledHex };
-        response = await attemptRequest(payload);
-        bodyText = await response.text();
-        if (response.ok) {
-          res.setHeader('X-Autoscaled', 'power-cap-400');
-        }
-      }
-    }
-
+    const text = await upstream.text();
     res
-      .status(response.status)
-      .type(response.headers.get('content-type') || 'application/json')
-      .send(bodyText);
+      .status(upstream.status)
+      .type(upstream.headers.get('content-type') || 'application/json')
+      .send(text);
   } catch (error) {
-    res.status(502).json({ error: 'proxy_error', target, detail: String(error) });
+    res.status(502).json({ error: 'proxy_error', target: 'controller', detail: String(error) });
   }
 });
 
@@ -6760,6 +6671,20 @@ app.post('/ui/ctrlmap', pinGuard, express.json(), (req, res) => {
   }
 
   res.json({ ok: true });
+});
+
+app.get('/ui/catalog', (req, res) => {
+  setCors(req, res);
+  try {
+    if (!fs.existsSync(EQUIPMENT_CATALOG_PATH)) {
+      res.status(404).json({ dehumidifiers: [] });
+      return;
+    }
+    const raw = fs.readFileSync(EQUIPMENT_CATALOG_PATH, 'utf8');
+    res.set('Cache-Control', 'no-store').type('application/json').send(raw);
+  } catch (error) {
+    res.status(500).json({ error: 'catalog_read_failed', detail: error?.message || String(error) });
+  }
 });
 
 app.get('/ui/equip', (req, res) => {
