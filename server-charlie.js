@@ -31,13 +31,12 @@ const PUBLIC_DIR = path.join(__dirname, 'public');
 
 // --- CORS guardrail: always answer OPTIONS and echo request headers ---
 app.use((req, res, next) => {
-  const origin = req.headers.origin || '*';
-  res.setHeader('Access-Control-Allow-Origin', origin);
+  res.setHeader('Access-Control-Allow-Origin', req.headers.origin || '*');
   res.setHeader('Vary', 'Origin');
   res.setHeader('Access-Control-Allow-Methods', 'GET,POST,PATCH,DELETE,OPTIONS');
-  const reqH = req.header('Access-Control-Request-Headers');
-  if (reqH) res.setHeader('Access-Control-Allow-Headers', reqH);
-  if (req.method === 'OPTIONS') return res.sendStatus(204);
+  res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization, X-Requested-With');
+  res.setHeader('Access-Control-Max-Age', '600');
+  if (req.method === 'OPTIONS') return res.status(204).end();
   next();
 });
 
