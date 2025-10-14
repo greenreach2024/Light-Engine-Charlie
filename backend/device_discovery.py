@@ -204,12 +204,8 @@ async def discover_mqtt_devices(
 
 
 def _switchbot_request(path: str, config: SwitchBotConfig) -> Optional[Dict[str, Any]]:
-    url = f"https://api.switch-bot.com/v1.1{path}"
-    headers = {
-        "Authorization": config.token,
-        "sign": config.secret,
-        "Content-Type": "application/json",
-    }
+    url = f"{config.base_url}{path}"
+    headers = config.base_headers
     try:
         response = requests.get(url, headers=headers, timeout=10)
         response.raise_for_status()
