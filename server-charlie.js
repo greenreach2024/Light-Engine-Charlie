@@ -57,7 +57,7 @@ function checkCorsConfigOrExit() {
 checkCorsConfigOrExit();
 // Default controller target. Can be overridden with the CTRL env var.
 // Use the Pi forwarder when available for remote device reachability during development.
-const DEFAULT_CONTROLLER = "http://100.65.187.59:8089";
+const DEFAULT_CONTROLLER = "http://192.168.2.80:3000";
 let CURRENT_CONTROLLER = process.env.CTRL || DEFAULT_CONTROLLER;
 let hasPersistedController = false;
 // IFTTT integration config (optional)
@@ -4373,84 +4373,51 @@ const switchBotDevicesCache = {
 
 const switchBotStatusCache = new Map();
 
-// Unified health endpoint with controller + SwitchBot diagnostics
+// Unified health endpoint with controller diagnostics that never 502s
 app.get('/healthz', async (req, res) => {
   const started = Date.now();
-  const hasCors = app._router && app._router.stack && app._router.stack.some(
-    (layer) => layer && layer.handle && layer.handle.toString().includes('Access-Control-Allow-Origin')
-  );
-
-  const controllerInfo = { reachable: false, status: null };
-  try {
-    const ac = new AbortController();
-    const timeout = setTimeout(() => ac.abort(), 1200);
-    try {
-      const base = getController().replace(/\/$/, '');
-      let response = await fetch(base, { method: 'HEAD', signal: ac.signal });
-      controllerInfo.reachable = response.ok;
-      controllerInfo.status = response.status;
-
-      if (!controllerInfo.reachable || (typeof controllerInfo.status === 'number' && controllerInfo.status >= 400)) {
-        response = await fetch(`${base}/healthz`, { method: 'GET', headers: { accept: '*/*' }, signal: ac.signal });
-        controllerInfo.reachable = response.ok;
-        controllerInfo.status = response.status;
-      }
-
-      if (!controllerInfo.reachable || (typeof controllerInfo.status === 'number' && controllerInfo.status >= 400)) {
-        response = await fetch(`${base}/api/healthz`, { method: 'GET', headers: { accept: '*/*' }, signal: ac.signal });
-        controllerInfo.reachable = response.ok;
-        controllerInfo.status = response.status;
-      }
-    } catch (error) {
-      controllerInfo.reachable = false;
-      controllerInfo.status = error.name === 'AbortError' ? 'timeout' : (error.message || 'error');
-    } finally {
-      clearTimeout(timeout);
-    }
-  } catch (error) {
-    controllerInfo.reachable = false;
-    controllerInfo.status = error.message || 'error';
-  }
-
-  let statusCacheEntries = 0;
-  let statusCacheActive = 0;
-  for (const entry of switchBotStatusCache.values()) {
-    statusCacheEntries += 1;
-    if (entry?.payload) statusCacheActive += 1;
-  }
-
-  const switchBotDiagnostics = {
-    configured: ensureSwitchBotConfigured(),
-    tokenPresent: Boolean(process.env.SWITCHBOT_TOKEN && process.env.SWITCHBOT_TOKEN.trim()),
-    secretPresent: Boolean(process.env.SWITCHBOT_SECRET && process.env.SWITCHBOT_SECRET.trim()),
-    region: SWITCHBOT_REGION || null,
-    lastRequestAt: lastSwitchBotRequest ? new Date(lastSwitchBotRequest).toISOString() : null,
-    cache: {
-      devicesCached: Boolean(switchBotDevicesCache.payload),
-      devicesFetchedAt: switchBotDevicesCache.fetchedAt ? new Date(switchBotDevicesCache.fetchedAt).toISOString() : null,
-      devicesError: switchBotDevicesCache.lastError ? (switchBotDevicesCache.lastError.message || String(switchBotDevicesCache.lastError)) : null,
-      statusEntries: statusCacheEntries,
-      statusCached: statusCacheActive
-    }
-  };
-
-  const ok = hasCors && (controllerInfo.reachable || controllerInfo.status === 'timeout');
-  const httpStatus = hasCors ? 200 : 500;
-  res.status(httpStatus).json({
-    ok,
-    status: ok ? 'healthy' : (hasCors ? 'degraded' : 'unhealthy'),
-    cors: { configured: hasCors },
+  const controllerTarget = (getController() || '').replace(/\/+$/, '');
+  const diag = {
+    ok: true,
+    status: 'healthy',
     controller: {
-      target: getController(),
-      reachable: controllerInfo.reachable,
-      status: controllerInfo.status
+      target: controllerTarget,
+      reachable: true,
+      status: 200
     },
     envSource: ENV_SOURCE,
     azureLatestUrl: AZURE_LATEST_URL || null,
-    switchbot: switchBotDiagnostics,
     ts: new Date().toISOString(),
-    dtMs: Date.now() - started
-  });
+    dtMs: 0
+  };
+
+  if (!controllerTarget) {
+    diag.ok = false;
+    diag.status = 'degraded';
+    diag.controller.reachable = false;
+    diag.controller.status = 'unconfigured';
+  } else {
+    try {
+      const upstream = await fetch(`${controllerTarget}/api/devicedatas`, {
+        method: 'GET',
+        signal: AbortSignal.timeout(1500)
+      });
+      diag.controller.reachable = upstream.ok;
+      diag.controller.status = upstream.status;
+      if (!upstream.ok) {
+        diag.ok = false;
+        diag.status = 'degraded';
+      }
+    } catch (error) {
+      diag.ok = false;
+      diag.status = 'degraded';
+      diag.controller.reachable = false;
+      diag.controller.status = error?.name === 'AbortError' ? 'timeout' : (error?.message || 'error');
+    }
+  }
+
+  diag.dtMs = Date.now() - started;
+  res.json(diag);
 });
 
 function getSwitchBotStatusEntry(deviceId) {
