@@ -4399,6 +4399,7 @@ function toNumberOrNull(val) {
         showError(`Failed to control device: ${escapeHtml(error.message || 'Unknown error')}`);
       }
     }
+    window.addEventListener('DOMContentLoaded', loadDevices);
   </script>
 </body>
 </html>

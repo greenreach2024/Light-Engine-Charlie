@@ -1,5 +1,5 @@
 {
-  "farmName": "",
+  "farmName": "My Farm",
   "location": {},
   "rooms": [
     {
@@ -11,12 +11,15 @@
     }
   ],
   "zones": [],
-  "address": "",
-  "city": "",
-  "state": "",
-  "postalCode": "",
+  "address": "St Lawrence Avenue",
+  "city": "Kingston",
+  "state": "Ontario",
+  "postalCode": "K7L 4V1",
   "timezone": "America/Toronto",
-  "coordinates": null,
+  "coordinates": {
+    "lat": 44.258596460875836,
+    "lng": -76.37263877437397
+  },
   "contact": {
     "name": "d",
     "email": "d",
@@ -46,5 +49,36 @@
   "locations": [
     "GreenReach"
   ],
-  "registered": "2025-10-13T21:28:09.501Z"
+  "registered": "2025-10-13T21:28:09.501Z",
+  "branding": {
+    "palette": {
+      "primary": "#0056D6",
+      "primaryHover": "#004CBC",
+      "primaryActive": "#0045AB",
+      "primarySoft": "#D9E6F9",
+      "accent": "#94E3FE",
+      "accentHover": "#82C8E0",
+      "accentSoft": "#EFFBFF",
+      "background": "#F7FAFA",
+      "surface": "#F8FAFA",
+      "border": "#A1C1ED",
+      "borderStrong": "#08377D",
+      "borderSubtle": "#232424",
+      "text": "#111111",
+      "muted": "#909191",
+      "highlight": "#AFEAFE",
+      "onPrimary": "#FFFFFF",
+      "onAccent": "#111111",
+      "shadow": "0 1px 3px 0 rgba(0, 86, 214, 0.16), 0 1px 2px -1px rgba(0, 86, 214, 0.12)",
+      "shadowLg": "0 10px 15px -3px rgba(0, 86, 214, 0.22), 0 4px 6px -4px rgba(0, 86, 214, 0.14)",
+      "focusRing": "0 0 0 3px rgba(148, 227, 254, 0.35)"
+    },
+    "logo": "",
+    "tagline": "Growing with technology",
+    "fontFamily": "",
+    "fontCss": []
+  },
+  "name": "My Farm",
+  "tagline": "Growing with technology",
+  "logo": ""
 }

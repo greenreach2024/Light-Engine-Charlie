@@ -51,6 +51,27 @@ app.add_middleware(
 
 CONFIG: EnvironmentConfig = build_environment_config()
 REGISTRY = DeviceRegistry()
+# Register a sample dehumidifier device at startup for testing
+from .device_models import Device
+sample_dehumidifier = Device(
+    device_id="dehum-quest-155",
+    name="Quest Dual 155",
+    category="dehumidifier",
+    protocol="wifi",
+    online=True,
+    capabilities={
+        "capacity": "155 pints/day",
+        "control": "WiFi",
+        "features": ["remote-monitoring", "app-control", "variable-speed-compressor"],
+        "power": "2100W",
+        "vendor": "Quest",
+        "model": "Quest Dual 155"
+    },
+    details={
+        "description": "High-capacity commercial dehumidifier with WiFi connectivity and app control"
+    }
+)
+REGISTRY.upsert(sample_dehumidifier)
 BUFFER = SensorEventBuffer()
 LIGHTING_STATE = LightingState(CONFIG.lighting_inventory or [])
 CONTROLLER = LightingController(CONFIG.lighting_inventory or [], LIGHTING_STATE)

@@ -2432,8 +2432,8 @@ async function api(url, opts = {}) {
     throw new Error(`Expected JSON from ${url} but received: ${snippet}`);
   }
 }
-<<<<<<< HEAD
-=======
+// [MERGE CONFLICT REMOVED]
+// [MERGE CONFLICT REMOVED]
 
 async function safeApi(url, fallbackValue = null, opts = {}) {
   try {
@@ -2613,7 +2613,7 @@ function getSwitchBotStatusColor(status) {
   if (['offline', 'inactive', 'error'].includes(normalized)) return '#ef4444';
   return '#f59e0b';
 }
->>>>>>> d9ae1097e3caa851c8d00d42999c76aebdefd32b
+// [MERGE CONFLICT REMOVED]
 // Ensure STATE is globally defined
 var STATE = window.STATE = window.STATE || {};
 STATE.rooms = Array.isArray(STATE.rooms) ? STATE.rooms : [];
@@ -8083,29 +8083,7 @@ async function loadAllData() {
     });
     
     // Load static data files
-<<<<<<< HEAD
     const [groups, schedules, plans, environment, calibrations, spdLibrary, deviceMeta, deviceKB, equipmentKB, deviceManufacturers, farm, rooms, switchbotDevices] = await Promise.all([
-      loadJSON('./data/groups.json'),
-      loadJSON('./data/schedules.json'),
-      loadJSON('./data/plans.json'),
-      api('/env'),
-      loadJSON('./data/calibration.json'),
-      loadJSON('./data/spd-library.json'),
-      loadJSON('./data/device-meta.json'),
-        loadJSON('./data/device-kb.json'),
-        loadJSON('./data/equipment-kb.json'),
-        loadJSON('./data/device-manufacturers.json'),
-      loadJSON('./data/farm.json'),
-      loadJSON('./data/rooms.json'),
-      loadJSON('./data/switchbot-devices.json')
-    ]);
-
-  STATE.groups = groups?.groups || [];
-    STATE.schedules = schedules?.schedules || [];
-    STATE.plans = plans?.plans || [];
-  STATE.environment = environment?.zones || [];
-=======
-    const [groups, schedulesDocRaw, plansDocRaw, environment, calibrations, spdLibrary, deviceMeta, deviceKB, equipmentKB, deviceManufacturers, farm, rooms, switchbotDevices] = await Promise.all([
       loadJSON('./data/groups.json', { groups: [] }),
       fetchSchedulesDocument(),
       fetchPlansDocument(),
@@ -8130,7 +8108,6 @@ async function loadAllData() {
     STATE.plans = Array.isArray(plansDoc?.plans) ? plansDoc.plans : [];
     updatePlansStatusIndicator({ doc: STATE.planDocumentInfo, plans: STATE.plans });
     STATE.environment = environment?.zones || [];
->>>>>>> d9ae1097e3caa851c8d00d42999c76aebdefd32b
     STATE.calibrations = calibrations?.calibrations || [];
     STATE._calibrationCache = new Map();
     STATE.spdLibrary = normalizeSpdLibrary(spdLibrary);
@@ -8140,24 +8117,14 @@ async function loadAllData() {
       console.warn('⚠️ SPD library missing or invalid');
     }
     hydrateDeviceDriverState();
-<<<<<<< HEAD
-  STATE.deviceMeta = deviceMeta?.devices || {};
-  normalizeGroupsInState();
-  STATE.switchbotDevices = switchbotDevices?.devices || [];
-  const rawFarm = farm || (() => { try { return JSON.parse(localStorage.getItem('gr.farm') || 'null'); } catch { return null; } })() || {};
-  STATE.farm = normalizeFarmDoc(rawFarm);
-  try { if (STATE.farm && Object.keys(STATE.farm).length) localStorage.setItem('gr.farm', JSON.stringify(STATE.farm)); } catch {}
-  STATE.rooms = rooms?.rooms || [];
-=======
     STATE.deviceMeta = deviceMeta?.devices || {};
     normalizeGroupsInState();
     STATE.switchbotDevices = switchbotDevices?.devices || [];
-    STATE.switchbotSummary = switchbotDevices?.summary || summarizeSwitchBotDevices(STATE.switchbotDevices);
+    STATE.switchbotSummary = switchbotDevices?.summary || summarizeSwitchBotDevices(STATE.switchbotDevices) || {};
     const rawFarm = farm || (() => { try { return JSON.parse(localStorage.getItem('gr.farm') || 'null'); } catch { return null; } })() || {};
     STATE.farm = normalizeFarmDoc(rawFarm);
     try { if (STATE.farm && Object.keys(STATE.farm).length) localStorage.setItem('gr.farm', JSON.stringify(STATE.farm)); } catch {}
     STATE.rooms = rooms?.rooms || [];
->>>>>>> d9ae1097e3caa851c8d00d42999c76aebdefd32b
   if (deviceKB && Array.isArray(deviceKB.fixtures)) {
     // Assign a unique id to each fixture if missing
     deviceKB.fixtures.forEach(fixture => {
