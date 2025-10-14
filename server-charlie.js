@@ -30,30 +30,15 @@ const __dirname = path.dirname(__filename);
 const PUBLIC_DIR = path.join(__dirname, 'public');
 
 // --- CORS guardrail: always answer OPTIONS and echo request headers ---
-app.use((req, res, next) => {
+app.use((req,res,next)=>{
   res.setHeader('Access-Control-Allow-Origin', req.headers.origin || '*');
   res.setHeader('Vary', 'Origin');
-  res.setHeader('Access-Control-Allow-Methods', 'GET,POST,PATCH,DELETE,OPTIONS');
-  res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization, X-Requested-With');
-  res.setHeader('Access-Control-Max-Age', '600');
+  res.setHeader('Access-Control-Allow-Methods','GET,POST,PATCH,DELETE,OPTIONS');
+  res.setHeader('Access-Control-Allow-Headers','Content-Type, Authorization, X-Requested-With');
+  res.setHeader('Access-Control-Max-Age','600');
   if (req.method === 'OPTIONS') return res.status(204).end();
   next();
 });
-
-// --- Health probe: refuse to start if CORS config is missing ---
-function checkCorsConfigOrExit() {
-  // Check if CORS middleware is present by inspecting app._router.stack
-  const hasCors = app._router && app._router.stack && app._router.stack.some(
-    (layer) => layer && layer.handle && layer.handle.toString().includes('Access-Control-Allow-Origin')
-  );
-  if (!hasCors) {
-    console.error('[health] CORS middleware missing. Refusing to start.');
-    process.exit(1);
-  }
-}
-
-// Call CORS check after CORS middleware is registered
-checkCorsConfigOrExit();
 // Default controller target. Can be overridden with the CTRL env var.
 // Use the Pi forwarder when available for remote device reachability during development.
 const DEFAULT_CONTROLLER = "http://192.168.2.80:3000";
