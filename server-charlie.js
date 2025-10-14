@@ -5716,6 +5716,15 @@ app.use('/controller', proxyCorsMiddleware, createProxyMiddleware({
   }
 }));
 
+// Dev-only live asset snapshots for cache validation
+app.get('/tmp/live.index.html', (req, res) => {
+  res.type('text').sendFile(path.join(__dirname, 'public', 'index.charlie.html'));
+});
+
+app.get('/tmp/live.app.charlie.js', (req, res) => {
+  res.type('text').sendFile(path.join(__dirname, 'public', 'app.charlie.js'));
+});
+
 // Static files
 // Serve static files
 app.use(express.static("./public"));
