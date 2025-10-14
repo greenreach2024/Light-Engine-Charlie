@@ -1,8 +1,13 @@
 """Configuration helpers for Light Engine Charlie."""
 from __future__ import annotations
 
+import base64
+import hashlib
+import hmac
 import logging
 import os
+import time
+import uuid
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Dict, List, Optional
@@ -35,11 +40,33 @@ class SwitchBotConfig:
 
     @property
     def base_headers(self) -> Dict[str, str]:
+        """Return the authenticated header set required by the SwitchBot API."""
+
+        timestamp = str(int(time.time() * 1000))
+        nonce = uuid.uuid4().hex
+        payload = f"{self.token}{timestamp}{nonce}".encode("utf-8")
+        signature = hmac.new(self.secret.encode("utf-8"), payload, hashlib.sha256)
+        sign = base64.b64encode(signature.digest()).decode("utf-8")
+
         return {
             "Authorization": self.token,
-            "sign": self.secret,
-            "Content-Type": "application/json",
+            "sign": sign,
+            "t": timestamp,
+            "nonce": nonce,
+            "Content-Type": "application/json; charset=utf8",
         }
+
+    @property
+    def base_url(self) -> str:
+        region = (self.region or "us").lower()
+        hosts = {
+            "us": "https://api.switch-bot.com",
+            "eu": "https://eu-apia.switch-bot.com",
+            "cn": "https://cn-apia.switch-bot.com",
+            "ap": "https://api.switch-bot.com",
+        }
+        base = hosts.get(region, hosts["us"])
+        return f"{base}/v1.1"
 
 
 @dataclass(frozen=True)
