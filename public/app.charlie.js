@@ -658,6 +658,96 @@ function computeChannelPercentages(mix) {
   return { percentages: pct, total: totals };
 }
 
+function computeSpdBandPercentages(spd) {
+  if (!spd || !Array.isArray(spd.wavelengths)) return null;
+  const wavelengths = spd.wavelengths;
+  const samples = Array.isArray(spd.samples) && spd.samples.length === wavelengths.length
+    ? spd.samples
+    : (Array.isArray(spd.display) && spd.display.length === wavelengths.length ? spd.display : null);
+  if (!samples) return null;
+  let red = 0;
+  let mid = 0;
+  let blue = 0;
+  for (let i = 0; i < wavelengths.length; i += 1) {
+    const wl = wavelengths[i];
+    const value = Number(samples[i]) || 0;
+    if (wl >= 600) red += value;
+    else if (wl >= 500) mid += value;
+    else blue += value;
+  }
+  const total = red + mid + blue;
+  if (total <= 0) {
+    return { red: 0, mid: 0, blue: 0 };
+  }
+  const scale = 100 / total;
+  return {
+    red: red * scale,
+    mid: mid * scale,
+    blue: blue * scale,
+  };
+}
+
+function buildSelectedLightMix(group, fallbackSpectrum = null) {
+  if (!group || !Array.isArray(group.lights) || group.lights.length === 0) return null;
+  const totals = { cw: 0, ww: 0, bl: 0, rd: 0 };
+  let totalWeight = 0;
+  let dynamicWeight = 0;
+  let staticWeight = 0;
+  const fallback = fallbackSpectrum || { cw: 45, ww: 45, bl: 0, rd: 0 };
+  group.lights.forEach((entry) => {
+    if (!entry) return;
+    const lightId = typeof entry === 'string' ? entry : entry.id;
+    if (!lightId) return;
+    const meta = getDeviceMeta(lightId) || {};
+    const setup = findSetupFixtureById(lightId);
+    const fromSetup = setup?.fixture || null;
+    const manufacturerSpectrum = meta.factorySpectrum || meta.spectrum || fromSetup?.spectrum || null;
+    const controlRaw = [meta.control, fromSetup?.control, meta.transport, meta.protocol]
+      .filter(Boolean)
+      .join(' ')
+      .toLowerCase();
+    const spectrumMode = String(meta.spectrumMode || '').toLowerCase();
+    const isDynamic = spectrumMode === 'dynamic' || /dynamic|api|lan|wifi|grow3|driver/.test(controlRaw);
+    const countCandidate = typeof entry === 'object'
+      ? (entry.count ?? entry.qty ?? entry.quantity ?? entry.units ?? entry.total)
+      : null;
+    const parsedCount = Number(countCandidate);
+    const weight = Number.isFinite(parsedCount) && parsedCount > 0 ? parsedCount : 1;
+    const sourceSpectrum = isDynamic ? fallback : (manufacturerSpectrum || fallback);
+    const numericSpectrum = {
+      cw: Number(sourceSpectrum?.cw || 0),
+      ww: Number(sourceSpectrum?.ww || 0),
+      bl: Number(sourceSpectrum?.bl || 0),
+      rd: Number(sourceSpectrum?.rd || 0),
+    };
+    const channelSum = numericSpectrum.cw + numericSpectrum.ww + numericSpectrum.bl + numericSpectrum.rd;
+    if (channelSum <= 0) return;
+    totals.cw += numericSpectrum.cw * weight;
+    totals.ww += numericSpectrum.ww * weight;
+    totals.bl += numericSpectrum.bl * weight;
+    totals.rd += numericSpectrum.rd * weight;
+    totalWeight += weight;
+    if (isDynamic) dynamicWeight += weight;
+    else staticWeight += weight;
+  });
+  if (totalWeight <= 0) return null;
+  const channelTotal = totals.cw + totals.ww + totals.bl + totals.rd;
+  if (channelTotal <= 0) return null;
+  return {
+    mix: {
+      cw: (totals.cw / channelTotal) * 100,
+      ww: (totals.ww / channelTotal) * 100,
+      bl: (totals.bl / channelTotal) * 100,
+      rd: (totals.rd / channelTotal) * 100,
+    },
+    counts: {
+      total: totalWeight,
+      dynamic: dynamicWeight,
+      static: staticWeight,
+    },
+  };
+}
+
 function deriveDeviceId(device, fallbackIndex = 0) {
   if (!device || typeof device !== 'object') {
     return `device-${fallbackIndex + 1}`;
@@ -8367,7 +8457,11 @@ function renderGroups() {
   const planSel = document.getElementById('groupPlan');
   if (planSel) {
     planSel.onchange = () => {
-      const plan = STATE.plans.find(p => p.id === planSel.value);
+      const planId = planSel.value;
+      if (STATE.currentGroup) {
+        STATE.currentGroup.plan = planId;
+      }
+      const plan = STATE.plans.find(p => p.id === planId);
       if (plan && plan.spectrum) {
         // Update spectrum preview
         renderPlanSpectrum(plan.spectrum);
@@ -8376,6 +8470,11 @@ function renderGroups() {
         setSlider('gww', plan.spectrum.ww);
         setSlider('gbl', plan.spectrum.bl);
         setSlider('grd', plan.spectrum.rd);
+      }
+      if (STATE.currentGroup) {
+        renderGroupSpectrumPreview(STATE.currentGroup);
+        updateGroupPlanInfoCard(STATE.currentGroup);
+        updateGroupLightInfoCard(STATE.currentGroup);
       }
     };
   }
@@ -10613,6 +10712,14 @@ function wireGlobalEvents() {
     const subtitle = document.getElementById('groupPlanInfoSubtitle');
     const canvas = document.getElementById('groupPlanInfoCanvas');
     const metrics = document.getElementById('groupPlanInfoMetrics');
+    const selectedLabel = document.getElementById('groupPlanSelectedLabel');
+    const selectedCanvas = document.getElementById('groupPlanSelectedCanvas');
+    const selectedMetrics = document.getElementById('groupPlanSelectedMetrics');
+    const resetSelectedSpectrum = (text) => {
+      if (selectedLabel) selectedLabel.textContent = text || 'Selected lights spectrum';
+      if (selectedMetrics) selectedMetrics.innerHTML = '';
+      clearCanvas(selectedCanvas);
+    };
     const plan = group ? STATE.plans.find((p) => p.id === group.plan) : null;
     if (!plan) {
       card.classList.add('is-empty');
@@ -10620,6 +10727,7 @@ function wireGlobalEvents() {
       if (subtitle) subtitle.textContent = 'Select a plan to view spectrum targets.';
       if (metrics) metrics.innerHTML = '';
       clearCanvas(canvas);
+      resetSelectedSpectrum('Selected lights spectrum');
       return;
     }
     card.classList.remove('is-empty');
@@ -10656,11 +10764,67 @@ function wireGlobalEvents() {
         .map((item) => `<dt>${escapeHtml(item.label)}</dt><dd>${escapeHtml(item.value)}</dd>`)
         .join('');
     }
+    const mix = { cw: Number(spectrum.cw || 0), ww: Number(spectrum.ww || 0), bl: Number(spectrum.bl || 0), rd: Number(spectrum.rd || 0) };
+    const deviceIds = Array.isArray(group?.lights) ? group.lights.map((l) => l.id).filter(Boolean) : [];
+    const planSpd = computeWeightedSPD(mix, { deviceIds });
     if (canvas && typeof renderSpectrumCanvas === 'function') {
-      const mix = { cw: Number(spectrum.cw || 0), ww: Number(spectrum.ww || 0), bl: Number(spectrum.bl || 0), rd: Number(spectrum.rd || 0) };
-      const deviceIds = Array.isArray(group?.lights) ? group.lights.map((l) => l.id).filter(Boolean) : [];
-      const spd = computeWeightedSPD(mix, { deviceIds });
-      renderSpectrumCanvas(canvas, spd, { width: canvas.width, height: canvas.height });
+      renderSpectrumCanvas(canvas, planSpd, { width: canvas.width, height: canvas.height });
+    }
+    const planBands = computeSpdBandPercentages(planSpd);
+    const hasLights = Array.isArray(group?.lights) && group.lights.length > 0;
+    const selectedInfo = buildSelectedLightMix(group, spectrum);
+    if (!selectedInfo) {
+      const labelText = hasLights
+        ? 'Selected lights spectrum (spectrum data unavailable)'
+        : 'Selected lights spectrum (assign lights to compare)';
+      resetSelectedSpectrum(labelText);
+      return;
+    }
+    const selectedSpd = computeWeightedSPD(selectedInfo.mix);
+    const selectedBands = computeSpdBandPercentages(selectedSpd);
+    if (selectedCanvas && typeof renderSpectrumCanvas === 'function') {
+      renderSpectrumCanvas(selectedCanvas, selectedSpd, { width: selectedCanvas.width, height: selectedCanvas.height });
+    }
+    if (selectedLabel) {
+      const approxCount = Math.round(selectedInfo.counts.total || 0);
+      const parts = ['Selected lights spectrum'];
+      if (approxCount > 0) {
+        parts.push(`• ${approxCount} light${approxCount === 1 ? '' : 's'}`);
+      }
+      selectedLabel.textContent = parts.join(' ');
+    }
+    if (selectedMetrics) {
+      if (selectedBands) {
+        const deltas = planBands
+          ? {
+              red: Math.round((planBands.red - selectedBands.red) * 10) / 10,
+              mid: Math.round((planBands.mid - selectedBands.mid) * 10) / 10,
+              blue: Math.round((planBands.blue - selectedBands.blue) * 10) / 10,
+            }
+          : null;
+        const items = [
+          {
+            label: 'Red',
+            value: `${selectedBands.red.toFixed(1)}%`,
+            delta: deltas ? formatDelta(deltas.red, '%', 1) : null,
+          },
+          {
+            label: 'Mid (green)',
+            value: `${selectedBands.mid.toFixed(1)}%`,
+            delta: deltas ? formatDelta(deltas.mid, '%', 1) : null,
+          },
+          {
+            label: 'Blue',
+            value: `${selectedBands.blue.toFixed(1)}%`,
+            delta: deltas ? formatDelta(deltas.blue, '%', 1) : null,
+          },
+        ];
+        selectedMetrics.innerHTML = items
+          .map((item) => `<dt>${escapeHtml(item.label)}</dt><dd>${escapeHtml(formatValueWithDelta(item.value, item.delta))}</dd>`)
+          .join('');
+      } else {
+        selectedMetrics.innerHTML = '';
+      }
     }
   }
 
