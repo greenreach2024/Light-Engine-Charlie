@@ -2327,15 +2327,6 @@ async function api(url, opts = {}) {
   if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
   return await resp.json();
 }
-
-async function safeApi(url, fallbackValue = null, opts = {}) {
-  try {
-    return await api(url, opts);
-  } catch (error) {
-    console.warn(`API request to ${url} failed`, error);
-    return fallbackValue;
-  }
-}
 // Ensure STATE is globally defined
 var STATE = window.STATE = window.STATE || {};
 STATE.rooms = Array.isArray(STATE.rooms) ? STATE.rooms : [];
@@ -7802,22 +7793,22 @@ async function loadAllData() {
       loadJSON('./data/groups.json'),
       loadJSON('./data/schedules.json'),
       loadJSON('./data/plans.json'),
-      safeApi('/env', { zones: [] }),
+      api('/env'),
       loadJSON('./data/calibration.json'),
       loadJSON('./data/spd-library.json'),
       loadJSON('./data/device-meta.json'),
-      loadJSON('./data/device-kb.json'),
-      loadJSON('./data/equipment-kb.json'),
-      loadJSON('./data/device-manufacturers.json'),
+        loadJSON('./data/device-kb.json'),
+        loadJSON('./data/equipment-kb.json'),
+        loadJSON('./data/device-manufacturers.json'),
       loadJSON('./data/farm.json'),
       loadJSON('./data/rooms.json'),
       loadJSON('./data/switchbot-devices.json')
     ]);
 
-    STATE.groups = groups?.groups || [];
+  STATE.groups = groups?.groups || [];
     STATE.schedules = schedules?.schedules || [];
     STATE.plans = plans?.plans || [];
-    STATE.environment = environment?.zones || [];
+  STATE.environment = environment?.zones || [];
     STATE.calibrations = calibrations?.calibrations || [];
     STATE._calibrationCache = new Map();
     STATE.spdLibrary = normalizeSpdLibrary(spdLibrary);
@@ -7827,13 +7818,13 @@ async function loadAllData() {
       console.warn('⚠️ SPD library missing or invalid');
     }
     hydrateDeviceDriverState();
-    STATE.deviceMeta = deviceMeta?.devices || {};
-    normalizeGroupsInState();
-    STATE.switchbotDevices = switchbotDevices?.devices || [];
-    const rawFarm = farm || (() => { try { return JSON.parse(localStorage.getItem('gr.farm') || 'null'); } catch { return null; } })() || {};
-    STATE.farm = normalizeFarmDoc(rawFarm);
-    try { if (STATE.farm && Object.keys(STATE.farm).length) localStorage.setItem('gr.farm', JSON.stringify(STATE.farm)); } catch {}
-    STATE.rooms = rooms?.rooms || [];
+  STATE.deviceMeta = deviceMeta?.devices || {};
+  normalizeGroupsInState();
+  STATE.switchbotDevices = switchbotDevices?.devices || [];
+  const rawFarm = farm || (() => { try { return JSON.parse(localStorage.getItem('gr.farm') || 'null'); } catch { return null; } })() || {};
+  STATE.farm = normalizeFarmDoc(rawFarm);
+  try { if (STATE.farm && Object.keys(STATE.farm).length) localStorage.setItem('gr.farm', JSON.stringify(STATE.farm)); } catch {}
+  STATE.rooms = rooms?.rooms || [];
   if (deviceKB && Array.isArray(deviceKB.fixtures)) {
     // Assign a unique id to each fixture if missing
     deviceKB.fixtures.forEach(fixture => {
