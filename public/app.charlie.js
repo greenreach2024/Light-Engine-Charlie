@@ -2655,6 +2655,33 @@ function cloneFallback(value) {
   return value;
 }
 
+const SMART_PLUGS_FALLBACK_PAYLOAD = Object.freeze({
+  plugs: Object.freeze([
+    Object.freeze({
+      id: 'plug-demo-1',
+      name: 'Irrigation Pump',
+      online: true,
+      ip: '192.168.50.21',
+      power_w: 87,
+      location: 'North Greenhouse'
+    }),
+    Object.freeze({
+      id: 'plug-demo-2',
+      name: 'Heater',
+      online: false,
+      ip: '192.168.50.32',
+      power_w: 0,
+      location: 'Propagation'
+    })
+  ])
+});
+
+function cloneSmartPlugFallback() {
+  return {
+    plugs: SMART_PLUGS_FALLBACK_PAYLOAD.plugs.map((plug) => ({ ...plug }))
+  };
+}
+
 // Global JSON loader with graceful fallback
 async function loadJSON(url, fallbackValue = null) {
   try {
@@ -10097,7 +10124,7 @@ async function loadSmartPlugs({ silent } = {}) {
     }
     console.warn('Failed to load smart plugs', error);
     try {
-      const fallback = await loadJSON('./data/smart-plugs.json', { plugs: [] });
+      const fallback = await loadJSON('/data/smart-plugs.json', cloneSmartPlugFallback);
       STATE.smartPlugs = Array.isArray(fallback?.plugs) ? fallback.plugs : [];
       if (!silent) {
         setSmartPlugsAlert(`Showing ${STATE.smartPlugs.length} demo smart plug${STATE.smartPlugs.length === 1 ? '' : 's'}.`, 'info');
