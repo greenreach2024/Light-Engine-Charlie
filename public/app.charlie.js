@@ -8556,9 +8556,9 @@ async function loadAllData() {
     console.log('Sample equipment:', equipmentKB.equipment.slice(0, 3).map(e => `${e.vendor} ${e.model} (${e.category})`));
   }
   // load manufacturers into a global for lookups and selects
-  if (deviceManufacturers && Array.isArray(deviceManufacturers.manufacturers)) {
-    window.DEVICE_MANUFACTURERS = deviceManufacturers.manufacturers;
-    console.log('✅ Loaded device manufacturers:', deviceManufacturers.manufacturers.length, 'manufacturers');
+  if (deviceManufacturersDoc && Array.isArray(deviceManufacturersDoc.manufacturers)) {
+    window.DEVICE_MANUFACTURERS = deviceManufacturersDoc.manufacturers;
+    console.log('✅ Loaded device manufacturers:', deviceManufacturersDoc.manufacturers.length, 'manufacturers');
   } else {
     window.DEVICE_MANUFACTURERS = window.DEVICE_MANUFACTURERS || [];
   }
