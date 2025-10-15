@@ -1,43 +1,44 @@
+
 from __future__ import annotations
+# --- Expose singletons to routers that need them ---
+def get_config():
+    return app.state.CONFIG
+
+def get_registry():
+    return app.state.REGISTRY
+
+def get_buffer():
+    return app.state.BUFFER
 
 """FastAPI server wiring together discovery, automation, and RBAC."""
 
-import asyncio
-import contextlib
-import logging
-import os
-ALLOW_MOCKS = os.getenv("ALLOW_MOCKS", "false").lower() == "true"
-from datetime import date, datetime, time, timezone
-from typing import Any, Dict, List, Optional
 
-from fastapi import Body, Depends, FastAPI, Header, HTTPException, Query, status
+import asyncio, contextlib, logging, inspect, os
+from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
-from pydantic import BaseModel, Field, validator
 
-from .ai_assist import SetupAssistError, SetupAssistService
-from .automation import AutomationEngine, lux_balancing_rule, occupancy_rule
-from .config import EnvironmentConfig, LightingFixture, build_environment_config
-from .device_discovery import fetch_switchbot_status, full_discovery_cycle
-from .device_models import (
-    Device,
-    GroupSchedule,
-    PhotoperiodScheduleConfig,
-    Schedule as ScheduleModel,
-    UserContext,
-)
-from .lighting import LightingController
-from .logging_config import configure_logging
-from .state import (
-    DeviceDataStore,
-    DeviceRegistry,
-    EnvironmentStateStore,
-    EnvironmentTelemetryStore,
-    GroupScheduleStore,
-    LightingState,
-    PlanStore,
-    ScheduleStore,
-    SensorEventBuffer,
-)
+
+
+from backend.config import load_config
+
+from backend.state import DeviceRegistry, SensorEventBuffer
+from backend.device_discovery import full_discovery_cycle
+
+# Safe import-or-fallback for configure_logging
+try:
+    from backend.logging_config import configure_logging
+    configure_logging()
+except ImportError:
+    pass
+
+log = logging.getLogger(__name__)
+app = FastAPI()
+
+# Create singletons ONCE during startup; keep on app.state
+app.state.CONFIG = None
+app.state.REGISTRY = None
+app.state.BUFFER = None
+app.state.discovery_task = None
 
 LOGGER = logging.getLogger(__name__)
 
@@ -796,11 +797,11 @@ async def get_environment(
             response["zone"] = telemetry_zone
         else:
             zone = ENVIRONMENT_STATE.get_zone(identifier)
-                if zone is not None:
-                    response["zone"] = zone
-                else:
-                    # Instead of 404, return empty zone for missing scope
-                    response["zone"] = {}
+            if zone is not None:
+                response["zone"] = zone
+            else:
+                # Instead of 404, return empty zone for missing scope
+                response["zone"] = {}
     else:
         response["zones"] = ENVIRONMENT_TELEMETRY.list_zones(range_seconds)
 
@@ -957,41 +958,83 @@ def _schedule_from_request(request: ScheduleRequest) -> ScheduleModel:
 
 
 
-# --- Refactored: Discovery supervisor for background execution ---
-discovery_task = None
 
-async def _discovery_supervisor():
-    interval = int(os.getenv("DISCOVERY_INTERVAL", "300"))
-    LOGGER.info("Starting discovery supervisor with interval %s", interval)
+# --- Minimal, robust async discovery supervisor ---
+import contextlib
+log = logging.getLogger(__name__)
+app.state.discovery_task = None
+
+async def _discovery_supervisor(
+    config,
+    registry,
+    buffer,
+    interval_sec: int = 300,
+    timeout_sec: int = 25,
+):
+    """
+    Periodically runs discovery. Never raises; timeboxed; survives errors.
+    """
+    log.info("Starting discovery supervisor with interval=%s", interval_sec)
     try:
-        # Initial run, off-thread if blocking
-        await asyncio.to_thread(full_discovery_cycle, CONFIG, REGISTRY, BUFFER, event_handler=AUTOMATION.publish)
         while True:
-            await asyncio.sleep(interval)
-            await asyncio.to_thread(full_discovery_cycle, CONFIG, REGISTRY, BUFFER, event_handler=AUTOMATION.publish)
+            try:
+                # Support either async or sync implementations transparently
+                if inspect.iscoroutinefunction(full_discovery_cycle):
+                    await asyncio.wait_for(
+                        full_discovery_cycle(config, registry, buffer, logger=log),
+                        timeout=timeout_sec,
+                    )
+                else:
+                    await asyncio.wait_for(
+                        asyncio.to_thread(full_discovery_cycle, config, registry, buffer),
+                        timeout=timeout_sec,
+                    )
+            except asyncio.TimeoutError:
+                log.warning("Discovery timed out after %ss (continuing)", timeout_sec)
+            except Exception:
+                log.exception("Discovery failed (non-fatal)")
+            await asyncio.sleep(interval_sec)
     except asyncio.CancelledError:
-        LOGGER.info("Discovery supervisor cancelled.")
-        pass
+        log.info("Discovery supervisor cancelled")
+        raise
+
+
+
 
 
 
 @app.on_event("startup")
 async def _startup():
-    global _AUTOMATION_TASK, discovery_task
-    _AUTOMATION_TASK = asyncio.create_task(AUTOMATION.start())
-    # Fire-and-forget background task; don't await here
-    discovery_task = asyncio.create_task(_discovery_supervisor())
+    # 1) build singletons once
+    if app.state.CONFIG is None:
+            app.state.CONFIG = load_config(env="production")
+    if app.state.REGISTRY is None:
+        app.state.REGISTRY = DeviceRegistry()
+    if app.state.BUFFER is None:
+        app.state.BUFFER = SensorEventBuffer(max_items=1000)
+
+    # 2) launch supervisor with the *actual* required args
+    if not app.state.discovery_task:
+        app.state.discovery_task = asyncio.create_task(
+            _discovery_supervisor(
+                app.state.CONFIG,
+                app.state.REGISTRY,
+                app.state.BUFFER,
+                interval_sec=300,
+                timeout_sec=25,
+            )
+        )
+
 
 
 
 @app.on_event("shutdown")
 async def _shutdown():
-    await AUTOMATION.stop()
-    global discovery_task
-    if discovery_task:
-        discovery_task.cancel()
+    t = getattr(app.state, "discovery_task", None)
+    if t:
+        t.cancel()
         with contextlib.suppress(Exception):
-            await discovery_task
+            await t
 
 
 @app.get("/health")

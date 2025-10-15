@@ -44,7 +44,7 @@ except ImportError:
     LOGGER = logging.getLogger(__name__)
     LOGGER.warning("zeroconf not available. mDNS discovery disabled.")
 
-from .config import EnvironmentConfig, MQTTConfig, SwitchBotConfig
+from .config import MQTTConfig, SwitchBotConfig
 from .device_models import Device, SensorEvent
 from .state import DeviceRegistry, SensorEventBuffer
 
@@ -434,7 +434,7 @@ async def discover_mdns_devices(registry: DeviceRegistry, scan_duration: float =
 
 
 async def full_discovery_cycle(
-    config: EnvironmentConfig,
+    config,
     registry: DeviceRegistry,
     buffer: SensorEventBuffer,
     event_handler: Optional[Callable[[SensorEvent], Awaitable[None]]] = None,
