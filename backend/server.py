@@ -1,49 +1,61 @@
 
 from __future__ import annotations
-# --- Expose singletons to routers that need them ---
-def get_config():
-    return app.state.CONFIG
-
-def get_registry():
-    return app.state.REGISTRY
-
-def get_buffer():
-    return app.state.BUFFER
 
 """FastAPI server wiring together discovery, automation, and RBAC."""
 
+import asyncio
+import contextlib
+import inspect
+import logging
+import os
+from datetime import date, datetime, time, timezone
+from typing import Any, Dict, List, Optional, cast
 
-import asyncio, contextlib, logging, inspect, os
-from fastapi import FastAPI
+from fastapi import Body, Depends, FastAPI, Header, HTTPException, Query, status
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse
+from pydantic import BaseModel, Field, validator
 
+from backend.ai_assist import SetupAssistError, SetupAssistService
+from backend.automation import AutomationEngine, lux_balancing_rule, occupancy_rule
+from backend.config import EnvironmentConfig, LightingFixture, load_config
+from backend.device_discovery import (
+    discover_ble_devices,
+    discover_kasa_devices,
+    discover_mdns_devices,
+    full_discovery_cycle,
+)
+from backend.device_models import (
+    Device,
+    GroupSchedule,
+    PhotoperiodScheduleConfig,
+    Schedule,
+    UserContext,
+)
+from backend.lighting import LightingController
+from backend.state import (
+    DeviceDataStore,
+    DeviceRegistry,
+    EnvironmentStateStore,
+    EnvironmentTelemetryStore,
+    GroupScheduleStore,
+    LightingState,
+    PlanStore,
+    ScheduleStore,
+    SensorEventBuffer,
+)
+from backend.switchbot import fetch_switchbot_status
 
-
-from backend.config import load_config
-
-from backend.state import DeviceRegistry, SensorEventBuffer
-from backend.device_discovery import full_discovery_cycle
-
-# Safe import-or-fallback for configure_logging
 try:
-    from backend.logging_config import configure_logging
-    configure_logging()
-except ImportError:
-    pass
+    from backend.logging_config import configure_logging as _configure_logging
+except ImportError:  # pragma: no cover - optional dependency
+    _configure_logging = None
 
-log = logging.getLogger(__name__)
-app = FastAPI()
+if _configure_logging:
+    _configure_logging()
 
-# Create singletons ONCE during startup; keep on app.state
-app.state.CONFIG = None
-app.state.REGISTRY = None
-app.state.BUFFER = None
-app.state.discovery_task = None
 
 LOGGER = logging.getLogger(__name__)
-
-configure_logging()
-
 app = FastAPI(title="Light Engine Charlie", version="1.0.0")
 app.add_middleware(
     CORSMiddleware,
@@ -53,75 +65,101 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-REGISTRY = DeviceRegistry()
-# Register a sample dehumidifier device at startup for testing
-from .device_models import Device
-sample_dehumidifier = Device(
-    device_id="dehum-quest-155",
-    name="Quest Dual 155",
-    category="dehumidifier",
-    protocol="wifi",
-    online=True,
-    capabilities={
-        "capacity": "155 pints/day",
-        "control": "WiFi",
-        "features": ["remote-monitoring", "app-control", "variable-speed-compressor"],
-        "power": "2100W",
-        "vendor": "Quest",
-        "model": "Quest Dual 155"
-    },
-    details={
-        "description": "High-capacity commercial dehumidifier with WiFi connectivity and app control"
-    }
-)
-REGISTRY.upsert(sample_dehumidifier)
-BUFFER = SensorEventBuffer()
-LIGHTING_STATE = LightingState(CONFIG.lighting_inventory or [])
-CONTROLLER = LightingController(CONFIG.lighting_inventory or [], LIGHTING_STATE)
-SCHEDULES = ScheduleStore()
-GROUP_SCHEDULES = GroupScheduleStore()
-PLAN_STORE = PlanStore()
-ENVIRONMENT_STATE = EnvironmentStateStore()
-ENVIRONMENT_TELEMETRY = EnvironmentTelemetryStore()
-DEVICE_DATA = DeviceDataStore()
-AUTOMATION = AutomationEngine(CONTROLLER, SCHEDULES)
-AI_ASSIST_SERVICE: Optional[SetupAssistService] = None
 
-if CONFIG.ai_assist and CONFIG.ai_assist.enabled:
-    try:
-        AI_ASSIST_SERVICE = SetupAssistService(CONFIG.ai_assist)
-    except SetupAssistError as exc:
-        LOGGER.error("Failed to initialise AI Assist: %s", exc)
-        AI_ASSIST_SERVICE = None
+def _require_state(name: str) -> Any:
+    value = getattr(app.state, name, None)
+    if value is None:
+        raise RuntimeError(f"Application state '{name}' has not been initialised")
+    return value
 
-ZONE_MAP = {fixture.name: fixture.address for fixture in CONFIG.lighting_inventory or []}
-if ZONE_MAP:
-    target_lux = int(os.getenv("TARGET_LUX", "500"))
-    occupied_level = int(os.getenv("OCCUPIED_BRIGHTNESS", "80"))
-    vacant_level = int(os.getenv("VACANT_BRIGHTNESS", "30"))
-    AUTOMATION.register_rule(lux_balancing_rule(ZONE_MAP, target_lux))
-    AUTOMATION.register_rule(occupancy_rule(ZONE_MAP, occupied_level, vacant_level))
 
-FIXTURE_INVENTORY = CONFIG.lighting_inventory or []
-DEVICE_ID_MAP: Dict[str, LightingFixture] = {}
-DEVICE_ID_BY_ADDRESS: Dict[str, str] = {}
-for index, fixture in enumerate(FIXTURE_INVENTORY, start=1):
-    device_id = str(index)
-    DEVICE_ID_MAP[device_id] = fixture
-    DEVICE_ID_BY_ADDRESS[fixture.address] = device_id
-    DEVICE_DATA.upsert(
-        device_id,
-        {
-            "status": "off",
-            "value": None,
-            "name": fixture.name,
-            "address": fixture.address,
-            "model": fixture.model,
-        },
-    )
+def get_config() -> EnvironmentConfig:
+    return cast(EnvironmentConfig, _require_state("CONFIG"))
 
-_AUTOMATION_TASK: Optional[asyncio.Task] = None
-_DISCOVERY_TASK: Optional[asyncio.Task] = None
+
+def get_registry() -> DeviceRegistry:
+    return cast(DeviceRegistry, _require_state("REGISTRY"))
+
+
+def get_buffer() -> SensorEventBuffer:
+    return cast(SensorEventBuffer, _require_state("BUFFER"))
+
+
+def get_lighting_state() -> LightingState:
+    return cast(LightingState, _require_state("LIGHTING_STATE"))
+
+
+def get_controller() -> LightingController:
+    return cast(LightingController, _require_state("CONTROLLER"))
+
+
+def get_schedules() -> ScheduleStore:
+    return cast(ScheduleStore, _require_state("SCHEDULES"))
+
+
+def get_group_schedules() -> GroupScheduleStore:
+    return cast(GroupScheduleStore, _require_state("GROUP_SCHEDULES"))
+
+
+def get_plan_store() -> PlanStore:
+    return cast(PlanStore, _require_state("PLAN_STORE"))
+
+
+def get_environment_state() -> EnvironmentStateStore:
+    return cast(EnvironmentStateStore, _require_state("ENVIRONMENT_STATE"))
+
+
+def get_environment_telemetry() -> EnvironmentTelemetryStore:
+    return cast(EnvironmentTelemetryStore, _require_state("ENVIRONMENT_TELEMETRY"))
+
+
+def get_device_data_store() -> DeviceDataStore:
+    return cast(DeviceDataStore, _require_state("DEVICE_DATA"))
+
+
+def get_automation() -> AutomationEngine:
+    return cast(AutomationEngine, _require_state("AUTOMATION"))
+
+
+def get_ai_assist_service() -> Optional[SetupAssistService]:
+    return cast(Optional[SetupAssistService], getattr(app.state, "AI_ASSIST_SERVICE", None))
+
+
+def get_zone_map() -> Dict[str, str]:
+    return cast(Dict[str, str], _require_state("ZONE_MAP"))
+
+
+def get_fixture_inventory() -> List[LightingFixture]:
+    return cast(List[LightingFixture], _require_state("FIXTURE_INVENTORY"))
+
+
+def get_device_id_map() -> Dict[str, LightingFixture]:
+    return cast(Dict[str, LightingFixture], _require_state("DEVICE_ID_MAP"))
+
+
+def get_device_id_by_address() -> Dict[str, str]:
+    return cast(Dict[str, str], _require_state("DEVICE_ID_BY_ADDRESS"))
+
+
+# Initialise application state placeholders
+app.state.CONFIG = None
+app.state.REGISTRY = None
+app.state.BUFFER = None
+app.state.LIGHTING_STATE = None
+app.state.CONTROLLER = None
+app.state.SCHEDULES = None
+app.state.GROUP_SCHEDULES = None
+app.state.PLAN_STORE = None
+app.state.ENVIRONMENT_STATE = None
+app.state.ENVIRONMENT_TELEMETRY = None
+app.state.DEVICE_DATA = None
+app.state.AUTOMATION = None
+app.state.AI_ASSIST_SERVICE = None
+app.state.ZONE_MAP = None
+app.state.FIXTURE_INVENTORY = None
+app.state.DEVICE_ID_MAP = None
+app.state.DEVICE_ID_BY_ADDRESS = None
+app.state.discovery_task = None
 
 
 def _parse_time_range(value: Optional[Any]) -> Optional[int]:
@@ -224,12 +262,13 @@ def _ingest_environment_telemetry(payload: Dict[str, Any]) -> Dict[str, Any]:
     except ValueError as exc:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
     metadata = _collect_metadata(payload)
-    zone = ENVIRONMENT_TELEMETRY.add_reading(scope, moment, sensors, metadata)
+    telemetry_store = get_environment_telemetry()
+    zone = telemetry_store.add_reading(scope, moment, sensors, metadata)
     response: Dict[str, Any] = {"status": "ok", "zone": zone}
-    last_updated = ENVIRONMENT_TELEMETRY.last_updated()
+    last_updated = telemetry_store.last_updated()
     if last_updated:
         response["updatedAt"] = last_updated
-    env_snapshot = ENVIRONMENT_STATE.snapshot()
+    env_snapshot = get_environment_state().snapshot()
     if env_snapshot:
         response["env"] = env_snapshot
     return response
@@ -570,7 +609,7 @@ def _serialize_plug(device: Device) -> PlugResponse:
 
 def _collect_plug_payloads() -> List[Dict[str, Any]]:
     plugs: Dict[str, Dict[str, Any]] = {}
-    for device in REGISTRY.list():
+    for device in get_registry().list():
         if not _is_plug_device(device):
             continue
         plug_payload = _serialize_plug(device).dict(by_alias=True)
@@ -584,12 +623,14 @@ def _collect_plug_payloads() -> List[Dict[str, Any]]:
 
 def _resolve_fixture(device_identifier: str) -> tuple[str, LightingFixture]:
     candidate = device_identifier.strip()
-    if candidate in DEVICE_ID_MAP:
-        return candidate, DEVICE_ID_MAP[candidate]
-    if candidate in DEVICE_ID_BY_ADDRESS:
-        resolved = DEVICE_ID_BY_ADDRESS[candidate]
-        return resolved, DEVICE_ID_MAP[resolved]
-    for device_id, fixture in DEVICE_ID_MAP.items():
+    device_id_map = get_device_id_map()
+    if candidate in device_id_map:
+        return candidate, device_id_map[candidate]
+    device_id_by_address = get_device_id_by_address()
+    if candidate in device_id_by_address:
+        resolved = device_id_by_address[candidate]
+        return resolved, device_id_map[resolved]
+    for device_id, fixture in device_id_map.items():
         if fixture.name == candidate:
             return device_id, fixture
     raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Device not found")
@@ -637,14 +678,15 @@ def _apply_device_patch(fixture: LightingFixture, entry: Dict[str, Any]) -> None
             brightness = fixture.max_brightness
     if brightness is not None:
         try:
-            CONTROLLER.set_output(fixture.address, brightness)
+            get_controller().set_output(fixture.address, brightness)
         except ValueError:
             LOGGER.warning("Failed to apply lighting update for %s", fixture.address)
 
 
 def _serialize_device_data(device_id: str, fixture: LightingFixture) -> Dict[str, Any]:
-    stored = DEVICE_DATA.get(device_id) or {}
-    last_state = LIGHTING_STATE.get_state(fixture.address) or {}
+    device_store = get_device_data_store()
+    stored = device_store.get(device_id) or {}
+    last_state = get_lighting_state().get_state(fixture.address) or {}
     status_text = stored.get("status")
     if not status_text:
         brightness = last_state.get("brightness", 0)
@@ -682,11 +724,6 @@ def get_user_context(
     return UserContext(user_id=x_user_id or "system", groups=groups)
 
 
-# Live device discovery endpoint: orchestrates all protocol-specific discovery functions
-from fastapi.responses import JSONResponse
-from .device_discovery import discover_kasa_devices, discover_ble_devices, discover_mdns_devices
-
-
 @app.get("/sched")
 async def list_group_schedules(
     device_id: Optional[str] = Query(None, alias="deviceId"),
@@ -697,15 +734,16 @@ async def list_group_schedules(
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Access denied for group")
 
     schedules: List[GroupSchedule] = []
+    store = get_group_schedules()
     if device_id:
-        schedule = GROUP_SCHEDULES.get(device_id)
+        schedule = store.get(device_id)
         if schedule is not None:
             target_group = schedule.target_group()
             if target_group and not user.can_access_group(target_group):
                 raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Access denied for group")
             schedules = [schedule]
     else:
-        candidate_schedules = GROUP_SCHEDULES.list(group=group)
+        candidate_schedules = store.list(group=group)
         for entry in candidate_schedules:
             target_group = entry.target_group()
             if target_group and not user.can_access_group(target_group):
@@ -725,14 +763,15 @@ async def save_group_schedule(
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="User cannot access target group")
 
     schedule = request.to_group_schedule()
-    saved = GROUP_SCHEDULES.upsert(schedule)
+    saved = get_group_schedules().upsert(schedule)
     return {"status": "ok", "schedule": _serialize_group_schedule(saved)}
 
 
 @app.get("/plans")
 async def list_plans() -> Dict[str, Any]:
-    plans = PLAN_STORE.list()
-    metadata = PLAN_STORE.metadata()
+    store = get_plan_store()
+    plans = store.list()
+    metadata = store.metadata()
     response: Dict[str, Any] = {"status": "ok", "plans": plans}
     if metadata:
         response["metadata"] = metadata
@@ -741,11 +780,12 @@ async def list_plans() -> Dict[str, Any]:
 
 @app.get("/plans/{plan_key}")
 async def get_plan(plan_key: str) -> Dict[str, Any]:
-    plan = PLAN_STORE.get(plan_key)
+    store = get_plan_store()
+    plan = store.get(plan_key)
     if plan is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Plan not found")
     response: Dict[str, Any] = {"status": "ok", "planKey": plan_key, "plan": plan}
-    metadata = PLAN_STORE.metadata().get(plan_key)
+    metadata = store.metadata().get(plan_key)
     if metadata:
         response["metadata"] = metadata
     return response
@@ -767,14 +807,15 @@ async def publish_plans(payload: Dict[str, Any] = Body(...)) -> Dict[str, Any]:
         normalized[key.strip()] = value
     if not normalized:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="No valid plans supplied")
-    PLAN_STORE.upsert_many(normalized)
-    saved_plans = {key: PLAN_STORE.get(key) for key in normalized.keys() if PLAN_STORE.get(key) is not None}
+    store = get_plan_store()
+    store.upsert_many(normalized)
+    saved_plans = {key: store.get(key) for key in normalized.keys() if store.get(key) is not None}
     response: Dict[str, Any] = {
         "status": "ok",
         "saved": sorted(saved_plans.keys()),
         "plans": saved_plans,
     }
-    metadata = PLAN_STORE.metadata()
+    metadata = store.metadata()
     if metadata:
         response["metadata"] = {key: metadata[key] for key in saved_plans.keys() if key in metadata}
     return response
@@ -790,25 +831,28 @@ async def get_environment(
     identifier = (scope or zone_id or "").strip()
     response: Dict[str, Any] = {"status": "ok"}
 
+    telemetry_store = get_environment_telemetry()
+    state_store = get_environment_state()
+
     if identifier:
-        telemetry_zone = ENVIRONMENT_TELEMETRY.get_zone(identifier, range_seconds)
+        telemetry_zone = telemetry_store.get_zone(identifier, range_seconds)
         if telemetry_zone:
             response["zone"] = telemetry_zone
         else:
-            zone = ENVIRONMENT_STATE.get_zone(identifier)
+            zone = state_store.get_zone(identifier)
             if zone is not None:
                 response["zone"] = zone
             else:
                 # Instead of 404, return empty zone for missing scope
                 response["zone"] = {}
     else:
-        response["zones"] = ENVIRONMENT_TELEMETRY.list_zones(range_seconds)
+        response["zones"] = telemetry_store.list_zones(range_seconds)
 
-    env_snapshot = ENVIRONMENT_STATE.snapshot()
+    env_snapshot = state_store.snapshot()
     if env_snapshot:
         response["env"] = env_snapshot
 
-    last_updated = ENVIRONMENT_TELEMETRY.last_updated()
+    last_updated = telemetry_store.last_updated()
     if last_updated:
         response["updatedAt"] = last_updated
 
@@ -830,11 +874,13 @@ async def upsert_environment(payload: Dict[str, Any] = Body(...)) -> Dict[str, A
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail="No valid telemetry entries supplied",
             )
+        telemetry_store = get_environment_telemetry()
+        state_store = get_environment_state()
         response: Dict[str, Any] = {"status": "ok", "zones": ingested}
-        last_updated = ENVIRONMENT_TELEMETRY.last_updated()
+        last_updated = telemetry_store.last_updated()
         if last_updated:
             response["updatedAt"] = last_updated
-        env_snapshot = ENVIRONMENT_STATE.snapshot()
+        env_snapshot = state_store.snapshot()
         if env_snapshot:
             response["env"] = env_snapshot
         return response
@@ -850,9 +896,12 @@ async def upsert_environment(payload: Dict[str, Any] = Body(...)) -> Dict[str, A
 
     response: Dict[str, Any] = {"status": "ok"}
 
+    state_store = get_environment_state()
+    telemetry_store = get_environment_telemetry()
+
     rooms_payload = payload.get("rooms")
     if isinstance(rooms_payload, dict):
-        response["rooms"] = ENVIRONMENT_STATE.upsert_rooms(rooms_payload)
+        response["rooms"] = state_store.upsert_rooms(rooms_payload)
 
     processed_zone = False
     zone_identifier = payload.get("zoneId") or payload.get("zone_id")
@@ -862,7 +911,7 @@ async def upsert_environment(payload: Dict[str, Any] = Body(...)) -> Dict[str, A
         zone_payload.pop("zoneId", None)
         zone_payload.pop("zone_id", None)
         zone_payload.pop("zones", None)
-        response["zone"] = ENVIRONMENT_STATE.upsert_zone(zone_identifier.strip(), zone_payload)
+        response["zone"] = state_store.upsert_zone(zone_identifier.strip(), zone_payload)
         processed_zone = True
 
     zones_payload = payload.get("zones")
@@ -871,7 +920,7 @@ async def upsert_environment(payload: Dict[str, Any] = Body(...)) -> Dict[str, A
         for zone_key, zone_body in zones_payload.items():
             if not isinstance(zone_key, str) or not isinstance(zone_body, dict):
                 continue
-            merged_zones[zone_key] = ENVIRONMENT_STATE.upsert_zone(zone_key, zone_body)
+            merged_zones[zone_key] = state_store.upsert_zone(zone_key, zone_body)
         if merged_zones:
             response["zones"] = merged_zones
 
@@ -888,11 +937,11 @@ async def upsert_environment(payload: Dict[str, Any] = Body(...)) -> Dict[str, A
                 if key not in {"targets", "control", "metadata", "sensors"}
             }
             if extra:
-                ENVIRONMENT_STATE.merge(extra)
+                state_store.merge(extra)
         else:
-            ENVIRONMENT_STATE.merge(remaining)
+            state_store.merge(remaining)
 
-    snapshot = ENVIRONMENT_STATE.snapshot()
+    snapshot = state_store.snapshot()
     for key, value in snapshot.items():
         response.setdefault(key, value)
     return response
@@ -900,10 +949,11 @@ async def upsert_environment(payload: Dict[str, Any] = Body(...)) -> Dict[str, A
 @app.get("/discovery/devices", response_class=JSONResponse)
 async def discovery_devices() -> dict:
     """Perform a live scan for all supported device types and return fresh results."""
+    registry = get_registry()
     results = await asyncio.gather(
-        discover_kasa_devices(REGISTRY, timeout=5),
-        discover_ble_devices(REGISTRY, scan_duration=8.0),
-        discover_mdns_devices(REGISTRY, scan_duration=5.0),
+        discover_kasa_devices(registry, timeout=5),
+        discover_ble_devices(registry, scan_duration=8.0),
+        discover_mdns_devices(registry, scan_duration=5.0),
         return_exceptions=True
     )
     devices = []
@@ -939,12 +989,10 @@ def _parse_time(value: str) -> tuple[int, int]:
     return hour, minute
 
 
-def _schedule_from_request(request: ScheduleRequest) -> ScheduleModel:
-    from datetime import time
-
+def _schedule_from_request(request: ScheduleRequest) -> Schedule:
     start_hour, start_minute = _parse_time(request.start_time)
     end_hour, end_minute = _parse_time(request.end_time)
-    return ScheduleModel(
+    return Schedule(
         schedule_id=request.schedule_id,
         name=request.name,
         group=request.group,
@@ -1003,22 +1051,122 @@ async def _discovery_supervisor(
 
 
 @app.on_event("startup")
-async def _startup():
-    # 1) build singletons once
+async def _startup() -> None:
     if app.state.CONFIG is None:
-            app.state.CONFIG = load_config(env="production")
+        app.state.CONFIG = load_config(env="production")
+    config = get_config()
+
     if app.state.REGISTRY is None:
-        app.state.REGISTRY = DeviceRegistry()
+        registry = DeviceRegistry()
+        registry.upsert(
+            Device(
+                device_id="dehum-quest-155",
+                name="Quest Dual 155",
+                category="dehumidifier",
+                protocol="wifi",
+                online=True,
+                capabilities={
+                    "capacity": "155 pints/day",
+                    "control": "WiFi",
+                    "features": [
+                        "remote-monitoring",
+                        "app-control",
+                        "variable-speed-compressor",
+                    ],
+                    "power": "2100W",
+                    "vendor": "Quest",
+                    "model": "Quest Dual 155",
+                },
+                details={
+                    "description": "High-capacity commercial dehumidifier with WiFi connectivity and app control",
+                },
+            )
+        )
+        app.state.REGISTRY = registry
+
     if app.state.BUFFER is None:
         app.state.BUFFER = SensorEventBuffer(max_items=1000)
 
-    # 2) launch supervisor with the *actual* required args
+    if app.state.LIGHTING_STATE is None:
+        app.state.LIGHTING_STATE = LightingState(config.lighting_inventory or [])
+
+    if app.state.CONTROLLER is None:
+        app.state.CONTROLLER = LightingController(
+            config.lighting_inventory or [],
+            get_lighting_state(),
+        )
+
+    if app.state.SCHEDULES is None:
+        app.state.SCHEDULES = ScheduleStore()
+
+    if app.state.GROUP_SCHEDULES is None:
+        app.state.GROUP_SCHEDULES = GroupScheduleStore()
+
+    if app.state.PLAN_STORE is None:
+        app.state.PLAN_STORE = PlanStore()
+
+    if app.state.ENVIRONMENT_STATE is None:
+        app.state.ENVIRONMENT_STATE = EnvironmentStateStore()
+
+    if app.state.ENVIRONMENT_TELEMETRY is None:
+        app.state.ENVIRONMENT_TELEMETRY = EnvironmentTelemetryStore()
+
+    if app.state.DEVICE_DATA is None:
+        app.state.DEVICE_DATA = DeviceDataStore()
+
+    automation_created = False
+    if app.state.AUTOMATION is None:
+        app.state.AUTOMATION = AutomationEngine(get_controller(), get_schedules())
+        automation_created = True
+
+    fixture_inventory = list(config.lighting_inventory or [])
+    device_id_map: Dict[str, LightingFixture] = {}
+    device_id_by_address: Dict[str, str] = {}
+    device_store = get_device_data_store()
+    for index, fixture in enumerate(fixture_inventory, start=1):
+        device_id = str(index)
+        device_id_map[device_id] = fixture
+        device_id_by_address[fixture.address] = device_id
+        device_store.upsert(
+            device_id,
+            {
+                "status": "off",
+                "value": None,
+                "name": fixture.name,
+                "address": fixture.address,
+                "model": fixture.model,
+            },
+        )
+
+    app.state.FIXTURE_INVENTORY = fixture_inventory
+    app.state.DEVICE_ID_MAP = device_id_map
+    app.state.DEVICE_ID_BY_ADDRESS = device_id_by_address
+
+    zone_map = {fixture.name: fixture.address for fixture in fixture_inventory}
+    app.state.ZONE_MAP = zone_map
+
+    if zone_map and automation_created:
+        automation = get_automation()
+        target_lux = int(os.getenv("TARGET_LUX", "500"))
+        occupied_level = int(os.getenv("OCCUPIED_BRIGHTNESS", "80"))
+        vacant_level = int(os.getenv("VACANT_BRIGHTNESS", "30"))
+        automation.register_rule(lux_balancing_rule(zone_map, target_lux))
+        automation.register_rule(occupancy_rule(zone_map, occupied_level, vacant_level))
+
+    ai_service: Optional[SetupAssistService] = None
+    if config.ai_assist and config.ai_assist.enabled:
+        try:
+            ai_service = SetupAssistService(config.ai_assist)
+        except SetupAssistError as exc:
+            LOGGER.error("Failed to initialise AI Assist: %s", exc)
+    app.state.AI_ASSIST_SERVICE = ai_service
+
     if not app.state.discovery_task:
         app.state.discovery_task = asyncio.create_task(
             _discovery_supervisor(
-                app.state.CONFIG,
-                app.state.REGISTRY,
-                app.state.BUFFER,
+                get_config(),
+                get_registry(),
+                get_buffer(),
                 interval_sec=300,
                 timeout_sec=25,
             )
@@ -1040,7 +1188,7 @@ async def _shutdown():
 async def health() -> dict:
     return {
         "status": "ok",
-        "devices": len(REGISTRY.list()),
+        "devices": len(get_registry().list()),
         "timestamp": _iso_now(),
         "version": app.version,
     }
@@ -1053,10 +1201,11 @@ async def healthz() -> dict:
 
 @app.post("/ai/setup-assist", response_model=SetupAssistResponse)
 async def setup_assist(request: SetupAssistRequest) -> SetupAssistResponse:
-    if not AI_ASSIST_SERVICE:
+    service = get_ai_assist_service()
+    if not service:
         raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail="AI Assist not configured")
     try:
-        result = await AI_ASSIST_SERVICE.generate(
+        result = await service.generate(
             device_metadata=request.device_metadata,
             wizard_state=request.wizard_state,
             environment_context=request.environment_context,
@@ -1072,7 +1221,7 @@ async def setup_assist(request: SetupAssistRequest) -> SetupAssistResponse:
 
 @app.get("/devices", response_model=List[DeviceResponse])
 async def list_devices() -> List[DeviceResponse]:
-    return [DeviceResponse(**device.__dict__) for device in REGISTRY.list()]
+    return [DeviceResponse(**device.__dict__) for device in get_registry().list()]
 
 
 @app.get("/plugs")
@@ -1083,14 +1232,22 @@ async def list_plugs() -> Dict[str, Any]:
 
 @app.post("/plugs/discover")
 async def discover_plugs() -> Dict[str, Any]:
-    await full_discovery_cycle(CONFIG, REGISTRY, BUFFER, event_handler=AUTOMATION.publish)
+    await full_discovery_cycle(
+        get_config(),
+        get_registry(),
+        get_buffer(),
+        event_handler=get_automation().publish,
+    )
     plugs = _collect_plug_payloads()
     return {"ok": True, "refreshedAt": _iso_now(), "count": len(plugs), "plugs": plugs}
 
 
 @app.get("/api/devicedatas")
 async def list_device_data() -> Dict[str, Any]:
-    devices = [_serialize_device_data(device_id, fixture) for device_id, fixture in DEVICE_ID_MAP.items()]
+    devices = [
+        _serialize_device_data(device_id, fixture)
+        for device_id, fixture in get_device_id_map().items()
+    ]
     return {"data": devices, "count": len(devices), "updatedAt": _iso_now()}
 
 
@@ -1113,23 +1270,28 @@ async def update_device_data(device_id: str, request: DeviceDataPatch) -> Dict[s
     if estimated is not None:
         payload["estimatedBrightness"] = estimated
 
-    entry = DEVICE_DATA.upsert(resolved_id, payload)
+    entry = get_device_data_store().upsert(resolved_id, payload)
     _apply_device_patch(fixture, entry)
     return {"status": "ok", "device": _serialize_device_data(resolved_id, fixture)}
 
 
 @app.post("/discovery/run", status_code=status.HTTP_202_ACCEPTED)
 async def trigger_discovery() -> dict:
-    asyncio.create_task(full_discovery_cycle(CONFIG, REGISTRY, BUFFER, AUTOMATION.publish))
+    asyncio.create_task(
+        full_discovery_cycle(
+            get_config(),
+            get_registry(),
+            get_buffer(),
+            get_automation().publish,
+        )
+    )
     return {"status": "scheduled"}
 
 
 @app.get("/api/devices/kasa", response_model=dict)
 async def get_kasa_devices() -> dict:
     """Get TP-Link Kasa devices discovered on the network."""
-    from .device_discovery import discover_kasa_devices
-    
-    devices = await discover_kasa_devices(REGISTRY, timeout=5)
+    devices = await discover_kasa_devices(get_registry(), timeout=5)
     return {
         "devices": [device.__dict__ for device in devices],
         "protocol": "kasa-wifi",
@@ -1140,7 +1302,7 @@ async def get_kasa_devices() -> dict:
 @app.get("/api/devices/mqtt", response_model=dict) 
 async def get_mqtt_devices() -> dict:
     """Get MQTT devices that have been discovered."""
-    mqtt_devices = [device for device in REGISTRY.list() if device.protocol == "mqtt"]
+    mqtt_devices = [device for device in get_registry().list() if device.protocol == "mqtt"]
     return {
         "devices": [device.__dict__ for device in mqtt_devices],
         "protocol": "mqtt",
@@ -1151,9 +1313,7 @@ async def get_mqtt_devices() -> dict:
 @app.get("/api/devices/ble", response_model=dict)
 async def get_ble_devices() -> dict:
     """Get Bluetooth Low Energy devices discovered nearby."""
-    from .device_discovery import discover_ble_devices
-    
-    devices = await discover_ble_devices(REGISTRY, scan_duration=8.0)
+    devices = await discover_ble_devices(get_registry(), scan_duration=8.0)
     return {
         "devices": [device.__dict__ for device in devices],
         "protocol": "bluetooth-le", 
@@ -1164,9 +1324,7 @@ async def get_ble_devices() -> dict:
 @app.get("/api/devices/mdns", response_model=dict)
 async def get_mdns_devices() -> dict:
     """Get mDNS/Bonjour devices discovered on the network."""
-    from .device_discovery import discover_mdns_devices
-    
-    devices = await discover_mdns_devices(REGISTRY, scan_duration=5.0)
+    devices = await discover_mdns_devices(get_registry(), scan_duration=5.0)
     return {
         "devices": [device.__dict__ for device in devices],
         "protocol": "mdns",
@@ -1187,7 +1345,7 @@ async def list_fixtures() -> List[LightingFixtureResponse]:
             spectrum_min=fixture.spectrum_min,
             spectrum_max=fixture.spectrum_max,
         )
-        for fixture in CONFIG.lighting_inventory or []
+        for fixture in get_fixture_inventory()
     ]
 
 
@@ -1195,7 +1353,7 @@ async def list_fixtures() -> List[LightingFixtureResponse]:
 async def list_schedules(user: UserContext = Depends(get_user_context), group: Optional[str] = None) -> List[dict]:
     if group and not user.can_access_group(group):
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Access denied for group")
-    schedules = SCHEDULES.list(group)
+    schedules = get_schedules().list(group)
     result = []
     for schedule in schedules:
         if not user.can_access_group(schedule.group):
@@ -1219,15 +1377,16 @@ async def create_schedule(request: ScheduleRequest, user: UserContext = Depends(
     schedule = _schedule_from_request(request)
     if not user.can_access_group(schedule.group):
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="User cannot access target group")
-    AUTOMATION.apply_schedule(schedule, user)
+    get_automation().apply_schedule(schedule, user)
     return {"status": "created", "schedule_id": schedule.schedule_id}
 
 
 @app.get("/switchbot/{device_id}/status")
 async def switchbot_status(device_id: str) -> dict:
-    if not CONFIG.switchbot:
+    config = get_config()
+    if not config.switchbot:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="SwitchBot not configured")
-    status_payload = fetch_switchbot_status(device_id, CONFIG.switchbot)
+    status_payload = fetch_switchbot_status(device_id, config.switchbot)
     if status_payload is None:
         raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail="Failed to fetch device status")
     return status_payload
@@ -1235,14 +1394,12 @@ async def switchbot_status(device_id: str) -> dict:
 
 @app.post("/lighting/failsafe")
 async def trigger_failsafe() -> dict:
-    AUTOMATION.enforce_fail_safe()
+    get_automation().enforce_fail_safe()
     return {"status": "ok"}
 
 
 
 # --- STUB ENDPOINTS FOR FRONTEND 404s ---
-from fastapi.responses import JSONResponse
-
 @app.post("/api/device/command")
 async def device_command_stub(payload: dict) -> JSONResponse:
     """Stub for device command endpoint. Returns success."""
@@ -1299,7 +1456,6 @@ async def post_rooms_stub(payload: dict) -> JSONResponse:
 
 
 # --- STUB ENDPOINTS FOR MISSING FRONTEND CALLS ---
-from fastapi.responses import JSONResponse
 
 @app.get("/rules")
 async def get_rules_stub() -> JSONResponse:
