@@ -953,33 +953,43 @@ def _schedule_from_request(request: ScheduleRequest) -> ScheduleModel:
     )
 
 
-async def _discovery_loop() -> None:
+
+
+# --- Refactored: Discovery supervisor for background execution ---
+discovery_task = None
+
+async def _discovery_supervisor():
     interval = int(os.getenv("DISCOVERY_INTERVAL", "300"))
-    LOGGER.info("Starting discovery loop with interval %s", interval)
-    while True:
-        try:
-            await full_discovery_cycle(CONFIG, REGISTRY, BUFFER, event_handler=AUTOMATION.publish)
-        except Exception as exc:  # pylint: disable=broad-except
-            LOGGER.exception("Discovery cycle failed: %s", exc)
-        await asyncio.sleep(interval)
+    LOGGER.info("Starting discovery supervisor with interval %s", interval)
+    try:
+        # Initial run, off-thread if blocking
+        await asyncio.to_thread(full_discovery_cycle, CONFIG, REGISTRY, BUFFER, event_handler=AUTOMATION.publish)
+        while True:
+            await asyncio.sleep(interval)
+            await asyncio.to_thread(full_discovery_cycle, CONFIG, REGISTRY, BUFFER, event_handler=AUTOMATION.publish)
+    except asyncio.CancelledError:
+        LOGGER.info("Discovery supervisor cancelled.")
+        pass
+
 
 
 @app.on_event("startup")
-async def startup() -> None:
-    global _AUTOMATION_TASK, _DISCOVERY_TASK
+async def _startup():
+    global _AUTOMATION_TASK, discovery_task
     _AUTOMATION_TASK = asyncio.create_task(AUTOMATION.start())
-    _DISCOVERY_TASK = asyncio.create_task(_discovery_loop())
-    await full_discovery_cycle(CONFIG, REGISTRY, BUFFER, event_handler=AUTOMATION.publish)
+    # Fire-and-forget background task; don't await here
+    discovery_task = asyncio.create_task(_discovery_supervisor())
+
 
 
 @app.on_event("shutdown")
-async def shutdown() -> None:
+async def _shutdown():
     await AUTOMATION.stop()
-    for task in (_AUTOMATION_TASK, _DISCOVERY_TASK):
-        if task:
-            task.cancel()
-            with contextlib.suppress(asyncio.CancelledError):
-                await task
+    global discovery_task
+    if discovery_task:
+        discovery_task.cancel()
+        with contextlib.suppress(Exception):
+            await discovery_task
 
 
 @app.get("/health")
@@ -1184,5 +1194,97 @@ async def trigger_failsafe() -> dict:
     AUTOMATION.enforce_fail_safe()
     return {"status": "ok"}
 
+
+
+# --- STUB ENDPOINTS FOR FRONTEND 404s ---
+from fastapi.responses import JSONResponse
+
+@app.post("/api/device/command")
+async def device_command_stub(payload: dict) -> JSONResponse:
+    """Stub for device command endpoint. Returns success."""
+    return JSONResponse({"status": "ok", "message": "Device command received (stub)", "payload": payload})
+
+@app.get("/calibration")
+async def get_calibration_stub() -> JSONResponse:
+    """Stub for calibration GET. Returns empty calibration data."""
+    return JSONResponse({"devices": {}})
+
+@app.post("/calibration")
+async def post_calibration_stub(payload: dict) -> JSONResponse:
+    """Stub for calibration POST. Returns the posted multipliers."""
+    device_id = payload.get("deviceId")
+    multipliers = payload.get("multipliers", {})
+    return JSONResponse({"deviceId": device_id, "multipliers": multipliers})
+
+
+# --- ADDITIONAL STUB ENDPOINTS FOR FRONTEND 404s ---
+@app.post("/api/kasa/discover")
+async def kasa_discover_stub(payload: dict) -> JSONResponse:
+    """Stub for Kasa device discovery."""
+    return JSONResponse({"devices": [], "message": "Kasa discovery stub"})
+
+@app.post("/api/kasa/configure")
+async def kasa_configure_stub(payload: dict) -> JSONResponse:
+    """Stub for Kasa device configuration."""
+    return JSONResponse({"status": "ok", "message": "Kasa configure stub", "payload": payload})
+
+@app.post("/api/switchbot/discover")
+async def switchbot_discover_stub(payload: dict) -> JSONResponse:
+    """Stub for SwitchBot device discovery."""
+    return JSONResponse({"devices": [], "message": "SwitchBot discovery stub"})
+
+@app.get("/farm")
+async def get_farm_stub() -> JSONResponse:
+    """Stub for GET /farm."""
+    return JSONResponse({"farm": {}, "message": "Farm GET stub"})
+
+@app.post("/farm")
+async def post_farm_stub(payload: dict) -> JSONResponse:
+    """Stub for POST /farm."""
+    return JSONResponse({"status": "ok", "message": "Farm POST stub", "payload": payload})
+
+@app.get("/data/rooms.json")
+async def get_rooms_stub() -> JSONResponse:
+    """Stub for GET /data/rooms.json."""
+    return JSONResponse({"rooms": [], "message": "Rooms GET stub"})
+
+@app.post("/data/rooms.json")
+async def post_rooms_stub(payload: dict) -> JSONResponse:
+    """Stub for POST /data/rooms.json."""
+    return JSONResponse({"status": "ok", "message": "Rooms POST stub", "payload": payload})
+
+
+# --- STUB ENDPOINTS FOR MISSING FRONTEND CALLS ---
+from fastapi.responses import JSONResponse
+
+@app.get("/rules")
+async def get_rules_stub() -> JSONResponse:
+    """Stub for GET /rules."""
+    return JSONResponse({"rules": [], "message": "Rules GET stub"})
+
+@app.post("/rules")
+async def post_rules_stub(payload: dict) -> JSONResponse:
+    """Stub for POST /rules."""
+    return JSONResponse({"status": "ok", "message": "Rules POST stub", "payload": payload})
+
+@app.patch("/rules/{rule_id}")
+async def patch_rules_stub(rule_id: str, payload: dict) -> JSONResponse:
+    """Stub for PATCH /rules/:id."""
+    return JSONResponse({"status": "ok", "message": f"Rules PATCH stub for {rule_id}", "payload": payload})
+
+@app.delete("/rules/{rule_id}")
+async def delete_rules_stub(rule_id: str) -> JSONResponse:
+    """Stub for DELETE /rules/:id."""
+    return JSONResponse({"status": "ok", "message": f"Rules DELETE stub for {rule_id}"})
+
+@app.get("/weather")
+async def get_weather_stub() -> JSONResponse:
+    """Stub for GET /weather."""
+    return JSONResponse({"weather": {}, "message": "Weather GET stub"})
+
+@app.get("/devicedatas")
+async def get_devicedatas_stub() -> JSONResponse:
+    """Stub for GET /devicedatas (non-API path)."""
+    return JSONResponse({"data": [], "message": "Devicedatas GET stub"})
 
 __all__ = ["app"]
