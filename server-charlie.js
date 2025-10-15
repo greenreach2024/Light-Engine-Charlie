@@ -5066,45 +5066,107 @@ async function fetchSwitchBotDeviceStatus(deviceId, { force = false } = {}) {
 }
 
 app.get('/switchbot/devices', async (req, res) => {
-  const token = process.env.SWITCHBOT_TOKEN || '';
-  if (!token.trim()) {
-    return res.status(400).json({ error: 'missing_switchbot_token' });
+  if (!ensureSwitchBotConfigured()) {
+    const error = new Error('SwitchBot credentials are not configured');
+    const meta = buildSwitchBotMeta({
+      fromCache: Boolean(switchBotDevicesCache.payload),
+      stale: Boolean(switchBotDevicesCache.payload),
+      fetchedAt: switchBotDevicesCache.fetchedAt,
+      error
+    });
+    return res.status(503).json({
+      statusCode: 503,
+      message: error.message,
+      meta
+    });
   }
 
+  const force = ['1', 'true', 'yes'].includes(String(req.query.refresh || '').toLowerCase());
+
   try {
-    const response = await fetch('https://api.switch-bot.com/v1.1/devices', {
-      headers: {
-        Authorization: token,
-        'Content-Type': 'application/json'
-      },
-      signal: AbortSignal.timeout(5000)
-    });
+    const result = await fetchSwitchBotDevices({ force });
+    const payload = result?.payload || {};
+    const meta = buildSwitchBotMeta(result);
+    const responseBody = {
+      ...payload,
+      meta
+    };
 
-    if (!response.ok) {
-      const text = await response.text();
-      throw new Error(`upstream_error:${response.status}:${text}`);
-    }
+    const cacheStatus = result.fromCache ? 'hit' : 'miss';
+    const cacheFreshness = result.stale ? 'stale' : 'fresh';
 
-    const txt = await response.text();
     try {
+      const txt = JSON.stringify(responseBody);
       ensureDataDir();
       fs.mkdirSync(path.dirname(SWITCHBOT_CACHE_PATH), { recursive: true });
       fs.writeFileSync(SWITCHBOT_CACHE_PATH, txt);
+      res.set('X-Cache', cacheStatus).set('X-Cache-Freshness', cacheFreshness).type('application/json').send(txt);
     } catch (writeError) {
       console.warn('[switchbot] Failed to persist cache:', writeError.message || writeError);
+      res
+        .set('X-Cache', cacheStatus)
+        .set('X-Cache-Freshness', cacheFreshness)
+        .json(responseBody);
     }
-    res.set('X-Cache', 'miss').type('application/json').send(txt);
   } catch (error) {
+    console.error('SwitchBot device list error:', error);
+
+    const status = error.status === 401
+      ? 401
+      : error.code === 'SWITCHBOT_TIMEOUT'
+        ? 504
+        : error.status === 429
+          ? 429
+          : error.code === 'SWITCHBOT_NO_AUTH'
+            ? 503
+            : 502;
+
+    // Prefer in-memory cache if available
+    if (switchBotDevicesCache.payload) {
+      const meta = buildSwitchBotMeta({
+        payload: switchBotDevicesCache.payload,
+        fetchedAt: switchBotDevicesCache.fetchedAt,
+        fromCache: true,
+        stale: true,
+        error
+      });
+      const fallbackBody = {
+        ...switchBotDevicesCache.payload,
+        meta
+      };
+      res
+        .set('X-Cache', 'hit')
+        .set('X-Cache-Freshness', 'stale')
+        .status(200)
+        .json(fallbackBody);
+      return;
+    }
+
     if (fs.existsSync(SWITCHBOT_CACHE_PATH)) {
       try {
         const cached = fs.readFileSync(SWITCHBOT_CACHE_PATH, 'utf8');
-        res.set('X-Cache', 'hit').type('application/json').send(cached);
+        res
+          .set('X-Cache', 'hit')
+          .set('X-Cache-Freshness', 'stale')
+          .type('application/json')
+          .send(cached);
         return;
       } catch (readError) {
         console.warn('[switchbot] Failed to read cache file:', readError.message || readError);
       }
     }
-    res.status(502).json({ error: 'switchbot_proxy_error', detail: String(error) });
+
+    const meta = buildSwitchBotMeta({
+      fromCache: false,
+      stale: false,
+      fetchedAt: 0,
+      error
+    });
+    res.status(status).json({
+      statusCode: status,
+      message: error.message || 'Failed to fetch devices from SwitchBot API',
+      meta
+    });
   }
 });
 

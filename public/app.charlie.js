@@ -2896,9 +2896,11 @@ function interpretSwitchBotPayload(payload) {
   return { rawDevices, devices, summary, summaryMeta, meta, statusCode, message };
 }
 
-async function loadSwitchBotDevices() {
+async function loadSwitchBotDevices(options = {}) {
+  const refresh = options && options.refresh === true;
   try {
-    const response = await fetch('/switchbot/devices');
+    const url = refresh ? '/switchbot/devices?refresh=1' : '/switchbot/devices';
+    const response = await fetch(url);
     const cache = {
       status: response.headers?.get?.('X-Cache') || null,
       freshness: response.headers?.get?.('X-Cache-Freshness') || null
@@ -10424,7 +10426,7 @@ function openSwitchBotManager() {
 }
 
 async function refreshSwitchBotDevices() {
-  const result = await loadSwitchBotDevices();
+  const result = await loadSwitchBotDevices({ refresh: true });
 
   if (!result) return;
 
