@@ -1,6 +1,8 @@
 
 
 import express from "express";
+// --- Feature flag: ALLOW_MOCKS (default OFF) ---
+const ALLOW_MOCKS = String(process.env.ALLOW_MOCKS || 'false').toLowerCase() === 'true';
 import { createProxyMiddleware } from "http-proxy-middleware";
 import fs from "fs";
 import path from "path";
@@ -5198,7 +5200,7 @@ app.get("/api/switchbot/devices", asyncHandler(async (req, res) => {
     }
     
     // If no cached data available but credentials are valid, return rate limit error
-    // Don't use fallback mock data - let the client know to retry later
+  // Don't use fallback mock data unless ALLOW_MOCKS is true
     if (error.code === 'SWITCHBOT_RATE_LIMITED' || error.status === 429) {
       console.log('[switchbot] Rate limited - returning rate limit status (no mock fallback)');
       return res.status(429).json({
@@ -7796,7 +7798,7 @@ app.get('/discovery/devices', async (req, res) => {
       startedAt, 
       completedAt: new Date().toISOString(), 
       devices: [], 
-      error: 'Live device discovery failed. No mock devices available.',
+      error: ALLOW_MOCKS ? 'Live device discovery failed. (Mocks allowed, but none loaded)' : 'Live device discovery failed. No mock devices available.',
       message: 'Please check network connectivity and device configuration.'
     });
   }

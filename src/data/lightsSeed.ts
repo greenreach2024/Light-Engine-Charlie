@@ -27,45 +27,7 @@ const rs485Comm: CommType = "RS485";
 const dcComm: CommType = "OTHER";
 
 export const LIGHTS_SEED: LightDefinition[] = [
-  {
-    id: "grow3-toplight-mh-300",
-    brand: "Grow3",
-    model: "TopLight MH Model 300W",
-    productName: "TopLight MH Model 300W",
-    dynamicSpectrum: true,
-    channels: ["Red", "Blue"],
-    maxPowerW: 300,
-    inputPowerSpec: "100–277 VAC 50/60Hz",
-    efficacy_umolPerJ: 2.59,
-    ppf_umolPerS: 709,
-    cct_or_peak: "400–700 nm adjustable red:blue ratio (0.68:1 factory)",
-    commType: managedComm,
-    controlMethod: "Light Engine / Lynx3 / SmarTune",
-    setupGuideId: managedControl,
-    supportBadge: managedBadge,
-    notes:
-      "Connected via Light Engine (managed). No setup changes will be made.",
-    warrantyYears: 5,
-    ipRating: "IP66",
-    lifetimeHoursL70: 50000,
-    manufacturer: "Grow3"
-  },
-  {
-    id: "example-wifi-480",
-    brand: "ExampleCo",
-    model: "XR-480 WiFi",
-    dynamicSpectrum: true,
-    channels: ["CW", "WW", "BL", "RD"],
-    maxPowerW: 480,
-    inputPowerSpec: "100–277 VAC",
-    efficacy_umolPerJ: 2.7,
-    ppf_umolPerS: 1296,
-    cct_or_peak: "CW/WW + 450 nm + 660 nm",
-    commType: wifiComm,
-    controlMethod: "Vendor API",
-    setupGuideId: wifiControl,
-    supportBadge: wifiBadge
-  },
+  // Removed demo/mock lights (Light-003, Light-004, Light-005, GRUE30, GRAL33, ExampleCo, etc.)
   {
     id: "analog-010v-320",
     brand: "AnalogLite",

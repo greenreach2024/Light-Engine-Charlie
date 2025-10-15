@@ -741,29 +741,21 @@ function collectCandidatesForSelection(selectedRoom, selectedZone) {
 // --- Split Assigned vs Ungrouped WITHOUT using group name ------------------
 
 function computeRostersForSelection(selectedRoom, selectedZone) {
-  const candidates = collectCandidatesForSelection(selectedRoom, selectedZone);
-  if (!candidates.length) return { assigned: [], ungrouped: [] };
-
-  const assignedIds = new Set();
-  (STATE?.groups || []).forEach((group) => {
-    (group?.lights || []).forEach((light) => {
-      const id = typeof light === 'string' ? String(light).trim() : stableLightId(light);
-      if (!id) return;
-      const meta = typeof light === 'string' ? {} : light;
-      if (isForSelection(meta, selectedRoom, selectedZone)) {
-        assignedIds.add(id);
-      }
-    });
-  });
-
-  const assigned = [];
-  const ungrouped = [];
-  candidates.forEach((candidate) => {
-    if (!candidate?.id) return;
-    (assignedIds.has(candidate.id) ? assigned : ungrouped).push(candidate);
-  });
-
-  return { assigned, ungrouped };
+  // Compute assigned/unassigned from live devices and groups only
+  const liveDevices = Array.isArray(STATE.devices) ? STATE.devices : [];
+  const groups = Array.isArray(STATE.groups) ? STATE.groups : [];
+  const map = new Map(liveDevices.map(d => [d.id, d]));
+  const assigned = new Set(groups.flatMap(g => (Array.isArray(g.lights) ? g.lights.map(l => typeof l === 'string' ? l : l.id) : [])));
+  const assignedArr = [];
+  const unassignedArr = [];
+  for (const device of map.values()) {
+    if (assigned.has(device.id)) {
+      assignedArr.push(device);
+    } else {
+      unassignedArr.push(device);
+    }
+  }
+  return { assigned: assignedArr, ungrouped: unassignedArr };
 }
 
 // --- When adding a light to a group, stamp roomId/zone explicitly ----------
@@ -8206,7 +8198,7 @@ class RoomWizard {
       kind: 'warn', 
       icon: '🚫' 
     });
-    this.data.devices = [];
+    // No-op: do not inject any demo devices
   }
 
   setupLiveSwitchBotConfiguration() {

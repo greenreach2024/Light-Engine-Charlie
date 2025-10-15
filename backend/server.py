@@ -6,6 +6,7 @@ import asyncio
 import contextlib
 import logging
 import os
+ALLOW_MOCKS = os.getenv("ALLOW_MOCKS", "false").lower() == "true"
 from datetime import date, datetime, time, timezone
 from typing import Any, Dict, List, Optional
 
@@ -795,10 +796,11 @@ async def get_environment(
             response["zone"] = telemetry_zone
         else:
             zone = ENVIRONMENT_STATE.get_zone(identifier)
-            if zone is None:
-                response["zone"] = {}
-            else:
-                response["zone"] = zone
+                if zone is not None:
+                    response["zone"] = zone
+                else:
+                    # Instead of 404, return empty zone for missing scope
+                    response["zone"] = {}
     else:
         response["zones"] = ENVIRONMENT_TELEMETRY.list_zones(range_seconds)
 
