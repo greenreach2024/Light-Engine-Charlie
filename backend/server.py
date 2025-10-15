@@ -796,8 +796,9 @@ async def get_environment(
         else:
             zone = ENVIRONMENT_STATE.get_zone(identifier)
             if zone is None:
-                raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Scope not found")
-            response["zone"] = zone
+                response["zone"] = {}
+            else:
+                response["zone"] = zone
     else:
         response["zones"] = ENVIRONMENT_TELEMETRY.list_zones(range_seconds)
 
