@@ -1,0 +1,28 @@
+{
+  "meta": {
+    "source": "static-demo",
+    "generated": "2024-01-01T00:00:00Z"
+  },
+  "data": [
+    {
+      "id": "demo-light-001",
+      "deviceName": "Demo Grow Light",
+      "vendor": "Acme",
+      "model": "Spectrum Pro",
+      "type": "grow-light",
+      "online": true,
+      "group": "North Greenhouse",
+      "spectrum": { "cw": 60, "ww": 20, "b": 10, "r": 10 }
+    },
+    {
+      "id": "demo-light-002",
+      "deviceName": "Demo Veg Light",
+      "vendor": "GrowCo",
+      "model": "Veg 500",
+      "type": "grow-light",
+      "online": true,
+      "group": "Propagation",
+      "spectrum": { "cw": 40, "ww": 40, "b": 10, "r": 10 }
+    }
+  ]
+}

@@ -1,0 +1,12 @@
+{
+  "rules": [
+    {
+      "id": "rule-demo-1",
+      "name": "Morning warm-up",
+      "description": "Bring veg room lights to 60% at sunrise.",
+      "targets": ["demo-light-001"],
+      "schedule": "0 6 * * *",
+      "actions": [{ "set": { "cw": 50, "ww": 40, "b": 5, "r": 5 } }]
+    }
+  ]
+}

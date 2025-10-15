@@ -2695,6 +2695,12 @@ async function fetchPlansDocument() {
     return await resp.json();
   } catch (error) {
     console.warn('[plans] Failed to fetch /plans', error);
+    try {
+      const fallback = await loadJSON('./data/plans.json', { plans: [] });
+      if (fallback) return fallback;
+    } catch (fallbackError) {
+      console.warn('[plans] Fallback load failed', fallbackError);
+    }
     return null;
   }
 }
@@ -2706,6 +2712,12 @@ async function fetchSchedulesDocument() {
     return await resp.json();
   } catch (error) {
     console.warn('[sched] Failed to fetch /sched', error);
+    try {
+      const fallback = await loadJSON('./data/schedules.json', { schedules: [] });
+      if (fallback) return fallback;
+    } catch (fallbackError) {
+      console.warn('[sched] Fallback load failed', fallbackError);
+    }
     return null;
   }
 }
@@ -4065,6 +4077,36 @@ class FarmWizard {
       
     } catch (error) {
       console.error('Weather loading error:', error);
+      try {
+        const fallback = await loadJSON('./data/weather.json', null);
+        if (fallback?.ok && fallback?.current) {
+          const weather = fallback.current;
+          const tempF = Math.round(weather.temperature_f);
+          const tempC = Math.round(weather.temperature_c);
+          const humidity = Math.round(weather.humidity || 0);
+          const windSpeed = Math.round(weather.wind_speed || 0);
+          weatherContent.innerHTML = `
+            <div class="weather-row">
+              <span class="weather-temp">${tempF}°F (${tempC}°C)</span>
+              <span class="weather-description">${escapeHtml(weather.description || '')}</span>
+            </div>
+            <div class="weather-row">
+              <span>Humidity:</span>
+              <span class="weather-value">${humidity}%</span>
+            </div>
+            <div class="weather-row">
+              <span>Wind Speed:</span>
+              <span class="weather-value">${windSpeed} km/h</span>
+            </div>
+            <div style="margin-top: 8px; font-size: 12px; color: #666;">
+              Updated: ${new Date(weather.last_updated).toLocaleTimeString()}
+            </div>
+          `;
+          return;
+        }
+      } catch (fallbackError) {
+        console.warn('Weather fallback load failed', fallbackError);
+      }
       weatherContent.innerHTML = `
         <div style="color: #EF4444; font-size: 14px;">
           ⚠️ Unable to load weather data
@@ -8430,13 +8472,26 @@ async function loadAllData() {
       copy.online = copy.online !== false;
       return copy;
     });
-    
+
+    if (!STATE.devices.length) {
+      try {
+        const fallbackDevicesDoc = await loadJSON('./data/devicedatas.json', { data: [] });
+        const fallbackDevices = unwrapDeviceList(fallbackDevicesDoc);
+        if (Array.isArray(fallbackDevices) && fallbackDevices.length) {
+          STATE.devices = fallbackDevices;
+          STATE.devicesMeta = fallbackDevicesDoc?.meta || { source: 'static-data' };
+        }
+      } catch (error) {
+        console.warn('[devices] No static fallback inventory available', error);
+      }
+    }
+
     // Load static data files
-    const [groups, schedules, plans, environment, calibrations, spdLibrary, deviceMeta, deviceKB, equipmentKB, deviceManufacturers, farm, rooms, switchbotDevices] = await Promise.all([
+    const [groupsDoc, schedulesDocRaw, plansDocRaw, envDocRaw, calibrationsDoc, spdLibraryDoc, deviceMetaDoc, deviceKB, equipmentKB, deviceManufacturersDoc, farmDoc, roomsDoc, switchbotDevicesDoc] = await Promise.all([
       loadJSON('./data/groups.json', { groups: [] }),
       fetchSchedulesDocument(),
       fetchPlansDocument(),
-      safeApi('/env', { zones: [] }),
+      safeApi('/env', null),
       loadJSON('./data/calibration.json', { calibrations: [] }),
       loadJSON('./data/spd-library.json', null),
       loadJSON('./data/device-meta.json', { devices: {} }),
@@ -8448,32 +8503,42 @@ async function loadAllData() {
       loadJSON('./data/switchbot-devices.json', { devices: [], summary: null })
     ]);
 
-    STATE.groups = groups?.groups || [];
-    const schedulesDoc = (schedulesDocRaw && typeof schedulesDocRaw === 'object') ? schedulesDocRaw : null;
+    STATE.groups = groupsDoc?.groups || [];
+    let schedulesDoc = (schedulesDocRaw && typeof schedulesDocRaw === 'object') ? schedulesDocRaw : null;
+    if (!schedulesDoc) {
+      schedulesDoc = await loadJSON('./data/schedules.json', { schedules: [] });
+    }
     STATE.scheduleDocument = schedulesDoc;
     STATE.schedules = Array.isArray(schedulesDoc?.schedules) ? schedulesDoc.schedules : [];
-    const plansDoc = (plansDocRaw && typeof plansDocRaw === 'object') ? plansDocRaw : null;
+    let plansDoc = (plansDocRaw && typeof plansDocRaw === 'object') ? plansDocRaw : null;
+    if (!plansDoc) {
+      plansDoc = await loadJSON('./data/plans.json', { plans: [] });
+    }
     STATE.planDocumentInfo = plansDoc;
     STATE.plans = Array.isArray(plansDoc?.plans) ? plansDoc.plans : [];
     updatePlansStatusIndicator({ doc: STATE.planDocumentInfo, plans: STATE.plans });
-    STATE.environment = environment?.zones || [];
-    STATE.calibrations = calibrations?.calibrations || [];
+    let environmentDoc = (envDocRaw && typeof envDocRaw === 'object') ? envDocRaw : null;
+    if (!environmentDoc || !Array.isArray(environmentDoc?.zones)) {
+      environmentDoc = await loadJSON('./data/env.json', { zones: [] });
+    }
+    STATE.environment = environmentDoc?.zones || [];
+    STATE.calibrations = calibrationsDoc?.calibrations || [];
     STATE._calibrationCache = new Map();
-    STATE.spdLibrary = normalizeSpdLibrary(spdLibrary);
+    STATE.spdLibrary = normalizeSpdLibrary(spdLibraryDoc);
     if (STATE.spdLibrary) {
       console.log('✅ Loaded SPD library:', STATE.spdLibrary.wavelengths.length, 'bins');
     } else {
       console.warn('⚠️ SPD library missing or invalid');
     }
     hydrateDeviceDriverState();
-    STATE.deviceMeta = deviceMeta?.devices || {};
+    STATE.deviceMeta = deviceMetaDoc?.devices || {};
     normalizeGroupsInState();
-    STATE.switchbotDevices = switchbotDevices?.devices || [];
-    STATE.switchbotSummary = switchbotDevices?.summary || summarizeSwitchBotDevices(STATE.switchbotDevices) || {};
-    const rawFarm = farm || (() => { try { return JSON.parse(localStorage.getItem('gr.farm') || 'null'); } catch { return null; } })() || {};
+    STATE.switchbotDevices = switchbotDevicesDoc?.devices || [];
+    STATE.switchbotSummary = switchbotDevicesDoc?.summary || summarizeSwitchBotDevices(STATE.switchbotDevices) || {};
+    const rawFarm = farmDoc || (() => { try { return JSON.parse(localStorage.getItem('gr.farm') || 'null'); } catch { return null; } })() || {};
     STATE.farm = normalizeFarmDoc(rawFarm);
     try { if (STATE.farm && Object.keys(STATE.farm).length) localStorage.setItem('gr.farm', JSON.stringify(STATE.farm)); } catch {}
-    STATE.rooms = rooms?.rooms || [];
+    STATE.rooms = roomsDoc?.rooms || [];
   if (deviceKB && Array.isArray(deviceKB.fixtures)) {
     // Assign a unique id to each fixture if missing
     deviceKB.fixtures.forEach(fixture => {
@@ -10011,8 +10076,14 @@ async function loadPreAutomationRules() {
     const payload = await api('/rules');
     STATE.preAutomationRules = Array.isArray(payload?.rules) ? payload.rules : [];
   } catch (error) {
-    STATE.preAutomationRules = [];
     console.warn('Failed to load automation rules', error);
+    try {
+      const fallback = await loadJSON('./data/rules.json', { rules: [] });
+      STATE.preAutomationRules = Array.isArray(fallback?.rules) ? fallback.rules : [];
+    } catch (fallbackError) {
+      console.warn('Automation rules fallback load failed', fallbackError);
+      STATE.preAutomationRules = [];
+    }
   }
 }
 
@@ -10029,6 +10100,16 @@ async function loadSmartPlugs({ silent } = {}) {
       setSmartPlugsAlert(`Smart plug refresh failed: ${error.message}`, 'error');
     }
     console.warn('Failed to load smart plugs', error);
+    try {
+      const fallback = await loadJSON('./data/smart-plugs.json', { plugs: [] });
+      STATE.smartPlugs = Array.isArray(fallback?.plugs) ? fallback.plugs : [];
+      if (!silent) {
+        setSmartPlugsAlert(`Showing ${STATE.smartPlugs.length} demo smart plug${STATE.smartPlugs.length === 1 ? '' : 's'}.`, 'info');
+      }
+      renderSmartPlugs();
+    } catch (fallbackError) {
+      console.warn('Smart plug fallback load failed', fallbackError);
+    }
   }
 }
 
@@ -10245,6 +10326,18 @@ async function reloadEnvironment() {
         envSnapshot = envSnapshot || fallback?.env || null;
         if (Array.isArray(fallback?.zones)) zones = fallback.zones;
         else if (fallback?.zone) zones = [fallback.zone];
+      }
+    }
+
+    if (!zones.length) {
+      try {
+        const fallback = await loadJSON('./data/env.json', { zones: [] });
+        if (!envSnapshot && fallback?.env) envSnapshot = fallback.env;
+        if (Array.isArray(fallback?.zones) && fallback.zones.length) {
+          zones = fallback.zones;
+        }
+      } catch (fallbackError) {
+        console.warn('[env] Static fallback load failed', fallbackError);
       }
     }
 
