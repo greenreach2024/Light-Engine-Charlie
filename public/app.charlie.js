@@ -423,6 +423,43 @@ async function sendGrow3Command(id, payload, row, apiBase) {
 
 // Modal open/close wiring
 document.addEventListener('DOMContentLoaded', function() {
+  // Wire up Search Kasa and Search Shelly buttons for future testing
+  const btnSearchKasa = document.getElementById('btnSearchKasa');
+  if (btnSearchKasa) {
+    btnSearchKasa.onclick = async function() {
+      window.showToast?.({ title: 'Search Kasa', msg: 'Searching for Kasa devices…', kind: 'info', icon: '🔍' });
+      try {
+        const resp = await fetch(window.API_BASE + '/plugs/search/kasa', { method: 'POST', headers: { 'Content-Type': 'application/json' } });
+        const data = await resp.json();
+        if (data.ok) {
+          window.showToast?.({ title: 'Kasa Search', msg: `Found ${data.plugs.length} Kasa device(s).`, kind: 'success', icon: '✅' });
+          console.log('Kasa devices:', data.plugs);
+        } else {
+          window.showToast?.({ title: 'Kasa Search Error', msg: data.error || 'Unknown error', kind: 'error', icon: '❌' });
+        }
+      } catch (err) {
+        window.showToast?.({ title: 'Kasa Search Error', msg: err.message, kind: 'error', icon: '❌' });
+      }
+    };
+  }
+  const btnSearchShelly = document.getElementById('btnSearchShelly');
+  if (btnSearchShelly) {
+    btnSearchShelly.onclick = async function() {
+      window.showToast?.({ title: 'Search Shelly', msg: 'Searching for Shelly devices…', kind: 'info', icon: '🔍' });
+      try {
+        const resp = await fetch(window.API_BASE + '/plugs/search/shelly', { method: 'POST', headers: { 'Content-Type': 'application/json' } });
+        const data = await resp.json();
+        if (data.ok) {
+          window.showToast?.({ title: 'Shelly Search', msg: `Found ${data.plugs.length} Shelly device(s).`, kind: 'success', icon: '✅' });
+          console.log('Shelly devices:', data.plugs);
+        } else {
+          window.showToast?.({ title: 'Shelly Search Error', msg: data.error || 'Unknown error', kind: 'error', icon: '❌' });
+        }
+      } catch (err) {
+        window.showToast?.({ title: 'Shelly Search Error', msg: err.message, kind: 'error', icon: '❌' });
+      }
+    };
+  }
   const btn = document.getElementById('btnOpenGrow3Manager');
   const modal = document.getElementById('grow3Modal');
   const closeBtn = document.getElementById('closeGrow3Modal');
@@ -438,6 +475,24 @@ function collectRoomsFromState() {
   if (wizardRooms.length) return wizardRooms;
   const farmRooms = Array.isArray(STATE.farm?.rooms) ? STATE.farm.rooms : [];
   return farmRooms;
+}
+
+// Collect groups from global STATE and ensure they are normalized.
+function collectGroupsFromState() {
+  try {
+    // If groups are missing or not an array, try normalizing existing state
+    if (!Array.isArray(STATE?.groups)) {
+      normalizeGroupsInState();
+    } else {
+      // Ensure individual group records are normalized
+      STATE.groups = STATE.groups.map(g => normalizeGroupRecord(g));
+    }
+  } catch (err) {
+    // Defensive fallback: ensure STATE.groups exists
+    if (STATE) STATE.groups = STATE.groups || [];
+    console.error('[app] collectGroupsFromState error:', err);
+  }
+  return Array.isArray(STATE.groups) ? STATE.groups : [];
 }
 
 function updateGroupActionStates({ hasGroup = false, hasRoom = false, hasZone = false } = {}) {
@@ -10112,7 +10167,7 @@ async function loadPreAutomationRules() {
 
 async function loadSmartPlugs({ silent } = {}) {
   try {
-    const payload = await api('/plugs');
+    const payload = await api(window.API_BASE + '/plugs');
     STATE.smartPlugs = Array.isArray(payload?.plugs) ? payload.plugs : [];
     renderSmartPlugs();
     if (!silent) {
@@ -10120,19 +10175,11 @@ async function loadSmartPlugs({ silent } = {}) {
     }
   } catch (error) {
     if (!silent) {
-      setSmartPlugsAlert(`Smart plug refresh failed: ${error.message}`, 'error');
+      setSmartPlugsAlert('No smart plugs found. Please check your network and device setup.', 'error');
     }
     console.warn('Failed to load smart plugs', error);
-    try {
-      const fallback = await loadJSON('/data/smart-plugs.json', cloneSmartPlugFallback);
-      STATE.smartPlugs = Array.isArray(fallback?.plugs) ? fallback.plugs : [];
-      if (!silent) {
-        setSmartPlugsAlert(`Showing ${STATE.smartPlugs.length} demo smart plug${STATE.smartPlugs.length === 1 ? '' : 's'}.`, 'info');
-      }
-      renderSmartPlugs();
-    } catch (fallbackError) {
-      console.warn('Smart plug fallback load failed', fallbackError);
-    }
+    STATE.smartPlugs = [];
+    renderSmartPlugs();
   }
 }
 
@@ -10476,6 +10523,10 @@ function renderSwitchBotManager() {
   const devices = Array.isArray(STATE.switchbotDevices) ? STATE.switchbotDevices : [];
   const summary = STATE.switchbotSummary || summarizeSwitchBotDevices(devices);
 
+  // Load available rooms and zones from Groups
+  const groups = collectGroupsFromState();
+  const rooms = collectRoomsFromState();
+  
   if (!devices.length) {
     host.innerHTML = '<div class="switchbot-manager-empty">No SwitchBot devices available. Check credentials or refresh.</div>';
     return;
@@ -10486,20 +10537,61 @@ function renderSwitchBotManager() {
     const statusColor = getSwitchBotStatusColor(status);
     const readingText = formatSwitchBotPreviewReadings(device.readings);
     const battery = typeof device.battery === 'number' ? `${device.battery}%` : '—';
+    const isSensor = device.type?.toLowerCase().includes('meter') || 
+                    device.deviceType?.toLowerCase().includes('meter') ||
+                    device.readings?.temperature != null ||
+                    device.readings?.humidity != null ||
+                    device.readings?.lux != null;
+    
+    const isPlug = device.type?.toLowerCase().includes('plug') || 
+                   device.deviceType?.toLowerCase().includes('plug') ||
+                   device.type?.toLowerCase().includes('switch');
+
+    const deviceIcon = isSensor ? '📊' : (isPlug ? '🔌' : '🔵');
+    const deviceTypeLabel = isSensor ? 'Sensor' : (isPlug ? 'Smart Plug' : 'Device');
+
+    // Create room/zone selection dropdown
+    const roomOptions = rooms.map(room => 
+      `<option value="${escapeHtml(room.id)}" ${device.room === room.id ? 'selected' : ''}>${escapeHtml(room.name)}</option>`
+    ).join('');
+
+    const zoneOptions = groups.map(group => 
+      `<option value="${escapeHtml(group.id)}" ${device.zone === group.id ? 'selected' : ''}>${escapeHtml(group.name)}</option>`
+    ).join('');
+
     return `
-      <div class="switchbot-manager-card">
+      <div class="switchbot-manager-card" data-device-id="${escapeHtml(device.deviceId)}">
         <div class="switchbot-manager-card__title">
-          <h3>${escapeHtml(device.name || device.deviceName || 'SwitchBot device')}</h3>
+          <h3>${deviceIcon} ${escapeHtml(device.name || device.deviceName || 'SwitchBot device')}</h3>
           <span class="switchbot-badge" style="background:${statusColor}22;color:${statusColor}">
             <span class="switchbot-dot" style="background:${statusColor}"></span>
             ${escapeHtml(status)}
           </span>
         </div>
-        <div class="switchbot-manager-meta">${escapeHtml(device.type || device.deviceType || 'Unknown type')} • ${escapeHtml(device.location || 'Unassigned location')}</div>
+        <div class="switchbot-manager-meta">
+          <span class="device-type-badge">${deviceTypeLabel}</span>
+          ${escapeHtml(device.type || device.deviceType || 'Unknown type')}
+        </div>
         <div class="switchbot-manager-readings">${escapeHtml(readingText)}</div>
+        <div class="switchbot-manager-assignment">
+          <select class="room-select" onchange="updateDeviceRoom('${escapeHtml(device.deviceId)}', this.value)">
+            <option value="">Select Room...</option>
+            ${roomOptions}
+          </select>
+          <select class="zone-select" onchange="updateDeviceZone('${escapeHtml(device.deviceId)}', this.value)">
+            <option value="">Select Zone...</option>
+            ${zoneOptions}
+          </select>
+        </div>
         <div class="switchbot-manager-footer">
           <span>Battery: ${escapeHtml(battery)}</span>
           <span>Last seen: ${escapeHtml(formatSwitchBotTimestamp(device.lastSeen))}</span>
+          ${isPlug ? `
+          <div class="switchbot-controls">
+            <button onclick="controlSwitchBotDevice('${escapeHtml(device.deviceId)}', 'turnOn')" class="ghost tiny">ON</button>
+            <button onclick="controlSwitchBotDevice('${escapeHtml(device.deviceId)}', 'turnOff')" class="ghost tiny">OFF</button>
+          </div>
+          ` : ''}
         </div>
       </div>`;
   }).join('');
@@ -11265,13 +11357,7 @@ function wireGlobalEvents() {
     }
     if (selectedMetrics) {
       if (selectedBands) {
-        const deltas = planBands
-          ? {
-              red: Math.round((planBands.red - selectedBands.red) * 10) / 10,
-              mid: Math.round((planBands.mid - selectedBands.mid) * 10) / 10,
-              blue: Math.round((planBands.blue - selectedBands.blue) * 10) / 10,
-            }
-          : null;
+        const deltas = planBands;
         const items = [
           {
             label: 'Red',
@@ -11287,7 +11373,7 @@ function wireGlobalEvents() {
             label: 'Blue',
             value: `${selectedBands.blue.toFixed(1)}%`,
             delta: deltas ? formatDelta(deltas.blue, '%', 1) : null,
-          },
+          }
         ];
         selectedMetrics.innerHTML = items
           .map((item) => `<dt>${escapeHtml(item.label)}</dt><dd>${escapeHtml(formatValueWithDelta(item.value, item.delta))}</dd>`)
