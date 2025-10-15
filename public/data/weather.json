@@ -1,0 +1,11 @@
+{
+  "ok": true,
+  "current": {
+    "temperature_f": 72,
+    "temperature_c": 22,
+    "humidity": 58,
+    "wind_speed": 12,
+    "description": "Partly cloudy",
+    "last_updated": "2024-01-01T14:30:00Z"
+  }
+}
