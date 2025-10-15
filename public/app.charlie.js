@@ -90,7 +90,7 @@ async function loadCalibrationMultipliers(force = false) {
     }
     calibrationMultipliersCache = normalized;
   } catch (error) {
-    console.warn('[calibration] Failed to load multipliers', error);
+    NetGuard.warnOnce('calibration', '[calibration] Failed to load multipliers');
     calibrationMultipliersCache = calibrationMultipliersCache || {};
     throw error;
   }
@@ -286,10 +286,10 @@ window.openGrow3Manager = async function() {
   // Fetch device list from controller API using config
   let devices = [];
   try {
-    const resp = await fetch(`${apiBase}/api/devicedatas`);
-    if (!resp.ok) throw new Error('Controller not reachable');
-    const data = await resp.json();
-    devices = Array.isArray(data) ? data : (data.devices || []);
+  // Copilot: device list fetch with NetGuard
+  const BASE = window.API_BASE;
+  const json = await NetGuard.fetchJSON(`${BASE}/api/devicedatas`, { timeout: 7000 });
+  devices = Array.isArray(json?.data) ? json.data : [];
   } catch (e) {
     body.querySelector('#grow3DevicesLoading').innerHTML = `<div style=\"color:#b91c1c;text-align:center;padding:32px;\">Failed to load devices: ${e.message}</div>`;
     return;
@@ -400,19 +400,23 @@ window.openGrow3Manager = async function() {
   });
 };
 
+// Copilot: device toggle with NetGuard
 async function sendGrow3Command(id, payload, row, apiBase) {
+  const BASE = window.API_BASE;
   try {
-    const resp = await fetch(`${apiBase}/api/devicedatas/device/${encodeURIComponent(id)}`, {
-      method: 'PATCH',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(payload)
+    await NetGuard.guardedPoll(async () => {
+      await fetch(`${BASE}/api/devicedatas/device/${encodeURIComponent(id)}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload)
+      });
     });
-    if (!resp.ok) throw new Error('Controller error');
-    const data = await resp.json();
-    row.querySelector('.grow3-status').textContent = data.status || payload.status || 'OK';
-    row.querySelector('.grow3-hex').value = typeof data.value === 'string' ? data.value : (payload.value || '');
+    // Optionally, you could re-fetch device state here if needed
+    row.querySelector('.grow3-status').textContent = payload.status || 'OK';
+    row.querySelector('.grow3-hex').value = typeof payload.value === 'string' ? payload.value : '';
     window.showToast?.({ title: 'Grow3 Updated', msg: `Device ${id} → ${row.querySelector('.grow3-status').textContent}`, kind: 'success', icon: '✅' });
   } catch (e) {
+    NetGuard.warnOnce('toggle', `[toggle] failed for ${id}; will retry when online`);
     window.showToast?.({ title: 'Grow3 Error', msg: e.message, kind: 'error', icon: '❌' });
   }
 }
@@ -10299,16 +10303,17 @@ async function reloadEnvironment() {
       if (Array.isArray(initial?.zones)) zones = initial.zones;
       else if (initial?.zone) zones = [initial.zone];
     } else {
+      // Copilot: resilient env fetch using NetGuard
+      const BASE = window.API_BASE;
       const requests = scopeIds.map(async (scopeId) => {
-        try {
-          const payload = await api(`/env?scope=${encodeURIComponent(scopeId)}&range=24h`);
+        return await NetGuard.guardedPoll(async () => {
+          const url = `${BASE}/env?scope=${encodeURIComponent(scopeId)}&range=24h`;
+          const payload = await NetGuard.fetchJSON(url, { timeout: 7000 });
           if (!envSnapshot && payload?.env) envSnapshot = payload.env;
           if (payload?.zone) return payload.zone;
           if (Array.isArray(payload?.zones) && payload.zones.length) return payload.zones[0];
-        } catch (error) {
-          console.warn(`[env] scope fetch failed for ${scopeId}`, error);
-        }
-        return null;
+          return null;
+        });
       });
       const results = await Promise.all(requests);
       zones = results.filter((zone) => zone && typeof zone === 'object');
@@ -10926,36 +10931,34 @@ window.startForwarderHealthPolling = startForwarderHealthPolling;
 let HEALTHZ_TIMER = 0;
 let HEALTHZ_BACKOFF = 5000;
 
+// Copilot: resilient healthz polling using NetGuard
 async function pollHealthz() {
-  try {
-    const response = await fetch('/healthz', { cache: 'no-store' });
-    if (!response.ok) throw new Error(`healthz:${response.status}`);
-    const body = await response.json().catch(() => ({ status: 'Controller reachable' }));
-    const message = (typeof body?.statusMessage === 'string' && body.statusMessage.trim())
-      ? body.statusMessage.trim()
-      : (typeof body?.status === 'string' && body.status.trim())
-        ? body.status.trim()
+  const BASE = window.API_BASE;
+  const j = await NetGuard.healthz(BASE);
+  const statusEl = document.getElementById('communicationStatus');
+  if (j) {
+    const message = (typeof j?.statusMessage === 'string' && j.statusMessage.trim())
+      ? j.statusMessage.trim()
+      : (typeof j?.status === 'string' && j.status.trim())
+        ? j.status.trim()
         : 'Controller reachable';
-    const statusEl = document.getElementById('communicationStatus');
     if (statusEl) {
       statusEl.textContent = message;
       statusEl.style.color = '#16a34a';
       statusEl.dataset.state = 'ok';
     }
     HEALTHZ_BACKOFF = 5000;
-  } catch (error) {
-    console.warn('healthz failed', error);
-    const statusEl = document.getElementById('communicationStatus');
+  } else {
+    NetGuard.warnOnce('healthz', '[healthz] controller offline; backing off');
     if (statusEl) {
       statusEl.textContent = 'Controller offline';
       statusEl.style.color = '#b91c1c';
       statusEl.dataset.state = 'error';
     }
     HEALTHZ_BACKOFF = Math.min(HEALTHZ_BACKOFF * 2, 60000);
-  } finally {
-    clearTimeout(HEALTHZ_TIMER);
-    HEALTHZ_TIMER = window.setTimeout(pollHealthz, HEALTHZ_BACKOFF);
   }
+  clearTimeout(HEALTHZ_TIMER);
+  HEALTHZ_TIMER = window.setTimeout(pollHealthz, HEALTHZ_BACKOFF);
 }
 
 document.addEventListener('DOMContentLoaded', () => {
