@@ -154,11 +154,18 @@ def load_lighting_inventory(path: Optional[Path] = None) -> List[LightingFixture
     return fixtures
 
 
-def build_environment_config() -> EnvironmentConfig:
-    """Construct an :class:`EnvironmentConfig` from the environment."""
+def build_environment_config(env: Optional[str] = None) -> EnvironmentConfig:
+    """Construct an :class:`EnvironmentConfig` from the environment.
 
-    env = get_environment()
-    LOGGER.info("Loading configuration for environment: %s", env)
+    Parameters
+    ----------
+    env:
+        Optional override for the environment name. If not provided the
+        environment will be resolved using :func:`get_environment`.
+    """
+
+    resolved_env = (env or get_environment()).lower()
+    LOGGER.info("Loading configuration for environment: %s", resolved_env)
 
     mqtt_config = None
     if os.getenv("MQTT_HOST"):
