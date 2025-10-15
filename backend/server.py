@@ -23,6 +23,7 @@ from backend.device_discovery import (
     discover_ble_devices,
     discover_kasa_devices,
     discover_mdns_devices,
+    fetch_switchbot_status,
     full_discovery_cycle,
 )
 from backend.device_models import (
@@ -44,7 +45,6 @@ from backend.state import (
     ScheduleStore,
     SensorEventBuffer,
 )
-from backend.switchbot import fetch_switchbot_status
 
 try:
     from backend.logging_config import configure_logging as _configure_logging
