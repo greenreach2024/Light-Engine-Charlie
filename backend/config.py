@@ -1,5 +1,14 @@
-"""Configuration helpers for Light Engine Charlie."""
+
 from __future__ import annotations
+
+def load_config(*args, **kwargs):
+    """
+    Alias for build_environment_config().
+    Allows newer code to call load_config(env=...) while using
+    the existing legacy implementation.
+    """
+    return build_environment_config(*args, **kwargs)
+"""Configuration helpers for Light Engine Charlie."""
 
 import base64
 import hashlib

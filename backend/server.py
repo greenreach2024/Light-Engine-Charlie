@@ -53,7 +53,6 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-CONFIG: EnvironmentConfig = build_environment_config()
 REGISTRY = DeviceRegistry()
 # Register a sample dehumidifier device at startup for testing
 from .device_models import Device
