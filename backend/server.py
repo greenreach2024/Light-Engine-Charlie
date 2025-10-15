@@ -1085,7 +1085,7 @@ async def _startup() -> None:
         app.state.REGISTRY = registry
 
     if app.state.BUFFER is None:
-        app.state.BUFFER = SensorEventBuffer(max_items=1000)
+        app.state.BUFFER = SensorEventBuffer(max_events=1000)
 
     if app.state.LIGHTING_STATE is None:
         app.state.LIGHTING_STATE = LightingState(config.lighting_inventory or [])
