@@ -1,16 +1,3 @@
 {
-  "schedules": [
-    {
-      "id": "group:PropagationBay:PropagationNorth:Demo",
-      "period": "1d",
-      "photoperiod": [
-        "16/8"
-      ],
-      "start": "06:00",
-      "durationHours": 16,
-      "rampUpMin": 10,
-      "rampDownMin": 10,
-      "planKey": "GR-Propagation-BL55"
-    }
-  ]
+  "schedules": []
 }
