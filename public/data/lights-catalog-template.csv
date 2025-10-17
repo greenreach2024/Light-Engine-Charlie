@@ -1,0 +1,11 @@
+manufacturer,model,wattage,ppfd,coverage_area,spectrum,notes,price_usd,efficiency_umol_j,dimensions,weight_lbs
+Fluence,SPYDR 2i,645,1500,4x4 ft,Full spectrum with enhanced red,High-end commercial fixture,1299,2.3,46.5 x 44.5 x 3 in,38
+Gavita,Pro 1700e LED,645,1700,5x5 ft,White LED full spectrum,Industry standard for greenhouses,999,2.6,43 x 43 x 3.5 in,35
+Spider Farmer,SF-4000,450,1200,4x4 ft,Samsung LM301B + Osram red,Budget-friendly option for hobbyists,499,2.7,25.9 x 23.9 x 2.4 in,15.4
+Mars Hydro,FC 6500,650,1525,5x5 ft,Samsung LM301B + Osram red,Commercial grade with full spectrum,699,2.35,43.3 x 43.3 x 2.4 in,22
+HLG,Scorpion Rspec,630,1425,4x4 ft,Samsung LM301B + deep red,Modular design for easy maintenance,999,2.26,43.3 x 43.3 x 2.2 in,25
+California LightWorks,SolarSystem 550,400,925,4x4 ft,Full spectrum white + supplemental,Programmable spectrum control,799,2.31,36 x 36 x 3 in,20
+Grow3,Lynx3,480,1100,4x4 ft,CW/WW + 450nm + 660nm,Light Engine compatible fixture,899,2.29,42 x 42 x 2.5 in,22
+Grow3,Lynx3-X,640,1450,5x5 ft,CW/WW + 450nm + 660nm,Extended coverage Light Engine fixture,1199,2.27,54 x 54 x 2.5 in,32
+Philips,GreenPower LED,600,1350,4x4 ft,White + red + far red,Research-grade fixture,1499,2.25,47 x 47 x 4 in,40
+Lumigrow,Pro 650,650,1400,5x5 ft,Full spectrum programmable,WiFi enabled with app control,1099,2.15,43 x 43 x 3.2 in,28

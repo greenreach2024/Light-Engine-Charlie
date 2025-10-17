@@ -8,8 +8,8 @@
   "scripts": {
     "start": "node server-charlie.js",
     "start:local": "PORT=8091 node server-charlie.js",
-    "smoke": "curl -sS http://localhost:8091/healthz",
-    "test": "node --test tests"
+    "smoke": "node scripts/smoke.js",
+    "test": "node --test --test-timeout=10000 \"tests/**/*.mjs\""
   },
   "dependencies": {
     "express": "^4.19.2",

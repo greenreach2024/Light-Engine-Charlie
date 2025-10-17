@@ -195,41 +195,87 @@ document.addEventListener('DOMContentLoaded', () => {
       id: '22G12-001',
       name: 'TopLight MH Model-300W-22G12',
       serial: '22G12-001',
+      manufacturer: 'TopLight',
       room: 'GreenReach',
       roomId: 'GreenReach',
-      zoneId: undefined
+      zoneId: undefined,
+      watts: 300,
+      ppf: 709,
+      ppe: 2.59,
+      tunable: true,
+      dimmable: true,
+      comm: 'WiFi',
+      spectrum: { blue: 45, green: 5, red: 45, farRed: 5 },
+      colorRange: '400-700'
     },
     {
       id: '22G12-002',
       name: 'TopLight MH Model-300W-22G12',
       serial: '22G12-002',
+      manufacturer: 'TopLight',
       room: 'GreenReach',
       roomId: 'GreenReach',
-      zoneId: undefined
+      zoneId: undefined,
+      watts: 300,
+      ppf: 709,
+      ppe: 2.59,
+      tunable: true,
+      dimmable: true,
+      comm: 'WiFi',
+      spectrum: { blue: 45, green: 5, red: 45, farRed: 5 },
+      colorRange: '400-700'
     },
     {
-      id: '22G12-003',
-      name: 'TopLight MH Model-300W-22G12',
-      serial: '22G12-003',
+      id: 'VERTIMAX-001',
+      name: 'P.L. Light VertiMax 640W',
+      serial: 'VERTIMAX-001',
+      manufacturer: 'P.L. Light Systems',
       room: 'GreenReach',
       roomId: 'GreenReach',
-      zoneId: undefined
+      zoneId: undefined,
+      watts: 640,
+      ppf: 1738,
+      ppe: 2.7,
+      tunable: false,
+      dimmable: true,
+      comm: '0-10V',
+      colorRange: '400-700',
+      spectrum: null
     },
     {
-      id: '22G12-004',
-      name: 'TopLight MH Model-300W-22G12',
-      serial: '22G12-004',
+      id: 'FLUENCE-001',
+      name: 'Fluence SPYDR 2x',
+      serial: 'FLUENCE-001',
+      manufacturer: 'Fluence',
       room: 'GreenReach',
       roomId: 'GreenReach',
-      zoneId: undefined
+      zoneId: undefined,
+      watts: 685,
+      ppf: 1700,
+      ppe: 2.5,
+      tunable: false,
+      dimmable: true,
+      comm: 'BLE',
+      colorRange: '400-700',
+      spectrum: null
     },
     {
-      id: '22G12-005',
-      name: 'TopLight MH Model-300W-22G12',
-      serial: '22G12-005',
+      id: 'GENERIC-PLUG-001',
+      name: 'Generic LED via Smart Plug',
+      serial: 'GENERIC-PLUG-001',
+      manufacturer: 'Generic',
       room: 'GreenReach',
       roomId: 'GreenReach',
-      zoneId: undefined
+      zoneId: undefined,
+      watts: 100,
+      ppf: 220,
+      ppe: 2.2,
+      tunable: false,
+      dimmable: false,
+      comm: 'SmartPlug',
+      smartPlug: true,
+      colorRange: '400-700',
+      spectrum: null
     },
   ];
   // Add if not already present
@@ -969,6 +1015,7 @@ const groupsV2FormState = {
   dps: 1,
   schedule: createDefaultGroupsV2Schedule(),
   gradients: { ...GROUPS_V2_DEFAULTS.gradients },
+  targetHumidity: null, // User input for target humidity percentage
 };
 
 const MS_PER_DAY = 24 * 60 * 60 * 1000;
@@ -1076,6 +1123,12 @@ function applyGroupsV2StateToInputs() {
   });
   const anchorRadios = document.querySelectorAll('input[name="groupsV2AnchorMode"]');
   anchorRadios.forEach((radio) => { radio.checked = radio.value === groupsV2FormState.anchorMode; });
+  
+  // Apply target humidity
+  const targetHumidityInput = document.getElementById('groupsV2TargetHumidity');
+  if (targetHumidityInput) {
+    targetHumidityInput.value = groupsV2FormState.targetHumidity != null ? String(groupsV2FormState.targetHumidity) : '';
+  }
 }
 
 function getGroupsV2DayNumber() {
@@ -1238,6 +1291,42 @@ function updateGroupsV2Preview() {
     ${gradientHtml}
     ${notesHtml}
   `;
+  
+  // Also update target temperature display
+  updateGroupsV2TargetTemp();
+}
+
+function updateGroupsV2TargetTemp() {
+  const targetTempEl = document.getElementById('groupsV2TargetTemp');
+  if (!targetTempEl) return;
+  
+  const plan = getGroupsV2SelectedPlan();
+  if (!plan || !plan.env || !Array.isArray(plan.env.days)) {
+    targetTempEl.innerHTML = '<span class="text-muted">—</span>';
+    return;
+  }
+  
+  // Get current day from preview
+  const preview = computeGroupsV2PreviewData(plan);
+  const currentDay = preview?.day || 1;
+  
+  // Find the temperature for the current day (or closest day)
+  const envDays = plan.env.days.sort((a, b) => a.d - b.d);
+  let targetTemp = null;
+  
+  for (const envDay of envDays) {
+    if (envDay.d <= currentDay) {
+      targetTemp = envDay.tempC;
+    } else {
+      break;
+    }
+  }
+  
+  if (targetTemp != null && Number.isFinite(targetTemp)) {
+    targetTempEl.innerHTML = `<strong style="color:#16a34a;">${targetTemp}°C</strong>`;
+  } else {
+    targetTempEl.innerHTML = '<span class="text-muted">—</span>';
+  }
 }
 
 function buildGroupsV2PlanConfig(planOverride) {
@@ -1258,6 +1347,13 @@ function buildGroupsV2PlanConfig(planOverride) {
     dps: groupsV2FormState.anchorMode === 'dps' ? toNumberOrNull(groupsV2FormState.dps) : null,
   };
   const config = { anchor, schedule, gradients, updatedAt };
+  
+  // Add target humidity if set
+  const targetHumidity = toNumberOrNull(groupsV2FormState.targetHumidity);
+  if (targetHumidity != null) {
+    config.targetHumidity = targetHumidity;
+  }
+  
   if (preview) config.preview = { ...preview, updatedAt };
   return config;
 }
@@ -1395,6 +1491,17 @@ function initializeGroupsV2Form() {
       updateGroupsV2Preview();
     });
   });
+  
+  // Wire up target humidity input
+  const targetHumidityInput = document.getElementById('groupsV2TargetHumidity');
+  if (targetHumidityInput) {
+    targetHumidityInput.addEventListener('input', (event) => {
+      const value = toNumberOrNull(event.target.value);
+      groupsV2FormState.targetHumidity = value;
+      // No need to update preview since humidity doesn't affect the plan preview
+    });
+  }
+  
   const anchorRadios = document.querySelectorAll('input[name="groupsV2AnchorMode"]');
   anchorRadios.forEach((radio) => {
     radio.addEventListener('change', (event) => {
@@ -1654,6 +1761,8 @@ document.addEventListener('DOMContentLoaded', () => {
       tempC: toNumberOrNull(gradientCfg.tempC) ?? GROUPS_V2_DEFAULTS.gradients.tempC,
       rh: toNumberOrNull(gradientCfg.rh) ?? GROUPS_V2_DEFAULTS.gradients.rh,
     };
+    // Load target humidity if present
+    groupsV2FormState.targetHumidity = toNumberOrNull(cfg.targetHumidity);
     populateGroupsV2PlanSearchDropdown();
     populateGroupsV2PlanDropdown(groupsV2FormState.planSearch);
     applyGroupsV2StateToInputs();
@@ -1722,4 +1831,127 @@ document.addEventListener('DOMContentLoaded', () => {
     });
   }
 });
+
+// Wire up Seed Date button to toggle anchor mode
+document.addEventListener('DOMContentLoaded', () => {
+  const seedDateBtn = document.getElementById('groupsV2SeedDateBtn');
+  if (seedDateBtn) {
+    seedDateBtn.addEventListener('click', () => {
+      const isPressed = seedDateBtn.getAttribute('aria-pressed') === 'true';
+      if (!isPressed) {
+        groupsV2FormState.anchorMode = 'seedDate';
+        seedDateBtn.setAttribute('aria-pressed', 'true');
+        // Update DPS button
+        const dpsBtn = document.getElementById('groupsV2DpsBtn');
+        if (dpsBtn) dpsBtn.setAttribute('aria-pressed', 'false');
+        updateGroupsV2AnchorInputs();
+        updateGroupsV2Preview();
+      }
+    });
+  }
+});
+
+// Wire up DPS button to toggle anchor mode
+document.addEventListener('DOMContentLoaded', () => {
+  const dpsBtn = document.getElementById('groupsV2DpsBtn');
+  if (dpsBtn) {
+    dpsBtn.addEventListener('click', () => {
+      const isPressed = dpsBtn.getAttribute('aria-pressed') === 'true';
+      if (!isPressed) {
+        groupsV2FormState.anchorMode = 'dps';
+        dpsBtn.setAttribute('aria-pressed', 'true');
+        // Update Seed Date button
+        const seedDateBtn = document.getElementById('groupsV2SeedDateBtn');
+        if (seedDateBtn) seedDateBtn.setAttribute('aria-pressed', 'false');
+        updateGroupsV2AnchorInputs();
+        updateGroupsV2Preview();
+      }
+    });
+  }
+});
+
+// Wire up Add Cycle 2 button
+document.addEventListener('DOMContentLoaded', () => {
+  const addCycle2Btn = document.getElementById('groupsV2AddCycle2Btn');
+  const cycle2Container = document.getElementById('groupsV2Cycle2Container');
+  if (addCycle2Btn && cycle2Container) {
+    addCycle2Btn.addEventListener('click', () => {
+      // Show cycle 2 container
+      cycle2Container.style.display = 'flex';
+      // Hide the add button
+      addCycle2Btn.style.display = 'none';
+      // Initialize cycle 2 in form state if not exists
+      if (!groupsV2FormState.schedule.cycle2) {
+        groupsV2FormState.schedule.cycle2 = {
+          enabled: true,
+          onHour: 20,
+          onMinute: 0,
+          hours: 12
+        };
+      } else {
+        groupsV2FormState.schedule.cycle2.enabled = true;
+      }
+      updateGroupsV2Preview();
+    });
+  }
+});
+
+// Wire up Remove Cycle 2 button
+document.addEventListener('DOMContentLoaded', () => {
+  const removeCycle2Btn = document.getElementById('groupsV2RemoveCycle2Btn');
+  const cycle2Container = document.getElementById('groupsV2Cycle2Container');
+  const addCycle2Btn = document.getElementById('groupsV2AddCycle2Btn');
+  if (removeCycle2Btn && cycle2Container && addCycle2Btn) {
+    removeCycle2Btn.addEventListener('click', () => {
+      // Hide cycle 2 container
+      cycle2Container.style.display = 'none';
+      // Show the add button again
+      addCycle2Btn.style.display = 'inline-block';
+      // Disable cycle 2 in form state
+      if (groupsV2FormState.schedule.cycle2) {
+        groupsV2FormState.schedule.cycle2.enabled = false;
+      }
+      updateGroupsV2Preview();
+    });
+  }
+});
+
+// Handle assign-lights-to-zone event
+document.addEventListener('assign-lights-to-zone', (evt) => {
+  const { lightIds, zoneId } = evt.detail || {};
+  if (!lightIds || !zoneId || !Array.isArray(lightIds)) return;
+  
+  // Update lights in STATE
+  if (!window.STATE) window.STATE = {};
+  if (!Array.isArray(window.STATE.lights)) window.STATE.lights = [];
+  
+  lightIds.forEach(lightId => {
+    const light = window.STATE.lights.find(l => l.id === lightId);
+    if (light) {
+      light.zoneId = zoneId;
+    }
+  });
+  
+  // Save to server
+  if (typeof window.saveLights === 'function') {
+    window.saveLights();
+  }
+  
+  // Refresh the unassigned lights dropdown
+  populateGroupsV2UnassignedLightsDropdown();
+  
+  // Show success message
+  if (typeof window.showToast === 'function') {
+    window.showToast({
+      title: 'Lights Assigned',
+      msg: `${lightIds.length} light(s) assigned to Zone ${zoneId}`,
+      kind: 'success',
+      icon: ''
+    }, 2000);
+  }
+  
+  // Dispatch lights-updated event
+  document.dispatchEvent(new Event('lights-updated'));
+});
+
 // Feature flag: opt-in to simplified room-only group matching

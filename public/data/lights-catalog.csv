@@ -1,0 +1,51 @@
+Manufacturer,Product Name,Model Number,Spectrally Tunable,Dimmable,Reported Photosynthetic Photon Efficacy (400-700nm),Reported Photosynthetic Photon Flux (400-700nm),Reported Default Photosynthetic Photon Flux,Reported Photon Flux Blue (400-500nm),Reported Photon Flux Green (500-600nm),Reported Photon Flux Red (600-700nm),Reported Photon Flux Far Red (700-800nm),Reported Default Input Wattage,Connector or Transmission Hardware,0-10V ANSI C137.1 (8V),DALI,DALI-2,Other Wired Dimming and Control Method to the Product,Zigbee 3.0,Zigbee - Manufacturer Specific,Bluetooth Sig MESH and MMDL Layers,Bluetooth - Manufacturer Specific,Wi-Fi,EnOcean,Other Wireless Dimming and Control Method to the Product,RJ-11,RJ-12,RJ-14,RJ-45,USB,Flying Leads,Terminal Block,Other Wired Connector or Transmission Hardware,Wireless Radio,Infrared Receiver,Other Wireless Connector or Transmission Hardware,Dim to Off,Energy Monitoring
+P.L. Light Systems Canada Inc.,VertiMax,VERTIMAX 640W 120-277V DIM,No,TRUE,2.7,1738,1738,310,712,719,36,640,"LLT-M12-10003M3044 (Input), LLT-M12-10003F3034 (Output – Daisy Chaining)",,No,,1-10V,,,,,,,,,,,,,,,"LLT-M12-10003M3044 (Input), LLT-M12-10003F3034 (Output – Daisy Chaining)",,,,,No
+P.L. Light Systems Canada Inc.,VertiMax,VERTIMAX 640W 277-480V DIM,No,TRUE,2.8,1778,1778,315,729,736,37,640,"LLT-M12-10003M3044 (Input), LLT-M12-10003F3034 (Output – Daisy Chaining)",,No,,1-10V,,,,,,,,,,,,,,,"LLT-M12-10003M3044 (Input), LLT-M12-10003F3034 (Output – Daisy Chaining)",,,,,No
+P.L. Light Systems Canada Inc.,ParFX Ultra Lite,ParFX Ultra Lite 208-240V R37:W37:B18:FR8,No,TRUE,2.59,1588,1587.7,300,671,626,135,612.7,LLT-M12-10002M2841,,No,,,,,,,,,,,,,,,,,LLT-M12-10002M2841,,,,TRUE,No
+GML Solutions Ltd.,Tarantula Volcano FR HV,GMLL0120W3L1E10E2,No,TRUE,3.16,383,382.5,38,76,268,13,120,RJ14 Cable,,No,,,,,,,,,,,,,,,,,RJ14 Cable,,,,TRUE,No
+"Shenzhen Xinshengyang Opto-electronics Technology Co.,Ltd.",,LPTCP800S-TT,No,TRUE,2.97,2412,2412,451,788,1173,128,813.4,"RJ-14, Terminal Block",,No,,,,,,,,,,,,TRUE,,,,TRUE,,,,,TRUE,No
+P.L. Light Systems Canada Inc.,ParFX Ultra Lite,ParFX Ultra Lite 208-240V R80:W5:B7:FR8,No,TRUE,3.28,2023,2022.6,156,134,1734,176,616.6,LLT-M12-10002M2841,,No,,,,,,,,,,,,,,,,,LLT-M12-10002M2841,,,,TRUE,No
+Skylight LED Inc.,,SKY UCR-150,No,TRUE,3.6,540,539.9,25,41,474,4,150,Flying Leads,,No,,,,,,,,,,,,,,,TRUE,,,,,,,No
+P.L. Light Systems Canada Inc.,ParFX BalensBeam,"PARFX BALENSBEAM R37:W37:B18:FR8 (230W,208-400V,DIGITAL)",No,TRUE,2.51,586,586,120,228,241,58,233.7,Wieland jumper,,No,,Digital dimming is based on RS485,,,,,,,,,,,,,,,Wieland jumper,,,,TRUE,No
+Hawthorne Gardening Company,Under Canopy 150W LED,HGC907092,No,TRUE,3.02,468,467.7,45,78,346,7,150,RJ-12,,No,,,,,,,,,,,TRUE,,,,,,,,,,TRUE,No
+Skylight LED Inc.,,SKY RFR-150,No,TRUE,3.2,482,482.4,26,41,415,49,150,Flying Leads,,No,,,,,,,,,,,,,,,TRUE,,,,,,,No
+Signify North America Corporation – Horti LED,GreenPower LED Production Module,GPL PM 290 DRBFR_LB L150 3.2,Yes,TRUE,3.05,273,272.6,33,,240,17,86,"Mains Cable + Wieland Connector, No",,No,,Power Line Communication,,,,,,,,,,,,,,,Mains Cable + Wieland Connector,,,No,TRUE,No
+Signify North America Corporation – Horti LED,RAPTR2,RP2i-BW4a-CG-EV-WC1,No,TRUE,2.71,2842,2842,568,1023,1251,58,1050,Wireless Radio,,No,,,,TRUE,,,,,,,,,,,,,,TRUE,,,,No
+P.L. Light Systems Canada Inc.,ParFX BalensBeam,"PARFX BALENSBEAM R44:W33:B23 (230W,208-400V,DIGITAL)",No,TRUE,2.63,616,615.8,147,199,273,8,234.2,Wieland jumper,,No,,Digital dimming is based on RS485,,,,,,,,,,,,,,,Wieland jumper,,,,TRUE,No
+Signify North America Corporation – Horti LED,GreenPower LED Production Module,GPL PM 300 DRBFR_LB L240 3.2,Yes,TRUE,3.05,282,282,34,,248,18,85,"Mains Cable + Wieland Connector, No",,No,,Power Line Communication,,,,,,,,,,,,,,,Mains Cable + Wieland Connector,,,No,TRUE,No
+"Shenzhen Xinshengyang Opto-electronics Technology Co.,Ltd.",,LPHM8I-LO,No,TRUE,2.81,2447,2447,508,789,1150,88,870.1,"RJ-14, Terminal Block",,No,,,,,,,,,,,,TRUE,,,,TRUE,,,,,TRUE,No
+P.L. Light Systems Canada Inc.,ParFX Ultra Lite,ParFX Ultra Lite 208-240V R90:W5:B5,No,TRUE,3.56,2157,2157,117,123,1919,18,606,LLT-M12-10002M2841,,No,,,,,,,,,,,,,,,,,LLT-M12-10002M2841,,,,TRUE,No
+"Shenzhen Grandyield Technology Co., Ltd",,KZ160W27VBXDYY,No,TRUE,3.02,493,492.9,58,119,316,6,160,Flying Leads,,No,,,,,,,,,,,,,,,TRUE,,,,,,TRUE,No
+GML Solutions Ltd.,Tarantula Revolution 600 Veg HV,GMLL0600W6N1A23E2,No,TRUE,2.73,1670,1670,544,764,364,25,600,RJ-12,,No,,,,,,,,,,,TRUE,,,,,,,,,,TRUE,No
+"Shenzhen Grandyield Technology Co., Ltd",,KZ160W34VAXDYY,No,TRUE,2.82,452,452.1,57,156,240,10,160,Flying Leads,,No,,,,,,,,,,,,,,,TRUE,,,,,,TRUE,No
+mammoth lighting,,MGREEN,No,TRUE,2.51,1805,1805,459,688,659,71,720,RJ-25,,No,,,,,,,,,,,,,,,,,RJ-25,,,,TRUE,No
+P.L. Light Systems Canada Inc.,ParFX Ultra Max,ParFX Ultra Max 3CH 4500,Yes,TRUE,3.82,4644,4643.7,232,3,4409,40,1216,Dongle Connector,,No,,Digital dimming is based on RS485,,,,,,,,,,,,,,,Dongle Connector,,,,TRUE,No
+"Shenzhen Xinshengyang Opto-electronics Technology Co.,Ltd.",,LPTCP800SHV-TT,No,TRUE,2.83,2422,2422,462,787,1173,130,855.2,"RJ-14, Terminal Block",,No,,,,,,,,,,,,TRUE,,,,TRUE,,,,,TRUE,No
+GML Solutions Ltd.,Tarantula Revolution 720 HV,GMLL0720W6N1A10E2,No,TRUE,2.69,1925,1925,330,742,856,129,720,RJ-12,,No,,,,,,,,,,,TRUE,,,,,,,,,,TRUE,No
+Signify North America Corporation – Horti LED,GreenPower LED Production Module,GPL PM 290 DRBWFR L150 3.2 C4,Yes,TRUE,2.99,273,272.6,33,16,224,17,88,"Mains Cable + Wieland Connector, No",,No,,Power Line Communication,,,,,,,,,,,,,,,Mains Cable + Wieland Connector,,,No,TRUE,No
+P.L. Light Systems Canada Inc.,ParFX Ultra Plus,ParFX Ultra Plus R90:W5:B5+FR8,Yes,TRUE,3.62,3873,3873.2,224,219,3434,41,1071,Dongle Connector,,No,,Digital dimming is based on RS485,,,,,,,,,,,,,,,Dongle Connector,,,,TRUE,No
+Skylight LED Inc.,,SKY RFR-120,No,TRUE,3.28,386,386.2,21,33,332,39,120,Flying Leads,,No,,,,,,,,,,,,,,,TRUE,,,,,,,No
+Shenzhen Number Energy Saving Corporation,,LEDex-F120,No,TRUE,3,360,360.4,34,54,272,39,120,RJ-11,,No,,,,,,,,,,TRUE,,,,,,,,,,,,No
+Signify North America Corporation – Horti LED,GreenPower LED Production Module,GPL PM 168 DRWFR_LB L120 C2,Yes,TRUE,2.64,158,157.9,13,10,122,10,58,"Mains Cable + Wieland Connector, No",,No,,Power Line Communication,,,,,,,,,,,,,,,Mains Cable + Wieland Connector,,,No,TRUE,No
+Signify North America Corporation – Horti LED,GreenPower LED Production Module,GPL PM 300 DRBWFR L240 3.2 C4,Yes,TRUE,2.99,282,282,34,17,231,18,87,"Mains Cable + Wieland Connector, No",,No,,Power Line Communication,,,,,,,,,,,,,,,Mains Cable + Wieland Connector,,,No,TRUE,No
+Shenzhen Number Energy Saving Corporation,,LEDex-F120,No,TRUE,3,360,360.4,34,54,272,39,120,RJ-11,,No,,,,,,,,,,TRUE,,,,,,,,,,,,No
+Signify North America Corporation – Horti LED,RAPTR2,RP2i-BW4-CG-EV-WC1,No,TRUE,2.61,2744,2744,549,1098,1098,56,1050,Wireless Radio,,No,,,,TRUE,,,,,,,,,,,,,,TRUE,,,,No
+Shenzhen Hortiright Co Ltd,,HR-1050 LED,No,TRUE,3.11,2855,2700,671,815,1368,166,900,RJ-14,TRUE,No,,,,,,,,,,,,TRUE,,,,,,,,,TRUE,No
+"Shenzhen Xinshengyang Opto-electronics Technology Co.,Ltd.",,LPHM8IHV-LO,No,TRUE,2.89,2439,2439,506,788,1145,87,844,"RJ-14, Terminal Block",,No,,,,,,,,,,,,TRUE,,,,TRUE,,,,,TRUE,No
+Heliospectra AB,MitraX C3,MIX6C3-E1,Yes,TRUE,,2324,1917,104,127,2093,15,584,"Wireless Radio, Adelphi",,No,,,,,,,TRUE,,LORA,,,,,,,,,TRUE,,Adelphi,TRUE,No
+GML Solutions Ltd.,Tarantula Volcano FR,GMLL0120W3F1E10B2,No,TRUE,3.16,383,382.5,38,76,268,13,120,RJ14 Cable,,No,,,,,,,,,,,,,,,,,RJ14 Cable,,,,TRUE,No
+Signify North America Corporation – Horti LED,RAPTR2,RP2i-BW4a-QB-EV-WC1,No,TRUE,2.71,2842,2842,568,1023,1251,58,1050,Wireless Radio,,No,,,,TRUE,,,,,,,,,,,,,,TRUE,,,,No
+"Parfactworks Co., Ltd",,SHY-Under Canopy Light,No,TRUE,3.05,2129,2129,219,5,1905,8,68,RJ25,,No,,,,,,,,,,,,,,,,,RJ25,,,,TRUE,No
+GrowGeneration Corp,Horticultural Luminaire,DialedIn Tri-Spec 150W UCL,No,TRUE,3.13,470,470.1,56,139,278,8,150,RJ-12,,No,,,,,,,,,,,TRUE,,,,,,,,,,TRUE,No
+Signify North America Corporation – Horti LED,RAPTR2,RP2i-BW4-QB-EV-WC1,No,TRUE,2.61,2744,2744,549,1098,1098,56,1050,Wireless Radio,,No,,,,TRUE,,,,,,,,,,,,,,TRUE,,,,No
+P.L. Light Systems Canada Inc.,ParFX Ultra Lite,ParFX Ultra Lite 208-240V R40:W40:B18:FR2,No,TRUE,2.57,1551,1551.3,279,660,621,51,604.5,LLT-M12-10002M2841,,No,,,,,,,,,,,,,,,,,LLT-M12-10002M2841,,,,TRUE,No
+"Shenzhen Xinshengyang Opto-electronics Technology Co.,Ltd.",,LPTCP620S-TT,No,TRUE,2.79,1737,1737,335,564,839,93,623,"RJ-14, Terminal Block",,No,,,,,,,,,,,,TRUE,,,,TRUE,,,,,TRUE,No
+"Shenzhen Enlite Energy Technology Co., Ltd",Flora 960W,001-FL960305312-00,No,TRUE,2.92,2959,2959,758,770,1433,32,960,RJ-11,,No,,,,,,,,,,TRUE,,,,,,,,,,,TRUE,No
+GML Solutions Ltd.,Tarantula Explorer HV,GMLL1440W6N2A05E2,Yes,TRUE,2.66,3781,3781,860,1457,1465,133,1440,RJ-12,,No,,,,,,,,,,,TRUE,,,,,,,,,,TRUE,No
+Signify North America Corporation – Horti LED,GreenPower LED Production Module,GPL PM 168 DRW_LB L120 3.2 C1,No,TRUE,2.79,168,168,13,10,129,,59,"Mains Cable + Wieland Connector, No",,No,,Power Line Communication,,,,,,,,,,,,,,,Mains Cable + Wieland Connector,,,No,TRUE,No
+"Shenzhen Enlite Energy Technology Co., Ltd",Top Light 780W,001-TL0780305300-00,No,TRUE,3.44,2808,2808,144,119,2545,16,780,RJ-11,,No,,,,,,,,,,TRUE,,,,,,,,,,,TRUE,No
+P.L. Light Systems Canada Inc.,ParFX Ultra Lite,ParFX Ultra Lite 208-240V R57:W30:B12:FR1,No,TRUE,2.81,1705,1705.3,207,532,974,37,607.4,LLT-M12-10002M2841,,No,,,,,,,,,,,,,,,,,LLT-M12-10002M2841,,,,TRUE,No
+LED Lighting LLC. DBA SpecGrade,LED Grow Light,FLORA-12-K1-V05-WT-6FT,No,TRUE,2.57,1249,1249,246,581,425,31,480,RJ-12,,No,,,,,,,,,,,TRUE,,,,,,,,,,,No
+"Shenzhen Grandyield Technology Co., Ltd",,KZ160W48VBXDYY,No,TRUE,3.02,493,492.9,58,119,316,6,160,Flying Leads,,No,,,,,,,,,,,,,,,TRUE,,,,,,TRUE,No
+"Shenzhen Xinshengyang Opto-electronics Technology Co.,Ltd.",,LPTCP620SHV-TT,No,TRUE,2.82,1886,1886,361,611,914,101,668.7,"RJ-14, Terminal Block",,No,,,,,,,,,,,,TRUE,,,,TRUE,,,,,TRUE,No
+Faven Lighting,Undercanopy Grow Light,FAVEN CHROMA 135W Undercanopy Grow Light,Yes,TRUE,3.07,415,415,16,31,368,34,135,RJ-12,TRUE,No,,,,,,,,,,,TRUE,,,,,,,,,,TRUE,No

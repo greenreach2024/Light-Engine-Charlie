@@ -1,5 +1,5 @@
 {
-  "farmName": "My Farm",
+  "farmName": "GreenReach",
   "location": {},
   "rooms": [
     {
@@ -11,40 +11,43 @@
     }
   ],
   "zones": [],
-  "address": "St Lawrence Avenue",
-  "city": "Kingston",
+  "address": "King Street East",
+  "city": "Gananoque",
   "state": "Ontario",
-  "postalCode": "K7L 4V1",
+  "postalCode": "K7G 2Y5",
   "timezone": "America/Toronto",
   "coordinates": {
-    "lat": 44.258596460875836,
-    "lng": -76.37263877437397
+    "lat": 44.32789763561765,
+    "lng": -76.16362561978208
   },
   "contact": {
-    "name": "d",
-    "email": "d",
-    "phone": "d",
-    "website": ""
+    "name": "Peter",
+    "email": "info@greenreachfarms.com",
+    "phone": "6138881031",
+    "website": "www.greenreachfarms.com"
   },
   "connection": {
     "type": "wifi",
     "wifi": {
-      "ssid": "greenreach",
+      "ssid": "Greenreach",
       "reuseDiscovery": true,
       "tested": true,
       "testResult": {
         "status": "connected",
-        "ip": "192.168.1.123",
-        "gateway": "192.168.1.1",
-        "latencyMs": 12
+        "ip": "192.168.2.37",
+        "gateway": "192.168.2.1",
+        "subnet": "192.168.2.37/24",
+        "latencyMs": 29.381,
+        "testedAt": "2025-10-17T15:29:41.610Z",
+        "ssid": "Greenreach"
       }
     }
   },
   "discovery": {
-    "subnet": "192.168.1.0/24",
-    "gateway": "192.168.1.1",
+    "subnet": "192.168.2.37/24",
+    "gateway": "192.168.2.1",
     "reuseNetwork": true,
-    "ssid": "greenreach"
+    "ssid": "Greenreach"
   },
   "locations": [
     "GreenReach"
@@ -52,33 +55,43 @@
   "registered": "2025-10-13T21:28:09.501Z",
   "branding": {
     "palette": {
-      "primary": "#0056D6",
-      "primaryHover": "#004CBC",
-      "primaryActive": "#0045AB",
-      "primarySoft": "#D9E6F9",
-      "accent": "#94E3FE",
-      "accentHover": "#82C8E0",
-      "accentSoft": "#EFFBFF",
+      "primary": "#0D7D7D",
+      "primaryHover": "#0B6E6E",
+      "primaryActive": "#0A6464",
+      "primarySoft": "#DBECEC",
+      "accent": "#64C7C7",
+      "accentHover": "#58AFAF",
+      "accentSoft": "#E8F7F7",
       "background": "#F7FAFA",
       "surface": "#F8FAFA",
-      "border": "#A1C1ED",
-      "borderStrong": "#08377D",
+      "border": "#A5CECE",
+      "borderStrong": "#0F4C4C",
       "borderSubtle": "#232424",
       "text": "#111111",
       "muted": "#909191",
-      "highlight": "#AFEAFE",
+      "highlight": "#8BD5D5",
       "onPrimary": "#FFFFFF",
       "onAccent": "#111111",
-      "shadow": "0 1px 3px 0 rgba(0, 86, 214, 0.16), 0 1px 2px -1px rgba(0, 86, 214, 0.12)",
-      "shadowLg": "0 10px 15px -3px rgba(0, 86, 214, 0.22), 0 4px 6px -4px rgba(0, 86, 214, 0.14)",
-      "focusRing": "0 0 0 3px rgba(148, 227, 254, 0.35)"
+      "shadow": "0 1px 3px 0 rgba(13, 125, 125, 0.16), 0 1px 2px -1px rgba(13, 125, 125, 0.12)",
+      "shadowLg": "0 10px 15px -3px rgba(13, 125, 125, 0.22), 0 4px 6px -4px rgba(13, 125, 125, 0.14)",
+      "focusRing": "0 0 0 3px rgba(100, 199, 199, 0.35)"
     },
     "logo": "",
     "tagline": "Growing with technology",
     "fontFamily": "",
     "fontCss": []
   },
-  "name": "My Farm",
+  "name": "GreenReach",
   "tagline": "Growing with technology",
-  "logo": ""
+  "logo": "",
+  "integrations": {
+    "switchbot": {
+      "token": "4e6fc805b4a0dd7ed693af1dcf89d9731113d4706b2d796759aafe09cf8f07ae1e858fa3fbf06139ddea004de7b04251",
+      "secret": "b9a4da66bb55d86299dc912ab16e4d44"
+    },
+    "kasa": {
+      "email": "info@greenreachfarms.com",
+      "password": "Testing123"
+    }
+  }
 }

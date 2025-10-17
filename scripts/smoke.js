@@ -61,16 +61,28 @@ async function waitForHealthz(retries = 10, delayMs = 300) {
     if (!ready) throw new Error('Server not responding on /healthz');
     log('Server is responsive');
 
-    // 1) GET /
+    // 1) GET / and /index.html should both be 200 and equivalent content length (served from Charlie)
     const root = await request('GET', '/');
     if (root.status !== 200) failures.push(`GET / expected 200, got ${root.status}`);
-    else log('GET / OK');
-
-    // 2) GET /index.html
     const index = await request('GET', '/index.html');
     if (index.status !== 200 || !/<!DOCTYPE html>/i.test(index.body)) {
       failures.push(`GET /index.html invalid response (status ${index.status})`);
-    } else log('GET /index.html OK');
+    }
+    if (!failures.length) {
+      const lenRoot = Number(root.headers['content-length'] || 0);
+      const lenIndex = Number(index.headers['content-length'] || 0);
+      if (!lenRoot || !lenIndex || Math.abs(lenRoot - lenIndex) > 32) {
+        failures.push(`Root vs index.html content length mismatch (${lenRoot} vs ${lenIndex})`);
+      } else {
+        log('GET / and /index.html equivalence OK');
+      }
+    }
+
+    // 2) Sidebar regression guardrails: Ensure Groups V2 present, Plans/Schedules absent
+    const html = root.body || '';
+    if (!/data-target="groups-v2"/i.test(html)) failures.push('Sidebar missing Groups V2 link');
+    if (/data-target="plans"/i.test(html)) failures.push('Sidebar unexpectedly contains Plans link');
+    if (/data-target="schedules"/i.test(html)) failures.push('Sidebar unexpectedly contains Schedules link');
 
     // 3) GET /config
     const configRes = await request('GET', '/config');

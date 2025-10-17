@@ -15,6 +15,10 @@ from fastapi import Body, Depends, FastAPI, Header, HTTPException, Query, status
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field, validator
+import json
+import subprocess
+import sys
+import re
 
 from backend.ai_assist import SetupAssistError, SetupAssistService
 from backend.automation import AutomationEngine, lux_balancing_rule, occupancy_rule
@@ -23,6 +27,7 @@ from backend.device_discovery import (
     discover_ble_devices,
     discover_kasa_devices,
     discover_mdns_devices,
+    discover_switchbot_devices,
     fetch_switchbot_status,
     full_discovery_cycle,
 )
@@ -59,7 +64,12 @@ LOGGER = logging.getLogger(__name__)
 app = FastAPI(title="Light Engine Charlie", version="1.0.0")
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=[
+        "http://localhost:8095",  # Original Node.js server port
+        "http://localhost:8091",  # Current Node.js server port
+        "http://127.0.0.1:8091",  # Alternative localhost
+        "http://127.0.0.1:8095",  # Alternative localhost
+    ],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -950,19 +960,32 @@ async def upsert_environment(payload: Dict[str, Any] = Body(...)) -> Dict[str, A
 async def discovery_devices() -> dict:
     """Perform a live scan for all supported device types and return fresh results."""
     registry = get_registry()
-    results = await asyncio.gather(
+    config = get_config()
+    
+    # Prepare discovery tasks
+    tasks = [
         discover_kasa_devices(registry, timeout=5),
         discover_ble_devices(registry, scan_duration=8.0),
         discover_mdns_devices(registry, scan_duration=5.0),
-        return_exceptions=True
-    )
-    devices = []
+    ]
     protocols = ["kasa", "bluetooth-le", "mdns"]
+    
+    # Add SwitchBot if configured
+    if config.switchbot:
+        # SwitchBot discovery is synchronous, so run it in executor
+        loop = asyncio.get_event_loop()
+        tasks.append(loop.run_in_executor(None, discover_switchbot_devices, registry, config.switchbot))
+        protocols.append("switchbot")
+    
+    results = await asyncio.gather(*tasks, return_exceptions=True)
+    
+    devices = []
     for idx, res in enumerate(results):
         if isinstance(res, Exception):
             LOGGER.warning(f"Discovery for {protocols[idx]} failed: {res}")
             continue
         devices.extend([d.__dict__ for d in res])
+    
     return {"devices": devices, "timestamp": asyncio.get_event_loop().time()}
 
 class SetupAssistRequest(BaseModel):
@@ -1330,6 +1353,402 @@ async def get_mdns_devices() -> dict:
         "protocol": "mdns",
         "timestamp": asyncio.get_event_loop().time()
     }
+
+
+@app.post("/discovery/scan")
+async def universal_scan() -> dict:
+    """Universal device scanner - aggregates all protocol discovery methods.
+    
+    Performs parallel discovery across:
+    - TP-Link Kasa (WiFi)
+    - MQTT devices
+    - BLE devices
+    - mDNS/Bonjour devices
+    
+    Returns a unified list of discovered devices.
+    """
+    LOGGER.info("[UniversalScan] Starting multi-protocol discovery")
+    
+    all_devices = []
+    registry = get_registry()
+    
+    try:
+        # Run all discovery methods in parallel
+        results = await asyncio.gather(
+            discover_kasa_devices(registry, timeout=5),
+            discover_ble_devices(registry, scan_duration=5.0),
+            discover_mdns_devices(registry, scan_duration=3.0),
+            return_exceptions=True
+        )
+        
+        # Process Kasa devices
+        if isinstance(results[0], list):
+            for device in results[0]:
+                device_dict = device.__dict__ if hasattr(device, '__dict__') else {}
+                all_devices.append({
+                    "name": device_dict.get('alias') or device_dict.get('name', 'Kasa Device'),
+                    "brand": "TP-Link",
+                    "vendor": "TP-Link",
+                    "protocol": "kasa",
+                    "comm_type": "WiFi",
+                    "ip": device_dict.get('host') or device_dict.get('ip'),
+                    "mac": device_dict.get('mac'),
+                    "deviceId": device_dict.get('device_id'),
+                    "model": device_dict.get('model')
+                })
+                LOGGER.info(f"[UniversalScan] Found Kasa: {device_dict.get('alias', 'Unknown')}")
+        elif isinstance(results[0], Exception):
+            LOGGER.warning(f"[UniversalScan] Kasa discovery failed: {results[0]}")
+        
+        # Process BLE devices
+        if isinstance(results[1], list):
+            for device in results[1]:
+                device_dict = device.__dict__ if hasattr(device, '__dict__') else {}
+                all_devices.append({
+                    "name": device_dict.get('name', 'BLE Device'),
+                    "brand": device_dict.get('vendor', 'Unknown'),
+                    "vendor": device_dict.get('vendor', 'Unknown'),
+                    "protocol": "ble",
+                    "comm_type": "Bluetooth LE",
+                    "mac": device_dict.get('address') or device_dict.get('mac'),
+                    "deviceId": device_dict.get('address')
+                })
+                LOGGER.info(f"[UniversalScan] Found BLE: {device_dict.get('name', 'Unknown')}")
+        elif isinstance(results[1], Exception):
+            LOGGER.warning(f"[UniversalScan] BLE discovery failed: {results[1]}")
+        
+        # Process mDNS devices
+        if isinstance(results[2], list):
+            for device in results[2]:
+                device_dict = device.__dict__ if hasattr(device, '__dict__') else {}
+                all_devices.append({
+                    "name": device_dict.get('name', 'mDNS Device'),
+                    "brand": device_dict.get('vendor', 'Unknown'),
+                    "vendor": device_dict.get('vendor', 'Unknown'),
+                    "protocol": "mdns",
+                    "comm_type": "mDNS",
+                    "ip": device_dict.get('host') or device_dict.get('ip'),
+                    "deviceId": device_dict.get('name')
+                })
+                LOGGER.info(f"[UniversalScan] Found mDNS: {device_dict.get('name', 'Unknown')}")
+        elif isinstance(results[2], Exception):
+            LOGGER.warning(f"[UniversalScan] mDNS discovery failed: {results[2]}")
+        
+        # Also include MQTT devices from registry
+        mqtt_devices = [d for d in registry.list() if d.protocol == "mqtt"]
+        for device in mqtt_devices:
+            device_dict = device.__dict__ if hasattr(device, '__dict__') else {}
+            all_devices.append({
+                "name": device_dict.get('name', 'MQTT Device'),
+                "brand": device_dict.get('vendor', 'Unknown'),
+                "vendor": device_dict.get('vendor', 'Unknown'),
+                "protocol": "mqtt",
+                "comm_type": "MQTT",
+                "deviceId": device_dict.get('device_id'),
+                "ip": device_dict.get('host')
+            })
+        
+        LOGGER.info(f"[UniversalScan] Complete: {len(all_devices)} total devices found")
+        
+        return {
+            "status": "success",
+            "devices": all_devices,
+            "count": len(all_devices),
+            "timestamp": asyncio.get_event_loop().time()
+        }
+        
+    except Exception as e:
+        LOGGER.error(f"[UniversalScan] Error during discovery: {e}")
+        return {
+            "status": "error",
+            "devices": all_devices,
+            "count": len(all_devices),
+            "error": str(e),
+            "timestamp": asyncio.get_event_loop().time()
+        }
+
+
+# -----------------------------
+# Network utilities (WiFi, test)
+# -----------------------------
+
+def _run_cmd(cmd: list[str], timeout: float = 8.0) -> str:
+    """Run a command and return stdout text; raise on failure.
+
+    Args:
+        cmd: Command and args to run
+        timeout: Seconds to wait before killing
+    Returns:
+        stdout string (may be empty)
+    Raises:
+        subprocess.TimeoutExpired, subprocess.CalledProcessError
+    """
+    LOGGER.debug("Running command: %s", " ".join(cmd))
+    res = subprocess.run(cmd, check=True, capture_output=True, text=True, timeout=timeout)
+    return res.stdout or ""
+
+
+def _scan_wifi_linux() -> list[dict]:
+    """Scan WiFi using nmcli (preferred) or iwlist fallback on Linux."""
+    # Try nmcli first
+    try:
+        out = _run_cmd(["nmcli", "-t", "-f", "SSID,SIGNAL,SECURITY", "dev", "wifi", "list"], timeout=6.0)
+        networks: list[dict] = []
+        for line in out.splitlines():
+            if not line.strip():
+                continue
+            # Some SSIDs may contain ':'; nmcli uses ':' as delimiter. Split max 2 times.
+            parts = line.split(":", 2)
+            ssid = (parts[0] or "").strip()
+            if not ssid:
+                continue
+            signal = int(parts[1] or "-60") if len(parts) > 1 and (parts[1] or "").strip().lstrip("-").isdigit() else -60
+            security = (parts[2] if len(parts) > 2 else "OPEN") or "OPEN"
+            networks.append({"ssid": ssid, "signal": signal, "security": security.upper()})
+        if networks:
+            return networks
+    except Exception as exc:  # pragma: no cover - depends on host tooling
+        LOGGER.debug("nmcli scan failed: %s", exc)
+
+    # Fallback: iwlist (may require sudo on some distros)
+    try:
+        out = _run_cmd(["/sbin/iwlist", "wlan0", "scan"], timeout=8.0)
+    except Exception as exc:  # pragma: no cover
+        LOGGER.debug("iwlist scan failed: %s", exc)
+        return []
+
+    networks: list[dict] = []
+    current: dict[str, object] = {}
+    for raw in out.splitlines():
+        line = raw.strip()
+        # ESSID:"MyNet"
+        m_essid = re.search(r'ESSID:\"(.*)\"', line)
+        if m_essid:
+            if current.get("ssid"):
+                networks.append(current)
+                current = {}
+            ssid = (m_essid.group(1) or "").strip()
+            if ssid:
+                current = {"ssid": ssid, "signal": -60, "security": "UNKNOWN"}
+            continue
+        # Signal level=-49 dBm | Quality=70/100
+        m_signal = re.search(r"Signal level[=:-](-?\d+)", line, flags=re.I)
+        if m_signal and current:
+            try:
+                current["signal"] = int(m_signal.group(1))
+            except Exception:  # pragma: no cover
+                current["signal"] = -60
+    if current.get("ssid"):
+        networks.append(current)
+    # Filter empties
+    return [n for n in networks if (n.get("ssid") or "").strip()]
+
+
+def _scan_wifi_macos() -> list[dict]:
+    """Scan WiFi on macOS using airport, with fallbacks to system_profiler and wdutil."""
+    # airport -s
+    airport = "/System/Library/PrivateFrameworks/Apple80211.framework/Versions/Current/Resources/airport"
+    try:
+        out = _run_cmd([airport, "-s"], timeout=6.0)
+        lines = [l for l in out.splitlines() if l.strip()]
+        # Detect header and rows that contain a BSSID MAC
+        if lines:
+            rows = lines[1:] if re.search(r"SSID\s+BSSID\s+RSSI", lines[0], flags=re.I) else lines
+            rows = [l for l in rows if re.search(r"([0-9A-Fa-f]{2}:){5}[0-9A-Fa-f]{2}", l)]
+            nets: list[dict] = []
+            for row in rows:
+                bssid = re.search(r"([0-9A-Fa-f]{2}:){5}[0-9A-Fa-f]{2}", row)
+                if not bssid:
+                    continue
+                left = row[: bssid.start()].rstrip()
+                right = row[bssid.end():].strip()
+                ssid = left.strip()
+                m_rssi = re.search(r"-?\d{1,3}", right)
+                m_sec = re.search(r"(WPA3|WPA2|WPA|WEP|OPEN|NONE|\S+)\s*$", right, flags=re.I)
+                signal = int(m_rssi.group(0)) if m_rssi else -60
+                security = (m_sec.group(1) if m_sec else "OPEN").upper()
+                if ssid:
+                    nets.append({"ssid": ssid, "signal": signal, "security": security})
+            if nets:
+                return nets
+    except Exception as exc:  # pragma: no cover
+        LOGGER.debug("airport scan failed: %s", exc)
+
+    # system_profiler SPAirPortDataType -json (macOS 12+)
+    try:
+        out = _run_cmd(["/usr/sbin/system_profiler", "SPAirPortDataType", "-json"], timeout=8.0)
+        if out.strip().startswith("{"):
+            data = json.loads(out)
+            wl = data.get("SPAirPortDataType") or data.get("SPAirPort") or []
+            nets: list[dict] = []
+            for iface in wl:
+                scans = iface.get("spairport_airport_interfaces") or []
+                for entry in scans:
+                    nearby = entry.get("spairport_airport_other_local_wireless_networks") or []
+                    for n in nearby:
+                        ssid = (n.get("_name") or n.get("spairport_airport_network_name") or "").strip()
+                        if not ssid:
+                            continue
+                        rssi = n.get("spairport_airport_signal_noise") or n.get("spairport_airport_signal")
+                        security = (n.get("spairport_airport_security") or "OPEN").upper()
+                        try:
+                            signal = int(str(rssi).split()[0]) if rssi is not None else -60
+                        except Exception:
+                            signal = -60
+                        nets.append({"ssid": ssid, "signal": signal, "security": security})
+            if nets:
+                return nets
+    except Exception as exc:  # pragma: no cover
+        LOGGER.debug("system_profiler scan failed: %s", exc)
+
+    # wdutil scan -json
+    try:
+        out = _run_cmd(["/usr/bin/wdutil", "scan", "-json"], timeout=8.0)
+        if out.strip().startswith("{"):
+            obj = json.loads(out)
+            arr = obj.get("Networks") or obj.get("networks") or []
+            nets = []
+            for n in arr:
+                ssid = (n.get("SSID") or n.get("ssid") or "").strip()
+                if not ssid:
+                    continue
+                signal = int(n.get("RSSI") or n.get("rssi") or -60)
+                security = (n.get("SECURITY") or n.get("security") or "OPEN").upper()
+                nets.append({"ssid": ssid, "signal": signal, "security": security})
+            if nets:
+                return nets
+    except Exception as exc:  # pragma: no cover
+        LOGGER.debug("wdutil scan failed: %s", exc)
+
+    return []
+
+
+@app.get("/api/network/wifi/scan")
+async def wifi_scan() -> list[dict]:
+    """Scan for available WiFi networks on the controller host.
+
+    Returns a list of objects: { ssid, signal, security }
+    """
+    try:
+        plat = sys.platform
+        if plat.startswith("linux"):
+            nets = _scan_wifi_linux()
+        elif plat == "darwin":
+            nets = _scan_wifi_macos()
+        else:
+            nets = []
+        if not nets:
+            raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail="WiFi scan unavailable on this host")
+        return nets
+    except HTTPException:
+        raise
+    except Exception as exc:  # pylint: disable=broad-except
+        LOGGER.exception("WiFi scan failed: %s", exc)
+        raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail=f"WiFi scan failed: {exc}") from exc
+
+
+@app.post("/api/network/test")
+async def network_test(payload: dict = Body(default={})) -> dict:
+    """Run a lightweight network connectivity test from the controller host.
+
+    Attempts to determine current IP, default gateway, subnet (CIDR), and ping latency
+    to a well-known address. Does not modify system state.
+    """
+    try:
+        plat = sys.platform
+        ip_addr: Optional[str] = None
+        gateway: Optional[str] = None
+        subnet: Optional[str] = None
+        latency_ms: Optional[float] = None
+
+        if plat.startswith("linux"):
+            # Extract default gateway
+            try:
+                out = _run_cmd(["ip", "route"], timeout=4.0)
+                m = re.search(r"^default\s+via\s+(\S+)", out, flags=re.M)
+                if m:
+                    gateway = m.group(1)
+            except Exception:  # pragma: no cover
+                pass
+            # Get primary interface and IP/subnet
+            try:
+                out = _run_cmd(["ip", "-o", "-4", "addr", "show", "scope", "global"], timeout=4.0)
+                # Take first global address line
+                line = next((l for l in out.splitlines() if l.strip()), "")
+                m = re.search(r"\d+:\s+(\S+)\s+inet\s+(\S+)", line)
+                if m:
+                    iface = m.group(1)
+                    cidr = m.group(2)
+                    subnet = cidr
+                    # Get just IP part
+                    ip_addr = cidr.split("/")[0]
+            except Exception:  # pragma: no cover
+                pass
+            # Ping test
+            try:
+                out = _run_cmd(["ping", "-c", "1", "-W", "1", "1.1.1.1"], timeout=2.5)
+                m = re.search(r"time[=<]([0-9.]+)\s*ms", out)
+                if m:
+                    latency_ms = float(m.group(1))
+            except Exception:  # pragma: no cover
+                pass
+
+        elif plat == "darwin":
+            # macOS gateway
+            try:
+                out = _run_cmd(["/usr/sbin/netstat", "-rn"], timeout=4.0)
+                # default            192.168.1.1        UGSc           en0
+                m = re.search(r"^default\s+(\S+)", out, flags=re.M)
+                if m:
+                    gateway = m.group(1)
+            except Exception:  # pragma: no cover
+                pass
+            # IP address (try en0, then en1)
+            for dev in ("en0", "en1"):
+                try:
+                    out = _run_cmd(["/usr/sbin/ipconfig", "getifaddr", dev], timeout=2.0).strip()
+                    if out:
+                        ip_addr = out
+                        break
+                except Exception:  # pragma: no cover
+                    continue
+            # Subnet CIDR (best effort via ifconfig)
+            try:
+                if ip_addr:
+                    for dev in ("en0", "en1"):
+                        out = _run_cmd(["/sbin/ifconfig", dev], timeout=3.0)
+                        if ip_addr in out:
+                            m = re.search(r"inet\s+%s\s+netmask\s+0x([0-9a-fA-F]+)" % re.escape(ip_addr), out)
+                            if m:
+                                mask_hex = int(m.group(1), 16)
+                                # Convert netmask hex to CIDR length
+                                mask_bits = bin(mask_hex).count("1")
+                                subnet = f"{ip_addr}/{mask_bits}"
+                            break
+            except Exception:  # pragma: no cover
+                pass
+            # Ping test
+            try:
+                out = _run_cmd(["/sbin/ping", "-c", "1", "-t", "1", "1.1.1.1"], timeout=2.5)
+                m = re.search(r"time[=<]([0-9.]+)\s*ms", out)
+                if m:
+                    latency_ms = float(m.group(1))
+            except Exception:  # pragma: no cover
+                pass
+
+        result = {
+            "status": "connected" if latency_ms is not None else "unknown",
+            "ip": ip_addr,
+            "gateway": gateway,
+            "subnet": subnet,
+            "latencyMs": latency_ms,
+            "testedAt": _iso_now(),
+            "ssid": (payload or {}).get("wifi", {}).get("ssid") if isinstance(payload, dict) else None,
+        }
+        return result
+    except Exception as exc:  # pylint: disable=broad-except
+        LOGGER.exception("Network test failed: %s", exc)
+        raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail=f"Network test failed: {exc}") from exc
 
 
 @app.get("/lighting/fixtures", response_model=List[LightingFixtureResponse])

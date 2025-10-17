@@ -1,3 +1,6 @@
+// API Base URL - uses window.API_BASE set in index.charlie.html
+const API_BASE = (typeof window !== 'undefined' && window.API_BASE) ? window.API_BASE : (typeof location !== 'undefined' ? location.origin : 'http://localhost:8091');
+
 // Fallbacks for device pick state if not defined elsewhere
 if (typeof getDevicePickState !== 'function') {
   window.getDevicePickState = function() {
@@ -19,10 +22,10 @@ async function sendDeviceCommand(deviceId, command, params = {}) {
     });
     if (!res.ok) throw new Error('Device command failed');
     const data = await res.json();
-    showToast({ title: 'Device Command', msg: `Command '${command}' sent to ${deviceId}`, kind: 'success', icon: '⚡' });
+    showToast({ title: 'Device Command', msg: `Command '${command}' sent to ${deviceId}`, kind: 'success', icon: '' });
     return data;
   } catch (e) {
-    showToast({ title: 'Device Command Error', msg: e.message, kind: 'error', icon: '❌' });
+    showToast({ title: 'Device Command Error', msg: e.message, kind: 'error', icon: '' });
     return null;
   }
 }
@@ -90,7 +93,7 @@ async function loadCalibrationMultipliers(force = false) {
     }
     calibrationMultipliersCache = normalized;
   } catch (error) {
-    NetGuard.warnOnce('calibration', '[calibration] Failed to load multipliers');
+    console.warn('[calibration] Failed to load multipliers', error);
     calibrationMultipliersCache = calibrationMultipliersCache || {};
     throw error;
   }
@@ -170,6 +173,7 @@ async function setupCalibrationMultipliersCard(card, devices = []) {
     cache = calibrationMultipliersCache || {};
   }
 
+  // Handle device selection changes for calibration multipliers
   const handleDeviceChange = (deviceId) => {
     if (!deviceId) {
       setDisabled(true);
@@ -250,7 +254,7 @@ window.openGrow3Manager = async function() {
   const modal = document.getElementById('grow3Modal');
   const body = document.getElementById('grow3ManagerBody');
   if (!modal || !body) {
-    window.showToast?.({ title: 'Grow3 Manager', msg: 'Modal not found.', kind: 'error', icon: '❌' });
+    window.showToast?.({ title: 'Grow3 Manager', msg: 'Modal not found.', kind: 'error', icon: '' });
     return;
   }
   // Show controller info at the top
@@ -280,16 +284,16 @@ window.openGrow3Manager = async function() {
       port: body.querySelector('#grow3ControllerPort').value.trim() || '8091'
     };
     saveGrow3ControllerConfig(newCfg);
-    window.showToast?.({ title: 'Controller Info Saved', msg: `${newCfg.name} (${newCfg.address}:${newCfg.port})`, kind: 'success', icon: '✅' });
+    window.showToast?.({ title: 'Controller Info Saved', msg: `${newCfg.name} (${newCfg.address}:${newCfg.port})`, kind: 'success', icon: '' });
     window.openGrow3Manager();
   };
   // Fetch device list from controller API using config
   let devices = [];
   try {
-  // Copilot: device list fetch with NetGuard
-  const BASE = window.API_BASE;
-  const json = await NetGuard.fetchJSON(`${BASE}/api/devicedatas`, { timeout: 7000 });
-  devices = Array.isArray(json?.data) ? json.data : [];
+    const resp = await fetch(`${apiBase}/api/devicedatas`);
+    if (!resp.ok) throw new Error('Controller not reachable');
+    const data = await resp.json();
+    devices = Array.isArray(data) ? data : (data.devices || []);
   } catch (e) {
     body.querySelector('#grow3DevicesLoading').innerHTML = `<div style=\"color:#b91c1c;text-align:center;padding:32px;\">Failed to load devices: ${e.message}</div>`;
     return;
@@ -394,72 +398,31 @@ window.openGrow3Manager = async function() {
       const row = btn.closest('tr');
       const id = row.getAttribute('data-id');
       const hex = row.querySelector('.grow3-hex').value.trim();
-      if (!hex) { window.showToast?.({ title: 'HEX required', msg: 'Enter a HEX payload.', kind: 'warn', icon: '⚠️' }); return; }
+      if (!hex) { window.showToast?.({ title: 'HEX required', msg: 'Enter a HEX payload.', kind: 'warn', icon: '' }); return; }
       await sendGrow3Command(id, { status: 'on', value: hex }, row, apiBase);
     };
   });
 };
 
-// Copilot: device toggle with NetGuard
 async function sendGrow3Command(id, payload, row, apiBase) {
-  const BASE = window.API_BASE;
   try {
-    await NetGuard.guardedPoll(async () => {
-      await fetch(`${BASE}/api/devicedatas/device/${encodeURIComponent(id)}`, {
-        method: 'PATCH',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(payload)
-      });
+    const resp = await fetch(`${apiBase}/api/devicedatas/device/${encodeURIComponent(id)}`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload)
     });
-    // Optionally, you could re-fetch device state here if needed
-    row.querySelector('.grow3-status').textContent = payload.status || 'OK';
-    row.querySelector('.grow3-hex').value = typeof payload.value === 'string' ? payload.value : '';
-    window.showToast?.({ title: 'Grow3 Updated', msg: `Device ${id} → ${row.querySelector('.grow3-status').textContent}`, kind: 'success', icon: '✅' });
+    if (!resp.ok) throw new Error('Controller error');
+    const data = await resp.json();
+    row.querySelector('.grow3-status').textContent = data.status || payload.status || 'OK';
+    row.querySelector('.grow3-hex').value = typeof data.value === 'string' ? data.value : (payload.value || '');
+    window.showToast?.({ title: 'Grow3 Updated', msg: `Device ${id} → ${row.querySelector('.grow3-status').textContent}`, kind: 'success', icon: '' });
   } catch (e) {
-    NetGuard.warnOnce('toggle', `[toggle] failed for ${id}; will retry when online`);
-    window.showToast?.({ title: 'Grow3 Error', msg: e.message, kind: 'error', icon: '❌' });
+    window.showToast?.({ title: 'Grow3 Error', msg: e.message, kind: 'error', icon: '' });
   }
 }
 
 // Modal open/close wiring
 document.addEventListener('DOMContentLoaded', function() {
-  // Wire up Search Kasa and Search Shelly buttons for future testing
-  const btnSearchKasa = document.getElementById('btnSearchKasa');
-  if (btnSearchKasa) {
-    btnSearchKasa.onclick = async function() {
-      window.showToast?.({ title: 'Search Kasa', msg: 'Searching for Kasa devices…', kind: 'info', icon: '🔍' });
-      try {
-        const resp = await fetch(window.API_BASE + '/plugs/search/kasa', { method: 'POST', headers: { 'Content-Type': 'application/json' } });
-        const data = await resp.json();
-        if (data.ok) {
-          window.showToast?.({ title: 'Kasa Search', msg: `Found ${data.plugs.length} Kasa device(s).`, kind: 'success', icon: '✅' });
-          console.log('Kasa devices:', data.plugs);
-        } else {
-          window.showToast?.({ title: 'Kasa Search Error', msg: data.error || 'Unknown error', kind: 'error', icon: '❌' });
-        }
-      } catch (err) {
-        window.showToast?.({ title: 'Kasa Search Error', msg: err.message, kind: 'error', icon: '❌' });
-      }
-    };
-  }
-  const btnSearchShelly = document.getElementById('btnSearchShelly');
-  if (btnSearchShelly) {
-    btnSearchShelly.onclick = async function() {
-      window.showToast?.({ title: 'Search Shelly', msg: 'Searching for Shelly devices…', kind: 'info', icon: '🔍' });
-      try {
-        const resp = await fetch(window.API_BASE + '/plugs/search/shelly', { method: 'POST', headers: { 'Content-Type': 'application/json' } });
-        const data = await resp.json();
-        if (data.ok) {
-          window.showToast?.({ title: 'Shelly Search', msg: `Found ${data.plugs.length} Shelly device(s).`, kind: 'success', icon: '✅' });
-          console.log('Shelly devices:', data.plugs);
-        } else {
-          window.showToast?.({ title: 'Shelly Search Error', msg: data.error || 'Unknown error', kind: 'error', icon: '❌' });
-        }
-      } catch (err) {
-        window.showToast?.({ title: 'Shelly Search Error', msg: err.message, kind: 'error', icon: '❌' });
-      }
-    };
-  }
   const btn = document.getElementById('btnOpenGrow3Manager');
   const modal = document.getElementById('grow3Modal');
   const closeBtn = document.getElementById('closeGrow3Modal');
@@ -475,24 +438,6 @@ function collectRoomsFromState() {
   if (wizardRooms.length) return wizardRooms;
   const farmRooms = Array.isArray(STATE.farm?.rooms) ? STATE.farm.rooms : [];
   return farmRooms;
-}
-
-// Collect groups from global STATE and ensure they are normalized.
-function collectGroupsFromState() {
-  try {
-    // If groups are missing or not an array, try normalizing existing state
-    if (!Array.isArray(STATE?.groups)) {
-      normalizeGroupsInState();
-    } else {
-      // Ensure individual group records are normalized
-      STATE.groups = STATE.groups.map(g => normalizeGroupRecord(g));
-    }
-  } catch (err) {
-    // Defensive fallback: ensure STATE.groups exists
-    if (STATE) STATE.groups = STATE.groups || [];
-    console.error('[app] collectGroupsFromState error:', err);
-  }
-  return Array.isArray(STATE.groups) ? STATE.groups : [];
 }
 
 function updateGroupActionStates({ hasGroup = false, hasRoom = false, hasZone = false } = {}) {
@@ -800,21 +745,29 @@ function collectCandidatesForSelection(selectedRoom, selectedZone) {
 // --- Split Assigned vs Ungrouped WITHOUT using group name ------------------
 
 function computeRostersForSelection(selectedRoom, selectedZone) {
-  // Compute assigned/unassigned from live devices and groups only
-  const liveDevices = Array.isArray(STATE.devices) ? STATE.devices : [];
-  const groups = Array.isArray(STATE.groups) ? STATE.groups : [];
-  const map = new Map(liveDevices.map(d => [d.id, d]));
-  const assigned = new Set(groups.flatMap(g => (Array.isArray(g.lights) ? g.lights.map(l => typeof l === 'string' ? l : l.id) : [])));
-  const assignedArr = [];
-  const unassignedArr = [];
-  for (const device of map.values()) {
-    if (assigned.has(device.id)) {
-      assignedArr.push(device);
-    } else {
-      unassignedArr.push(device);
-    }
-  }
-  return { assigned: assignedArr, ungrouped: unassignedArr };
+  const candidates = collectCandidatesForSelection(selectedRoom, selectedZone);
+  if (!candidates.length) return { assigned: [], ungrouped: [] };
+
+  const assignedIds = new Set();
+  (STATE?.groups || []).forEach((group) => {
+    (group?.lights || []).forEach((light) => {
+      const id = typeof light === 'string' ? String(light).trim() : stableLightId(light);
+      if (!id) return;
+      const meta = typeof light === 'string' ? {} : light;
+      if (isForSelection(meta, selectedRoom, selectedZone)) {
+        assignedIds.add(id);
+      }
+    });
+  });
+
+  const assigned = [];
+  const ungrouped = [];
+  candidates.forEach((candidate) => {
+    if (!candidate?.id) return;
+    (assignedIds.has(candidate.id) ? assigned : ungrouped).push(candidate);
+  });
+
+  return { assigned, ungrouped };
 }
 
 // --- When adding a light to a group, stamp roomId/zone explicitly ----------
@@ -1400,7 +1353,7 @@ function showKasaWizard() {
     document.getElementById('kasaWizardNext').onclick = function() {
       const account = document.getElementById('kasaAccount').value.trim();
       if (!account) {
-        showToast({ title: 'Missing Info', msg: 'Account email or IP range is required.', kind: 'error', icon: '⚠️' });
+        showToast({ title: 'Missing Info', msg: 'Account email or IP range is required.', kind: 'error', icon: '' });
         return;
       }
       renderStep2(account);
@@ -1474,12 +1427,12 @@ function showKasaWizard() {
       .then(resp => resp.json())
       .then(result => {
         modal.style.display = 'none';
-        showToast({ title: 'Kasa Setup Complete', msg: `Provisioned ${configs.length} device(s).`, kind: 'success', icon: '✅' });
+        showToast({ title: 'Kasa Setup Complete', msg: `Provisioned ${configs.length} device(s).`, kind: 'success', icon: '' });
         // Optionally refresh Kasa card here
         if (typeof window.refreshKasaCard === 'function') window.refreshKasaCard();
       })
       .catch(err => {
-        showToast({ title: 'Kasa Setup Error', msg: escapeHtml(err.message||'Unknown error'), kind: 'error', icon: '⚠️' });
+        showToast({ title: 'Kasa Setup Error', msg: escapeHtml(err.message||'Unknown error'), kind: 'error', icon: '' });
       });
     };
   }
@@ -1506,7 +1459,7 @@ function showKasaWizard() {
         const token = document.getElementById('sbApiToken').value.trim();
         const secret = document.getElementById('sbApiSecret').value.trim();
         if (!token || !secret) {
-          showToast({ title: 'Missing Info', msg: 'Both API Token and Secret are required.', kind: 'error', icon: '⚠️' });
+          showToast({ title: 'Missing Info', msg: 'Both API Token and Secret are required.', kind: 'error', icon: '' });
           return;
         }
         renderStep2(token, secret);
@@ -1538,7 +1491,7 @@ function showKasaWizard() {
         modalBody.innerHTML = `<h2 style=\"margin-top:0\">SwitchBot Setup Wizard</h2><div class=\"tiny\" style=\"margin-bottom:12px;\">Found ${data.devices.length} device(s):</div><ul style=\"margin-bottom:16px;\">${data.devices.map(d=>`<li><b>${escapeHtml(d.name||d.deviceName||'Device')}</b> <span class='tiny'>(${escapeHtml(d.deviceType||'Unknown')})</span></li>`).join('')}</ul><button class=\"primary\" id=\"sbWizardFinish\" style=\"width:100%;\">Finish Setup</button>`;
         document.getElementById('sbWizardFinish').onclick = function() {
           modal.style.display = 'none';
-          showToast({ title: 'SwitchBot Setup Complete', msg: `Discovered ${data.devices.length} device(s).`, kind: 'success', icon: '✅' });
+          showToast({ title: 'SwitchBot Setup Complete', msg: `Discovered ${data.devices.length} device(s).`, kind: 'success', icon: '' });
           // Optionally refresh SwitchBot card here
           if (typeof window.refreshSwitchBotCard === 'function') window.refreshSwitchBotCard();
         };
@@ -1568,7 +1521,7 @@ window.saveEcosystemSetup = function(ecosystem) {
   const fields = Array.from((modal && modal.querySelectorAll('input,select')) || []);
   const values = {};
   fields.forEach(f => { values[f.id] = f.value; });
-  showToast({ title: `${ecosystem} Info Saved`, msg: JSON.stringify(values), kind: 'success', icon: '✅' });
+  showToast({ title: `${ecosystem} Info Saved`, msg: JSON.stringify(values), kind: 'success', icon: '' });
   if (modal) modal.style.display = 'none';
 };
 // Pairing Wizard modal logic
@@ -1617,33 +1570,709 @@ function groupBy(arr, key) {
   }, {});
 }
 // --- IoT Device Manager Modular UI ---
+const DEVICE_ID_FIELDS = ['id', 'deviceId', 'device_id', 'serialNumber', 'serial', 'mac', 'macAddress', 'btAddress', 'ieeeAddress', 'address', 'ip', 'uuid'];
+
+function cloneDeviceData(value) {
+  try {
+    if (typeof structuredClone === 'function') return structuredClone(value);
+  } catch (err) {
+    console.warn('[renderIoTDeviceCards] structuredClone failed, falling back to JSON clone', err);
+  }
+  try {
+    return JSON.parse(JSON.stringify(value));
+  } catch (jsonErr) {
+    console.warn('[renderIoTDeviceCards] JSON clone failed, returning shallow copy', jsonErr);
+    if (Array.isArray(value)) return value.slice();
+    if (value && typeof value === 'object') return { ...value };
+  }
+  return value;
+}
+
+function deriveDeviceKey(device) {
+  if (!device || typeof device !== 'object') return null;
+  for (const field of DEVICE_ID_FIELDS) {
+    const candidate = device[field];
+    if (candidate !== undefined && candidate !== null && String(candidate).trim()) {
+      return String(candidate).trim();
+    }
+  }
+  return null;
+}
+
+function buildFallbackDeviceKey(device) {
+  if (!device || typeof device !== 'object') return `device-${Date.now()}`;
+  const parts = [
+    device.protocol || device.comm_type || device.type,
+    device.vendor || device.brand || device.manufacturer,
+    device.name || device.deviceName || device.label,
+    device.model || device.deviceModel || device.productModel,
+    device.mac || device.ip || device.address
+  ].filter(Boolean);
+  if (parts.length === 0) {
+    return `device-${Date.now()}`;
+  }
+  return parts.join('|').toLowerCase();
+}
+
+function extractTelemetryData(source, fallback = {}) {
+  const summary = { ...(fallback || {}) };
+  const scope = [];
+  if (source && typeof source === 'object') {
+    scope.push(source);
+    if (source.body && typeof source.body === 'object') scope.push(source.body);
+    if (source.status && typeof source.status === 'object') scope.push(source.status);
+    if (source.state && typeof source.state === 'object') scope.push(source.state);
+    if (Array.isArray(source.properties)) {
+      for (const prop of source.properties) {
+        const key = prop?.name || prop?.key;
+        const value = prop?.value;
+        if (key && value !== undefined && value !== null && typeof value !== 'object') {
+          summary[key] = value;
+        }
+      }
+    }
+  }
+  const interestingKeys = ['power', 'powerState', 'devicePower', 'voltage', 'current', 'temperature', 'humidity', 'rssi', 'signal', 'battery', 'fwVersion', 'firmwareVersion', 'watts', 'amps', 'status', 'state'];
+  for (const target of scope) {
+    for (const [key, value] of Object.entries(target)) {
+      if (value === undefined || value === null) continue;
+      if (typeof value === 'object') continue;
+      summary[key] = value;
+      if (!interestingKeys.includes(key)) {
+        if (/power|state|temp|humid|volt|amp|signal|battery|status/i.test(key)) {
+          summary[key] = value;
+        }
+      }
+    }
+  }
+  return summary;
+}
+
+function sanitizeDevicePayload(rawDevice = {}, overrides = {}) {
+  const base = rawDevice && typeof rawDevice === 'object' ? cloneDeviceData(rawDevice) : {};
+  if (base.deviceData && typeof base.deviceData === 'object') {
+    delete base.deviceData.deviceData;
+  }
+  if (base.telemetry && typeof base.telemetry === 'object') {
+    delete base.telemetry.telemetry;
+  }
+  const merged = { ...base, ...overrides };
+  const key = deriveDeviceKey(merged) || buildFallbackDeviceKey(merged);
+  const telemetry = extractTelemetryData(merged.deviceData || merged, overrides.telemetry || merged.telemetry);
+  const payload = {
+    id: key,
+    deviceId: merged.deviceId || merged.device_id || key,
+    name: merged.name || merged.deviceName || merged.label || 'Unknown Device',
+    brand: merged.brand || merged.vendor || merged.manufacturer || 'Unknown',
+    vendor: merged.vendor || merged.brand || merged.manufacturer || 'Unknown',
+    protocol: String(merged.protocol || merged.comm_type || merged.type || 'unknown').toLowerCase(),
+    type: String(merged.type || merged.category || merged.deviceType || merged.kind || merged.protocol || 'unknown').toLowerCase(),
+    category: merged.category || merged.deviceCategory || null,
+    ip: merged.ip || merged.address || merged.localIp || merged.ipAddress || null,
+    mac: merged.mac || merged.macAddress || merged.btAddress || merged.ieeeAddress || null,
+    address: merged.address || merged.ip || merged.mac || key,
+    model: merged.model || merged.deviceModel || merged.productModel || null,
+    location: merged.location || merged.room || merged.zone || merged.area || null,
+    trust: overrides.trust || merged.trust || rawDevice.trust || 'unknown',
+    credentials: overrides.credentials !== undefined ? overrides.credentials : (merged.credentials !== undefined ? merged.credentials : null),
+    lastSeen: merged.lastSeen || merged.lastseen || merged.lastUpdate || merged.updateTime || merged.detectedAt || null,
+    telemetry,
+    deviceData: cloneDeviceData(merged.deviceData || merged)
+  };
+  if (payload.deviceData && typeof payload.deviceData === 'object' && 'credentials' in payload.deviceData) {
+    delete payload.deviceData.credentials;
+  }
+  Object.defineProperty(payload, '__sanitized', { value: true, enumerable: false });
+  return payload;
+}
+
+function dedupeDevices(devices = []) {
+  const map = new Map();
+  if (!Array.isArray(devices)) return [];
+  for (const device of devices) {
+    const sanitized = device?.__sanitized ? device : sanitizeDevicePayload(device);
+    map.set(sanitized.id, sanitized);
+  }
+  return Array.from(map.values());
+}
+
+function upsertDeviceList(list = [], device) {
+  const sanitized = device?.__sanitized ? device : sanitizeDevicePayload(device);
+  const result = new Map();
+  if (Array.isArray(list)) {
+    for (const item of list) {
+      const normalized = item?.__sanitized ? item : sanitizeDevicePayload(item);
+      result.set(normalized.id, normalized);
+    }
+  }
+  result.set(sanitized.id, sanitized);
+  return Array.from(result.values());
+}
+
+function formatTelemetryKey(key) {
+  return String(key || '')
+    .replace(/_/g, ' ')
+    .replace(/([a-z0-9])([A-Z])/g, '$1 $2')
+    .replace(/\s+/g, ' ')
+    .trim()
+    .replace(/^\w/g, ch => ch.toUpperCase());
+}
+
+function deviceSupportsPowerToggle(device) {
+  if (!device) return false;
+  const protocol = String(device.protocol || '').toLowerCase();
+  const type = String(device.type || '').toLowerCase();
+  const category = String(device.category || '').toLowerCase();
+  return protocol === 'switchbot' && (type.includes('plug') || category.includes('plug'));
+}
+
+function getDevicePowerState(device) {
+  if (!device) return null;
+  const telemetry = device.telemetry || {};
+  const candidates = [telemetry.power, telemetry.powerState, telemetry.devicePower, telemetry.switch, telemetry.status, telemetry.state];
+  for (const value of candidates) {
+    if (value === undefined || value === null) continue;
+    if (typeof value === 'boolean') return value ? 'on' : 'off';
+    const text = String(value).trim().toLowerCase();
+    if (['on', 'true', '1', 'opened', 'open'].includes(text)) return 'on';
+    if (['off', 'false', '0', 'closed', 'close'].includes(text)) return 'off';
+  }
+  return null;
+}
+
+function buildInfoGrid(entries, options = {}) {
+  const items = (entries || []).filter(entry => {
+    if (!entry) return false;
+    const value = entry.value;
+    if (value === undefined || value === null) return false;
+    if (typeof value === 'string' && !value.trim()) return false;
+    return true;
+  });
+  if (!items.length) return null;
+  const columns = options.columns || 2;
+  const grid = document.createElement('div');
+  grid.style.cssText = `margin-top:${options.compact ? '6px' : '10px'};display:grid;grid-template-columns:repeat(${columns}, minmax(0, 1fr));gap:${options.compact ? '6px' : '10px'};`; 
+  items.forEach(entry => {
+    const cell = document.createElement('div');
+    cell.style.cssText = 'background:#f1f5f9;border:1px solid #e2e8f0;border-radius:6px;padding:8px;display:flex;flex-direction:column;gap:2px;';
+    const label = document.createElement('span');
+    label.style.cssText = 'font-size:10px;font-weight:600;letter-spacing:0.04em;text-transform:uppercase;color:#475569;';
+    label.textContent = entry.label;
+    const valueEl = document.createElement('span');
+    valueEl.style.cssText = 'font-size:12px;color:#0f172a;font-weight:500;word-break:break-word;';
+    valueEl.textContent = entry.value;
+    cell.appendChild(label);
+    cell.appendChild(valueEl);
+    grid.appendChild(cell);
+  });
+  return grid;
+}
+
+function buildTelemetrySection(device, options = {}) {
+  const telemetry = device?.telemetry && typeof device.telemetry === 'object' ? device.telemetry : {};
+  const entries = Object.keys(telemetry)
+    .filter(key => telemetry[key] !== undefined && telemetry[key] !== null && typeof telemetry[key] !== 'object')
+    .map(key => ({ label: formatTelemetryKey(key), value: String(telemetry[key]) }));
+  if (!entries.length) return null;
+
+  const deviceId = options.deviceId || device.id;
+  const storageKey = deviceId ? `iot.metrics.expanded.${deviceId}` : null;
+  const stored = storageKey ? (localStorage.getItem(storageKey) || '').toLowerCase() : '';
+  const storedExpanded = stored === '1' || stored === 'true' || stored === 'yes';
+  const showAll = options.showAll === true || storedExpanded;
+  const limit = typeof options.limit === 'number' ? options.limit : entries.length;
+
+  const section = document.createElement('div');
+  section.style.cssText = 'margin-top:10px;display:flex;flex-direction:column;gap:8px;';
+
+  const header = document.createElement('div');
+  header.style.cssText = 'display:flex;align-items:center;justify-content:space-between;gap:8px;';
+  const heading = document.createElement('span');
+  heading.style.cssText = 'font-size:11px;font-weight:600;color:#0369a1;letter-spacing:0.03em;text-transform:uppercase;';
+  heading.textContent = 'Telemetry';
+  header.appendChild(heading);
+
+  const canToggle = entries.length > limit && !showAll;
+  const toggleBtn = document.createElement('button');
+  toggleBtn.style.cssText = 'margin-left:auto;padding:4px 8px;background:#e2e8f0;color:#0f172a;border:none;border-radius:6px;font-size:10px;font-weight:600;cursor:pointer;';
+  toggleBtn.textContent = showAll ? 'Show less' : canToggle ? `Show all (+${entries.length - limit})` : '';
+  if (toggleBtn.textContent) header.appendChild(toggleBtn);
+
+  section.appendChild(header);
+
+  const gridAll = buildInfoGrid(entries, { columns: options.columns || 2, compact: true });
+  const gridTrimmed = buildInfoGrid(entries.slice(0, limit), { columns: options.columns || 2, compact: true });
+
+  if (showAll) {
+    if (gridAll) section.appendChild(gridAll);
+  } else {
+    if (gridTrimmed) section.appendChild(gridTrimmed);
+  }
+
+  if (toggleBtn.textContent) {
+    toggleBtn.addEventListener('click', () => {
+      const currentlyAll = section.querySelector('[data-telemetry-all]');
+    });
+  }
+
+  // Enhanced toggle that rebuilds content when clicked
+  if (toggleBtn.textContent) {
+    const rebuild = (expand) => {
+      // Remove existing grid(s)
+      Array.from(section.querySelectorAll('.__telemetry-grid')).forEach(el => el.remove());
+      const grid = expand ? buildInfoGrid(entries, { columns: options.columns || 2, compact: true })
+                          : buildInfoGrid(entries.slice(0, limit), { columns: options.columns || 2, compact: true });
+      if (grid) {
+        grid.classList.add('__telemetry-grid');
+        section.appendChild(grid);
+      }
+      toggleBtn.textContent = expand ? 'Show less' : `Show all (+${entries.length - limit})`;
+      if (storageKey) localStorage.setItem(storageKey, expand ? '1' : '0');
+    };
+    // Mark initial grid for easy replacement
+    const lastGrid = section.lastElementChild;
+    if (lastGrid) lastGrid.classList.add('__telemetry-grid');
+    toggleBtn.addEventListener('click', () => rebuild(toggleBtn.textContent !== 'Show less'));
+  }
+
+  return section;
+}
+
+function findKeyCaseInsensitive(source, targetKey) {
+  if (!source || typeof source !== 'object') return null;
+  const search = String(targetKey || '').toLowerCase();
+  for (const key of Object.keys(source)) {
+    if (key.toLowerCase() === search) {
+      return key;
+    }
+  }
+  return null;
+}
+
+function resolveDeviceMetric(device, keys = []) {
+  if (!device || typeof device !== 'object') return { key: null, value: null };
+  const sources = [];
+  if (device.telemetry && typeof device.telemetry === 'object') sources.push(device.telemetry);
+  if (device.deviceData && typeof device.deviceData === 'object') {
+    sources.push(device.deviceData);
+    const { details, status, state, body } = device.deviceData;
+    if (details && typeof details === 'object') sources.push(details);
+    if (status && typeof status === 'object') sources.push(status);
+    if (state && typeof state === 'object') sources.push(state);
+    if (body && typeof body === 'object') sources.push(body);
+  }
+  for (const source of sources) {
+    for (const key of keys) {
+      const actualKey = findKeyCaseInsensitive(source, key);
+      if (!actualKey) continue;
+      const value = source[actualKey];
+      if (value !== undefined && value !== null) {
+        return { key: actualKey, value };
+      }
+    }
+    // Shallow nested search (depth 1) for metrics that may be nested in objects
+    for (const [k, v] of Object.entries(source)) {
+      if (v && typeof v === 'object' && !Array.isArray(v)) {
+        for (const key of keys) {
+          const nestedKey = findKeyCaseInsensitive(v, key);
+          if (!nestedKey) continue;
+          const value = v[nestedKey];
+          if (value !== undefined && value !== null) {
+            return { key: `${k}.${nestedKey}`, value };
+          }
+        }
+      }
+    }
+  }
+  return { key: null, value: null };
+}
+
+function toNumericValue(value) {
+  if (value === undefined || value === null) return null;
+  if (typeof value === 'number' && Number.isFinite(value)) return value;
+  if (typeof value === 'boolean') return value ? 1 : 0;
+  if (typeof value === 'string') {
+    const cleaned = value.replace(/,/g, ' ').trim();
+    if (!cleaned) return null;
+    const match = cleaned.match(/-?\d+(?:\.\d+)?/);
+    if (!match) return null;
+    const parsed = Number.parseFloat(match[0]);
+    return Number.isFinite(parsed) ? parsed : null;
+  }
+  return null;
+}
+
+function formatSwitchbotMetric(value, options = {}) {
+  const fallback = options.fallback !== undefined ? options.fallback : '—';
+  if (value === undefined || value === null) return fallback;
+  const numeric = toNumericValue(value);
+  if (numeric === null) {
+    const text = String(value).trim();
+    return text || fallback;
+  }
+  let amount = numeric;
+  let unit = options.unit || '';
+  const threshold = options.kiloThreshold;
+  if (threshold && Math.abs(numeric) >= threshold) {
+    amount = numeric / threshold;
+    unit = options.kiloUnit || unit;
+  }
+  const decimals = typeof options.decimals === 'number' ? options.decimals : 1;
+  let formatted = decimals >= 0 ? amount.toFixed(decimals) : String(amount);
+  formatted = formatted.replace(/\.0+$/, '').replace(/(\.\d*?)0+$/, '$1');
+  if (options.minDecimals !== undefined && options.minDecimals > 0 && !formatted.includes('.')) {
+    formatted = `${formatted}.${'0'.repeat(options.minDecimals)}`;
+  }
+  return unit ? `${formatted}${unit}` : formatted;
+}
+
+function classifySwitchbotDeviceRole(device) {
+  const type = String(device?.type || '').toLowerCase();
+  const category = String(device?.category || '').toLowerCase();
+  if (type.includes('sensor') || category.includes('sensor')) return 'Sensor';
+  if (type.includes('plug') || category.includes('plug')) return 'Plug';
+  const sensorMetric = resolveDeviceMetric(device, ['temperature', 'temp', 'humidity']);
+  if (sensorMetric.value !== null) return 'Sensor';
+  const plugMetric = resolveDeviceMetric(device, ['wattage', 'watts', 'power', 'meter']);
+  if (plugMetric.value !== null) return 'Plug';
+  if (type) return formatTelemetryKey(type);
+  if (category) return formatTelemetryKey(category);
+  return 'Device';
+}
+
+function formatSwitchbotTemperature(device) {
+  const metric = resolveDeviceMetric(device, ['temperature', 'temp_c', 'temp', 'temperature_c', 'temperaturef', 'temperature_f', 'temperaturec']);
+  const telemetry = device?.telemetry || {};
+  const unitHint = String(telemetry.temperatureUnit || telemetry.temperature_scale || telemetry.tempUnit || telemetry.temperatureScale || '').trim();
+  const suffix = unitHint ? (unitHint.toUpperCase().startsWith('F') ? '°F' : unitHint.toUpperCase().startsWith('K') ? 'K' : '°C') : '°C';
+  return formatSwitchbotMetric(metric.value, { unit: suffix, decimals: 1 });
+}
+
+function formatSwitchbotHumidity(device) {
+  const metric = resolveDeviceMetric(device, ['humidity', 'relative_humidity', 'humid']);
+  return formatSwitchbotMetric(metric.value, { unit: '%', decimals: 0 });
+}
+
+function formatSwitchbotVpd(device) {
+  const metric = resolveDeviceMetric(device, ['vpd', 'vpd_kpa', 'vpdvalue', 'vapor_pressure_deficit', 'vaporpressuredeficit']);
+  if (metric.value !== null && metric.value !== undefined) {
+    return formatSwitchbotMetric(metric.value, { unit: 'kPa', decimals: 2 });
+  }
+  const vpdCalc = computeVpdFromTempHumidity(device);
+  return vpdCalc !== null ? formatSwitchbotMetric(vpdCalc, { unit: 'kPa', decimals: 2 }) : '—';
+}
+
+function formatSwitchbotWattage(device) {
+  // Avoid plain "power" key as it's commonly on/off, not power draw
+  const metric = resolveDeviceMetric(device, ['wattage', 'watts', 'watt', 'power_w', 'currentpower', 'instantpower', 'currentwatt', 'meter', 'electricity', 'powerconsumption']);
+  return formatSwitchbotMetric(metric.value, { unit: 'W', kiloThreshold: 1000, kiloUnit: 'kW', decimals: 1 });
+}
+
+function formatSwitchbotPreviousDayEnergy(device) {
+  const metric = resolveDeviceMetric(device, ['previousdaywattage', 'wattageyesterday', 'meteryesterday', 'yesterdaymeter', 'energyyesterday', 'electricityofyesterday', 'electricityOfYesterday', 'yesterdayenergy', 'wattagepreviousday', 'yesterdaykwh', 'yesterDayKwh']);
+  return formatSwitchbotMetric(metric.value, { unit: 'Wh', kiloThreshold: 1000, kiloUnit: 'kWh', decimals: 1 });
+}
+
+function getTemperatureCelsiusNumeric(device) {
+  const m = resolveDeviceMetric(device, ['temperature', 'temp_c', 'temp', 'temperature_c', 'temperaturef', 'temperature_f', 'temperaturec']);
+  const raw = m.value;
+  const unitHint = String((device?.telemetry?.temperatureUnit || device?.telemetry?.temperature_scale || device?.telemetry?.tempUnit || device?.telemetry?.temperatureScale || '')).trim();
+  let value = toNumericValue(raw);
+  if (value === null) return null;
+  const key = (m.key || '').toLowerCase();
+  const isF = unitHint.toUpperCase().startsWith('F') || key.endsWith('f');
+  if (isF) {
+    value = (value - 32) * (5/9);
+  }
+  return value;
+}
+
+function getHumidityPercentNumeric(device) {
+  const m = resolveDeviceMetric(device, ['humidity', 'relative_humidity', 'humid']);
+  const value = toNumericValue(m.value);
+  return value === null ? null : value;
+}
+
+function computeVpdFromTempHumidity(device) {
+  const tC = getTemperatureCelsiusNumeric(device);
+  const rh = getHumidityPercentNumeric(device);
+  if (tC === null || rh === null) return null;
+  // Tetens equation for saturation vapor pressure (kPa)
+  const svp = 0.6108 * Math.exp((17.27 * tC) / (tC + 237.3));
+  const vpd = svp * (1 - (rh / 100));
+  return vpd;
+}
+
+function buildSwitchbotSnapshot(device) {
+  const role = classifySwitchbotDeviceRole(device);
+  const common = [{ label: 'Role', value: role || '—' }];
+  const isPlug = role === 'Plug';
+  const isSensor = role === 'Sensor';
+  const plugEntries = [
+    { label: 'Wattage', value: formatSwitchbotWattage(device) },
+    { label: 'Yesterday Energy', value: formatSwitchbotPreviousDayEnergy(device) }
+  ];
+  const sensorEntries = [
+    { label: 'Temperature', value: formatSwitchbotTemperature(device) },
+    { label: 'Humidity', value: formatSwitchbotHumidity(device) },
+    { label: 'VPD', value: formatSwitchbotVpd(device) }
+  ];
+  const entries = isPlug ? [...common, ...plugEntries] : isSensor ? [...common, ...sensorEntries] : [...common];
+  const grid = buildInfoGrid(entries, { columns: entries.length > 2 ? 3 : 2, compact: true });
+  if (!grid) return null;
+  const wrapper = document.createElement('div');
+  wrapper.style.cssText = 'margin-top:8px;display:flex;flex-direction:column;gap:6px;';
+  const heading = document.createElement('span');
+  heading.style.cssText = 'font-size:10px;font-weight:600;color:#1d4ed8;letter-spacing:0.04em;text-transform:uppercase;';
+  heading.textContent = 'SwitchBot Snapshot';
+  wrapper.appendChild(heading);
+  wrapper.appendChild(grid);
+  return wrapper;
+}
+
+function persistIotDevices(devices) {
+  const payload = dedupeDevices(devices);
+  return fetch('/data/iot-devices.json', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(payload)
+  }).then(res => {
+    if (!res.ok) throw new Error(res.statusText || 'Failed to save devices');
+    console.log('[IoT] Devices persisted:', payload.length);
+  }).catch(err => {
+    console.warn('[IoT] Failed to persist devices:', err);
+  });
+}
+
+function findDeviceRecord(deviceId) {
+  if (!deviceId) return null;
+  const key = String(deviceId);
+  const collections = [STATE.iotDevices || [], window.LAST_IOT_SCAN || []];
+  for (const collection of collections) {
+    if (!Array.isArray(collection)) continue;
+    const match = collection.find(item => deriveDeviceKey(item) === key);
+    if (match) return match.__sanitized ? match : sanitizeDevicePayload(match);
+  }
+  return null;
+}
+
+function updateDeviceRecord(device, options = {}) {
+  const sanitized = device?.__sanitized ? device : sanitizeDevicePayload(device, options.overrides || {});
+  STATE.iotDevices = upsertDeviceList(STATE.iotDevices, sanitized);
+  window.LAST_IOT_SCAN = upsertDeviceList(window.LAST_IOT_SCAN, sanitized);
+  if (options.persist) {
+    persistIotDevices(STATE.iotDevices);
+  }
+  return sanitized;
+}
+
+function createDeviceEntryElement(device) {
+  const entry = document.createElement('div');
+  entry.className = 'iot-device-entry';
+  entry.dataset.deviceId = device.id;
+  entry.style.cssText = 'background:#f8fafc;border:1px solid #e2e8f0;border-radius:10px;padding:12px;display:flex;justify-content:space-between;align-items:flex-start;gap:12px;';
+
+  const info = document.createElement('div');
+  info.style.cssText = 'flex:1;min-width:0;';
+
+  const name = document.createElement('div');
+  name.style.cssText = 'font-weight:600;color:#0f172a;margin-bottom:4px;font-size:14px;display:flex;align-items:center;gap:6px;';
+  name.textContent = device.name || 'Unknown Device';
+  info.appendChild(name);
+
+  const subline = document.createElement('div');
+  subline.style.cssText = 'font-size:10px;color:#475569;display:flex;flex-wrap:wrap;gap:6px;align-items:center;';
+
+  const protocolBadge = document.createElement('span');
+  protocolBadge.style.cssText = 'background:#e0e7ff;color:#1d4ed8;padding:2px 6px;border-radius:999px;font-weight:600;letter-spacing:0.03em;text-transform:uppercase;';
+  protocolBadge.textContent = device.protocol || 'unknown';
+  subline.appendChild(protocolBadge);
+
+  if (device.type && device.type !== device.protocol) {
+    const typeBadge = document.createElement('span');
+  typeBadge.style.cssText = 'background:#e2e8f0;color:#1f2937;padding:2px 6px;border-radius:999px;font-weight:500;text-transform:uppercase;letter-spacing:0.03em;';
+    typeBadge.textContent = device.type;
+    subline.appendChild(typeBadge);
+  }
+
+  // Keep badges minimal: omit address/location to reduce card size
+
+  info.appendChild(subline);
+
+  const powerStateValue = getDevicePowerState(device);
+  if (powerStateValue) {
+    const stateChip = document.createElement('span');
+    stateChip.style.cssText = `display:inline-flex;align-items:center;gap:4px;margin-top:6px;font-size:11px;font-weight:600;color:${powerStateValue === 'on' ? '#047857' : '#b91c1c'};`;
+    const dot = document.createElement('span');
+    dot.style.cssText = `display:inline-block;width:8px;height:8px;border-radius:50%;background:${powerStateValue === 'on' ? '#22c55e' : '#f87171'};`;
+    stateChip.appendChild(dot);
+    const label = document.createElement('span');
+    label.textContent = `Power ${powerStateValue.toUpperCase()}`;
+    stateChip.appendChild(label);
+    info.appendChild(stateChip);
+  }
+
+  const isSwitchbot = String(device.protocol || '').toLowerCase() === 'switchbot';
+  const typeLC = String(device.type || '').toLowerCase();
+  const categoryLC = String(device.category || '').toLowerCase();
+  const isWoiSensor = typeLC.includes('woiosensor') || categoryLC.includes('woiosensor');
+  if (isSwitchbot) {
+    const snapshot = buildSwitchbotSnapshot(device);
+    if (snapshot) info.appendChild(snapshot);
+  }
+
+  // Hide the verbose info grid by default to keep cards small.
+
+  // Hide raw telemetry grid for SwitchBot WoIOSensor cards to keep them clean; keep snapshot above
+  if (!(isSwitchbot && isWoiSensor)) {
+    const telemetrySection = buildTelemetrySection(device, { deviceId: device.id, limit: 6, columns: 2, showAll: isSwitchbot && !isWoiSensor });
+    if (telemetrySection) {
+      info.appendChild(telemetrySection);
+    } else {
+      const placeholder = document.createElement('div');
+      placeholder.style.cssText = 'margin-top:10px;font-size:11px;color:#94a3b8;';
+      placeholder.textContent = 'No telemetry reported yet.';
+      info.appendChild(placeholder);
+    }
+  }
+
+  // Show controlled equipment
+  const controlledEquipment = getAllEquipment().filter(eq => eq.control === `IoT:${device.deviceId || device.id}`);
+  if (controlledEquipment.length > 0) {
+    const controlSection = document.createElement('div');
+    controlSection.style.cssText = 'margin-top:10px;padding:8px;background:#f1f5f9;border-radius:6px;border-left:3px solid #3b82f6;';
+    
+    const controlHeader = document.createElement('div');
+    controlHeader.style.cssText = 'font-size:11px;font-weight:600;color:#1e40af;margin-bottom:6px;';
+    controlHeader.textContent = `Controls ${controlledEquipment.length} Equipment:`;
+    controlSection.appendChild(controlHeader);
+    
+    const equipList = document.createElement('div');
+    equipList.style.cssText = 'display:flex;flex-direction:column;gap:4px;';
+    
+    controlledEquipment.forEach(eq => {
+      const equipItem = document.createElement('div');
+      equipItem.style.cssText = 'font-size:11px;color:#475569;display:flex;align-items:center;gap:6px;';
+      equipItem.innerHTML = `
+        <span style="width:6px;height:6px;background:#3b82f6;border-radius:50%;"></span>
+        <span style="font-weight:500;">${escapeHtml(eq.name || eq.category || 'Equipment')}</span>
+        ${eq.roomName ? `<span style="color:#94a3b8;">in ${escapeHtml(eq.roomName)}</span>` : ''}
+      `;
+      equipList.appendChild(equipItem);
+    });
+    
+    controlSection.appendChild(equipList);
+    info.appendChild(controlSection);
+  }
+
+  entry.appendChild(info);
+
+  const actions = document.createElement('div');
+  actions.style.cssText = 'display:flex;flex-direction:column;gap:6px;align-items:flex-end;';
+
+  const buttonGroup = document.createElement('div');
+  buttonGroup.style.cssText = 'display:flex;gap:4px;';
+
+  let refreshAdded = false;
+  if (deviceSupportsPowerToggle(device)) {
+    const toggleBtn = document.createElement('button');
+    toggleBtn.textContent = powerStateValue === 'on' ? 'Turn Off' : 'Turn On';
+    toggleBtn.style.cssText = 'padding:6px 10px;background:#10b981;color:white;border:none;border-radius:4px;font-size:11px;font-weight:600;cursor:pointer;';
+    toggleBtn.dataset.deviceId = device.id;
+    toggleBtn.dataset.intent = powerStateValue === 'on' ? 'off' : 'on';
+    toggleBtn.addEventListener('click', () => window.toggleDevicePower(device.id));
+    buttonGroup.appendChild(toggleBtn);
+
+    const refreshBtn = document.createElement('button');
+    refreshBtn.textContent = 'Refresh';
+    refreshBtn.style.cssText = 'padding:6px 10px;background:#1f2937;color:white;border:none;border-radius:4px;font-size:11px;font-weight:600;cursor:pointer;';
+    refreshBtn.addEventListener('click', () => window.refreshDeviceStatus(device.id));
+    buttonGroup.appendChild(refreshBtn);
+    refreshAdded = true;
+  }
+
+  if (isSwitchbot && !refreshAdded) {
+    const refreshBtn = document.createElement('button');
+    refreshBtn.textContent = 'Refresh';
+    refreshBtn.style.cssText = 'padding:6px 10px;background:#1f2937;color:white;border:none;border-radius:4px;font-size:11px;font-weight:600;cursor:pointer;';
+    refreshBtn.addEventListener('click', () => window.refreshDeviceStatus(device.id));
+    buttonGroup.appendChild(refreshBtn);
+    refreshAdded = true;
+  }
+
+  const removeBtn = document.createElement('button');
+  removeBtn.textContent = 'Remove';
+  removeBtn.style.cssText = 'padding:6px 10px;background:#ef4444;color:white;border:none;border-radius:4px;font-size:11px;font-weight:600;cursor:pointer;';
+  removeBtn.addEventListener('click', () => window.removeIoTDevice(device.id));
+  buttonGroup.appendChild(removeBtn);
+
+  const renameBtn = document.createElement('button');
+  renameBtn.textContent = 'Rename';
+  renameBtn.style.cssText = 'padding:6px 10px;background:#334155;color:white;border:none;border-radius:4px;font-size:11px;font-weight:600;cursor:pointer;';
+  renameBtn.addEventListener('click', () => window.renameIoTDevice(device.id));
+  buttonGroup.appendChild(renameBtn);
+
+  actions.appendChild(buttonGroup);
+
+  const trustValue = String(device.trust || '').toLowerCase();
+  if (trustValue && trustValue !== 'unknown') {
+    const trustBadge = document.createElement('span');
+    trustBadge.style.cssText = 'font-size:10px;font-weight:600;text-transform:uppercase;color:#475569;';
+    trustBadge.textContent = `Trust: ${trustValue}`;
+    actions.appendChild(trustBadge);
+  }
+
+  entry.appendChild(actions);
+
+  return entry;
+}
+
 function renderIoTDeviceCards(devices) {
-  const list = document.getElementById('iotDevicesList');
-  if (!list) return;
+  console.log('[renderIoTDeviceCards] Called with devices:', devices);
+  let list = document.getElementById('iotDevicesList');
+  console.log('[renderIoTDeviceCards] iotDevicesList element:', list);
+  if (!list) {
+    const iotPanelBody = document.querySelector('#iotPanel .panel-body') || document.getElementById('iotPanel');
+    if (iotPanelBody) {
+      list = document.createElement('div');
+      list.id = 'iotDevicesList';
+      list.style.marginTop = '12px';
+      iotPanelBody.appendChild(list);
+      console.warn('[renderIoTDeviceCards] Created missing iotDevicesList container dynamically');
+    } else {
+      console.error('[renderIoTDeviceCards] IoT panel body not found; cannot render devices');
+      return;
+    }
+  }
+
+  const normalizedDevices = dedupeDevices(Array.isArray(devices) ? devices : []);
+  console.log('[renderIoTDeviceCards] Normalized devices:', normalizedDevices.length, normalizedDevices);
+
   list.innerHTML = '';
-  if (!Array.isArray(devices) || !devices.length) {
-    list.innerHTML = '';
+  if (!normalizedDevices.length) {
+    list.innerHTML = '<div style="padding: 24px; text-align: center; color: #64748b;">No devices added yet. Use the Universal Scanner to discover and add devices.</div>';
     return;
   }
-  // Identify unknown devices: no vendor/type or not trusted/assigned/quarantined
-  const unknowns = devices.filter(d => !d.vendor || d.vendor === 'Unknown' || !d.type || d.trust === 'unknown' || d.trust === undefined);
+
+  const unknowns = normalizedDevices.filter(device => (device.trust || 'unknown') === 'unknown');
+  console.log('[renderIoTDeviceCards] Unknown devices (not accepted):', unknowns.length);
   if (unknowns.length) {
     let html = `<h3 style="margin:0 0 8px 0;">Unknown Devices</h3>`;
     html += `<table class="iot-unknown-table" style="width:100%;border-collapse:collapse;margin-bottom:12px;">
-      <thead><tr style="background:#f1f5f9"><th>Address</th><th>Type</th><th>Vendor</th><th>Name</th><th>Location</th><th>Trust</th><th>Actions</th></tr></thead><tbody>`;
+      <thead><tr style="background:#f1f5f9"><th>Identifier</th><th>Type</th><th>Vendor</th><th>Name</th><th>Location</th><th>Trust</th><th>Actions</th></tr></thead><tbody>`;
     for (const dev of unknowns) {
-      html += `<tr data-addr="${escapeHtml(dev.address||dev.id||'')}" style="border-bottom:1px solid #e5e7eb;">
-        <td>${escapeHtml(dev.address||dev.id||'')}</td>
-        <td><input type="text" class="iot-unknown-type" value="${escapeHtml(dev.type||'')}" style="width:80px"></td>
-        <td><input type="text" class="iot-unknown-vendor" value="${escapeHtml(dev.vendor||'')}" style="width:90px"></td>
-        <td><input type="text" class="iot-unknown-name" value="${escapeHtml(dev.name||'')}" style="width:90px"></td>
-        <td><input type="text" class="iot-unknown-loc" value="${escapeHtml(dev.location||'')}" style="width:90px"></td>
+      html += `<tr data-device-id="${escapeHtml(dev.id)}" style="border-bottom:1px solid #e5e7eb;">
+        <td>${escapeHtml(dev.address || dev.id || '—')}</td>
+        <td><input type="text" class="iot-unknown-type" value="${escapeHtml(dev.type || '')}" style="width:90px"></td>
+        <td><input type="text" class="iot-unknown-vendor" value="${escapeHtml(dev.vendor || '')}" style="width:110px"></td>
+        <td><input type="text" class="iot-unknown-name" value="${escapeHtml(dev.name || '')}" style="width:120px"></td>
+        <td><input type="text" class="iot-unknown-loc" value="${escapeHtml(dev.location || '')}" style="width:120px"></td>
         <td>
           <select class="iot-unknown-trust">
-            <option value="unknown"${!dev.trust||dev.trust==='unknown'?' selected':''}>Unknown</option>
-            <option value="trusted"${dev.trust==='trusted'?' selected':''}>Trusted</option>
-            <option value="quarantine"${dev.trust==='quarantine'?' selected':''}>Quarantine</option>
-            <option value="ignored"${dev.trust==='ignored'?' selected':''}>Ignored</option>
+            <option value="unknown"${!dev.trust || dev.trust === 'unknown' ? ' selected' : ''}>Unknown</option>
+            <option value="trusted"${dev.trust === 'trusted' ? ' selected' : ''}>Trusted</option>
+            <option value="quarantine"${dev.trust === 'quarantine' ? ' selected' : ''}>Quarantine</option>
+            <option value="ignored"${dev.trust === 'ignored' ? ' selected' : ''}>Ignored</option>
           </select>
         </td>
         <td>
@@ -1653,58 +2282,237 @@ function renderIoTDeviceCards(devices) {
       </tr>`;
     }
     html += '</tbody></table>';
-    // Insert the table at the top of the list
-    list.insertAdjacentHTML('afterbegin', html);
-    // Add event listeners for actions
+    list.insertAdjacentHTML('beforeend', html);
+
     Array.from(list.querySelectorAll('.iot-unknown-assign')).forEach(btn => {
       btn.onclick = function(e) {
         const row = e.target.closest('tr');
-        const addr = row.getAttribute('data-addr');
+        const deviceId = row.getAttribute('data-device-id');
         const type = row.querySelector('.iot-unknown-type').value.trim();
         const vendor = row.querySelector('.iot-unknown-vendor').value.trim();
         const name = row.querySelector('.iot-unknown-name').value.trim();
         const loc = row.querySelector('.iot-unknown-loc').value.trim();
         const trust = row.querySelector('.iot-unknown-trust').value;
-        // Update in window.LAST_IOT_SCAN
-        const dev = window.LAST_IOT_SCAN.find(d => (d.address||d.id||'') === addr);
-        if (dev) {
-          dev.type = type; dev.vendor = vendor; dev.name = name; dev.location = loc; dev.trust = trust;
+        const device = findDeviceRecord(deviceId);
+        if (device) {
+          const updated = sanitizeDevicePayload({ ...device, type, vendor, name, location: loc, trust });
+          window.LAST_IOT_SCAN = upsertDeviceList(window.LAST_IOT_SCAN, updated);
+          if (trust === 'trusted') {
+            STATE.iotDevices = upsertDeviceList(STATE.iotDevices, { ...updated, trust: 'trusted' });
+            persistIotDevices(STATE.iotDevices);
+          }
+          showToast({ title: 'Device updated', msg: `${name || device.address || device.id} updated.`, kind: 'success', icon: '' });
+          renderIoTDeviceCards(window.LAST_IOT_SCAN);
         }
-        showToast({ title: 'Device assigned', msg: `${addr} updated.`, kind: 'success', icon: '✅' });
-        renderIoTDeviceCards(window.LAST_IOT_SCAN);
       };
     });
+
     Array.from(list.querySelectorAll('.iot-unknown-quarantine')).forEach(btn => {
       btn.onclick = function(e) {
         const row = e.target.closest('tr');
-        const addr = row.getAttribute('data-addr');
-        const dev = window.LAST_IOT_SCAN.find(d => (d.address||d.id||'') === addr);
-        if (dev) {
-          dev.trust = 'quarantine';
+        const deviceId = row.getAttribute('data-device-id');
+        const device = findDeviceRecord(deviceId);
+        if (device) {
+          const updated = sanitizeDevicePayload({ ...device, trust: 'quarantine' });
+          window.LAST_IOT_SCAN = upsertDeviceList(window.LAST_IOT_SCAN, updated);
+          showToast({ title: 'Device quarantined', msg: `${device.name || device.address || device.id} moved to quarantine.`, kind: 'warn', icon: '' });
+          renderIoTDeviceCards(window.LAST_IOT_SCAN);
         }
-        showToast({ title: 'Device quarantined', msg: `${addr} moved to quarantine.`, kind: 'warn', icon: '🚫' });
-        renderIoTDeviceCards(window.LAST_IOT_SCAN);
       };
     });
   }
-  // Grouped device cards (excluding unknowns)
-  const knowns = devices.filter(d => unknowns.indexOf(d) === -1);
-  if (knowns.length) {
-    const byVendor = groupBy(knowns, d => (d.vendor || d.brand || 'Unknown').toLowerCase());
-    for (const vendor of Object.keys(byVendor)) {
-      let card = document.createElement('section');
-      card.className = 'iot-vendor-card';
-      card.innerHTML = `<h3 style="margin:0 0 8px 0;text-transform:capitalize">${vendor} Devices</h3>`;
-      card.innerHTML += '<ul style="margin:0 0 8px 0;padding:0;list-style:none">' +
-        byVendor[vendor].map(dev => `<li style="margin-bottom:4px"><b>${escapeHtml(dev.name)}</b> <span class="tiny">(${escapeHtml(dev.protocol)})</span> <span class="tiny">${escapeHtml(dev.address||'')}</span></li>`).join('') + '</ul>';
-      list.appendChild(card);
-    }
+
+  const knowns = normalizedDevices.filter(device => (device.trust || 'unknown') !== 'unknown');
+  console.log('[renderIoTDeviceCards] Known/trusted devices:', knowns.length);
+  if (!knowns.length) return;
+
+  const byVendor = groupBy(knowns, dev => (dev.vendor || dev.brand || 'Unknown').toLowerCase());
+  for (const vendor of Object.keys(byVendor)) {
+    const card = document.createElement('section');
+    card.className = 'iot-vendor-card';
+    card.style.cssText = 'background:white;border:1px solid #e5e7eb;border-radius:8px;padding:16px;margin-bottom:12px;box-shadow:0 1px 3px rgba(0,0,0,0.1);';
+
+    const header = document.createElement('h3');
+    header.style.cssText = 'margin:0 0 12px 0;text-transform:capitalize;color:#1e293b;font-size:16px;font-weight:600;border-bottom:2px solid #e5e7eb;padding-bottom:8px;display:flex;align-items:center;gap:8px;';
+    header.textContent = `${vendor === 'unknown' ? 'Unknown' : vendor} Devices`;
+    const badge = document.createElement('span');
+    badge.style.cssText = 'background:#dbeafe;color:#1e40af;padding:2px 8px;border-radius:12px;font-size:11px;font-weight:600;';
+    badge.textContent = byVendor[vendor].length;
+    header.appendChild(badge);
+    card.appendChild(header);
+
+    const container = document.createElement('div');
+    container.style.cssText = 'display:grid;gap:8px;';
+    byVendor[vendor].forEach(device => {
+      const entry = createDeviceEntryElement(device);
+      container.appendChild(entry);
+    });
+    card.appendChild(container);
+    list.appendChild(card);
   }
 }
 
+// View device details
+window.viewDeviceDetails = function(deviceId) {
+  const device = findDeviceRecord(deviceId);
+  if (!device) {
+    showToast({ title: 'Error', msg: 'Device not found', kind: 'error', icon: '' });
+    return;
+  }
+  const safeDevice = cloneDeviceData(device);
+  if (safeDevice.credentials) {
+    if (safeDevice.credentials.token) safeDevice.credentials.token = '••••••';
+    if (safeDevice.credentials.secret) safeDevice.credentials.secret = '••••••';
+    if (safeDevice.credentials.password) safeDevice.credentials.password = '••••••';
+  }
+  const detailsHtml = `
+    <div style="font-family: monospace; font-size: 12px; white-space: pre-wrap; max-height: 320px; overflow-y: auto;">
+${JSON.stringify({
+  id: safeDevice.id,
+  name: safeDevice.name,
+  vendor: safeDevice.vendor,
+  protocol: safeDevice.protocol,
+  type: safeDevice.type,
+  location: safeDevice.location,
+  trust: safeDevice.trust,
+  telemetry: safeDevice.telemetry,
+  deviceData: safeDevice.deviceData
+}, null, 2)}
+    </div>
+  `;
+
+  showToast({
+    title: `Device: ${safeDevice.name || 'Unknown'}`,
+    msg: detailsHtml,
+    kind: 'info',
+    icon: '',
+    duration: 15000
+  });
+};
+
+// Remove device from IoT devices
+window.removeIoTDevice = function(deviceId) {
+  if (!confirm('Remove this device from IoT devices?')) return;
+  const key = String(deviceId);
+  STATE.iotDevices = (STATE.iotDevices || []).filter(device => deriveDeviceKey(device) !== key);
+  window.LAST_IOT_SCAN = (window.LAST_IOT_SCAN || []).filter(device => deriveDeviceKey(device) !== key);
+  persistIotDevices(STATE.iotDevices).finally(() => {
+    window.renderIoTDeviceCards(window.LAST_IOT_SCAN);
+  });
+  showToast({
+    title: 'Device removed',
+    msg: 'Device has been removed from IoT devices',
+    kind: 'success',
+    icon: ''
+  });
+};
+
+window.refreshDeviceStatus = async function(deviceId, options = {}) {
+  const device = findDeviceRecord(deviceId);
+  if (!device) {
+    if (!options.silent) showToast({ title: 'Error', msg: 'Device not found', kind: 'error', icon: '' });
+    return;
+  }
+  if (device.protocol === 'switchbot') {
+    try {
+      const endpointId = encodeURIComponent(device.deviceId || device.id);
+      const resp = await fetch(`/api/switchbot/devices/${endpointId}/status?refresh=1`);
+      const data = await resp.json();
+      if (!resp.ok || !data || data.statusCode !== 100) {
+        throw new Error(data?.message || 'Unable to fetch device status');
+      }
+      const body = data.body || {};
+      const telemetry = extractTelemetryData(body, device.telemetry);
+      const updated = sanitizeDevicePayload({
+        ...device,
+        telemetry,
+        lastSeen: body.lastUpdate || new Date().toISOString(),
+        deviceData: { ...device.deviceData, status: body }
+      });
+      updateDeviceRecord(updated, { persist: true });
+      renderIoTDeviceCards(window.LAST_IOT_SCAN);
+      if (!options.silent) {
+        showToast({ title: 'Status refreshed', msg: `${device.name || device.id} status updated.`, kind: 'success', icon: '' });
+      }
+    } catch (error) {
+      console.error('[IoT] Failed to refresh status', error);
+      if (!options.silent) {
+        showToast({ title: 'Status refresh failed', msg: error.message || 'Unable to refresh status', kind: 'error', icon: '' });
+      }
+    }
+    return;
+  }
+  if (!options.silent) {
+    showToast({ title: 'Not supported', msg: 'Status refresh is not implemented for this device type yet.', kind: 'warn', icon: '' });
+  }
+};
+
+window.toggleDevicePower = async function(deviceId) {
+  const device = findDeviceRecord(deviceId);
+  if (!device) {
+    showToast({ title: 'Error', msg: 'Device not found', kind: 'error', icon: '' });
+    return;
+  }
+  if (!deviceSupportsPowerToggle(device)) {
+    showToast({ title: 'Unsupported', msg: 'Power control not available for this device.', kind: 'warn', icon: '' });
+    return;
+  }
+  const currentState = getDevicePowerState(device);
+  const targetState = currentState === 'on' ? 'off' : 'on';
+
+  if (device.protocol === 'switchbot') {
+    const command = targetState === 'on' ? 'turnOn' : 'turnOff';
+    try {
+      const endpointId = encodeURIComponent(device.deviceId || device.id);
+      const resp = await fetch(`/api/switchbot/devices/${endpointId}/commands`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ command })
+      });
+      const data = await resp.json().catch(() => ({}));
+      if (!resp.ok || data.statusCode !== 100) {
+        throw new Error(data.message || 'Command failed');
+      }
+      showToast({ title: 'Command sent', msg: `${device.name || device.id} turned ${targetState}.`, kind: 'success', icon: '' });
+      await window.refreshDeviceStatus(device.id, { silent: true });
+    } catch (error) {
+      console.error('[IoT] Power toggle failed', error);
+      showToast({ title: 'Command failed', msg: error.message || 'Unable to toggle device power', kind: 'error', icon: '' });
+    }
+    return;
+  }
+
+  showToast({ title: 'Not implemented', msg: 'Power control not implemented for this protocol yet.', kind: 'warn', icon: '' });
+};
+
+// Rename device (update friendly name and persist)
+window.renameIoTDevice = async function(deviceId) {
+  const device = findDeviceRecord(deviceId);
+  if (!device) {
+    showToast({ title: 'Error', msg: 'Device not found', kind: 'error', icon: '' });
+    return;
+  }
+  const current = device.name || '';
+  const next = prompt('Enter a new device name:', current);
+  if (next === null) return; // cancelled
+  const newName = String(next).trim();
+  if (!newName) {
+    showToast({ title: 'Invalid name', msg: 'Name cannot be empty.', kind: 'warn', icon: '' });
+    return;
+  }
+  try {
+    const updated = sanitizeDevicePayload({ ...device, name: newName });
+    updateDeviceRecord(updated, { persist: true });
+    renderIoTDeviceCards(window.LAST_IOT_SCAN);
+    showToast({ title: 'Device renamed', msg: `${current || 'Device'} → ${newName}`, kind: 'success', icon: '' });
+  } catch (e) {
+    showToast({ title: 'Rename failed', msg: e.message || 'Unable to update name', kind: 'error', icon: '' });
+  }
+};
+
 // Demo: global stubs for Kasa/Shelly managers
-window.openKasaManager = function() { showToast({ title: 'Kasa Manager', msg: 'Kasa setup wizard coming soon.', kind: 'info', icon: '💡' }); };
-window.openShellyManager = function() { showToast({ title: 'Shelly Manager', msg: 'Shelly setup wizard coming soon.', kind: 'info', icon: '🔌' }); };
+window.openKasaManager = function() { showToast({ title: 'Kasa Manager', msg: 'Kasa setup wizard coming soon.', kind: 'info', icon: '' }); };
+window.openShellyManager = function() { showToast({ title: 'Shelly Manager', msg: 'Shelly setup wizard coming soon.', kind: 'info', icon: '' }); };
 // Modal close handler
 document.addEventListener('DOMContentLoaded', function() {
   const modal = document.getElementById('switchBotModal');
@@ -1718,10 +2526,60 @@ document.addEventListener('DOMContentLoaded', function() {
       if (e.target === modal) modal.style.display = 'none';
     });
   }
+  // Start auto polling on load
+  try { window.startIotAutoPolling(); } catch {}
+
+  // Pause polling when tab hidden, resume when visible
+  document.addEventListener('visibilitychange', () => {
+    if (document.hidden) {
+      window.stopIotAutoPolling();
+    } else {
+      window.startIotAutoPolling();
+    }
+  });
 });
 
 // Demo: global for last IoT scan results
 window.LAST_IOT_SCAN = [];
+
+// ===== IoT Auto-Polling (every 5 minutes) =====
+window.__iotPollTimer = window.__iotPollTimer || null;
+window.__iotPollIntervalMs = 5 * 60 * 1000; // 5 minutes
+
+function getRefreshableDevices() {
+  const all = Array.isArray(STATE.iotDevices) && STATE.iotDevices.length
+    ? STATE.iotDevices
+    : (Array.isArray(window.LAST_IOT_SCAN) ? window.LAST_IOT_SCAN : []);
+  return dedupeDevices(all).filter(d => String(d.protocol || '').toLowerCase() === 'switchbot' && String(d.trust || '').toLowerCase() === 'trusted');
+}
+
+async function refreshAllDevices(options = {}) {
+  const list = getRefreshableDevices();
+  for (const dev of list) {
+    try {
+      // eslint-disable-next-line no-await-in-loop
+      await window.refreshDeviceStatus(dev.id, { silent: true, ...(options || {}) });
+      // eslint-disable-next-line no-await-in-loop
+      await new Promise(r => setTimeout(r, 250));
+    } catch (e) {
+      // ignore per-device failures during polling
+    }
+  }
+}
+
+window.startIotAutoPolling = function() {
+  if (window.__iotPollTimer) return; // already running
+  window.__iotPollTimer = setInterval(() => {
+    refreshAllDevices({});
+  }, window.__iotPollIntervalMs);
+};
+
+window.stopIotAutoPolling = function() {
+  if (window.__iotPollTimer) {
+    clearInterval(window.__iotPollTimer);
+    window.__iotPollTimer = null;
+  }
+};
 
 // Scan for devices and update UI
 window.scanIoTDevices = async function() {
@@ -1757,10 +2615,12 @@ window.scanIoTDevices = async function() {
     const resp = await fetch('/discovery/devices');
     if (!resp.ok) throw new Error('Discovery failed');
     const data = await resp.json();
-    const devices = Array.isArray(data.devices) ? data.devices : [];
-    window.LAST_IOT_SCAN = devices;
-    renderIoTDeviceCards(devices);
-    showToast({ title: 'Scan complete', msg: `Found ${devices.length} devices`, kind: 'success', icon: '🔍' });
+  const devices = Array.isArray(data.devices) ? data.devices : [];
+  const scanned = devices.map(dev => sanitizeDevicePayload(dev, { trust: 'unknown' }));
+  const trusted = Array.isArray(STATE.iotDevices) ? STATE.iotDevices : [];
+  window.LAST_IOT_SCAN = dedupeDevices([...scanned, ...trusted]);
+  renderIoTDeviceCards(window.LAST_IOT_SCAN);
+    showToast({ title: 'Scan complete', msg: `Found ${devices.length} devices`, kind: 'success', icon: '' });
     if (data.analysis && data.analysis.suggestedWizards) {
       console.info('Suggested wizards:', data.analysis.suggestedWizards);
     }
@@ -1773,7 +2633,7 @@ window.scanIoTDevices = async function() {
     await new Promise(res => setTimeout(res, 500));
   } catch (e) {
     renderIoTDeviceCards([]);
-    showToast({ title: 'Scan failed', msg: e.message || 'Could not scan for devices.', kind: 'error', icon: '❌' });
+    showToast({ title: 'Scan failed', msg: e.message || 'Could not scan for devices.', kind: 'error', icon: '' });
     // Fill bar to 100% on error
     percent = 100;
     if (barFill && barPercent) {
@@ -1791,6 +2651,744 @@ window.scanIoTDevices = async function() {
     }, 600);
   }
 };
+
+// ===== UNIVERSAL DEVICE SCANNER =====
+// Live multi-protocol scanner for the Integrations panel
+window.runUniversalScan = async function() {
+  const btn = document.getElementById('btnUniversalScan');
+  const progress = document.getElementById('universalScanProgress');
+  const progressBar = document.getElementById('universalScanProgressBar');
+  const status = document.getElementById('universalScanStatus');
+  const resultsContainer = document.getElementById('universalScanResults');
+  const resultsTable = document.getElementById('universalScanResultsTable');
+  const resultsCount = document.getElementById('universalScanCount');
+  
+  // Disable button and show progress
+  if (btn) {
+    btn.disabled = true;
+    btn.textContent = 'Scanning...';
+  }
+  if (progress) progress.style.display = 'block';
+  if (resultsContainer) resultsContainer.style.display = 'none';
+  
+  let percent = 0;
+  let animFrame;
+  let running = true;
+  
+  // Animate progress bar
+  function animateProgress() {
+    if (!running) return;
+    percent += Math.random() * 3 + 1;
+    if (percent > 95) percent = 95;
+    if (progressBar) progressBar.style.width = `${percent}%`;
+    if (percent < 95) {
+      animFrame = requestAnimationFrame(animateProgress);
+    }
+  }
+  
+  animFrame = requestAnimationFrame(animateProgress);
+  
+  try {
+    // Update status text
+    if (status) status.textContent = 'Scanning WiFi, BLE, MQTT, Kasa, SwitchBot...';
+    
+    // Discovery endpoint is on Python backend (port 8000), not Node.js (port 8091)
+    // Corrected endpoint: backend uses /discovery/devices (GET), not /discovery/scan (POST)
+    const discoveryEndpoint = '/discovery/devices';
+    console.log('[UniversalScan] Fetching from:', discoveryEndpoint);
+    console.log('[UniversalScan] Full URL:', window.location.origin + discoveryEndpoint);
+    
+    const response = await fetch(discoveryEndpoint, {
+      method: 'GET',
+      headers: { 'Content-Type': 'application/json' }
+    });
+    
+    console.log('[UniversalScan] Response status:', response.status, response.statusText);
+    
+    if (!response.ok) {
+      const errorText = await response.text();
+      console.error('[UniversalScan] Error response:', errorText);
+      throw new Error(`Scan failed: ${response.statusText}`);
+    }
+    
+    const data = await response.json();
+    console.log('[UniversalScan] Response data:', data);
+    const devices = Array.isArray(data.devices) ? data.devices : [];
+    
+    console.log('[UniversalScan] Found devices:', devices);
+    console.log('[UniversalScan] Device count:', devices.length);
+    console.log('[UniversalScan] Device protocols:', [...new Set(devices.map(d => d.protocol))].join(', '));
+    
+    // Complete progress
+    percent = 100;
+    if (progressBar) progressBar.style.width = '100%';
+    if (status) status.textContent = `Found ${devices.length} device${devices.length !== 1 ? 's' : ''}`;
+    
+    await new Promise(res => setTimeout(res, 500));
+    
+    // Hide progress, show results
+    if (progress) progress.style.display = 'none';
+    if (resultsContainer) resultsContainer.style.display = 'block';
+    if (resultsCount) resultsCount.textContent = `${devices.length} device${devices.length !== 1 ? 's' : ''} found`;
+    
+    // Render results table with Accept/Ignore buttons
+    if (resultsTable) {
+      if (devices.length === 0) {
+        resultsTable.innerHTML = '<div style="padding: 24px; text-align: center; color: #64748b;">No devices found. Check network connection.</div>';
+      } else {
+        resultsTable.innerHTML = `
+          <table style="width: 100%; border-collapse: collapse;">
+            <thead>
+              <tr style="background: #f8fafc; border-bottom: 2px solid #e2e8f0;">
+                <th style="padding: 12px; text-align: left; font-size: 12px; font-weight: 600; color: #475569;">Device</th>
+                <th style="padding: 12px; text-align: left; font-size: 12px; font-weight: 600; color: #475569;">Brand</th>
+                <th style="padding: 12px; text-align: left; font-size: 12px; font-weight: 600; color: #475569;">Protocol</th>
+                <th style="padding: 12px; text-align: left; font-size: 12px; font-weight: 600; color: #475569;">IP / ID</th>
+                <th style="padding: 12px; text-align: center; font-size: 12px; font-weight: 600; color: #475569;">Action</th>
+              </tr>
+            </thead>
+            <tbody id="universalScanTableBody">
+              ${devices.map((device, idx) => `
+                <tr id="device-row-${idx}" style="border-bottom: 1px solid #f1f5f9; ${idx % 2 === 0 ? 'background: #fafafa;' : ''}">
+                  <td style="padding: 12px; font-size: 13px; color: #1e293b;">${escapeHtml(device.name || 'Unknown Device')}</td>
+                  <td style="padding: 12px; font-size: 12px; color: #64748b;">${escapeHtml(device.brand || device.vendor || '—')}</td>
+                  <td style="padding: 12px;">
+                    <span style="display: inline-block; padding: 4px 8px; background: #e0e7ff; color: #4338ca; border-radius: 4px; font-size: 11px; font-weight: 600;">
+                      ${escapeHtml(device.protocol || device.comm_type || 'unknown')}
+                    </span>
+                  </td>
+                  <td style="padding: 12px; font-size: 12px; color: #64748b; font-family: monospace;">${escapeHtml(device.ip || device.deviceId || device.mac || '—')}</td>
+                  <td style="padding: 12px; text-align: center;">
+                    <button onclick="window.acceptDiscoveredDevice(${idx})" 
+                            style="padding: 6px 12px; background: #10b981; color: white; border: none; border-radius: 4px; font-size: 12px; font-weight: 600; cursor: pointer; margin-right: 4px;">
+                      Accept
+                    </button>
+                    <button onclick="window.ignoreDiscoveredDevice(${idx})" 
+                            style="padding: 6px 12px; background: #64748b; color: white; border: none; border-radius: 4px; font-size: 12px; font-weight: 600; cursor: pointer;">
+                      Ignore
+                    </button>
+                  </td>
+                </tr>
+              `).join('')}
+            </tbody>
+          </table>
+        `;
+      }
+    }
+    
+    // Store results for adding devices
+    window.LAST_UNIVERSAL_SCAN = devices;
+    
+    showToast({ 
+      title: 'Scan complete', 
+      msg: `Found ${devices.length} device${devices.length !== 1 ? 's' : ''} across all protocols`, 
+      kind: 'success', 
+      icon: '' 
+    });
+    
+  } catch (error) {
+    console.error('[UniversalScan] Error:', error);
+    
+    percent = 100;
+    if (progressBar) progressBar.style.width = '100%';
+    if (status) status.textContent = 'Scan failed';
+    
+    await new Promise(res => setTimeout(res, 500));
+    if (progress) progress.style.display = 'none';
+    
+    showToast({ 
+      title: 'Scan failed', 
+      msg: error.message || 'Could not complete device scan', 
+      kind: 'error', 
+      icon: '' 
+    });
+  } finally {
+    running = false;
+    if (animFrame) cancelAnimationFrame(animFrame);
+    
+    // Reset button
+    if (btn) {
+      btn.disabled = false;
+      btn.textContent = 'Start Scan';
+    }
+  }
+};
+
+// Helper to accept a discovered device - prompts for sign-in if needed
+window.acceptDiscoveredDevice = async function(index) {
+  const devices = window.LAST_UNIVERSAL_SCAN || [];
+  const device = devices[index];
+  if (!device) {
+    showToast({ title: 'Error', msg: 'Device not found', kind: 'error', icon: '' });
+    return;
+  }
+  
+  console.log('[UniversalScan] Accepting device:', device);
+  
+  // Determine if device requires sign-in based on protocol
+  const protocol = (device.protocol || device.comm_type || '').toLowerCase();
+  const requiresSignIn = ['kasa', 'tplink', 'switchbot'].includes(protocol);
+  
+  if (requiresSignIn) {
+    // Check if we already have credentials for this protocol
+    const existingDevice = STATE.iotDevices?.find(d => 
+      d.protocol === protocol && d.credentials && Object.keys(d.credentials).length > 0
+    );
+    
+    if (existingDevice && existingDevice.credentials) {
+      // Use existing credentials - no need to ask again
+      console.log(`[UniversalScan] Using existing ${protocol} credentials`);
+      await addDeviceToIoT(device, index, existingDevice.credentials);
+    } else {
+      // Need to get credentials from user
+      console.log(`[UniversalScan] No existing ${protocol} credentials found, showing sign-in form`);
+      await showDeviceSignInForm(device, index);
+    }
+  } else {
+    // No auth needed - add directly to IoT devices
+    await addDeviceToIoT(device, index);
+  }
+};
+
+// Helper to ignore a discovered device
+window.ignoreDiscoveredDevice = function(index) {
+  const devices = window.LAST_UNIVERSAL_SCAN || [];
+  const device = devices[index];
+  if (!device) return;
+  
+  console.log('[UniversalScan] Ignoring device:', device);
+  
+  // Remove row from table
+  const row = document.getElementById(`device-row-${index}`);
+  if (row) {
+    row.style.opacity = '0.5';
+    row.style.transition = 'opacity 0.3s';
+    setTimeout(() => {
+      row.remove();
+      
+      // Update count
+      const remainingRows = document.querySelectorAll('#universalScanTableBody tr');
+      const resultsCount = document.getElementById('universalScanCount');
+      if (resultsCount) {
+        resultsCount.textContent = `${remainingRows.length} device${remainingRows.length !== 1 ? 's' : ''} found`;
+      }
+      
+      // Show empty state if no devices left
+      if (remainingRows.length === 0) {
+        const resultsTable = document.getElementById('universalScanResultsTable');
+        if (resultsTable) {
+          resultsTable.innerHTML = '<div style="padding: 24px; text-align: center; color: #64748b;">All devices ignored. Run scan again to discover more.</div>';
+        }
+      }
+    }, 300);
+  }
+  
+  showToast({ 
+    title: 'Device ignored', 
+    msg: `${device.name || 'Device'} will not be added`, 
+    kind: 'info', 
+    icon: '' 
+  });
+};
+
+// Show sign-in form for devices that require authentication
+async function showDeviceSignInForm(device, deviceIndex) {
+  const protocol = (device.protocol || device.comm_type || '').toLowerCase();
+  
+  // Create modal overlay
+  const modal = document.createElement('div');
+  modal.id = 'deviceSignInModal';
+  modal.style.cssText = `
+    position: fixed;
+    top: 0;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    background: rgba(0, 0, 0, 0.5);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    z-index: 10000;
+  `;
+  
+  let formHTML = '';
+  
+  if (protocol === 'switchbot') {
+    formHTML = `
+      <div style="background: white; border-radius: 8px; padding: 24px; max-width: 500px; width: 90%;">
+        <h3 style="margin: 0 0 16px 0; color: #1e293b;">Sign In to SwitchBot</h3>
+        <p style="margin: 0 0 16px 0; color: #64748b; font-size: 14px;">
+          Enter your SwitchBot API credentials to add <strong>${escapeHtml(device.name)}</strong>
+        </p>
+        
+        <div style="margin-bottom: 16px;">
+          <label style="display: block; margin-bottom: 4px; font-size: 13px; font-weight: 600; color: #475569;">API Token</label>
+          <input type="text" id="deviceSignInToken" placeholder="Your SwitchBot API token" 
+                 style="width: 100%; padding: 10px; border: 1px solid #e2e8f0; border-radius: 4px; font-size: 14px;">
+        </div>
+        
+        <div style="margin-bottom: 24px;">
+          <label style="display: block; margin-bottom: 4px; font-size: 13px; font-weight: 600; color: #475569;">API Secret</label>
+          <input type="password" id="deviceSignInSecret" placeholder="Your SwitchBot API secret" 
+                 style="width: 100%; padding: 10px; border: 1px solid #e2e8f0; border-radius: 4px; font-size: 14px;">
+        </div>
+        
+        <div style="display: flex; gap: 8px; justify-content: flex-end;">
+          <button onclick="closeDeviceSignInModal()" 
+                  style="padding: 10px 20px; background: #e2e8f0; color: #475569; border: none; border-radius: 4px; font-size: 14px; font-weight: 600; cursor: pointer;">
+            Cancel
+          </button>
+          <button onclick="submitDeviceSignIn(${deviceIndex}, 'switchbot')" 
+                  style="padding: 10px 20px; background: #10b981; color: white; border: none; border-radius: 4px; font-size: 14px; font-weight: 600; cursor: pointer;">
+            Sign In & Add Device
+          </button>
+        </div>
+      </div>
+    `;
+  } else if (protocol === 'kasa' || protocol === 'tplink') {
+    formHTML = `
+      <div style="background: white; border-radius: 8px; padding: 24px; max-width: 500px; width: 90%;">
+        <h3 style="margin: 0 0 16px 0; color: #1e293b;">Sign In to TP-Link Kasa</h3>
+        <p style="margin: 0 0 16px 0; color: #64748b; font-size: 14px;">
+          Enter your Kasa account credentials to add <strong>${escapeHtml(device.name)}</strong>
+        </p>
+        
+        <div style="margin-bottom: 16px;">
+          <label style="display: block; margin-bottom: 4px; font-size: 13px; font-weight: 600; color: #475569;">Email</label>
+          <input type="email" id="deviceSignInEmail" placeholder="your@email.com" 
+                 style="width: 100%; padding: 10px; border: 1px solid #e2e8f0; border-radius: 4px; font-size: 14px;">
+        </div>
+        
+        <div style="margin-bottom: 24px;">
+          <label style="display: block; margin-bottom: 4px; font-size: 13px; font-weight: 600; color: #475569;">Password</label>
+          <input type="password" id="deviceSignInPassword" placeholder="Your password" 
+                 style="width: 100%; padding: 10px; border: 1px solid #e2e8f0; border-radius: 4px; font-size: 14px;">
+        </div>
+        
+        <div style="display: flex; gap: 8px; justify-content: flex-end;">
+          <button onclick="closeDeviceSignInModal()" 
+                  style="padding: 10px 20px; background: #e2e8f0; color: #475569; border: none; border-radius: 4px; font-size: 14px; font-weight: 600; cursor: pointer;">
+            Cancel
+          </button>
+          <button onclick="submitDeviceSignIn(${deviceIndex}, 'kasa')" 
+                  style="padding: 10px 20px; background: #10b981; color: white; border: none; border-radius: 4px; font-size: 14px; font-weight: 600; cursor: pointer;">
+            Sign In & Add Device
+          </button>
+        </div>
+      </div>
+    `;
+  }
+  
+  modal.innerHTML = formHTML;
+  document.body.appendChild(modal);
+}
+
+// Close sign-in modal
+window.closeDeviceSignInModal = function() {
+  const modal = document.getElementById('deviceSignInModal');
+  if (modal) modal.remove();
+};
+
+// Submit device sign-in and add to IoT devices
+window.submitDeviceSignIn = async function(deviceIndex, protocol) {
+  const devices = window.LAST_UNIVERSAL_SCAN || [];
+  const device = devices[deviceIndex];
+  if (!device) return;
+  
+  let credentials = {};
+  
+  if (protocol === 'switchbot') {
+    const token = document.getElementById('deviceSignInToken')?.value.trim();
+    const secret = document.getElementById('deviceSignInSecret')?.value.trim();
+    
+    if (!token || !secret) {
+      showToast({ title: 'Error', msg: 'Please enter both token and secret', kind: 'error', icon: '' });
+      return;
+    }
+    
+    credentials = { token, secret };
+  } else if (protocol === 'kasa') {
+    const email = document.getElementById('deviceSignInEmail')?.value.trim();
+    const password = document.getElementById('deviceSignInPassword')?.value.trim();
+    
+    if (!email || !password) {
+      showToast({ title: 'Error', msg: 'Please enter both email and password', kind: 'error', icon: '' });
+      return;
+    }
+    
+    credentials = { email, password };
+  }
+  
+  // Close modal
+  closeDeviceSignInModal();
+  
+  // Add device with credentials
+  await addDeviceToIoT(device, deviceIndex, credentials);
+};
+
+// Add device to IoT devices panel
+async function addDeviceToIoT(device, deviceIndex, credentials = null) {
+  try {
+    const sanitizedDevice = sanitizeDevicePayload(device, { trust: 'trusted', credentials });
+    console.log('[UniversalScan] Adding device to IoT:', sanitizedDevice);
+
+    STATE.iotDevices = upsertDeviceList(STATE.iotDevices, sanitizedDevice);
+    window.LAST_IOT_SCAN = upsertDeviceList(window.LAST_IOT_SCAN, sanitizedDevice);
+
+    await persistIotDevices(STATE.iotDevices);
+    
+    // Remove from scan results
+    const row = document.getElementById(`device-row-${deviceIndex}`);
+    if (row) {
+      row.style.opacity = '0.5';
+      row.style.transition = 'opacity 0.3s';
+      setTimeout(() => {
+        row.remove();
+        
+        // Update count
+        const remainingRows = document.querySelectorAll('#universalScanTableBody tr');
+        const resultsCount = document.getElementById('universalScanCount');
+        if (resultsCount) {
+          resultsCount.textContent = `${remainingRows.length} device${remainingRows.length !== 1 ? 's' : ''} found`;
+        }
+        
+        // Show empty state if no devices left
+        if (remainingRows.length === 0) {
+          const resultsTable = document.getElementById('universalScanResultsTable');
+          if (resultsTable) {
+            resultsTable.innerHTML = '<div style="padding: 24px; text-align: center; color: #10b981;">✓ All devices processed. Run scan again to discover more.</div>';
+          }
+        }
+      }, 300);
+    }
+    
+    // Render IoT devices panel
+    console.log('[IoT] Rendering devices, count:', window.LAST_IOT_SCAN?.length);
+    console.log('[IoT] Devices to render:', window.LAST_IOT_SCAN);
+    if (typeof window.renderIoTDeviceCards === 'function') {
+      window.renderIoTDeviceCards(window.LAST_IOT_SCAN);
+    } else {
+      console.warn('[IoT] renderIoTDeviceCards function not found!');
+    }
+    
+    // Note: Auto-navigation removed to prevent panel switching
+    // User can manually navigate to IoT Devices panel to view accepted devices
+    
+    showToast({ 
+      title: 'Device added', 
+      msg: `${sanitizedDevice.name || 'Device'} added to IoT devices. Navigate to IoT Devices panel to view.`, 
+      kind: 'success', 
+      icon: '' 
+    });
+    
+  } catch (error) {
+    console.error('[UniversalScan] Error adding device:', error);
+    showToast({ 
+      title: 'Error', 
+      msg: `Failed to add device: ${error.message}`, 
+      kind: 'error', 
+      icon: '' 
+    });
+  }
+}
+
+// Legacy function - deprecated
+window.addDiscoveredDevice = function(index) {
+  console.warn('[UniversalScan] addDiscoveredDevice is deprecated, use acceptDiscoveredDevice instead');
+  window.acceptDiscoveredDevice(index);
+};
+
+// Bind Universal Scanner button on page load
+document.addEventListener('DOMContentLoaded', function() {
+  const universalScanBtn = document.getElementById('btnUniversalScan');
+  if (universalScanBtn) {
+    universalScanBtn.addEventListener('click', window.runUniversalScan);
+  }
+  
+  // Auto-check Grow3 controller status on page load
+  const grow3StatusEl = document.getElementById('grow3Status');
+  if (grow3StatusEl) {
+    window.checkGrow3Status();
+  }
+  
+  // Bind Grow3 test button
+  const btnTestGrow3 = document.getElementById('btnTestGrow3');
+  if (btnTestGrow3) {
+    btnTestGrow3.addEventListener('click', window.testGrow3Connection);
+  }
+});
+
+// ===== GROW3 CONTROLLER FUNCTIONS =====
+// Use relative URL to proxy through Node.js server instead of direct connection
+const GROW3_BASE_URL = '/api/grow3';
+const GROW3_FIXTURES = [
+  { controllerId: 2, fixtureUid: 'F00001' },
+  { controllerId: 3, fixtureUid: 'F00002' },
+  { controllerId: 4, fixtureUid: 'F00003' },
+  { controllerId: 5, fixtureUid: 'F00005' },
+  { controllerId: 6, fixtureUid: 'F00004' }
+];
+
+// Check Grow3 controller health
+window.checkGrow3Status = async function() {
+  const statusEl = document.getElementById('grow3Status');
+  if (!statusEl) return;
+  
+  try {
+    // Try /healthz first, fall back to /api/devicedatas if 404
+    let response = await fetch(`${GROW3_BASE_URL}/healthz`, { 
+      method: 'GET',
+      signal: AbortSignal.timeout(5000) // 5 second timeout
+    });
+    
+    // If /healthz doesn't exist (404), try /api/devicedatas as health check
+    if (response.status === 404) {
+      console.log('[Grow3] /healthz not found, trying /api/devicedatas');
+      response = await fetch(`${GROW3_BASE_URL}/api/devicedatas`, {
+        method: 'GET',
+        signal: AbortSignal.timeout(5000)
+      });
+    }
+    
+    if (response.ok) {
+      const data = await response.json();
+      // Accept various success indicators
+      // Grow3 returns: {status: 'success', message: '...', data: [...]}
+      const isHealthy = 
+        data.ok || 
+        data.status === 'ok' || 
+        data.status === 'success' ||  // ← Grow3 uses 'success'
+        Array.isArray(data) ||
+        (data.data && Array.isArray(data.data));  // ← Nested data array
+      
+      if (isHealthy) {
+        statusEl.innerHTML = `
+          <span style="width: 8px; height: 8px; border-radius: 50%; background: #10b981;"></span>
+          <span>Online</span>
+        `;
+        // Mirror into Code3 card dot/text
+        const code3Dot = document.getElementById('code3StatusDot');
+        const code3Pill = document.getElementById('code3StatusPill');
+        const code3Text = document.getElementById('code3StatusText');
+        if (code3Dot) code3Dot.style.background = '#10b981';
+        if (code3Pill) code3Pill.style.background = '#10b981';
+        if (code3Text) code3Text.textContent = 'Online';
+      } else {
+        throw new Error('Controller returned non-ok status');
+      }
+    } else {
+      throw new Error(`HTTP ${response.status}`);
+    }
+  } catch (error) {
+    // Only log warning, don't show error toast (controller might just be offline)
+    console.warn('[Grow3] Health check failed:', error.message);
+    statusEl.innerHTML = `
+      <span style="width: 8px; height: 8px; border-radius: 50%; background: #ef4444;"></span>
+      <span>Offline</span>
+    `;
+    const code3Dot = document.getElementById('code3StatusDot');
+    const code3Pill = document.getElementById('code3StatusPill');
+    const code3Text = document.getElementById('code3StatusText');
+    if (code3Dot) code3Dot.style.background = '#ef4444';
+    if (code3Pill) code3Pill.style.background = '#ef4444';
+    if (code3Text) code3Text.textContent = 'Offline';
+  }
+};
+// Test Grow3 controller connection with full device list check
+window.testGrow3Connection = async function() {
+  const btn = document.getElementById('btnTestGrow3');
+  if (!btn) return;
+  
+  const originalText = btn.textContent;
+  btn.disabled = true;
+  btn.textContent = 'Testing...';
+  
+  try {
+    // Note: Grow3 controller doesn't have /healthz, so we use /api/devicedatas as health check
+    const devicesResponse = await fetch(`${GROW3_BASE_URL}/api/devicedatas`, {
+      method: 'GET',
+      signal: AbortSignal.timeout(5000)
+    });
+    
+    if (!devicesResponse.ok) {
+      throw new Error(`Devices endpoint failed: ${devicesResponse.statusText}`);
+    }
+    
+    const devicesData = await devicesResponse.json();
+    console.log('[Grow3] Devices:', devicesData);
+    
+    // Extract device array from response (format: {status, message, data: [...]})
+    const devices = devicesData.data || devicesData;
+    const deviceCount = Array.isArray(devices) ? devices.length : 0;
+    
+    // Update status
+    window.checkGrow3Status();
+    
+    showToast({
+      title: 'Code3 Controller Connected',
+      msg: `Found ${deviceCount} device${deviceCount !== 1 ? 's' : ''}`,
+      kind: 'success'
+    });
+
+    // Pipe 5 Code3 fixtures into Groups V2 Unassigned Lights
+    try {
+      if (!window.STATE) window.STATE = {};
+      if (!Array.isArray(window.STATE.lights)) window.STATE.lights = [];
+      const fixtures = [
+        { id: 'F00001', name: 'Code3 Fixture F00001', controller: 'Code3', roomId: 'GreenReach', zoneId: null, comm: 'LAN', tunable: true, dimmable: true },
+        { id: 'F00002', name: 'Code3 Fixture F00002', controller: 'Code3', roomId: 'GreenReach', zoneId: null, comm: 'LAN', tunable: true, dimmable: true },
+        { id: 'F00003', name: 'Code3 Fixture F00003', controller: 'Code3', roomId: 'GreenReach', zoneId: null, comm: 'LAN', tunable: true, dimmable: true },
+        { id: 'F00005', name: 'Code3 Fixture F00005', controller: 'Code3', roomId: 'GreenReach', zoneId: null, comm: 'LAN', tunable: true, dimmable: true },
+        { id: 'F00004', name: 'Code3 Fixture F00004', controller: 'Code3', roomId: 'GreenReach', zoneId: null, comm: 'LAN', tunable: true, dimmable: true }
+      ];
+      let added = 0;
+      fixtures.forEach(f => {
+        if (!window.STATE.lights.some(x => x.id === f.id)) {
+          window.STATE.lights.push(f);
+          added++;
+        }
+      });
+      if (added > 0) {
+        document.dispatchEvent(new Event('lights-updated'));
+        showToast && showToast({ title: 'Lights added', msg: `Added ${added} Code3 light(s) to Unassigned`, kind: 'success' });
+      }
+    } catch(e) { console.warn('Failed to add Code3 fixtures to unassigned', e); }
+
+    // Update Code3 status visuals
+    const code3Dot = document.getElementById('code3StatusDot');
+    const code3Pill = document.getElementById('code3StatusPill');
+    const code3Text = document.getElementById('code3StatusText');
+    if (code3Dot) code3Dot.style.background = '#10b981';
+    if (code3Pill) code3Pill.style.background = '#10b981';
+    if (code3Text) code3Text.textContent = 'Online';
+    
+  } catch (error) {
+    console.error('[Grow3] Connection test failed:', error);
+    
+    showToast({
+      title: 'Code3 Connection Failed',
+      msg: error.message || 'Check network and controller status',
+      kind: 'error'
+    });
+    
+    // Update status to offline
+    const statusEl = document.getElementById('grow3Status');
+    if (statusEl) {
+      statusEl.innerHTML = `
+        <span style="width: 8px; height: 8px; border-radius: 50%; background: #ef4444;"></span>
+        <span>Offline</span>
+      `;
+    }
+    const code3Dot = document.getElementById('code3StatusDot');
+    const code3Pill = document.getElementById('code3StatusPill');
+    const code3Text = document.getElementById('code3StatusText');
+    if (code3Dot) code3Dot.style.background = '#ef4444';
+    if (code3Pill) code3Pill.style.background = '#ef4444';
+    if (code3Text) code3Text.textContent = 'Offline';
+  } finally {
+    btn.disabled = false;
+    btn.textContent = originalText;
+  }
+};
+
+// Render Unassigned Lights cards in Groups V2 panel
+function renderUnassignedLightsCards() {
+  const container = document.getElementById('groupsV2UnassignedLightsCards');
+  if (!container) return;
+  const lights = Array.isArray(window.STATE?.lights) ? window.STATE.lights : [];
+  const unassigned = lights.filter(l => l.roomId && !l.zoneId);
+  if (!unassigned.length) {
+    container.innerHTML = '<p class="tiny text-muted">No unassigned lights yet.</p>';
+    return;
+  }
+  const cards = unassigned.map(l => {
+    const title = escapeHtml(l.name || l.model || 'Light');
+    const id = escapeHtml(l.id || l.serial || '');
+    const controller = escapeHtml(l.controller || 'Unassigned');
+    const comm = escapeHtml(l.comm || '');
+    return `
+      <div class="gr-card" style="padding:12px;border:1px solid #e2e8f0;border-radius:10px;background:#fff;">
+        <div style="font-weight:600;color:#0f172a;margin-bottom:4px;">${title}</div>
+        <div class="tiny" style="color:#64748b;">S/N: ${id}</div>
+        <div class="tiny" style="color:#475569;margin-top:6px;">Controller: ${controller}${comm ? ` • ${comm}` : ''}</div>
+      </div>
+    `;
+  }).join('');
+  container.innerHTML = cards;
+}
+
+document.addEventListener('DOMContentLoaded', renderUnassignedLightsCards);
+
+document.addEventListener('lights-updated', renderUnassignedLightsCards);
+
+// Test individual Grow3 fixture with on/off sequence
+window.testGrow3Fixture = async function(controllerId, fixtureUid) {
+  console.log(`[Grow3] Testing fixture ${fixtureUid} (Controller ID: ${controllerId})`);
+  
+  try {
+    // Turn ON with 45% all channels (hex: 73 = 115 decimal = ~45% of 255)
+    const onPayload = {
+      status: 'on',
+      value: '737373730000' // CW:45% WW:45% Blue:45% Red:45%
+    };
+    
+    const onResponse = await fetch(`${GROW3_BASE_URL}/api/devicedatas/device/${controllerId}`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(onPayload),
+      signal: AbortSignal.timeout(5000)
+    });
+    
+    if (!onResponse.ok) {
+      throw new Error(`ON command failed: ${onResponse.statusText}`);
+    }
+    
+    console.log(`[Grow3] Fixture ${fixtureUid} turned ON`);
+    
+    showToast({
+      title: `Fixture ${fixtureUid} ON`,
+      msg: 'All channels at 45%. Light should be on.',
+      kind: 'success',
+      icon: ''
+    });
+    
+    // Wait 2 seconds, then turn OFF
+    await new Promise(resolve => setTimeout(resolve, 2000));
+    
+    const offPayload = { status: 'off' };
+    
+    const offResponse = await fetch(`${GROW3_BASE_URL}/api/devicedatas/device/${controllerId}`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(offPayload),
+      signal: AbortSignal.timeout(5000)
+    });
+    
+    if (!offResponse.ok) {
+      throw new Error(`OFF command failed: ${offResponse.statusText}`);
+    }
+    
+    console.log(`[Grow3] Fixture ${fixtureUid} turned OFF`);
+    
+    showToast({
+      title: `Fixture ${fixtureUid} OFF`,
+      msg: 'Test complete. Light should be off.',
+      kind: 'info',
+      icon: ''
+    });
+    
+  } catch (error) {
+    console.error(`[Grow3] Fixture test failed for ${fixtureUid}:`, error);
+    
+    showToast({
+      title: 'Fixture Test Failed',
+      msg: `${fixtureUid}: ${error.message}`,
+      kind: 'error',
+      icon: ''
+    });
+  }
+};
+
 if (typeof window.showTipFor !== 'function') {
   window.showTipFor = function(el) {
     // No-op stub for tooltips
@@ -2185,6 +3783,8 @@ async function safeRoomsDelete(roomId) {
     renderRooms();
   }
   return ok;
+}
+
 // Helper to reload rooms from backend
 async function loadRoomsFromBackend() {
   try {
@@ -2194,7 +3794,6 @@ async function loadRoomsFromBackend() {
       STATE.rooms = data.rooms || [];
     }
   } catch (e) { console.warn('Failed to reload rooms:', e); }
-}
 }
 
 async function safeRoomsSave() {
@@ -2710,33 +4309,6 @@ function cloneFallback(value) {
   return value;
 }
 
-const SMART_PLUGS_FALLBACK_PAYLOAD = Object.freeze({
-  plugs: Object.freeze([
-    Object.freeze({
-      id: 'plug-demo-1',
-      name: 'Irrigation Pump',
-      online: true,
-      ip: '192.168.50.21',
-      power_w: 87,
-      location: 'North Greenhouse'
-    }),
-    Object.freeze({
-      id: 'plug-demo-2',
-      name: 'Heater',
-      online: false,
-      ip: '192.168.50.32',
-      power_w: 0,
-      location: 'Propagation'
-    })
-  ])
-});
-
-function cloneSmartPlugFallback() {
-  return {
-    plugs: SMART_PLUGS_FALLBACK_PAYLOAD.plugs.map((plug) => ({ ...plug }))
-  };
-}
-
 // Global JSON loader with graceful fallback
 async function loadJSON(url, fallbackValue = null) {
   try {
@@ -2773,12 +4345,6 @@ async function fetchPlansDocument() {
     return await resp.json();
   } catch (error) {
     console.warn('[plans] Failed to fetch /plans', error);
-    try {
-      const fallback = await loadJSON('./data/plans.json', { plans: [] });
-      if (fallback) return fallback;
-    } catch (fallbackError) {
-      console.warn('[plans] Fallback load failed', fallbackError);
-    }
     return null;
   }
 }
@@ -2790,12 +4356,6 @@ async function fetchSchedulesDocument() {
     return await resp.json();
   } catch (error) {
     console.warn('[sched] Failed to fetch /sched', error);
-    try {
-      const fallback = await loadJSON('./data/schedules.json', { schedules: [] });
-      if (fallback) return fallback;
-    } catch (fallbackError) {
-      console.warn('[sched] Fallback load failed', fallbackError);
-    }
     return null;
   }
 }
@@ -2986,11 +4546,9 @@ function interpretSwitchBotPayload(payload) {
   return { rawDevices, devices, summary, summaryMeta, meta, statusCode, message };
 }
 
-async function loadSwitchBotDevices(options = {}) {
-  const refresh = options && options.refresh === true;
+async function loadSwitchBotDevices() {
   try {
-    const url = refresh ? '/switchbot/devices?refresh=1' : '/switchbot/devices';
-    const response = await fetch(url);
+    const response = await fetch('/switchbot/devices');
     const cache = {
       status: response.headers?.get?.('X-Cache') || null,
       freshness: response.headers?.get?.('X-Cache-Freshness') || null
@@ -3435,23 +4993,37 @@ class FarmWizard {
     if (networkList) networkList.style.display = 'none';
     this.hasScannedWifi = true;
     if (status) status.textContent = 'Scanning…';
-    // DEMO MODE: Always use demo Wi-Fi networks
-    setTimeout(() => {
-      this.wifiNetworks = [
-        { ssid: 'greenreach', signal: -42, security: 'WPA2' },
-        { ssid: 'Farm-IoT', signal: -48, security: 'WPA2' },
-        { ssid: 'Greenhouse-Guest', signal: -62, security: 'WPA2' },
-        { ssid: 'BackOffice', signal: -74, security: 'WPA3' },
-        { ssid: 'Equipment-WiFi', signal: -55, security: 'WPA2' }
-      ];
-      if (status) status.textContent = `${this.wifiNetworks.length} networks found (demo)`;
-      console.debug('[FarmWizard] DEMO Wi-Fi scan result', this.wifiNetworks);
+    
+    // LIVE MODE: Call real WiFi scan endpoint
+    try {
+      const response = await fetch(`${API_BASE}/forwarder/network/wifi/scan`);
+      if (!response.ok) throw new Error(`WiFi scan failed: ${response.statusText}`);
+      
+      const networks = await response.json();
+      this.wifiNetworks = Array.isArray(networks) ? networks : [];
+      
+      if (status) status.textContent = `${this.wifiNetworks.length} network${this.wifiNetworks.length !== 1 ? 's' : ''} found`;
+      console.debug('[FarmWizard] Live Wi-Fi scan result', this.wifiNetworks);
+      
       // Hide both scanners and show network list
       if (step2Scanner) step2Scanner.style.display = 'none';
       if (scanningIndicator) scanningIndicator.style.display = 'none';
       if (networkList) networkList.style.display = 'block';
       this.renderWifiNetworks();
-    }, 1200);
+    } catch (error) {
+      console.error('[FarmWizard] WiFi scan error:', error);
+      if (status) status.textContent = 'Scan failed';
+      
+      // LIVE MODE: No demo fallback - show real error
+      this.wifiNetworks = [];
+      
+      if (step2Scanner) step2Scanner.style.display = 'none';
+      if (scanningIndicator) scanningIndicator.style.display = 'none';
+      if (networkList) networkList.style.display = 'block';
+      this.renderWifiNetworks();
+      
+      showToast({ title: 'WiFi scan failed', msg: `Network scan error: ${error.message}. Check API endpoint.`, kind: 'error', icon: '' });
+    }
 
     // If not already on the wifi-select step, force the wizard to that step
     if (this.steps && this.steps[this.currentStep] !== 'wifi-select') {
@@ -3495,6 +5067,7 @@ class FarmWizard {
     const status = $('#wifiTestStatus');
     const testingIndicator = $('#wifiTestingIndicator');
     const testButton = $('#btnTestWifi');
+    
     // Show testing indicator and disable button
     if (testingIndicator) {
       testingIndicator.style.display = 'flex';
@@ -3507,33 +5080,85 @@ class FarmWizard {
       status.style.display = 'none'; // Hide status while testing indicator is shown
       status.innerHTML = '<div class="tiny">Testing connection...</div>';
     }
-    // DEMO MODE: Simulate a 2s delay and always return a successful connection
-    await new Promise(res => setTimeout(res, 2000));
-    const demoResult = {
-      status: 'connected',
-      ip: '192.168.1.123',
-      gateway: '192.168.1.1',
-      latencyMs: 12
-    };
-    this.data.connection.wifi.tested = true;
-    this.data.connection.wifi.testResult = demoResult;
-    if (this.data.connection.wifi.reuseDiscovery) {
-      try {
-        localStorage.setItem(this.discoveryStorageKeys.subnet, '192.168.1.0/24');
-        localStorage.setItem(this.discoveryStorageKeys.gateway, '192.168.1.1');
-        localStorage.setItem(this.discoveryStorageKeys.ssid, this.data.connection.wifi.ssid);
-      } catch {}
+    
+    // LIVE MODE: Call real network test endpoint
+    try {
+      const payload = {
+        type: 'wifi',
+        wifi: {
+          ssid: this.data.connection.wifi.ssid,
+          password: this.data.connection.wifi.password
+        }
+      };
+      
+      const response = await fetch(`${API_BASE}/forwarder/network/test`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload)
+      });
+      
+      if (!response.ok) throw new Error(`Network test failed: ${response.statusText}`);
+      
+      const result = await response.json();
+      this.data.connection.wifi.tested = true;
+      this.data.connection.wifi.testResult = result;
+      
+      // Store network info for device discovery if enabled
+      if (this.data.connection.wifi.reuseDiscovery && result.subnet) {
+        try {
+          localStorage.setItem(this.discoveryStorageKeys.subnet, result.subnet);
+          localStorage.setItem(this.discoveryStorageKeys.gateway, result.gateway || '');
+          localStorage.setItem(this.discoveryStorageKeys.ssid, this.data.connection.wifi.ssid);
+        } catch {}
+      }
+      
+      showToast({ 
+        title: 'Wi‑Fi connected', 
+        msg: `IP ${result.ip || 'unknown'} • gateway ${result.gateway || 'unknown'}`, 
+        kind: 'success', 
+        icon: '' 
+      });
+      
+      // Hide testing indicator, restore button, and show status
+      if (testingIndicator) {
+        testingIndicator.style.display = 'none';
+      }
+      if (testButton) {
+        testButton.disabled = false;
+        testButton.textContent = 'Test connection';
+      }
+      if (status) {
+        status.style.display = 'block';
+        status.innerHTML = `<div class="badge badge--success">Connected</div><div class="tiny">IP: ${result.ip || 'N/A'} • Latency: ${result.latencyMs || 0}ms</div>`;
+      }
+      this.updateWifiPasswordUI();
+      
+    } catch (error) {
+      console.error('[FarmWizard] WiFi test error:', error);
+      
+      this.data.connection.wifi.tested = false;
+      this.data.connection.wifi.testResult = null;
+      
+      // Hide testing indicator, restore button
+      if (testingIndicator) {
+        testingIndicator.style.display = 'none';
+      }
+      if (testButton) {
+        testButton.disabled = false;
+        testButton.textContent = 'Test connection';
+      }
+      if (status) {
+        status.style.display = 'block';
+        status.innerHTML = `<div class="badge badge--error">Failed</div><div class="tiny">${error.message || 'Connection test failed. Check password and try again.'}</div>`;
+      }
+      
+      showToast({ 
+        title: 'Connection failed', 
+        msg: 'Check password and network availability', 
+        kind: 'error', 
+        icon: '' 
+      });
     }
-    showToast({ title: 'Wi‑Fi connected', msg: `IP ${demoResult.ip} • gateway ${demoResult.gateway}`, kind: 'success', icon: '✅' });
-    // Hide testing indicator, restore button, and show status
-    if (testingIndicator) {
-      testingIndicator.style.display = 'none';
-    }
-    if (testButton) {
-      testButton.disabled = false;
-      testButton.textContent = 'Test connection';
-    }
-    this.updateWifiPasswordUI();
   }
 
   addRoom() {
@@ -3944,11 +5569,11 @@ class FarmWizard {
       });
       this.updateFarmDisplay();
       try { this.updateFarmHeaderDisplay(); } catch {}
-      showToast({ title: 'Farm saved', msg: 'We stored the farm profile and updated discovery defaults.', kind: 'success', icon: '✅' });
+      showToast({ title: 'Farm saved', msg: 'We stored the farm profile and updated discovery defaults.', kind: 'success', icon: '' });
       // Notify listeners (e.g., Groups card) that farm data changed
       window.dispatchEvent(new CustomEvent('farmDataChanged'));
     } catch (err) {
-      showToast({ title: 'Save failed', msg: err?.message || String(err), kind: 'warn', icon: '⚠️' });
+      showToast({ title: 'Save failed', msg: err?.message || String(err), kind: 'warn', icon: '' });
     }
     this.close();
     // Removed: Do not auto-launch Grow Room setup after farm registration
@@ -4155,36 +5780,6 @@ class FarmWizard {
       
     } catch (error) {
       console.error('Weather loading error:', error);
-      try {
-        const fallback = await loadJSON('./data/weather.json', null);
-        if (fallback?.ok && fallback?.current) {
-          const weather = fallback.current;
-          const tempF = Math.round(weather.temperature_f);
-          const tempC = Math.round(weather.temperature_c);
-          const humidity = Math.round(weather.humidity || 0);
-          const windSpeed = Math.round(weather.wind_speed || 0);
-          weatherContent.innerHTML = `
-            <div class="weather-row">
-              <span class="weather-temp">${tempF}°F (${tempC}°C)</span>
-              <span class="weather-description">${escapeHtml(weather.description || '')}</span>
-            </div>
-            <div class="weather-row">
-              <span>Humidity:</span>
-              <span class="weather-value">${humidity}%</span>
-            </div>
-            <div class="weather-row">
-              <span>Wind Speed:</span>
-              <span class="weather-value">${windSpeed} km/h</span>
-            </div>
-            <div style="margin-top: 8px; font-size: 12px; color: #666;">
-              Updated: ${new Date(weather.last_updated).toLocaleTimeString()}
-            </div>
-          `;
-          return;
-        }
-      } catch (fallbackError) {
-        console.warn('Weather fallback load failed', fallbackError);
-      }
       weatherContent.innerHTML = `
         <div style="color: #EF4444; font-size: 14px;">
           ⚠️ Unable to load weather data
@@ -4647,7 +6242,7 @@ class FarmWizard {
       try {
         await this.saveBrandingChanges();
       } catch (err) {
-  if (typeof showToast === 'function') showToast({ title: 'Save failed', msg: err?.message || String(err), kind: 'warn', icon: '⚠️' });
+  if (typeof showToast === 'function') showToast({ title: 'Save failed', msg: err?.message || String(err), kind: 'warn', icon: '' });
       } finally {
         btn.disabled = false;
         btn.textContent = 'Save Branding';
@@ -4900,12 +6495,12 @@ class FarmWizard {
     try {
       if (STATE.farm.name) {
         await safeFarmSave(STATE.farm);
-        showToast({ title: 'Branding saved', msg: 'Your farm branding has been updated successfully.', kind: 'success', icon: '🎨' });
+        showToast({ title: 'Branding saved', msg: 'Your farm branding has been updated successfully.', kind: 'success', icon: '' });
       } else {
-        showToast({ title: 'Branding applied', msg: 'Branding will be saved when you complete farm registration.', kind: 'info', icon: '🎨' });
+        showToast({ title: 'Branding applied', msg: 'Branding will be saved when you complete farm registration.', kind: 'info', icon: '' });
       }
     } catch (e) {
-      showToast({ title: 'Save warning', msg: 'Branding applied locally but could not sync to server.', kind: 'warn', icon: '⚠️' });
+      showToast({ title: 'Save warning', msg: 'Branding applied locally but could not sync to server.', kind: 'warn', icon: '' });
     }
     document.getElementById('brandingWizardBackdrop').remove();
   }
@@ -5145,7 +6740,7 @@ class DeviceManagerWindow {
     this.runBtn?.addEventListener('click', () => this.runDiscovery());
     this.filterButtons.forEach(btn => btn.addEventListener('click', () => this.setFilter(btn.dataset.filter)));
     this.automationBtn?.addEventListener('click', () => {
-      showToast({ title: 'Automation card', msg: 'Coming soon — natural language rules for any sensor to control any device.', kind: 'info', icon: '🧠' }, 5000);
+      showToast({ title: 'Automation card', msg: 'Coming soon — natural language rules for any sensor to control any device.', kind: 'info', icon: '' }, 5000);
     });
   }
 
@@ -5203,7 +6798,7 @@ class DeviceManagerWindow {
         };
       });
       if (this.statusEl) this.statusEl.textContent = `Found ${this.devices.length} device${this.devices.length === 1 ? '' : 's'}`;
-      showToast({ title: 'Discovery complete', msg: `Found ${this.devices.length} potential devices`, kind: 'success', icon: '🔍' });
+      showToast({ title: 'Discovery complete', msg: `Found ${this.devices.length} potential devices`, kind: 'success', icon: '' });
     } catch (err) {
       console.error('Discovery failed', err);
       // NO DEMO DEVICES - Show error and require live discovery
@@ -5213,7 +6808,7 @@ class DeviceManagerWindow {
         title: 'Discovery Failed', 
         msg: 'Device discovery failed. Please check network connectivity and try again. No demo devices available.', 
         kind: 'error', 
-        icon: '❌' 
+        icon: '' 
       });
     }
     this.render();
@@ -5359,7 +6954,7 @@ class DeviceManagerWindow {
       });
     } else if (proto.includes('mqtt')) {
       card.querySelector('[data-action="mqtt-sub"]').addEventListener('click', () => {
-        showToast({ title: 'MQTT', msg: 'Subscribe/Unsubscribe coming soon.', kind: 'info', icon: '🔗' });
+        showToast({ title: 'MQTT', msg: 'Subscribe/Unsubscribe coming soon.', kind: 'info', icon: '' });
       });
     }
     this.renderAssignment(card, device);
@@ -5479,7 +7074,7 @@ class DeviceManagerWindow {
         }
       }
       if (updated) {
-        showToast({ title: 'Zone added', msg: `Zone "${zoneName}" added to room.`, kind: 'success', icon: '➕' });
+        showToast({ title: 'Zone added', msg: `Zone "${zoneName}" added to room.`, kind: 'success', icon: '' });
         refreshRoomsAndZones(roomId, zoneName);
         if (typeof safeRoomsSave === 'function') {
           try { safeRoomsSave({ id: roomId }); } catch {}
@@ -5498,7 +7093,7 @@ class DeviceManagerWindow {
       const type = form.querySelector('select[name="type"]').value;
       device.assignment = { roomId, zone, type };
       device.status = 'added';
-      showToast({ title: 'Device added', msg: `${device.name} mapped to ${type} in room ${rooms.find(r => r.id === roomId)?.name || roomId}`, kind: 'success', icon: '✅' });
+      showToast({ title: 'Device added', msg: `${device.name} mapped to ${type} in room ${rooms.find(r => r.id === roomId)?.name || roomId}`, kind: 'success', icon: '' });
       this.render();
     });
 
@@ -5816,13 +7411,13 @@ class RoomWizard {
             // Block adding device on invalid unit id
             fatalError = true;
             const msg = 'RS-485 Unit ID must be an integer between 1 and 247';
-            showToast({ title: 'RS-485 invalid', msg, kind: 'warn', icon: '⚠️' });
+            showToast({ title: 'RS-485 invalid', msg, kind: 'warn', icon: '' });
             setFieldError('deviceRs485UnitId', msg);
             const el = document.getElementById('deviceRs485UnitId'); if (el) invalidEls.push(el);
           }
           if (!validBaud) {
             // Non-fatal advisory for uncommon baud
-            showToast({ title: 'RS-485 baud', msg: `Uncommon baud rate: ${rsBaud}. Examples: ${commonBaud.join(', ')}`, kind: 'info', icon: 'ℹ️' });
+            showToast({ title: 'RS-485 baud', msg: `Uncommon baud rate: ${rsBaud}. Examples: ${commonBaud.join(', ')}`, kind: 'info', icon: '' });
           }
           if (validUnit && !fatalError) setup.rs485 = { host: rsHost || null, unitId: rsUnit, baud: rsBaud || null };
         }
@@ -5841,14 +7436,14 @@ class RoomWizard {
           if (!validCh) {
             fatalError = true;
             const msg = '0-10V channel is required for 0-10V setup';
-            showToast({ title: '0-10V invalid', msg, kind: 'warn', icon: '⚠️' });
+            showToast({ title: '0-10V invalid', msg, kind: 'warn', icon: '' });
             setFieldError('device0v10Channel', msg);
             const el = document.getElementById('device0v10Channel'); if (el) invalidEls.push(el);
           }
           if (!validScale) {
             fatalError = true;
             const msg = '0-10V scale must be numeric (e.g., 0-100)';
-            showToast({ title: '0-10V scale', msg, kind: 'warn', icon: '⚠️' });
+            showToast({ title: '0-10V scale', msg, kind: 'warn', icon: '' });
             setFieldError('device0v10Scale', msg);
             const el2 = document.getElementById('device0v10Scale'); if (el2) invalidEls.push(el2);
           }
@@ -6113,7 +7708,7 @@ class RoomWizard {
         title: 'No Rooms Found',
         msg: 'Farm Registration has no rooms yet. Starting a blank Grow Room setup.',
         kind: 'info',
-        icon: 'ℹ️'
+        icon: ''
       });
       this.multiRoomList = [];
       this.multiRoomIndex = 0;
@@ -6292,7 +7887,7 @@ class RoomWizard {
           title: 'Switched Room', 
           msg: `Now setting up: ${prevRoom.name}`, 
           kind: 'info', 
-          icon: '🔄' 
+          icon: '' 
         });
       }
     };
@@ -6308,7 +7903,7 @@ class RoomWizard {
           title: 'Switched Room', 
           msg: `Now setting up: ${nextRoom.name}`, 
           kind: 'info', 
-          icon: '🔄' 
+          icon: '' 
         });
       }
     };
@@ -6405,7 +8000,7 @@ class RoomWizard {
                 title: 'Room Setup Saved',
                 msg: `Moving to ${nextRoom.name}`,
                 kind: 'success',
-                icon: '✅'
+                icon: ''
               });
             } else {
               // No more rooms, close the wizard
@@ -6414,7 +8009,7 @@ class RoomWizard {
                 title: 'All Rooms Complete!',
                 msg: 'All grow rooms have been set up successfully',
                 kind: 'success',
-                icon: '🎉'
+                icon: ''
               });
             }
           } else {
@@ -6422,7 +8017,7 @@ class RoomWizard {
               title: 'Save Failed',
               msg: 'Please fix errors before continuing',
               kind: 'error',
-              icon: '❌'
+              icon: ''
             });
           }
         };
@@ -6939,8 +8534,6 @@ class RoomWizard {
       html = `
         <div class="tiny">Central HVAC units</div>
         <label class="tiny">How many? <input type="number" id="cat-hvac-count" min="0" value="${v(catData.count||0)}" style="width:80px"></label>
-        <div class="tiny" style="margin-top:6px">Control</div>
-        ${chipRow('cat-hvac-control', ['Thermostat','Modbus/BACnet','Relay','Other'], catData.control)}
       `;
     } else if (catId === 'mini-split') {
       html = `
@@ -6968,13 +8561,6 @@ class RoomWizard {
           </div>
         </div>
         
-        <div class="tiny" style="margin-top:6px">Control Options</div>
-        <div class="control-checkboxes">
-          <label class="tiny"><input type="checkbox" id="cat-mini-split-wifi" ${catData.wifi ? 'checked' : ''}> Wi-Fi Control</label>
-          <label class="tiny"><input type="checkbox" id="cat-mini-split-wired" ${catData.wired ? 'checked' : ''}> Wired Thermostat Control</label>
-        </div>
-        <div class="tiny" style="margin-top:6px">Additional Control</div>
-        ${chipRow('cat-mini-split-control', ['Modbus/BACnet','Relay','Other'], catData.control)}
       `;
     } else if (catId === 'dehumidifier') {
       html = `
@@ -7002,11 +8588,6 @@ class RoomWizard {
           </div>
         </div>
         
-        <div class="tiny" style="margin-top:6px">Control Options</div>
-        <div class="control-checkboxes">
-          <label class="tiny"><input type="checkbox" id="cat-dehu-wifi" ${catData.wifi ? 'checked' : ''}> Wi-Fi Control</label>
-          <label class="tiny"><input type="checkbox" id="cat-dehu-wired" ${catData.wired ? 'checked' : ''}> Wired Thermostat Control</label>
-        </div>
       `;
     } else if (catId === 'fans') {
       html = `
@@ -7017,11 +8598,6 @@ class RoomWizard {
           </label>
         </div>
         <label class="tiny">How many? <input type="number" id="cat-fans-count" min="0" value="${v(catData.count||0)}" style="width:80px"></label>
-        <div class="tiny" style="margin-top:6px">Control Options</div>
-        <div class="control-checkboxes">
-          <label class="tiny"><input type="checkbox" id="cat-fans-wifi" ${catData.wifi ? 'checked' : ''}> Wi-Fi Control</label>
-          <label class="tiny"><input type="checkbox" id="cat-fans-wired" ${catData.wired ? 'checked' : ''}> Wired Thermostat Control</label>
-        </div>
       `;
     } else if (catId === 'vents') {
       html = `
@@ -7032,8 +8608,6 @@ class RoomWizard {
           </label>
         </div>
         <label class="tiny">How many? <input type="number" id="cat-vents-count" min="0" value="${v(catData.count||0)}" style="width:80px"></label>
-        <div class="tiny" style="margin-top:6px">Control</div>
-        ${chipRow('cat-vents-control', ['Relay','0-10V','Other'], catData.control)}
       `;
     } else if (catId === 'controllers') {
       html = `
@@ -7044,8 +8618,6 @@ class RoomWizard {
       html = `
         <div class="tiny">Energy Monitors</div>
         <label class="tiny">How many? <input type="number" id="cat-energy-count" min="0" value="${v(catData.count||0)}" style="width:80px"></label>
-        <div class="tiny" style="margin-top:6px">Type</div>
-        ${chipRow('cat-energy-type', ['CT clamp','Smart meter','Built-in','Other'], catData.type)}
       `;
     } else {
       html = `
@@ -7260,14 +8832,44 @@ class RoomWizard {
     }
     
     console.log('[DEBUG] Searching equipment for category:', category, 'query:', query);
+    console.log('[DEBUG] STATE object keys:', Object.keys(STATE || {}));
+    console.log('[DEBUG] STATE.equipmentKB:', STATE.equipmentKB);
+    console.log('[DEBUG] STATE.equipmentKB exists:', !!STATE.equipmentKB);
+    console.log('[DEBUG] Equipment array length:', STATE.equipmentKB?.equipment?.length || 0);
     
     // Search in equipment database
     const equipment = STATE.equipmentKB?.equipment || [];
+    
+    if (equipment.length === 0) {
+      console.warn('[WARN] Equipment database is empty or not loaded!');
+      console.warn('[WARN] Attempting to reload equipment database...');
+      
+      // Try to load the equipment database on-demand
+      fetch('./data/equipment-kb.json')
+        .then(r => r.json())
+        .then(data => {
+          if (data && Array.isArray(data.equipment)) {
+            STATE.equipmentKB = data;
+            console.log('✅ Successfully loaded equipment database on-demand:', data.equipment.length, 'items');
+            // Retry the search
+            this.searchEquipment(category, query, resultsElementId);
+          } else {
+            console.error('[ERROR] Invalid equipment database structure:', data);
+            resultsDiv.innerHTML = `<div style="padding: 20px; text-align: center; color: #ef4444; font-size: 13px;">Equipment database has invalid structure.</div>`;
+          }
+        })
+        .catch(err => {
+          console.error('[ERROR] Failed to load equipment database:', err);
+          resultsDiv.innerHTML = `<div style="padding: 20px; text-align: center; color: #ef4444; font-size: 13px;">Failed to load equipment database: ${err.message}</div>`;
+        });
+      return;
+    }
+    
     const filtered = equipment.filter(item => {
       const searchText = (item.vendor + ' ' + item.model + ' ' + (item.tags || []).join(' ')).toLowerCase();
       const matches = item.category === category && searchText.includes(query.toLowerCase());
       if (query.toLowerCase().length >= 2) {
-        console.log('[DEBUG] Checking:', searchText, 'matches query "' + query + '":', matches);
+        console.log('[DEBUG] Checking:', item.vendor, item.model, 'category:', item.category, 'vs', category, 'match:', matches);
       }
       return matches;
     });
@@ -7868,7 +9470,7 @@ class RoomWizard {
       if (typeof renderControllerAssignments === 'function') {
         renderControllerAssignments();
       }
-      showToast({ title: 'Fixture added', msg: `${item.vendor} ${item.model} inserted into the room`, kind: 'success', icon: '✅' }, 3000);
+      showToast({ title: 'Fixture added', msg: `${item.vendor} ${item.model} inserted into the room`, kind: 'success', icon: '' }, 3000);
       return;
     }
 
@@ -7918,7 +9520,7 @@ class RoomWizard {
         title: 'Equipment added', 
         msg: `${item.vendor} ${item.model} added to room`, 
         kind: 'success', 
-        icon: '✅' 
+        icon: '' 
       }, 3000);
       return;
     }
@@ -7968,7 +9570,7 @@ class RoomWizard {
       }
       if (typeof toggleSetupFormsForModel === 'function') toggleSetupFormsForModel(item);
       this.updateSetupQueue();
-      showToast({ title: 'Device selected', msg: `${item.vendor} ${item.model} prefilled. Complete the device form to add it.`, kind: 'info', icon: 'ℹ️' }, 3500);
+      showToast({ title: 'Device selected', msg: `${item.vendor} ${item.model} prefilled. Complete the device form to add it.`, kind: 'info', icon: '' }, 3500);
     }
   }
 
@@ -8156,7 +9758,7 @@ class RoomWizard {
           title: 'API Rate Limited',
           msg: `SwitchBot API is rate limited. Please wait ${retryAfter} seconds and refresh.`,
           kind: 'warn',
-          icon: '⏱️'
+          icon: ''
         });
 
         // NO FALLBACK - Live data only
@@ -8175,7 +9777,7 @@ class RoomWizard {
           title: 'Using Cached Data',
           msg: 'SwitchBot API unavailable, using cached device data.',
           kind: 'info',
-          icon: '💾'
+          icon: ''
         });
       } else if (meta.cached || cacheStatus === 'hit') {
         console.info('📋 Using cached SwitchBot device list (within TTL).');
@@ -8190,7 +9792,7 @@ class RoomWizard {
           title: 'No Devices Found',
           msg: 'No SwitchBot devices found in your account. Add devices in the SwitchBot app first.',
           kind: 'warn',
-          icon: '📱'
+          icon: ''
         });
 
         if (this.statusEl) {
@@ -8224,7 +9826,7 @@ class RoomWizard {
         title: 'Live Devices Connected',
         msg: `Successfully connected to ${normalizedDevices.length} live SwitchBot devices on greenreach network.`,
         kind: 'success',
-        icon: '🔌'
+        icon: ''
       });
 
       if (this.statusEl) {
@@ -8238,7 +9840,7 @@ class RoomWizard {
         title: 'Live Data Required', 
         msg: `Cannot load live SwitchBot devices: ${error.message}. Please check your API credentials and network connection.`, 
         kind: 'error', 
-        icon: '❌' 
+        icon: '' 
       });
       
       if (this.statusEl) {
@@ -8255,13 +9857,14 @@ class RoomWizard {
 
   getSetupForDeviceType(deviceType) {
     const type = deviceType.toLowerCase();
+    // LIVE MODE: Return empty setup - user must configure WiFi/BLE from Farm Registration wizard
     if (type.includes('meter') || type.includes('sensor')) {
       return {
         bluetooth: { name: `WoSensorTH_${Math.random().toString(36).substr(2, 6)}`, pin: null }
       };
     } else if (type.includes('plug') || type.includes('switch')) {
       return {
-        wifi: { ssid: 'greenreach', psk: 'Farms2024', useStatic: false, staticIp: null }
+        wifi: { ssid: '', psk: '', useStatic: false, staticIp: null }
       };
     } else if (type.includes('bot')) {
       return {
@@ -8269,7 +9872,7 @@ class RoomWizard {
       };
     } else {
       return {
-        wifi: { ssid: 'greenreach', psk: 'Farms2024', useStatic: true, staticIp: `192.168.1.${40 + Math.floor(Math.random() * 10)}` }
+        wifi: { ssid: '', psk: '', useStatic: false, staticIp: null }
       };
     }
   }
@@ -8282,9 +9885,9 @@ class RoomWizard {
       title: 'Live Data Only', 
       msg: 'Mock devices are disabled. Please ensure your SwitchBot API is working and you have real devices.', 
       kind: 'warn', 
-      icon: '🚫' 
+      icon: '' 
     });
-    // No-op: do not inject any demo devices
+    this.data.devices = [];
   }
 
   setupLiveSwitchBotConfiguration() {
@@ -8336,7 +9939,7 @@ class RoomWizard {
       title: 'Live Farm Network Connected', 
       msg: `Connected to greenreach network with live SwitchBot devices and farm sensors.`, 
       kind: 'success', 
-      icon: '🌱' 
+      icon: '' 
     });
   }
 
@@ -8357,7 +9960,12 @@ class RoomWizard {
     // Assign id if new
     if (!this.data.id) this.data.id = `room-${Math.random().toString(36).slice(2,8)}`;
     // Persist categoryProgress into room data for summary
-    if (this.categoryProgress) this.data._categoryProgress = JSON.parse(JSON.stringify(this.categoryProgress));
+    if (this.categoryProgress) {
+      const snap = JSON.parse(JSON.stringify(this.categoryProgress));
+      // Save under both underscored and non-underscored keys to ensure visibility across readers
+      this.data._categoryProgress = snap;
+      this.data.categoryProgress = snap;
+    }
     // Upsert into STATE.rooms and persist
     const idx = STATE.rooms.findIndex(r => r.id === this.data.id);
     if (idx >= 0) STATE.rooms[idx] = { ...STATE.rooms[idx], ...this.data };
@@ -8367,6 +9975,7 @@ class RoomWizard {
     if (ok) {
       renderRooms();
       renderControllerAssignments(); // Update controller assignments when rooms change
+      renderEquipmentOverview(); // Update equipment overview when rooms change
       if (typeof seedGroupRoomZoneDropdowns === 'function') {
         try { seedGroupRoomZoneDropdowns(); } catch {}
       }
@@ -8396,7 +10005,7 @@ class RoomWizard {
         title: 'Room Saved',
         msg: `Room \"${this.data.name}\" saved successfully!`,
         kind: 'success',
-        icon: '✅'
+        icon: ''
       });
     }
     // If save failed, saveRoom will handle the error display and we stay in the wizard
@@ -8550,26 +10159,13 @@ async function loadAllData() {
       copy.online = copy.online !== false;
       return copy;
     });
-
-    if (!STATE.devices.length) {
-      try {
-        const fallbackDevicesDoc = await loadJSON('./data/devicedatas.json', { data: [] });
-        const fallbackDevices = unwrapDeviceList(fallbackDevicesDoc);
-        if (Array.isArray(fallbackDevices) && fallbackDevices.length) {
-          STATE.devices = fallbackDevices;
-          STATE.devicesMeta = fallbackDevicesDoc?.meta || { source: 'static-data' };
-        }
-      } catch (error) {
-        console.warn('[devices] No static fallback inventory available', error);
-      }
-    }
-
+    
     // Load static data files
-    const [groupsDoc, schedulesDocRaw, plansDocRaw, envDocRaw, calibrationsDoc, spdLibraryDoc, deviceMetaDoc, deviceKB, equipmentKB, deviceManufacturersDoc, farmDoc, roomsDoc, switchbotDevicesDoc] = await Promise.all([
+    const [groups, schedules, plans, environment, calibrations, spdLibrary, deviceMeta, deviceKB, equipmentKB, deviceManufacturers, farm, rooms, switchbotDevices, storedIotDevices, equipmentMetadata] = await Promise.all([
       loadJSON('./data/groups.json', { groups: [] }),
       fetchSchedulesDocument(),
       fetchPlansDocument(),
-      safeApi('/env', null),
+      safeApi('/env', { zones: [] }),
       loadJSON('./data/calibration.json', { calibrations: [] }),
       loadJSON('./data/spd-library.json', null),
       loadJSON('./data/device-meta.json', { devices: {} }),
@@ -8578,45 +10174,56 @@ async function loadAllData() {
       loadJSON('./data/device-manufacturers.json', { manufacturers: [] }),
       loadJSON('./data/farm.json', {}),
       loadJSON('./data/rooms.json', { rooms: [] }),
-      loadJSON('./data/switchbot-devices.json', { devices: [], summary: null })
+      loadJSON('./data/switchbot-devices.json', { devices: [], summary: null }),
+      loadJSON('./data/iot-devices.json', []),
+      loadJSON('./data/equipment-metadata.json', {})
     ]);
 
-    STATE.groups = groupsDoc?.groups || [];
-    let schedulesDoc = (schedulesDocRaw && typeof schedulesDocRaw === 'object') ? schedulesDocRaw : null;
-    if (!schedulesDoc) {
-      schedulesDoc = await loadJSON('./data/schedules.json', { schedules: [] });
+    STATE.groups = groups?.groups || [];
+    const iotDevicesData = Array.isArray(storedIotDevices) ? storedIotDevices : [];
+    const uniqueDevices = dedupeDevices(iotDevicesData);
+    if (uniqueDevices.length !== iotDevicesData.length) {
+      persistIotDevices(uniqueDevices);
     }
+    STATE.iotDevices = uniqueDevices;
+    window.LAST_IOT_SCAN = uniqueDevices.slice();
+    console.log('✅ [loadAllData] Loaded IoT devices:', STATE.iotDevices.length);
+    setTimeout(() => {
+      if (typeof window.renderIoTDeviceCards === 'function') {
+        window.renderIoTDeviceCards(window.LAST_IOT_SCAN);
+      }
+    }, 500);
+     const schedulesDoc = (schedules && typeof schedules === 'object') ? schedules : null;
     STATE.scheduleDocument = schedulesDoc;
     STATE.schedules = Array.isArray(schedulesDoc?.schedules) ? schedulesDoc.schedules : [];
-    let plansDoc = (plansDocRaw && typeof plansDocRaw === 'object') ? plansDocRaw : null;
-    if (!plansDoc) {
-      plansDoc = await loadJSON('./data/plans.json', { plans: [] });
-    }
+     const plansDoc = (plans && typeof plans === 'object') ? plans : null;
     STATE.planDocumentInfo = plansDoc;
     STATE.plans = Array.isArray(plansDoc?.plans) ? plansDoc.plans : [];
     updatePlansStatusIndicator({ doc: STATE.planDocumentInfo, plans: STATE.plans });
-    let environmentDoc = (envDocRaw && typeof envDocRaw === 'object') ? envDocRaw : null;
-    if (!environmentDoc || !Array.isArray(environmentDoc?.zones)) {
-      environmentDoc = await loadJSON('./data/env.json', { zones: [] });
-    }
-    STATE.environment = environmentDoc?.zones || [];
-    STATE.calibrations = calibrationsDoc?.calibrations || [];
+    STATE.environment = environment?.zones || [];
+    STATE.calibrations = calibrations?.calibrations || [];
     STATE._calibrationCache = new Map();
-    STATE.spdLibrary = normalizeSpdLibrary(spdLibraryDoc);
+    STATE.spdLibrary = normalizeSpdLibrary(spdLibrary);
     if (STATE.spdLibrary) {
       console.log('✅ Loaded SPD library:', STATE.spdLibrary.wavelengths.length, 'bins');
     } else {
       console.warn('⚠️ SPD library missing or invalid');
     }
     hydrateDeviceDriverState();
-    STATE.deviceMeta = deviceMetaDoc?.devices || {};
+    STATE.deviceMeta = deviceMeta?.devices || {};
     normalizeGroupsInState();
-    STATE.switchbotDevices = switchbotDevicesDoc?.devices || [];
-    STATE.switchbotSummary = switchbotDevicesDoc?.summary || summarizeSwitchBotDevices(STATE.switchbotDevices) || {};
-    const rawFarm = farmDoc || (() => { try { return JSON.parse(localStorage.getItem('gr.farm') || 'null'); } catch { return null; } })() || {};
+    STATE.switchbotDevices = switchbotDevices?.devices || [];
+    STATE.switchbotSummary = switchbotDevices?.summary || summarizeSwitchBotDevices(STATE.switchbotDevices) || {};
+    const rawFarm = farm || (() => { try { return JSON.parse(localStorage.getItem('gr.farm') || 'null'); } catch { return null; } })() || {};
     STATE.farm = normalizeFarmDoc(rawFarm);
     try { if (STATE.farm && Object.keys(STATE.farm).length) localStorage.setItem('gr.farm', JSON.stringify(STATE.farm)); } catch {}
-    STATE.rooms = roomsDoc?.rooms || [];
+    STATE.rooms = rooms?.rooms || [];
+    console.log('✅ [loadAllData] Loaded STATE.rooms:', STATE.rooms.length, 'rooms');
+    STATE.equipmentMetadata = equipmentMetadata || {};
+    console.log('✅ [loadAllData] Loaded equipment metadata:', Object.keys(STATE.equipmentMetadata).length, 'items');
+    if (STATE.rooms.length > 0) {
+      console.log('   Room details:', STATE.rooms.map(r => `${r.name} (id: ${r.id})`).join(', '));
+    }
   if (deviceKB && Array.isArray(deviceKB.fixtures)) {
     // Assign a unique id to each fixture if missing
     deviceKB.fixtures.forEach(fixture => {
@@ -8634,9 +10241,9 @@ async function loadAllData() {
     console.log('Sample equipment:', equipmentKB.equipment.slice(0, 3).map(e => `${e.vendor} ${e.model} (${e.category})`));
   }
   // load manufacturers into a global for lookups and selects
-  if (deviceManufacturersDoc && Array.isArray(deviceManufacturersDoc.manufacturers)) {
-    window.DEVICE_MANUFACTURERS = deviceManufacturersDoc.manufacturers;
-    console.log('✅ Loaded device manufacturers:', deviceManufacturersDoc.manufacturers.length, 'manufacturers');
+  if (deviceManufacturers && Array.isArray(deviceManufacturers.manufacturers)) {
+    window.DEVICE_MANUFACTURERS = deviceManufacturers.manufacturers;
+    console.log('✅ Loaded device manufacturers:', deviceManufacturers.manufacturers.length, 'manufacturers');
   } else {
     window.DEVICE_MANUFACTURERS = window.DEVICE_MANUFACTURERS || [];
   }
@@ -8657,12 +10264,21 @@ async function loadAllData() {
     renderEnvironment();
     renderRooms();
     renderLightSetups();
+    renderEquipmentOverview(); // Explicitly render equipment overview on load
     
     // Demo/mock light setups removed: only live light setups and devices will be used.
     
     renderLightSetupSummary();
     renderControllerAssignments();
     renderSwitchBotDevices();
+    
+    // Notify wizards that data has been loaded
+    try {
+      window.dispatchEvent(new CustomEvent('farmDataChanged'));
+      console.log('[loadAllData] Dispatched farmDataChanged event');
+    } catch (err) {
+      console.warn('[loadAllData] Failed to dispatch farmDataChanged:', err);
+    }
 
     try {
       await initLightSearch();
@@ -8973,6 +10589,23 @@ function renderGroups() {
   seedGroupRoomZoneDropdowns();
 }
 
+// Helper function to extract equipment from nested room.category structure
+function extractRoomEquipment(room) {
+  const equipment = [];
+  if (room.category && typeof room.category === 'object') {
+    Object.values(room.category).forEach(cat => {
+      if (Array.isArray(cat.selectedEquipment)) {
+        equipment.push(...cat.selectedEquipment);
+      }
+    });
+  }
+  // Also check for flat room.equipment array (legacy/alternative structure)
+  if (Array.isArray(room.equipment)) {
+    equipment.push(...room.equipment);
+  }
+  return equipment;
+}
+
 function renderRooms() {
   const host = $('#roomsList'); if (!host) return;
   if (!STATE.rooms.length) {
@@ -8980,9 +10613,28 @@ function renderRooms() {
     return;
   }
     host.innerHTML = STATE.rooms.map(r => {
-      const zones = (r.zones || []).map(z => escapeHtml(z)).join(', ') || '—';
       const name = escapeHtml(r.name || '');
-      const controlCount = Array.isArray(r.controllers) ? r.controllers.length : (r.controlMethod ? 1 : 0);
+      const roomId = escapeHtml(r.id || '');
+      
+      // Equipment summary - extract from room.category structure
+      let equipmentSummary = '—';
+      const equipment = extractRoomEquipment(r);
+      if (equipment.length) {
+        const eqMap = {};
+        equipment.forEach(eq => {
+          const key = `${eq.vendor || ''} ${eq.model || eq.name || eq.category || 'Equipment'}`.trim();
+          if (!eqMap[key]) eqMap[key] = 0;
+          eqMap[key] += Number(eq.count) || 1;
+        });
+        equipmentSummary = Object.entries(eqMap)
+          .map(([k, v]) => `${escapeHtml(k)}${v > 1 ? ` ×${v}` : ''}`)
+          .join(', ');
+      }
+      
+      // Zone count (simplified)
+      const zoneCount = Array.isArray(r.zones) ? r.zones.length : 0;
+      const zoneText = zoneCount === 0 ? 'No zones' : `${zoneCount} zone${zoneCount !== 1 ? 's' : ''}`;
+      
       // Aggregate lights from STATE.lightSetups for this room
       const roomLightSetups = (window.STATE?.lightSetups || []).filter(setup => String(setup.room) === String(r.id) || String(setup.room) === String(r.name));
       let lightMap = {};
@@ -8996,15 +10648,14 @@ function renderRooms() {
         });
       });
       const lightsList = Object.keys(lightMap).length ? Object.entries(lightMap).map(([k,v]) => `${escapeHtml(k)} ×${v}`).join(', ') : '—';
-      const roomId = escapeHtml(r.id || '');
+      
       return `<div class="card" style="margin-top:8px">
         <div class="row" style="justify-content:space-between;align-items:center">
           <div>
             <h3 style="margin:0">${name}</h3>
-            <div class="tiny" style="color:#475569">Zones: ${zones}</div>
-            <div class="tiny" style="color:#475569">Controls: ${controlCount}</div>
-            <div class="tiny" style="color:#475569">Lights: ${numLights}</div>
-            <div class="tiny" style="color:#475569">${lightsList}</div>
+            <div class="tiny" style="color:#475569"><b>Equipment:</b> ${equipmentSummary}</div>
+            <div class="tiny" style="color:#64748b">${zoneText}</div>
+            ${numLights > 0 ? `<div class="tiny" style="color:#64748b">Lights: ${numLights} (${lightsList})</div>` : ''}
           </div>
           <div class="row" style="gap:6px">
             <button type="button" class="ghost" data-action="edit-room" data-room-id="${roomId}">Edit</button>
@@ -9024,7 +10675,7 @@ function renderRooms() {
         if (!room) {
           console.warn('Edit requested for unknown room id', id);
           if (typeof showToast === 'function') {
-            showToast({ title: 'Room not found', msg: 'Unable to load room for editing.', kind: 'warn', icon: '⚠️' });
+            showToast({ title: 'Room not found', msg: 'Unable to load room for editing.', kind: 'warn', icon: '' });
           }
           return;
         }
@@ -9066,45 +10717,76 @@ function renderRooms() {
 }
 
 function renderLightSetups() {
-  const container = document.getElementById('lightSetupsContent');
+  const container = document.getElementById('lightSetupsList');
   if (!container) return;
   
-  // For now, this is a placeholder - light setups would be stored separately from rooms
-  // In the future, this would load from a light-setups.json file
-  const lightSetups = []; // TODO: Load actual light setups
+  // Get rooms from STATE.rooms that have fixtures defined
+  const rooms = (STATE.rooms || []).filter(room => 
+    room.fixtures && Array.isArray(room.fixtures) && room.fixtures.length > 0
+  );
   
-  if (lightSetups.length === 0) {
+  if (rooms.length === 0) {
     container.innerHTML = `
-      <div class="empty-state">
-        <h3>No Light Setups Configured</h3>
-        <p>Create your first light setup to manage fixtures, control methods, and energy settings.</p>
-        <button type="button" class="primary" id="btnLaunchLightSetup">
-          <span class="icon">💡</span>
-          Create Light Setup
-        </button>
+      <div class="empty-state" style="padding: 40px; text-align: center; background: #f8fafc; border-radius: 8px; margin-top: 16px;">
+        <div style="font-size: 48px; margin-bottom: 16px;">💡</div>
+        <h3 style="margin: 0 0 8px 0; color: #1e293b;">No Light Setups Configured</h3>
+        <p style="margin: 0 0 8px 0; color: #64748b;">Create a room in the <strong>Grow Rooms</strong> panel, then return here to configure lighting.</p>
+        <p style="margin: 0; color: #94a3b8; font-size: 13px;">Rooms → Light Setup</p>
       </div>
     `;
-    // Wire the button since it's dynamically created
-    document.getElementById('btnLaunchLightSetup')?.addEventListener('click', () => freshLightWizard.open());
   } else {
-    container.innerHTML = lightSetups.map(setup => `
-      <div class="card">
-        <div class="card-header">
-          <h3>${setup.name}</h3>
-          <div class="actions">
-            <button type="button" class="ghost small" onclick="editLightSetup('${setup.id}')">Edit</button>
-            <button type="button" class="ghost small danger" onclick="deleteLightSetup('${setup.id}')">Delete</button>
+    container.innerHTML = rooms.map(room => {
+      const fixtures = room.fixtures || [];
+      const totalFixtures = fixtures.reduce((sum, f) => sum + (Number(f.count) || 1), 0);
+      const fixturesList = fixtures.map(f => {
+        const name = f.name || f.model || f.vendor || 'Light';
+        const count = Number(f.count) || 1;
+        return `${count}× ${escapeHtml(name)}`;
+      }).join(', ');
+      
+      const zones = Array.isArray(room.zones) ? room.zones.join(', ') : '—';
+      const controlMethod = room.controlMethod || room.control || '—';
+      
+      return `
+        <div class="card" style="margin-bottom: 16px; border: 1px solid #e2e8f0; border-radius: 8px; padding: 16px;">
+          <div style="display: flex; justify-content: space-between; align-items: start; margin-bottom: 12px;">
+            <div>
+              <h3 style="margin: 0 0 4px 0; color: #1e293b; font-size: 18px;">${escapeHtml(room.name || 'Unnamed Room')}</h3>
+              <div class="tiny" style="color: #64748b;">Room ID: ${escapeHtml(room.id || 'N/A')}</div>
+            </div>
+            <div style="display: flex; gap: 8px;">
+              <button type="button" class="ghost small" onclick="editRoom('${escapeHtml(room.id)}')">
+                Edit Room
+              </button>
+            </div>
+          </div>
+          <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 12px; padding: 12px; background: #f8fafc; border-radius: 6px;">
+            <div>
+              <div class="tiny" style="color: #64748b; margin-bottom: 4px;">Fixtures</div>
+              <div style="font-weight: 600; color: #1e293b;">${totalFixtures} total</div>
+              <div class="tiny" style="color: #475569; margin-top: 2px;">${fixturesList}</div>
+            </div>
+            <div>
+              <div class="tiny" style="color: #64748b; margin-bottom: 4px;">Zones</div>
+              <div style="font-weight: 600; color: #1e293b;">${escapeHtml(zones)}</div>
+            </div>
+            <div>
+              <div class="tiny" style="color: #64748b; margin-bottom: 4px;">Control Method</div>
+              <div style="font-weight: 600; color: #1e293b;">${escapeHtml(controlMethod)}</div>
+            </div>
+            ${room.layout ? `
+            <div>
+              <div class="tiny" style="color: #64748b; margin-bottom: 4px;">Layout</div>
+              <div style="font-weight: 600; color: #1e293b;">${escapeHtml(room.layout)}</div>
+            </div>
+            ` : ''}
           </div>
         </div>
-        <div class="card-body">
-          <p><strong>Fixtures:</strong> ${setup.fixtures?.length || 0}</p>
-          <p><strong>Control:</strong> ${setup.controlMethod || 'Not set'}</p>
-          <p><strong>Energy:</strong> ${setup.energy || 'Not set'}</p>
-        </div>
-      </div>
-    `).join('');
+      `;
+    }).join('');
   }
 }
+
 
 function renderLightSetupSummary() {
   const summaryContainer = document.getElementById('lightSetupSummary');
@@ -9115,9 +10797,36 @@ function renderLightSetupSummary() {
     window.addEventListener('lightSetupsChanged', window._lightSetupSummaryListener);
   }
 
+  // Try to use STATE.lightSetups first, then fallback to STATE.rooms with fixtures
+  let lightSetups = STATE.lightSetups || [];
+  
+  // If no light setups, create virtual setups from rooms with fixtures
+  if (lightSetups.length === 0) {
+    const roomsWithFixtures = (STATE.rooms || []).filter(room => 
+      room.fixtures && Array.isArray(room.fixtures) && room.fixtures.length > 0
+    );
+    
+    if (roomsWithFixtures.length === 0) {
+      summaryContainer.innerHTML = `
+        <div style="padding: 16px; background: #f8fafc; border-radius: 6px; text-align: center;">
+          <p class="tiny" style="color: #64748b; margin: 0;">
+            No rooms with light fixtures configured. Go to <strong>Grow Rooms</strong> to create a room first.
+          </p>
+        </div>
+      `;
+      return;
+    }
+    
+    // Convert rooms to light setup format for display
+    lightSetups = roomsWithFixtures.map(room => ({
+      room: room.id,
+      fixtures: room.fixtures || [],
+      controlMethod: room.controlMethod || room.control,
+      zone: room.zones ? room.zones[0] : null
+    }));
+  }
+  
   // Group light setups by room (id or name)
-  const lightSetups = STATE.lightSetups || [];
-  // Map: roomId -> { name, zones, controls, lights }
   const roomMap = {};
   lightSetups.forEach(setup => {
     const roomKey = String(setup.room);
@@ -9182,7 +10891,7 @@ function renderLightSetupSummary() {
       if (!id) return;
       const room = (STATE.rooms||[]).find(r => String(r.id) === String(id) || String(r.name) === String(id));
       if (!room) {
-        if (typeof showToast === 'function') showToast({ title: 'Room not found', msg: 'Unable to load room for editing.', kind: 'warn', icon: '⚠️' });
+        if (typeof showToast === 'function') showToast({ title: 'Room not found', msg: 'Unable to load room for editing.', kind: 'warn', icon: '' });
         return;
       }
       if (window.freshLightWizard && typeof window.freshLightWizard.open === 'function') {
@@ -9280,7 +10989,41 @@ function editLightSetup(roomId) {
       title: 'Edit Light Setup', 
       msg: `Opening light setup wizard for ${room.name}`, 
       kind: 'info', 
-      icon: '✏️' 
+      icon: '' 
+    });
+  }
+}
+
+// Edit a room from the Light Setup panel
+function editRoom(roomId) {
+  // Find the room in STATE.rooms
+  const room = (STATE.rooms || []).find(r => String(r.id) === String(roomId));
+  
+  if (!room) {
+    showToast({ 
+      title: 'Room not found', 
+      msg: `Unable to find room with ID: ${roomId}`, 
+      kind: 'error', 
+      icon: '' 
+    });
+    return;
+  }
+  
+  // Open the Grow Room wizard with this room's data
+  if (typeof growRoomWizard !== 'undefined' && growRoomWizard.open) {
+    growRoomWizard.open(room);
+    showToast({ 
+      title: 'Edit Room', 
+      msg: `Opening ${room.name} for editing`, 
+      kind: 'info', 
+      icon: '' 
+    });
+  } else {
+    showToast({ 
+      title: 'Wizard not available', 
+      msg: 'Grow Room wizard is not loaded', 
+      kind: 'error', 
+      icon: '' 
     });
   }
 }
@@ -9589,7 +11332,7 @@ function renderControllerAssignments() {
           title: 'Controller Updated',
           msg: `${equipment[index].uniqueId} assigned to ${controllerId || 'Unassigned'}`,
           kind: 'success',
-          icon: '🔗'
+          icon: ''
         });
       }
     });
@@ -9750,7 +11493,7 @@ function saveControllerAssignment(index, updateRoomZone) {
     title: 'Assignment Updated',
     msg: `${item.uniqueId} ${controllerId ? 'assigned to ' + controllerId : 'unassigned'}`,
     kind: 'success',
-    icon: '🔗'
+    icon: ''
   });
 }
 
@@ -9792,7 +11535,7 @@ function exportControllerAssignments() {
     title: 'Export Complete',
     msg: 'Controller assignments exported to CSV',
     kind: 'success',
-    icon: '📄'
+    icon: ''
   });
 }
 
@@ -9802,7 +11545,7 @@ function saveControllerAssignments() {
     title: 'Assignments Saved',
     msg: 'Controller assignments have been saved',
     kind: 'success',
-    icon: '💾'
+    icon: ''
   });
 }
 
@@ -9814,6 +11557,723 @@ function renderSchedules() {
     STATE.schedules.map(schedule => `<option value="${schedule.id}">${schedule.name}</option>`).join('');
 
   renderGrowRoomOverview();
+  renderEquipmentOverview();
+}
+
+// --- Equipment Overview Functions ---
+function getAllEquipment() {
+  // Aggregate equipment from all rooms
+  const equipment = [];
+  const rooms = Array.isArray(STATE.rooms) ? STATE.rooms : [];
+  
+  rooms.forEach(room => {
+    const roomId = room.id || room.name;
+    const roomName = room.name || room.location || 'Unnamed Room';
+    
+    // Check if room has equipment array (legacy structure)
+    if (Array.isArray(room.equipment)) {
+      room.equipment.forEach(eq => {
+        const count = eq.count || 1;
+        // Expand equipment with count > 1 into individual items
+        for (let i = 0; i < count; i++) {
+          equipment.push({
+            ...eq,
+            id: eq.id ? `${eq.id}-${i}` : `${roomId}-${eq.vendor}-${eq.model}-${i}`.replace(/\s+/g, '-'),
+            count: 1, // Each item is a single unit
+            roomId,
+            roomName
+          });
+        }
+      });
+    }
+    
+    // Check _categoryProgress (persisted from wizard)
+    const categoryProgress = room._categoryProgress || room.categoryProgress;
+    if (categoryProgress) {
+      // Process categories with selectedEquipment arrays (mini-split, dehumidifier)
+      Object.values(categoryProgress).forEach(catProgress => {
+        if (Array.isArray(catProgress.selectedEquipment)) {
+          catProgress.selectedEquipment.forEach(eq => {
+            const count = eq.count || 1;
+            // Expand equipment with count > 1 into individual items
+            for (let i = 0; i < count; i++) {
+              equipment.push({
+                ...eq,
+                id: eq.id ? `${eq.id}-${i}` : `${roomId}-${eq.vendor}-${eq.model}-${i}`.replace(/\s+/g, '-'),
+                count: 1, // Each item is a single unit
+                roomId,
+                roomName
+              });
+            }
+          });
+        }
+      });
+      
+      // Process categories with simple count/manufacturer format (fans, vents, controllers, etc.)
+      const simpleCategories = ['fans', 'vents', 'controllers', 'energy-monitor', 'other'];
+      simpleCategories.forEach(catKey => {
+        const catData = categoryProgress[catKey];
+        if (catData && catData.count && catData.count > 0) {
+          // Expand into individual items based on count
+          for (let i = 0; i < catData.count; i++) {
+            equipment.push({
+              id: `${roomId}-${catKey}-${i}`.replace(/\s+/g, '-'),
+              category: catKey,
+              vendor: catData.manufacturer || 'Unknown',
+              model: catData.model || catKey,
+              count: 1, // Each item is a single unit
+              control: catData.control || null,
+              roomId,
+              roomName,
+              wifi: catData.wifi || false,
+              wired: catData.wired || false,
+              notes: catData.notes || ''
+            });
+          }
+        }
+      });
+    }
+    
+    // Also check room.category for legacy storage format
+    if (room.category) {
+      const simpleCategories = ['fans', 'vents', 'controllers', 'energy-monitor', 'other'];
+      simpleCategories.forEach(catKey => {
+        const catData = room.category[catKey];
+        if (catData && catData.count && catData.count > 0) {
+          // Expand into individual items based on count
+          for (let i = 0; i < catData.count; i++) {
+            equipment.push({
+              id: `${roomId}-${catKey}-${i}`.replace(/\s+/g, '-'),
+              category: catKey,
+              vendor: catData.manufacturer || 'Unknown',
+              model: catData.model || catKey,
+              count: 1, // Each item is a single unit
+              control: catData.control || null,
+              roomId,
+              roomName,
+              wifi: catData.wifi || false,
+              wired: catData.wired || false,
+              notes: catData.notes || ''
+            });
+          }
+        }
+      });
+    }
+  });
+  
+  // Merge in metadata (name, control overrides, etc.)
+  const metadata = STATE.equipmentMetadata || {};
+  equipment.forEach(eq => {
+    if (metadata[eq.id]) {
+      Object.assign(eq, metadata[eq.id]);
+    }
+  });
+  
+  // Add standalone equipment that only exists in metadata (manually added)
+  const equipmentIds = new Set(equipment.map(eq => eq.id));
+  Object.keys(metadata).forEach(metadataId => {
+    // If this ID doesn't exist in the room-based equipment, it's a standalone item
+    if (!equipmentIds.has(metadataId)) {
+      const metaItem = metadata[metadataId];
+      equipment.push({
+        id: metadataId,
+        name: metaItem.name || 'Equipment',
+        category: metaItem.category || 'Other',
+        vendor: metaItem.vendor || 'Unknown',
+        model: metaItem.model || 'Unknown',
+        count: 1,
+        control: metaItem.control || null,
+        roomId: metaItem.roomId || '',
+        roomName: metaItem.roomName || '—',
+        isStandalone: true
+      });
+    }
+  });
+  
+  return equipment;
+}
+
+function openGrowRoomWizardForEquipment() {
+  // Create a new equipment item directly in the metadata
+  const equipmentId = `equipment-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
+  
+  if (!STATE.equipmentMetadata) {
+    STATE.equipmentMetadata = {};
+  }
+  
+  // Create a new equipment entry with default values
+  STATE.equipmentMetadata[equipmentId] = {
+    name: 'New Equipment',
+    category: 'Other',
+    vendor: 'Unknown',
+    model: 'Unknown',
+    roomId: '',
+    roomName: '—',
+    control: ''
+  };
+  
+  // Save metadata
+  saveEquipmentMetadata();
+  
+  // Re-render equipment overview
+  renderEquipmentOverview();
+  
+  showToast({
+    title: 'Equipment Added',
+    msg: 'New equipment added. Please fill in the details.',
+    kind: 'success',
+    icon: ''
+  }, 2000);
+  
+  // Focus on the first input field of the new equipment
+  setTimeout(() => {
+    const row = document.querySelector(`tr[data-equipment-id="${equipmentId}"]`);
+    if (row) {
+      const firstInput = row.querySelector('input[data-field="name"]');
+      if (firstInput) {
+        firstInput.focus();
+        firstInput.select();
+      }
+    }
+  }, 100);
+}
+
+function renderEquipmentOverview() {
+  const summaryEl = document.getElementById('equipmentSummary');
+  const tbody = document.querySelector('#equipmentTable tbody');
+  if (!summaryEl || !tbody) return;
+  
+  const equipment = getAllEquipment();
+  
+  if (equipment.length === 0) {
+    summaryEl.textContent = 'No equipment configured yet.';
+    tbody.innerHTML = `
+      <tr>
+        <td colspan="8" style="text-align: center; padding: 24px; color: #64748b;">
+          <p>No equipment found.</p>
+          <p class="tiny" style="margin-top: 8px;">Click "+ Add New Equipment" above or configure equipment through the Grow Room Setup wizard.</p>
+        </td>
+      </tr>
+    `;
+    return;
+  }
+  
+  // Create summary
+  const categoryCount = {};
+  equipment.forEach(eq => {
+    const cat = eq.category || 'Other';
+    categoryCount[cat] = (categoryCount[cat] || 0) + (eq.count || 1);
+  });
+  
+  const summaryParts = Object.entries(categoryCount).map(([cat, count]) => 
+    `${count} ${cat}${count !== 1 ? 's' : ''}`
+  );
+  summaryEl.textContent = `${equipment.length} equipment item${equipment.length !== 1 ? 's' : ''}: ${summaryParts.join(', ')}`;
+  
+  // Render equipment table
+  tbody.innerHTML = equipment.map((eq, index) => {
+    const id = eq.id || `eq-${index}`;
+    const name = eq.name || '';
+    const category = eq.category || 'Other';
+    const vendor = eq.vendor || '—';
+    const model = eq.model || '—';
+    const roomName = eq.roomName || '—';
+    const control = eq.control || '—';
+    const actions = renderEquipmentActions(control);
+    
+    return `
+      <tr data-equipment-id="${id}">
+        <td>
+          <input type="text" 
+                 value="${escapeHtml(name)}" 
+                 data-equipment-id="${id}"
+                 data-field="name"
+                 onblur="updateEquipmentField('${id}', 'name', this.value)"
+                 style="width:100%;border:1px solid #e2e8f0;padding:4px 8px;border-radius:4px;font-size:13px;"
+                 placeholder="Equipment name" />
+        </td>
+        <td>
+          <input type="text" 
+                 value="${escapeHtml(category)}" 
+                 data-equipment-id="${id}"
+                 data-field="category"
+                 onblur="updateEquipmentField('${id}', 'category', this.value)"
+                 style="width:100%;border:1px solid #e2e8f0;padding:4px 8px;border-radius:4px;font-size:13px;"
+                 placeholder="Category" />
+        </td>
+        <td>
+          <input type="text" 
+                 value="${escapeHtml(vendor)}" 
+                 data-equipment-id="${id}"
+                 data-field="vendor"
+                 onblur="updateEquipmentField('${id}', 'vendor', this.value)"
+                 style="width:100%;border:1px solid #e2e8f0;padding:4px 8px;border-radius:4px;font-size:13px;"
+                 placeholder="Vendor" />
+        </td>
+        <td>
+          <input type="text" 
+                 value="${escapeHtml(model)}" 
+                 data-equipment-id="${id}"
+                 data-field="model"
+                 onblur="updateEquipmentField('${id}', 'model', this.value)"
+                 style="width:100%;border:1px solid #e2e8f0;padding:4px 8px;border-radius:4px;font-size:13px;"
+                 placeholder="Model" />
+        </td>
+        <td>
+          <select class="equipment-room-select" data-equipment-id="${id}" onchange="assignEquipmentRoom('${id}', this.value)" style="width:100%;border:1px solid #e2e8f0;padding:4px 8px;border-radius:4px;font-size:13px;">
+            ${renderRoomOptions(eq.roomId)}
+          </select>
+        </td>
+        <td>
+          <select class="equipment-control-select" data-equipment-id="${id}" onchange="assignEquipmentControl('${id}', this.value)" style="width:100%;border:1px solid #e2e8f0;padding:4px 8px;border-radius:4px;font-size:13px;">
+            ${renderControlOptions(control)}
+          </select>
+        </td>
+        <td>
+          <div class="row" style="gap: 4px; flex-wrap: wrap;">
+            ${actions}
+          </div>
+        </td>
+        <td>
+          <div class="row" style="gap: 4px;">
+            <button type="button" class="ghost tiny" onclick="editEquipment('${id}')" title="Edit">✎</button>
+            <button type="button" class="ghost tiny" onclick="deleteEquipment('${id}')" title="Delete" style="color: #ef4444;">×</button>
+          </div>
+        </td>
+      </tr>
+    `;
+  }).join('');
+}
+
+function renderEquipmentActions(control) {
+  // Return action buttons based on control type
+  if (!control || control === '—' || control === '') {
+    return '<span class="tiny" style="color:#94a3b8;">No control assigned</span>';
+  }
+  
+  // Check if it's an IoT device (format: IoT:{deviceId})
+  if (control.startsWith('IoT:')) {
+    const deviceId = control.substring(4);
+    const device = STATE.iotDevices?.find(d => d.deviceId === deviceId);
+    
+    if (device) {
+      // SwitchBot plugs support on/off
+      if (device.type?.toLowerCase().includes('plug') || device.category?.toLowerCase().includes('plug')) {
+        return `
+          <button type="button" class="btn-sm" onclick="controlEquipment('${deviceId}', 'on')" 
+                  style="padding:2px 8px;font-size:11px;background:#10b981;color:white;border:none;border-radius:4px;cursor:pointer;">
+            ON
+          </button>
+          <button type="button" class="btn-sm" onclick="controlEquipment('${deviceId}', 'off')" 
+                  style="padding:2px 8px;font-size:11px;background:#ef4444;color:white;border:none;border-radius:4px;cursor:pointer;">
+            OFF
+          </button>
+        `;
+      }
+      // Add more device types as needed
+      return '<span class="tiny" style="color:#64748b;">Device control available</span>';
+    }
+    return '<span class="tiny" style="color:#f59e0b;">Device not found</span>';
+  }
+  
+  // Manual control types
+  if (control === 'Manual') {
+    return '<span class="tiny" style="color:#64748b;">Manual operation</span>';
+  }
+  
+  // Other control types show as configured
+  return `<span class="tiny" style="color:#64748b;">${escapeHtml(control)}</span>`;
+}
+
+function renderRoomOptions(selectedRoomId) {
+  const rooms = Array.isArray(STATE.rooms) ? STATE.rooms : [];
+  const options = ['<option value="">— Unassigned —</option>'];
+  
+  rooms.forEach(room => {
+    const id = room.id || room.name;
+    const name = room.name || room.location || 'Unnamed Room';
+    const selected = id === selectedRoomId ? 'selected' : '';
+    options.push(`<option value="${id}" ${selected}>${escapeHtml(name)}</option>`);
+  });
+  
+  return options.join('');
+}
+
+function renderControlOptions(selectedControl) {
+  const controls = [
+    'WiFi',
+    'Wired Thermostat',
+    'Modbus/BACnet',
+    'Relay',
+    '0-10V',
+    'Manual',
+    'Other'
+  ];
+  
+  const options = ['<option value="">— Select Control —</option>'];
+  
+  // Add standard control options
+  controls.forEach(control => {
+    const selected = control === selectedControl ? 'selected' : '';
+    options.push(`<option value="${control}" ${selected}>${control}</option>`);
+  });
+  
+  // Get IoT plugs from saved devices
+  const iotDevices = STATE.iotDevices || [];
+  const plugDevices = iotDevices.filter(device => {
+    const type = (device.deviceType || device.type || '').toLowerCase();
+    const category = (device.category || '').toLowerCase();
+    // Check if it's a plug device
+    return type.includes('plug') || category.includes('plug') || 
+           (device.protocol === 'switchbot' && (type.includes('plug') || category.includes('plug')));
+  });
+  
+  // Add IoT plugs as control options if any exist
+  if (plugDevices.length > 0) {
+    options.push('<option disabled>━━━ IoT Plugs ━━━</option>');
+    plugDevices.forEach(plug => {
+      const deviceName = plug.name || plug.deviceName || plug.id || 'Unknown Plug';
+      const deviceId = plug.id || plug.deviceId;
+      const controlValue = `IoT:${deviceId}`;
+      const selected = controlValue === selectedControl ? 'selected' : '';
+      options.push(`<option value="${controlValue}" ${selected}>🔌 ${escapeHtml(deviceName)}</option>`);
+    });
+  }
+  
+  return options.join('');
+}
+
+function assignEquipmentRoom(equipmentId, roomId) {
+  // Initialize equipment metadata storage if not exists
+  if (!STATE.equipmentMetadata) {
+    STATE.equipmentMetadata = {};
+  }
+  
+  if (!STATE.equipmentMetadata[equipmentId]) {
+    STATE.equipmentMetadata[equipmentId] = {};
+  }
+  
+  // Update equipment room assignment in metadata
+  STATE.equipmentMetadata[equipmentId].roomId = roomId;
+  const room = STATE.rooms.find(r => r.id === roomId || r.name === roomId);
+  const roomName = room ? (room.name || room.location) : '—';
+  STATE.equipmentMetadata[equipmentId].roomName = roomName;
+  
+  // Save metadata
+  saveEquipmentMetadata();
+  
+  // Re-render equipment overview
+  renderEquipmentOverview();
+  
+  showToast({
+    title: 'Room Assigned',
+    msg: `Equipment assigned to ${roomName}`,
+    kind: 'success',
+    icon: ''
+  }, 2000);
+}
+
+function updateEquipmentField(equipmentId, fieldName, newValue) {
+  // Initialize equipment metadata storage if not exists
+  if (!STATE.equipmentMetadata) {
+    STATE.equipmentMetadata = {};
+  }
+  
+  // Validate and update the field
+  const trimmedValue = String(newValue || '').trim();
+  
+  // Name field can be empty, but other fields cannot
+  if (!trimmedValue && fieldName !== 'name') {
+    showToast({
+      title: 'Invalid Value',
+      msg: `${fieldName} cannot be empty`,
+      kind: 'warning',
+      icon: ''
+    });
+    renderEquipmentOverview(); // Re-render to restore original value
+    return;
+  }
+  
+  // Store in metadata
+  if (!STATE.equipmentMetadata[equipmentId]) {
+    STATE.equipmentMetadata[equipmentId] = {};
+  }
+  STATE.equipmentMetadata[equipmentId][fieldName] = trimmedValue;
+  
+  // Save metadata
+  saveEquipmentMetadata();
+  
+  showToast({
+    title: 'Field Updated',
+    msg: `${fieldName} updated successfully`,
+    kind: 'success',
+    icon: ''
+  }, 2000);
+}
+
+async function saveEquipmentMetadata() {
+  try {
+    await fetch('/data/equipment-metadata', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(STATE.equipmentMetadata || {})
+    });
+  } catch (error) {
+    console.error('Failed to save equipment metadata:', error);
+  }
+}
+
+function assignEquipmentControl(equipmentId, controlMethod) {
+  // Initialize equipment metadata storage if not exists
+  if (!STATE.equipmentMetadata) {
+    STATE.equipmentMetadata = {};
+  }
+  
+  if (!STATE.equipmentMetadata[equipmentId]) {
+    STATE.equipmentMetadata[equipmentId] = {};
+  }
+  
+  // Update equipment control method in metadata
+  STATE.equipmentMetadata[equipmentId].control = controlMethod;
+  
+  // Save metadata
+  saveEquipmentMetadata();
+  
+  // Re-render both equipment overview and IoT devices to show the connection
+  renderEquipmentOverview();
+  if (typeof window.renderIoTDeviceCards === 'function' && window.LAST_IOT_SCAN) {
+    window.renderIoTDeviceCards(window.LAST_IOT_SCAN);
+  }
+  
+  showToast({
+    title: 'Control Updated',
+    msg: `Control method updated`,
+    kind: 'success',
+    icon: ''
+  }, 2000);
+}
+
+async function controlEquipment(deviceId, action) {
+  // Find the IoT device
+  const device = STATE.iotDevices?.find(d => d.deviceId === deviceId);
+  
+  if (!device) {
+    showToast({
+      title: 'Device Not Found',
+      msg: 'IoT device not found',
+      kind: 'error',
+      icon: ''
+    });
+    return;
+  }
+  
+  showToast({
+    title: 'Sending Command',
+    msg: `Sending ${action.toUpperCase()} to ${device.deviceName}`,
+    kind: 'info',
+    icon: ''
+  }, 1000);
+  
+  try {
+    // Call SwitchBot API to control the device
+    const response = await fetch(`/api/switchbot/devices/${deviceId}/commands`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify({
+        command: action === 'on' ? 'turnOn' : 'turnOff',
+        parameter: 'default'
+      })
+    });
+    
+    if (!response.ok) {
+      throw new Error(`HTTP ${response.status}`);
+    }
+    
+    const result = await response.json();
+    
+    if (result.statusCode === 100 || result.status === 'success') {
+      showToast({
+        title: 'Success',
+        msg: `${device.deviceName} turned ${action.toUpperCase()}`,
+        kind: 'success',
+        icon: ''
+      }, 2000);
+    } else {
+      throw new Error(result.message || 'Command failed');
+    }
+  } catch (error) {
+    console.error('Equipment control error:', error);
+    showToast({
+      title: 'Control Failed',
+      msg: error.message || 'Failed to control equipment',
+      kind: 'error',
+      icon: ''
+    });
+  }
+}
+
+function editEquipment(equipmentId) {
+  const equipment = getAllEquipment();
+  const eq = equipment.find(e => (e.id || `eq-${equipment.indexOf(e)}`) === equipmentId);
+  
+  if (!eq) {
+    showToast({
+      title: 'Error',
+      msg: 'Equipment not found',
+      kind: 'error',
+      icon: ''
+    });
+    return;
+  }
+  
+  // Open grow room wizard with this equipment pre-selected
+  // For now, just show a message
+  showToast({
+    title: 'Edit Equipment',
+    msg: `Editing ${eq.vendor} ${eq.model}. Use the Grow Room wizard to modify equipment details.`,
+    kind: 'info',
+    icon: ''
+  }, 3000);
+  
+  // TODO: Enhance wizard to support editing existing equipment
+}
+
+async function deleteEquipment(equipmentId) {
+  if (!confirm('Are you sure you want to delete this equipment?')) {
+    return;
+  }
+  
+  const equipment = getAllEquipment();
+  const eq = equipment.find(e => e.id === equipmentId);
+  
+  if (!eq) {
+    showToast({
+      title: 'Error',
+      msg: 'Equipment not found',
+      kind: 'error',
+      icon: ''
+    });
+    return;
+  }
+  
+  // If it's a standalone item (only exists in metadata), just remove from metadata
+  if (eq.isStandalone) {
+    if (STATE.equipmentMetadata && STATE.equipmentMetadata[equipmentId]) {
+      delete STATE.equipmentMetadata[equipmentId];
+      await saveEquipmentMetadata();
+    }
+  } else {
+    // For room-based equipment, we need to remove from source data
+    const room = STATE.rooms.find(r => (r.id || r.name) === eq.roomId);
+    if (room) {
+      let removed = false;
+      
+      // Extract the base ID and index from equipmentId (e.g., "room-fans-0" -> "room-fans", index 0)
+      const match = equipmentId.match(/^(.+)-(\d+)$/);
+      if (match) {
+        const baseId = match[1];
+        const itemIndex = parseInt(match[2], 10);
+        
+        // Check _categoryProgress or categoryProgress for simple count-based categories
+        const categoryProgress = room._categoryProgress || room.categoryProgress;
+        if (categoryProgress) {
+          const simpleCategories = ['fans', 'vents', 'controllers', 'energy-monitor', 'other'];
+          for (const catKey of simpleCategories) {
+            if (baseId.includes(catKey) && categoryProgress[catKey]) {
+              const catData = categoryProgress[catKey];
+              if (catData.count > 1) {
+                catData.count--;
+                removed = true;
+              } else if (catData.count === 1) {
+                // Remove the entire category entry
+                delete categoryProgress[catKey];
+                removed = true;
+              }
+              break;
+            }
+          }
+        }
+        
+        // Also check room.category for legacy storage format
+        if (!removed && room.category) {
+          const simpleCategories = ['fans', 'vents', 'controllers', 'energy-monitor', 'other'];
+          for (const catKey of simpleCategories) {
+            if (baseId.includes(catKey) && room.category[catKey]) {
+              const catData = room.category[catKey];
+              if (catData.count > 1) {
+                catData.count--;
+                removed = true;
+              } else if (catData.count === 1) {
+                // Remove the entire category entry
+                delete room.category[catKey];
+                removed = true;
+              }
+              break;
+            }
+          }
+        }
+      }
+      
+      // Check legacy room.equipment array
+      if (!removed && Array.isArray(room.equipment)) {
+        const eqIndex = room.equipment.findIndex(e => {
+          const eqId = e.id || `${eq.roomId}-${e.vendor}-${e.model}`.replace(/\s+/g, '-');
+          return equipmentId.startsWith(eqId);
+        });
+        if (eqIndex !== -1) {
+          room.equipment.splice(eqIndex, 1);
+          removed = true;
+        }
+      }
+      
+      if (removed) {
+        // Save the updated rooms data
+        await saveJSON('rooms.json', { rooms: STATE.rooms });
+      }
+    }
+    
+    // Also remove from metadata if it exists
+    if (STATE.equipmentMetadata && STATE.equipmentMetadata[equipmentId]) {
+      delete STATE.equipmentMetadata[equipmentId];
+      await saveEquipmentMetadata();
+    }
+  }
+  
+  // Re-render equipment overview
+  renderEquipmentOverview();
+  
+  // Update IoT devices display if control was assigned
+  if (eq.control && typeof window.renderIoTDeviceCards === 'function' && window.LAST_IOT_SCAN) {
+    window.renderIoTDeviceCards(window.LAST_IOT_SCAN);
+  }
+  
+  showToast({
+    title: 'Equipment Removed',
+    msg: `${eq.name || eq.category || 'Equipment'} has been removed`,
+    kind: 'success',
+    icon: ''
+  }, 2000);
+}
+
+function saveEquipmentChanges() {
+  // Persist rooms with updated equipment to server
+  if (STATE.rooms && STATE.rooms.length > 0) {
+    saveJSON('rooms.json', { rooms: STATE.rooms })
+      .then(() => {
+        console.log('Equipment changes saved');
+      })
+      .catch(err => {
+        console.error('Failed to save equipment changes:', err);
+        showToast({
+          title: 'Save Error',
+          msg: 'Failed to save changes. Please try again.',
+          kind: 'error',
+          icon: ''
+        });
+      });
+  }
 }
 
 function renderGrowRoomOverview() {
@@ -9957,17 +12417,76 @@ function renderGrowRoomOverview() {
     rooms.forEach((room) => {
       const zone = matchZoneForRoom(room);
       const name = room.name || room.id || 'Grow Room';
-      const details = [];
+      const roomId = room.id || room.name;
+      
+      // Get zones for this room
       const zonesList = Array.isArray(room.zones) ? room.zones.filter(Boolean) : [];
+      
+      // Get groups for this room
+      const roomGroups = (STATE.groups || []).filter(g => 
+        g.room === roomId || g.roomId === roomId || 
+        g.room === room.name || g.roomId === room.name
+      );
+      
+      // Get equipment for this room
+      const roomEquipment = getAllEquipment().filter(eq => 
+        eq.roomId === roomId || eq.roomName === name
+      );
+      
+      // Get lights/fixtures for this room
+      const roomFixtures = (room.fixtures || []).filter(Boolean);
+      
+      // Build details sections
+      const details = [];
+      
+      // Zones
       if (zonesList.length) {
-        details.push(`Zones: ${zonesList.map((item) => escapeHtml(item)).join(', ')}`);
+        details.push(`<strong>Zones:</strong> ${zonesList.map((item) => escapeHtml(item)).join(', ')}`);
       }
+      
+      // Groups
+      if (roomGroups.length) {
+        const groupNames = roomGroups.map(g => g.name || g.id).slice(0, 3);
+        const extra = roomGroups.length > 3 ? ` +${roomGroups.length - 3}` : '';
+        details.push(`<strong>Groups:</strong> ${groupNames.map(n => escapeHtml(n)).join(', ')}${extra}`);
+      }
+      
+      // Equipment
+      if (roomEquipment.length) {
+        const eqSummary = {};
+        roomEquipment.forEach(eq => {
+          const cat = eq.category || 'Other';
+          eqSummary[cat] = (eqSummary[cat] || 0) + (eq.count || 1);
+        });
+        const eqText = Object.entries(eqSummary)
+          .map(([cat, count]) => `${count} ${cat}${count !== 1 ? 's' : ''}`)
+          .join(', ');
+        details.push(`<strong>Equipment:</strong> ${eqText}`);
+      }
+      
+      // Lights/Fixtures
+      if (roomFixtures.length) {
+        const fixtureSummary = {};
+        roomFixtures.forEach(f => {
+          const model = f.model || f.name || 'Light';
+          fixtureSummary[model] = (fixtureSummary[model] || 0) + (f.count || 1);
+        });
+        const fixtureText = Object.entries(fixtureSummary)
+          .slice(0, 2)
+          .map(([model, count]) => `${count}× ${escapeHtml(model)}`)
+          .join(', ');
+        const extra = Object.keys(fixtureSummary).length > 2 ? ` +${Object.keys(fixtureSummary).length - 2}` : '';
+        details.push(`<strong>Lights:</strong> ${fixtureText}${extra}`);
+      }
+      
+      // Layout and control
       if (room.layout?.type) {
-        details.push(`Layout: ${escapeHtml(room.layout.type)}`);
+        details.push(`<strong>Layout:</strong> ${escapeHtml(room.layout.type)}`);
       }
       if (room.controlMethod) {
-        details.push(`Control: ${escapeHtml(room.controlMethod)}`);
+        details.push(`<strong>Control:</strong> ${escapeHtml(room.controlMethod)}`);
       }
+      
       const metaParts = [];
       if (zone?.meta?.source) metaParts.push(`Source: ${escapeHtml(zone.meta.source)}`);
       if (typeof zone?.meta?.battery === 'number') metaParts.push(`Battery: ${escapeHtml(`${zone.meta.battery}%`)}`);
@@ -9979,7 +12498,7 @@ function renderGrowRoomOverview() {
             <h3>${escapeHtml(name)}</h3>
             ${room.roomType ? `<span class="chip tiny">${escapeHtml(room.roomType)}</span>` : ''}
           </div>
-          ${details.length ? `<div class="tiny text-muted">${details.join(' • ')}</div>` : ''}
+          ${details.length ? `<div class="grow-room-card__details" style="margin: 8px 0; font-size: 13px; line-height: 1.6;">${details.join('<br>')}</div>` : ''}
           ${metaParts.length ? `<div class="tiny text-muted">${metaParts.join(' • ')}</div>` : ''}
           ${metrics ? `<div class="grow-room-card__metrics">${metrics}</div>` : '<p class="tiny text-muted">No telemetry available.</p>'}
           <div class="grow-room-card__ai">
@@ -10024,12 +12543,20 @@ function renderGrowRoomOverview() {
 function updateAutomationIndicator(status = {}) {
   const indicator = document.getElementById('automationIndicator');
   const statusEl = document.getElementById('automationIndicatorStatus');
+  const dotEl = document.getElementById('automationStatusDot');
   if (!indicator || !statusEl) return;
 
+  // Remove old classes from indicator
   indicator.classList.remove('is-active', 'is-idle', 'is-alert');
+  
+  // Remove old classes from dot if it exists
+  if (dotEl) {
+    dotEl.classList.remove('is-active', 'is-idle', 'is-alert');
+  }
 
   if (status.error) {
     indicator.classList.add('is-alert');
+    if (dotEl) dotEl.classList.add('is-alert');
     statusEl.textContent = status.error;
     return;
   }
@@ -10039,14 +12566,17 @@ function updateAutomationIndicator(status = {}) {
 
   if (managedZones.length > 0) {
     indicator.classList.add('is-active');
+    if (dotEl) dotEl.classList.add('is-active');
     statusEl.textContent = managedZones.length === 1
       ? 'Managing 1 zone'
       : `Managing ${managedZones.length} zones`;
   } else if (hasRules) {
     indicator.classList.add('is-idle');
+    if (dotEl) dotEl.classList.add('is-idle');
     statusEl.textContent = 'Armed';
   } else {
     indicator.classList.add('is-idle');
+    if (dotEl) dotEl.classList.add('is-idle');
     statusEl.textContent = 'Idle';
   }
 }
@@ -10154,20 +12684,14 @@ async function loadPreAutomationRules() {
     const payload = await api('/rules');
     STATE.preAutomationRules = Array.isArray(payload?.rules) ? payload.rules : [];
   } catch (error) {
+    STATE.preAutomationRules = [];
     console.warn('Failed to load automation rules', error);
-    try {
-      const fallback = await loadJSON('./data/rules.json', { rules: [] });
-      STATE.preAutomationRules = Array.isArray(fallback?.rules) ? fallback.rules : [];
-    } catch (fallbackError) {
-      console.warn('Automation rules fallback load failed', fallbackError);
-      STATE.preAutomationRules = [];
-    }
   }
 }
 
 async function loadSmartPlugs({ silent } = {}) {
   try {
-    const payload = await api(window.API_BASE + '/plugs');
+    const payload = await api('/plugs');
     STATE.smartPlugs = Array.isArray(payload?.plugs) ? payload.plugs : [];
     renderSmartPlugs();
     if (!silent) {
@@ -10175,11 +12699,9 @@ async function loadSmartPlugs({ silent } = {}) {
     }
   } catch (error) {
     if (!silent) {
-      setSmartPlugsAlert('No smart plugs found. Please check your network and device setup.', 'error');
+      setSmartPlugsAlert(`Smart plug refresh failed: ${error.message}`, 'error');
     }
     console.warn('Failed to load smart plugs', error);
-    STATE.smartPlugs = [];
-    renderSmartPlugs();
   }
 }
 
@@ -10377,17 +12899,16 @@ async function reloadEnvironment() {
       if (Array.isArray(initial?.zones)) zones = initial.zones;
       else if (initial?.zone) zones = [initial.zone];
     } else {
-      // Copilot: resilient env fetch using NetGuard
-      const BASE = window.API_BASE;
       const requests = scopeIds.map(async (scopeId) => {
-        return await NetGuard.guardedPoll(async () => {
-          const url = `${BASE}/env?scope=${encodeURIComponent(scopeId)}&range=24h`;
-          const payload = await NetGuard.fetchJSON(url, { timeout: 7000 });
+        try {
+          const payload = await api(`/env?scope=${encodeURIComponent(scopeId)}&range=24h`);
           if (!envSnapshot && payload?.env) envSnapshot = payload.env;
           if (payload?.zone) return payload.zone;
           if (Array.isArray(payload?.zones) && payload.zones.length) return payload.zones[0];
-          return null;
-        });
+        } catch (error) {
+          console.warn(`[env] scope fetch failed for ${scopeId}`, error);
+        }
+        return null;
       });
       const results = await Promise.all(requests);
       zones = results.filter((zone) => zone && typeof zone === 'object');
@@ -10397,18 +12918,6 @@ async function reloadEnvironment() {
         envSnapshot = envSnapshot || fallback?.env || null;
         if (Array.isArray(fallback?.zones)) zones = fallback.zones;
         else if (fallback?.zone) zones = [fallback.zone];
-      }
-    }
-
-    if (!zones.length) {
-      try {
-        const fallback = await loadJSON('./data/env.json', { zones: [] });
-        if (!envSnapshot && fallback?.env) envSnapshot = fallback.env;
-        if (Array.isArray(fallback?.zones) && fallback.zones.length) {
-          zones = fallback.zones;
-        }
-      } catch (fallbackError) {
-        console.warn('[env] Static fallback load failed', fallbackError);
       }
     }
 
@@ -10523,10 +13032,6 @@ function renderSwitchBotManager() {
   const devices = Array.isArray(STATE.switchbotDevices) ? STATE.switchbotDevices : [];
   const summary = STATE.switchbotSummary || summarizeSwitchBotDevices(devices);
 
-  // Load available rooms and zones from Groups
-  const groups = collectGroupsFromState();
-  const rooms = collectRoomsFromState();
-  
   if (!devices.length) {
     host.innerHTML = '<div class="switchbot-manager-empty">No SwitchBot devices available. Check credentials or refresh.</div>';
     return;
@@ -10537,61 +13042,20 @@ function renderSwitchBotManager() {
     const statusColor = getSwitchBotStatusColor(status);
     const readingText = formatSwitchBotPreviewReadings(device.readings);
     const battery = typeof device.battery === 'number' ? `${device.battery}%` : '—';
-    const isSensor = device.type?.toLowerCase().includes('meter') || 
-                    device.deviceType?.toLowerCase().includes('meter') ||
-                    device.readings?.temperature != null ||
-                    device.readings?.humidity != null ||
-                    device.readings?.lux != null;
-    
-    const isPlug = device.type?.toLowerCase().includes('plug') || 
-                   device.deviceType?.toLowerCase().includes('plug') ||
-                   device.type?.toLowerCase().includes('switch');
-
-    const deviceIcon = isSensor ? '📊' : (isPlug ? '🔌' : '🔵');
-    const deviceTypeLabel = isSensor ? 'Sensor' : (isPlug ? 'Smart Plug' : 'Device');
-
-    // Create room/zone selection dropdown
-    const roomOptions = rooms.map(room => 
-      `<option value="${escapeHtml(room.id)}" ${device.room === room.id ? 'selected' : ''}>${escapeHtml(room.name)}</option>`
-    ).join('');
-
-    const zoneOptions = groups.map(group => 
-      `<option value="${escapeHtml(group.id)}" ${device.zone === group.id ? 'selected' : ''}>${escapeHtml(group.name)}</option>`
-    ).join('');
-
     return `
-      <div class="switchbot-manager-card" data-device-id="${escapeHtml(device.deviceId)}">
+      <div class="switchbot-manager-card">
         <div class="switchbot-manager-card__title">
-          <h3>${deviceIcon} ${escapeHtml(device.name || device.deviceName || 'SwitchBot device')}</h3>
+          <h3>${escapeHtml(device.name || device.deviceName || 'SwitchBot device')}</h3>
           <span class="switchbot-badge" style="background:${statusColor}22;color:${statusColor}">
             <span class="switchbot-dot" style="background:${statusColor}"></span>
             ${escapeHtml(status)}
           </span>
         </div>
-        <div class="switchbot-manager-meta">
-          <span class="device-type-badge">${deviceTypeLabel}</span>
-          ${escapeHtml(device.type || device.deviceType || 'Unknown type')}
-        </div>
+        <div class="switchbot-manager-meta">${escapeHtml(device.type || device.deviceType || 'Unknown type')} • ${escapeHtml(device.location || 'Unassigned location')}</div>
         <div class="switchbot-manager-readings">${escapeHtml(readingText)}</div>
-        <div class="switchbot-manager-assignment">
-          <select class="room-select" onchange="updateDeviceRoom('${escapeHtml(device.deviceId)}', this.value)">
-            <option value="">Select Room...</option>
-            ${roomOptions}
-          </select>
-          <select class="zone-select" onchange="updateDeviceZone('${escapeHtml(device.deviceId)}', this.value)">
-            <option value="">Select Zone...</option>
-            ${zoneOptions}
-          </select>
-        </div>
         <div class="switchbot-manager-footer">
           <span>Battery: ${escapeHtml(battery)}</span>
           <span>Last seen: ${escapeHtml(formatSwitchBotTimestamp(device.lastSeen))}</span>
-          ${isPlug ? `
-          <div class="switchbot-controls">
-            <button onclick="controlSwitchBotDevice('${escapeHtml(device.deviceId)}', 'turnOn')" class="ghost tiny">ON</button>
-            <button onclick="controlSwitchBotDevice('${escapeHtml(device.deviceId)}', 'turnOff')" class="ghost tiny">OFF</button>
-          </div>
-          ` : ''}
         </div>
       </div>`;
   }).join('');
@@ -10627,7 +13091,7 @@ function renderSwitchBotManager() {
 function openSwitchBotManager() {
   const modal = document.getElementById('switchBotModal');
   if (!modal) {
-    showToast({ title: 'SwitchBot Manager', msg: 'SwitchBot manager UI not found.', kind: 'error', icon: '🤖' });
+    showToast({ title: 'SwitchBot Manager', msg: 'SwitchBot manager UI not found.', kind: 'error', icon: '' });
     return;
   }
   modal.style.display = 'flex';
@@ -10635,7 +13099,7 @@ function openSwitchBotManager() {
 }
 
 async function refreshSwitchBotDevices() {
-  const result = await loadSwitchBotDevices({ refresh: true });
+  const result = await loadSwitchBotDevices();
 
   if (!result) return;
 
@@ -10645,7 +13109,7 @@ async function refreshSwitchBotDevices() {
       title: 'SwitchBot Sync Failed',
       msg: 'Could not connect to SwitchBot API. Check connection.',
       kind: 'error',
-      icon: '❌'
+      icon: ''
     }, 4000);
     return;
   }
@@ -10655,7 +13119,7 @@ async function refreshSwitchBotDevices() {
       title: 'SwitchBot Sync Failed',
       msg: `SwitchBot API request failed (${result.httpStatus}). Check credentials or network.`,
       kind: 'error',
-      icon: '❌'
+      icon: ''
     }, 4000);
     return;
   }
@@ -10665,7 +13129,7 @@ async function refreshSwitchBotDevices() {
       title: 'SwitchBot Sync Failed',
       msg: result.message || `SwitchBot API returned status ${result.statusCode}.`,
       kind: 'error',
-      icon: '❌'
+      icon: ''
     }, 4000);
     return;
   }
@@ -11050,34 +13514,36 @@ window.startForwarderHealthPolling = startForwarderHealthPolling;
 let HEALTHZ_TIMER = 0;
 let HEALTHZ_BACKOFF = 5000;
 
-// Copilot: resilient healthz polling using NetGuard
 async function pollHealthz() {
-  const BASE = window.API_BASE;
-  const j = await NetGuard.healthz(BASE);
-  const statusEl = document.getElementById('communicationStatus');
-  if (j) {
-    const message = (typeof j?.statusMessage === 'string' && j.statusMessage.trim())
-      ? j.statusMessage.trim()
-      : (typeof j?.status === 'string' && j.status.trim())
-        ? j.status.trim()
+  try {
+    const response = await fetch('/healthz', { cache: 'no-store' });
+    if (!response.ok) throw new Error(`healthz:${response.status}`);
+    const body = await response.json().catch(() => ({ status: 'Controller reachable' }));
+    const message = (typeof body?.statusMessage === 'string' && body.statusMessage.trim())
+      ? body.statusMessage.trim()
+      : (typeof body?.status === 'string' && body.status.trim())
+        ? body.status.trim()
         : 'Controller reachable';
+    const statusEl = document.getElementById('communicationStatus');
     if (statusEl) {
       statusEl.textContent = message;
       statusEl.style.color = '#16a34a';
       statusEl.dataset.state = 'ok';
     }
     HEALTHZ_BACKOFF = 5000;
-  } else {
-    NetGuard.warnOnce('healthz', '[healthz] controller offline; backing off');
+  } catch (error) {
+    console.warn('healthz failed', error);
+    const statusEl = document.getElementById('communicationStatus');
     if (statusEl) {
       statusEl.textContent = 'Controller offline';
       statusEl.style.color = '#b91c1c';
       statusEl.dataset.state = 'error';
     }
     HEALTHZ_BACKOFF = Math.min(HEALTHZ_BACKOFF * 2, 60000);
+  } finally {
+    clearTimeout(HEALTHZ_TIMER);
+    HEALTHZ_TIMER = window.setTimeout(pollHealthz, HEALTHZ_BACKOFF);
   }
-  clearTimeout(HEALTHZ_TIMER);
-  HEALTHZ_TIMER = window.setTimeout(pollHealthz, HEALTHZ_BACKOFF);
 }
 
 document.addEventListener('DOMContentLoaded', () => {
@@ -11183,19 +13649,19 @@ function wireGlobalEvents() {
   if (btnGroupSave) {
     btnGroupSave.onclick = async () => {
       if (!STATE.currentGroup) {
-        showToast({ title: 'No group selected', msg: 'Select a group to save.', kind: 'warn', icon: '⚠️' });
+        showToast({ title: 'No group selected', msg: 'Select a group to save.', kind: 'warn', icon: '' });
         return;
       }
       await saveGroups();
       updateGroupUI(STATE.currentGroup);
-      showToast({ title: 'Group Saved', msg: `Group "${STATE.currentGroup.name || ''}" saved.`, kind: 'success', icon: '✅' });
+      showToast({ title: 'Group Saved', msg: `Group "${STATE.currentGroup.name || ''}" saved.`, kind: 'success', icon: '' });
     };
   }
   if (btnImportFixtures) {
     btnImportFixtures.addEventListener('click', () => {
       if (window.freshLightWizard && typeof window.freshLightWizard.open === 'function') {
         window.freshLightWizard.open();
-        showToast({ title: 'Import fixtures', msg: 'Use the Light Setup wizard to add fixtures. New fixtures appear in Ungrouped Lights.', kind: 'info', icon: '💡' });
+        showToast({ title: 'Import fixtures', msg: 'Use the Light Setup wizard to add fixtures. New fixtures appear in Ungrouped Lights.', kind: 'info', icon: '' });
       } else {
         const lightSetupNav = document.querySelector('[data-sidebar-link][data-target="light-setup"]');
         if (lightSetupNav instanceof HTMLElement) {
@@ -11357,7 +13823,13 @@ function wireGlobalEvents() {
     }
     if (selectedMetrics) {
       if (selectedBands) {
-        const deltas = planBands;
+        const deltas = planBands
+          ? {
+              red: Math.round((planBands.red - selectedBands.red) * 10) / 10,
+              mid: Math.round((planBands.mid - selectedBands.mid) * 10) / 10,
+              blue: Math.round((planBands.blue - selectedBands.blue) * 10) / 10,
+            }
+          : null;
         const items = [
           {
             label: 'Red',
@@ -11373,7 +13845,7 @@ function wireGlobalEvents() {
             label: 'Blue',
             value: `${selectedBands.blue.toFixed(1)}%`,
             delta: deltas ? formatDelta(deltas.blue, '%', 1) : null,
-          }
+          },
         ];
         selectedMetrics.innerHTML = items
           .map((item) => `<dt>${escapeHtml(item.label)}</dt><dd>${escapeHtml(formatValueWithDelta(item.value, item.delta))}</dd>`)
@@ -12551,7 +15023,7 @@ function wireGlobalEvents() {
         STATE.currentGroup.pendingSpectrum = { ...mix, updatedAt: new Date().toISOString() };
         await saveJSON('./data/groups.json', { groups: STATE.groups });
         setStatus('Saved spectrum to file only (pending)');
-        showToast({ title: 'Saved to file only', msg: 'Pending spectrum saved to groups.json', kind: 'info', icon: '💾' });
+        showToast({ title: 'Saved to file only', msg: 'Pending spectrum saved to groups.json', kind: 'info', icon: '' });
       } catch (e) {
         console.warn('File-only save failed', e);
       }
@@ -12598,7 +15070,7 @@ function wireGlobalEvents() {
           }
         }
         renderPlans(); renderPlansPanel(); updateGroupUI(STATE.currentGroup);
-        showToast({ title: 'Plan saved', msg: `Created “${name}” and assigned to group`, kind: 'success', icon: '✅' });
+        showToast({ title: 'Plan saved', msg: `Created “${name}” and assigned to group`, kind: 'success', icon: '' });
       });
     }
   }
@@ -12748,7 +15220,6 @@ class FreshLightWizard {
     this.totalSteps = 4;
     this.data = {
       room: '',
-      zone: '',
       fixtures: [],
       controlMethod: '',
       controlDetails: '',
@@ -12772,126 +15243,80 @@ class FreshLightWizard {
     if (prevBtn) prevBtn.addEventListener('click', () => this.prevStep());
     const backdrop = this.modal.querySelector('.fresh-light-modal__backdrop');
     if (backdrop) backdrop.addEventListener('click', () => this.close());
-    this.setupRoomZoneDropdowns();
+    this.setupRoomDropdown();
     this.setupFixtureSelection();
     this.setupControlMethod();
     this.setupCountInputs();
   }
 
-  setupRoomZoneDropdowns() {
+  setupRoomDropdown() {
+    console.log('[FreshLightWizard] setupRoomDropdown called, STATE.rooms length:', STATE.rooms?.length);
     const roomSelect = document.getElementById('freshRoomSelect');
-    const zoneSelect = document.getElementById('freshZoneSelect');
-    const createZoneBtn = document.getElementById('freshCreateZone');
-    if (!roomSelect || !zoneSelect || !createZoneBtn) return;
+    
+    console.log('[FreshLightWizard] DOM elements check:', {
+      roomSelect: !!roomSelect
+    });
+    
+    if (!roomSelect) {
+      console.error('[FreshLightWizard] Missing freshRoomSelect element! Cannot setup room dropdown.');
+      return;
+    }
 
-    // Helper to get normalized rooms
+    // Helper to get normalized rooms from STATE.rooms (Grow Rooms)
     function collectRoomsFromState() {
-      // Only use STATE.rooms as canonical source
       let createdRooms = Array.isArray(STATE.rooms) ? STATE.rooms : [];
       return createdRooms;
     }
 
-    // Populate rooms and zones
-
-    const refreshRoomsAndZones = (selectedRoomId, selectedZone) => {
+    // Populate rooms dropdown only (no zones)
+    const refreshRooms = (selectedRoomId) => {
       const rooms = collectRoomsFromState();
+      console.log('[FreshLightWizard] refreshRooms called');
+      console.log('  → rooms count:', rooms.length);
+      console.log('  → STATE.rooms:', STATE.rooms);
+      console.log('  → Collected rooms:', rooms);
+      
+      if (!Array.isArray(STATE.rooms)) {
+        console.error('[FreshLightWizard] STATE.rooms is not an array!', typeof STATE.rooms);
+      }
+      
       if (!rooms.length) {
-        roomSelect.innerHTML = '<option value="">No rooms found. Add rooms in the Room Setup wizard.</option>';
-        zoneSelect.innerHTML = '<option value="">No zones</option>';
+        console.warn('[FreshLightWizard] No rooms found! STATE.rooms length:', STATE.rooms?.length);
+        roomSelect.innerHTML = '<option value="">No rooms found. Create rooms in Grow Rooms panel first.</option>';
         this.data.room = '';
-        this.data.zone = '';
         this.updateNavigation();
         return;
       }
+      
       roomSelect.innerHTML = '<option value="">Select a room</option>' + rooms.map(room => `<option value="${room.id || room.name}">${room.name || room.id}</option>`).join('');
+      console.log('[FreshLightWizard] Dropdown populated with', rooms.length, 'rooms:', rooms.map(r => r.name).join(', '));
+      
       let roomId = selectedRoomId;
       if (!roomId || !rooms.some(r => (r.id || r.name) === roomId)) {
         roomId = rooms[0]?.id || rooms[0]?.name || '';
       }
       roomSelect.value = roomId;
-      updateZones(roomId, selectedZone);
-    };
-
-    const updateZones = (roomId, zoneToPreserve) => {
-      const rooms = collectRoomsFromState();
-      const selectedRoom = rooms.find(r => (r.id || r.name) === roomId);
-      const zones = selectedRoom && Array.isArray(selectedRoom.zones) ? selectedRoom.zones : [];
-      if (!zones.length) {
-        zoneSelect.innerHTML = '<option value="">No zones found. Add zones in the Room Setup wizard.</option>';
-        this.data.zone = '';
-        this.data.room = roomId;
-        this.updateNavigation();
-        return;
-      }
-      zoneSelect.innerHTML = '<option value="">Select a zone</option>' + zones.map(z => `<option value="${z}">${z}</option>`).join('');
-      let zoneValue = '';
-      if (zoneToPreserve && zones.includes(zoneToPreserve)) {
-        zoneValue = zoneToPreserve;
-      } else if (zones.length > 0) {
-        zoneValue = zones[0];
-      }
-      zoneSelect.value = zoneValue;
-      // Update wizard data
-      this.data.zone = zoneValue;
+      
+      // Update wizard data (no zone)
       this.data.room = roomId;
       this.updateNavigation();
     };
+    
+    // Store reference to refresh function for use in open() method
+    this.refreshRooms = refreshRooms;
 
     // Listen for state refreshes
     window.addEventListener('farmDataChanged', () => {
-      refreshRoomsAndZones(roomSelect.value, zoneSelect.value);
+      refreshRooms(roomSelect.value);
     });
 
     roomSelect.addEventListener('change', (e) => {
-      updateZones(e.target.value, '');
-    });
-    zoneSelect.addEventListener('change', (e) => {
-      this.data.zone = e.target.value;
-      this.data.room = roomSelect.value;
+      this.data.room = e.target.value;
       this.updateNavigation();
     });
 
-    // Create New Zone action
-    createZoneBtn.addEventListener('click', () => {
-      const roomId = roomSelect.value;
-      if (!roomId) return alert('Select a room first');
-      const zoneName = prompt('Enter new zone name:');
-      if (!zoneName) return;
-      let updated = false;
-      if (Array.isArray(STATE.rooms)) {
-        const r = STATE.rooms.find(r => (r.id || r.name) === roomId);
-        if (r) {
-          r.zones = Array.isArray(r.zones) ? r.zones : [];
-          if (!r.zones.includes(zoneName)) {
-            r.zones.push(zoneName);
-            updated = true;
-          }
-        }
-      }
-      if (!updated && Array.isArray(STATE.farm?.rooms)) {
-        const r = STATE.farm.rooms.find(r => (r.id || r.name) === roomId);
-        if (r) {
-          r.zones = Array.isArray(r.zones) ? r.zones : [];
-          if (!r.zones.includes(zoneName)) {
-            r.zones.push(zoneName);
-            updated = true;
-          }
-        }
-      }
-      if (updated) {
-        showToast({ title: 'Zone added', msg: `Zone "${zoneName}" added to room.`, kind: 'success', icon: '➕' });
-        refreshRoomsAndZones(roomId, zoneName);
-        if (typeof safeRoomsSave === 'function') {
-          try { safeRoomsSave({ id: roomId }); } catch {}
-        }
-        window.dispatchEvent(new CustomEvent('farmDataChanged'));
-      } else {
-        alert('Failed to add zone.');
-      }
-    });
-
-  // Initial population
-  refreshRoomsAndZones(this.data.room, this.data.zone);
+    // Initial population
+    refreshRooms(this.data.room);
   }
 
   setupFixtureSelection() {
@@ -13049,7 +15474,7 @@ class FreshLightWizard {
 
   canAdvance() {
     switch (this.currentStep) {
-      case 1: return this.data.room && this.data.zone;
+      case 1: return this.data.room; // Only room required (no zone)
       case 2: return this.data.fixtures.length > 0 && this.data.lightsPerController > 0 && this.data.controllersCount > 0;
       case 3: return this.data.controlMethod;
       case 4: return true;
@@ -13127,11 +15552,25 @@ class FreshLightWizard {
   }
 
   open() {
+    console.log('[FreshLightWizard] Opening wizard, STATE.rooms:', STATE.rooms);
     if (this.modal) {
       this.modal.setAttribute('aria-hidden', 'false');
       this.currentStep = 1;
       this.showStep();
-      // this.populateRooms(); // Removed: no longer exists, handled by setupRoomZoneDropdowns
+      
+      // If refreshRooms wasn't set up (DOM not ready during construction), try now
+      if (!this.refreshRooms) {
+        console.warn('[FreshLightWizard] refreshRooms not available, attempting to setup now...');
+        this.setupRoomDropdown();
+      }
+      
+      // Refresh room dropdown with latest data from STATE.rooms
+      if (this.refreshRooms) {
+        console.log('[FreshLightWizard] Calling refreshRooms with STATE.rooms length:', STATE.rooms?.length);
+        this.refreshRooms(this.data.room);
+      } else {
+        console.error('[FreshLightWizard] refreshRooms function STILL not available after setup attempt!');
+      }
     }
   }
 
@@ -13148,7 +15587,7 @@ class FreshLightWizard {
     const lightSetup = {
       id: Date.now().toString(),
       room: this.data.room,
-      zone: this.data.zone,
+      // No zone - zones are managed in Groups only
       fixtures: this.data.fixtures,
       controlMethod: this.data.controlMethod,
       controlDetails: this.data.controlDetails,
@@ -13164,8 +15603,8 @@ class FreshLightWizard {
     renderControllerAssignments();
     // Add to group if matching group exists
     if (window.STATE && Array.isArray(window.STATE.groups)) {
-      // Try to find group for this room/zone
-      let group = window.STATE.groups.find(g => (g.room === this.data.room || g.roomId === this.data.room) && g.zone === this.data.zone);
+      // Try to find group for this room (no zone check)
+      let group = window.STATE.groups.find(g => (g.room === this.data.room || g.roomId === this.data.room));
       if (group) {
         // Add fixtures as lights to group.lights if not already present
         group.lights = group.lights || [];
@@ -13180,7 +15619,7 @@ class FreshLightWizard {
                 model: fixture.model || '',
                 room: this.data.room,
                 roomId: this.data.room,
-                zone: this.data.zone,
+                // No zone - zones are managed in Groups
                 source: 'setup',
                 setupId: lightSetup.id,
                 fixtureId: fixture.id || null
@@ -13197,7 +15636,7 @@ class FreshLightWizard {
       const roomObj = STATE.rooms.find(r => r.id === this.data.room);
       if (roomObj && roomObj.name) roomName = roomObj.name;
     }
-    const summary = `Light Setup Saved!\n\nLocation: ${roomName} - ${this.data.zone}\nFixtures: ${totalFixtures} lights (${totalWattage.toLocaleString()}W total)\nControl: ${this.getControlMethodName(this.data.controlMethod)}`;
+    const summary = `Light Setup Saved!\n\nLocation: ${roomName}\nFixtures: ${totalFixtures} lights (${totalWattage.toLocaleString()}W total)\nControl: ${this.getControlMethodName(this.data.controlMethod)}`;
     alert(summary);
     this.close();
     // After closing wizard, reload rooms and re-render (guarded)
@@ -13460,7 +15899,7 @@ class DevicePairWizard {
       console.warn('AI Assist request failed', err);
       if (!this.aiNotifiedFailure && stage === 'start') {
         this.aiNotifiedFailure = true;
-        showToast({ title: 'IA Assist', msg: 'Unable to fetch pairing suggestions right now.', kind: 'info', icon: '🤖' }, 5000);
+        showToast({ title: 'IA Assist', msg: 'Unable to fetch pairing suggestions right now.', kind: 'info', icon: '' }, 5000);
       }
       return null;
     }
@@ -13509,7 +15948,7 @@ class DevicePairWizard {
         button.textContent = 'Suggestion applied';
       }
     }
-    showToast({ title: 'IA Assist', msg: `Transport set to ${String(transport).toUpperCase()}.`, kind: 'info', icon: '🤖' }, 5000);
+    showToast({ title: 'IA Assist', msg: `Transport set to ${String(transport).toUpperCase()}.`, kind: 'info', icon: '' }, 5000);
     this.updateReview();
   }
 
@@ -13558,7 +15997,7 @@ class DevicePairWizard {
         button.textContent = 'Suggestion applied';
       }
     }
-    showToast({ title: 'IA Assist', msg: 'Applied Wi‑Fi configuration suggestions.', kind: 'info', icon: '🤖' }, 5000);
+    showToast({ title: 'IA Assist', msg: 'Applied Wi‑Fi configuration suggestions.', kind: 'info', icon: '' }, 5000);
     this.updateReview();
   }
 
@@ -13599,7 +16038,7 @@ class DevicePairWizard {
         button.textContent = 'Suggestion applied';
       }
     }
-    showToast({ title: 'IA Assist', msg: 'Bluetooth pairing details filled in.', kind: 'info', icon: '🤖' }, 5000);
+    showToast({ title: 'IA Assist', msg: 'Bluetooth pairing details filled in.', kind: 'info', icon: '' }, 5000);
     this.updateReview();
   }
 
@@ -13633,10 +16072,10 @@ class DevicePairWizard {
         });
         if (!resp.ok) {
           const txt = await resp.text().catch(() => null);
-          showToast({ title: 'Provision failed', msg: `Controller returned ${resp.status}: ${txt || ''}`, kind: 'warn', icon: '⚠️' }, 6000);
+          showToast({ title: 'Provision failed', msg: `Controller returned ${resp.status}: ${txt || ''}`, kind: 'warn', icon: '' }, 6000);
         } else {
           const body = await resp.json().catch(() => null);
-          showToast({ title: 'Provisioning initiated', msg: body?.message || 'Controller accepted provisioning request', kind: 'success', icon: '✅' }, 4000);
+          showToast({ title: 'Provisioning initiated', msg: body?.message || 'Controller accepted provisioning request', kind: 'success', icon: '' }, 4000);
         }
       }
       if (cfg.bluetooth) {
@@ -13648,14 +16087,14 @@ class DevicePairWizard {
         });
         if (!resp.ok) {
           const txt = await resp.text().catch(() => null);
-          showToast({ title: 'BT pair failed', msg: `Controller returned ${resp.status}: ${txt || ''}`, kind: 'warn', icon: '⚠️' }, 6000);
+          showToast({ title: 'BT pair failed', msg: `Controller returned ${resp.status}: ${txt || ''}`, kind: 'warn', icon: '' }, 6000);
         } else {
           const body = await resp.json().catch(() => null);
-          showToast({ title: 'Pairing requested', msg: body?.message || 'Controller pairing request sent', kind: 'success', icon: '✅' }, 4000);
+          showToast({ title: 'Pairing requested', msg: body?.message || 'Controller pairing request sent', kind: 'success', icon: '' }, 4000);
         }
       }
     } catch (e) {
-      showToast({ title: 'Provision error', msg: e.message || String(e), kind: 'warn', icon: '⚠️' }, 6000);
+      showToast({ title: 'Provision error', msg: e.message || String(e), kind: 'warn', icon: '' }, 6000);
     } finally {
       if (this.progress) this.progress.textContent = '';
     }
@@ -13668,9 +16107,9 @@ class DevicePairWizard {
         this.aiFollowUp = followUp;
         const steps = Array.isArray(followUp.next_steps) ? followUp.next_steps : [];
         if (steps.length) {
-          showToast({ title: 'IA Assist', msg: steps.join(' • '), kind: 'info', icon: '🤖' }, 8000);
+          showToast({ title: 'IA Assist', msg: steps.join(' • '), kind: 'info', icon: '' }, 8000);
         } else if (followUp.summary) {
-          showToast({ title: 'IA Assist', msg: followUp.summary, kind: 'info', icon: '🤖' }, 6000);
+          showToast({ title: 'IA Assist', msg: followUp.summary, kind: 'info', icon: '' }, 6000);
         }
       }
     }
@@ -13750,7 +16189,7 @@ function hookRoomDevicePairing(roomWizardInstance) {
     if (requiresHub) {
       const hasHub = (roomWizardInstance.data.devices||[]).some(d=> (d.vendor===vendor && /(hub|bridge|bridge mini|hub)/i.test(d.model)) || (d.setup && d.setup.isHub));
       if (!hasHub) {
-        showToast({ title: 'Hub required', msg: `${vendor} ${model} typically requires a hub. Please add the hub first.`, kind:'warn', icon: '⚠️' }, 6000);
+        showToast({ title: 'Hub required', msg: `${vendor} ${model} typically requires a hub. Please add the hub first.`, kind:'warn', icon: '' }, 6000);
         DEVICE_PAIR_WIZARD.open({
           suggestedTransport: 'wifi',
           metadata: {
@@ -13771,7 +16210,7 @@ function hookRoomDevicePairing(roomWizardInstance) {
             if (typeof renderControllerAssignments === 'function') {
               renderControllerAssignments();
             }
-            showToast({ title: 'Hub added', msg: `Added ${hubName}. Now add child devices.`, kind: 'success', icon: '✅' }, 4000);
+            showToast({ title: 'Hub added', msg: `Added ${hubName}. Now add child devices.`, kind: 'success', icon: '' }, 4000);
           }
         });
         return;
@@ -14490,14 +16929,17 @@ function setActivePanel(panelId = 'overview') {
     return;
   }
 
-  // Move the active panel to the top of .dashboard-main
-  if (activePanel) {
+  // Ensure the active panel renders in the main column (to the right of the sidebar)
+  // across both index.html variants by appending it inside .dashboard-main.
+  if (activePanel && panelId !== 'overview') {
     const dashboardMain = document.querySelector('.dashboard-main');
-    if (dashboardMain && dashboardMain.firstElementChild !== activePanel) {
-      dashboardMain.insertBefore(activePanel, dashboardMain.firstElementChild);
+    if (dashboardMain) {
+      // Always move the active panel under the main column to normalize placement.
+      // Appending ensures it won't render beneath the sidebar due to stray DOM location.
+      dashboardMain.appendChild(activePanel);
+      // Reset scroll position for a consistent UX.
+      dashboardMain.scrollTop = 0;
     }
-    // Reset scroll position
-    dashboardMain.scrollTop = 0;
   }
 
   document.querySelectorAll('[data-sidebar-link]').forEach((link) => {
@@ -14563,6 +17005,10 @@ function initializeSidebarNavigation() {
         });
       }
       setActivePanel(target);
+      // When arriving at Equipment Overview, re-render to include any newly saved equipment
+      if (target === 'equipment-overview') {
+        try { renderEquipmentOverview(); } catch (e) { console.warn('Failed to render equipment overview on nav', e); }
+      }
     });
   });
 
@@ -14630,8 +17076,20 @@ document.addEventListener('DOMContentLoaded', async () => {
         title: 'Pairing checklist',
         msg: 'Review onboarding notes before pairing devices.',
         kind: 'info',
-        icon: '🧭'
+        icon: ''
       });
+    });
+
+    // Wire Add Device button in Integrations panel to open Pair Devices panel
+    document.getElementById('btnAddDeviceIntegrations')?.addEventListener('click', () => {
+      try {
+        setActivePanel('pair-devices');
+        // If a modal-based pairing wizard is available, open it as well for convenience
+        const openWizard = typeof DEVICE_PAIR_WIZARD !== 'undefined' && DEVICE_PAIR_WIZARD?.open;
+        if (openWizard) DEVICE_PAIR_WIZARD.open();
+      } catch (e) {
+        console.warn('Failed to navigate to Pair Devices panel from Integrations', e);
+      }
     });
 
     document.getElementById('btnRefreshSmartPlugs')?.addEventListener('click', () => loadSmartPlugs());
@@ -14709,7 +17167,7 @@ document.addEventListener('DOMContentLoaded', async () => {
           console.warn('Failed to persist profile', err);
         }
         if (statusEl) statusEl.textContent = 'Saved locally';
-        showToast({ title: 'Profile saved', msg: 'Profile details stored on this device.', kind: 'success', icon: '💾' });
+        showToast({ title: 'Profile saved', msg: 'Profile details stored on this device.', kind: 'success', icon: '' });
       });
 
       document.getElementById('profileReset')?.addEventListener('click', () => {
@@ -14723,7 +17181,7 @@ document.addEventListener('DOMContentLoaded', async () => {
           console.warn('Failed to clear profile', err);
         }
         if (statusEl) statusEl.textContent = 'Profile cleared';
-        showToast({ title: 'Profile reset', msg: 'Local profile details removed.', kind: 'info', icon: '🧹' });
+        showToast({ title: 'Profile reset', msg: 'Local profile details removed.', kind: 'info', icon: '' });
       });
     }
 

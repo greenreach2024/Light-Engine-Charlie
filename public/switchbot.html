@@ -2435,10 +2435,18 @@ function toNumberOrNull(val) {
       return saved;
     }
 
+    // Determine API base depending on which port this page is served from
+    // Use a single global to avoid redeclaration if this block appears multiple times
+    window.GR_API_BASE = window.GR_API_BASE || (
+      (window.location.port && window.location.port !== '8091')
+        ? `${window.location.protocol}//${window.location.hostname}:8091`
+        : ''
+    );
+
     async function fetchSwitchBotDevices() {
       try {
         // Fetch real SwitchBot devices from your farm
-        const response = await fetch('/api/switchbot/devices');
+  const response = await fetch(`${window.GR_API_BASE}/api/switchbot/devices`);
         if (response.status === 429) {
           throw new Error('SwitchBot API rate limit reached. Please wait before making more requests.');
         }
@@ -2494,7 +2502,7 @@ function toNumberOrNull(val) {
       
       // Try SwitchBot API as fallback (with rate limiting protection)
       try {
-        const response = await fetch(`/api/switchbot/devices/${deviceId}/status`);
+  const response = await fetch(`${window.GR_API_BASE}/api/switchbot/devices/${deviceId}/status`);
         if (response.status === 429) {
           throw new Error('Rate limit reached');
         }
@@ -2506,7 +2514,7 @@ function toNumberOrNull(val) {
     }
 
     async function sendCommand(deviceId, command, parameter = '', commandType = 'command') {
-      const response = await fetch(`/api/switchbot/devices/${deviceId}/commands`, {
+  const response = await fetch(`${window.GR_API_BASE}/api/switchbot/devices/${deviceId}/commands`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json'
@@ -4325,7 +4333,7 @@ function toNumberOrNull(val) {
         showInfo(`Refreshing data for ${safeDeviceLabel}...`);
 
         // Call SwitchBot status API for individual device
-        const response = await fetch(`/api/switchbot/devices/${deviceId}/status`);
+  const response = await fetch(`${window.GR_API_BASE}/api/switchbot/devices/${deviceId}/status`);
         const data = await response.json();
 
         if (data.statusCode === 100) {
@@ -4374,7 +4382,7 @@ function toNumberOrNull(val) {
 
         showInfo(`Sending ${safeCommand} command to ${safeDeviceName}...`);
 
-        const response = await fetch(`/api/switchbot/devices/${deviceId}/commands`, {
+  const response = await fetch(`${window.GR_API_BASE}/api/switchbot/devices/${deviceId}/commands`, {
           method: 'POST',
           headers: {
             'Content-Type': 'application/json'

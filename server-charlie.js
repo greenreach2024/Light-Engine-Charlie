@@ -1,6 +1,6 @@
-
-
 import express from "express";
+import { setCorsHeaders } from './server/middleware/cors.js';
+
 // --- Feature flag: ALLOW_MOCKS (default OFF) ---
 const ALLOW_MOCKS = String(process.env.ALLOW_MOCKS || 'false').toLowerCase() === 'true';
 import { createProxyMiddleware } from "http-proxy-middleware";
@@ -19,8 +19,33 @@ import {
   cloneWizardStep
 } from './server/wizards/index.js';
 import buyerRouter from './server/buyer/routes.js';
+import lightsDB from './lib/lights-database.js';
 
 const app = express();
+
+// --- Kasa and Shelly Search Endpoints ---
+app.post('/plugs/search/kasa', asyncHandler(async (req, res) => {
+  setPreAutomationCors(req, res);
+  try {
+    prePlugManager.registerKasaDriver();
+    const plugs = await prePlugManager.drivers.get('kasa').discover();
+    res.json({ ok: true, plugs, vendor: 'kasa', searchedAt: new Date().toISOString() });
+  } catch (error) {
+    res.status(500).json({ ok: false, error: error.message });
+  }
+}));
+
+app.post('/plugs/search/shelly', asyncHandler(async (req, res) => {
+  setPreAutomationCors(req, res);
+  try {
+    prePlugManager.registerShellyDriver();
+    const plugs = await prePlugManager.drivers.get('shelly').discover();
+    res.json({ ok: true, plugs, vendor: 'shelly', searchedAt: new Date().toISOString() });
+  } catch (error) {
+    res.status(500).json({ ok: false, error: error.message });
+  }
+}));
+
 const parsedPort = Number.parseInt(process.env.PORT ?? '', 10);
 const hasExplicitPort = Number.isFinite(parsedPort);
 let PORT = hasExplicitPort ? parsedPort : 8091;
@@ -1093,9 +1118,10 @@ process.on('SIGINT', () => {
 async function createKasaClient() {
   try {
     const kasaModule = await import('tplink-smarthome-api');
-    const Client = kasaModule.default?.Client || kasaModule.Client || kasaModule.default;
+    // tplink-smarthome-api is a CommonJS module, use default export
+    const Client = kasaModule.default?.Client || kasaModule.Client;
     
-    if (!Client) {
+    if (!Client || typeof Client !== 'function') {
       throw new Error('tplink-smarthome-api Client not found in module exports');
     }
     
@@ -1211,7 +1237,7 @@ function recordEnvEntry(state, entry) {
 }
 
 // GET /env → full state (legacy view via ?legacy=1)
-app.get('/env', (req, res, next) => {
+app.get('/env', setCorsHeaders, (req, res, next) => {
   if (req.query?.legacy === '1') {
     return res.json(readEnv());
   }
@@ -4739,7 +4765,222 @@ app.delete('/devices/:id', async (req, res) => {
   }
 });
 
+// =====================================================
+// Lights Catalog API Endpoints
+// =====================================================
+
+// GET /lights → get all lights with optional filtering
+app.get('/lights', async (req, res) => {
+  try {
+    setApiCors(res);
+    
+    // Support query params for filtering
+    const { manufacturer, wattage_min, wattage_max, search } = req.query;
+    
+    let lights = await lightsDB.getAll();
+    
+    // Apply filters if provided
+    if (manufacturer) {
+      lights = lights.filter(l => l.manufacturer && l.manufacturer.toLowerCase() === manufacturer.toLowerCase());
+    }
+    
+    if (wattage_min || wattage_max) {
+      lights = lights.filter(l => {
+        const w = l.wattage || 0;
+        if (wattage_min && w < Number(wattage_min)) return false;
+        if (wattage_max && w > Number(wattage_max)) return false;
+        return true;
+      });
+    }
+    
+    if (search) {
+      const term = search.toLowerCase();
+      lights = lights.filter(l => {
+        return (l.manufacturer && l.manufacturer.toLowerCase().includes(term)) ||
+               (l.model && l.model.toLowerCase().includes(term)) ||
+               (l.name && l.name.toLowerCase().includes(term));
+      });
+    }
+    
+    return res.json({ ok: true, lights, count: lights.length });
+  } catch (e) {
+    return res.status(500).json({ ok: false, error: e.message });
+  }
+});
+
+// GET /lights/manufacturers → get list of unique manufacturers
+app.get('/lights/manufacturers', async (req, res) => {
+  try {
+    setApiCors(res);
+    const manufacturers = await lightsDB.getManufacturers();
+    return res.json({ ok: true, manufacturers });
+  } catch (e) {
+    return res.status(500).json({ ok: false, error: e.message });
+  }
+});
+
+// GET /lights/stats → get database statistics
+app.get('/lights/stats', async (req, res) => {
+  try {
+    setApiCors(res);
+    const stats = await lightsDB.getStats();
+    return res.json({ ok: true, stats });
+  } catch (e) {
+    return res.status(500).json({ ok: false, error: e.message });
+  }
+});
+
+// GET /lights/:id → get single light by id
+app.get('/lights/:id', async (req, res) => {
+  try {
+    setApiCors(res);
+    const light = await lightsDB.findById(req.params.id);
+    if (!light) {
+      return res.status(404).json({ ok: false, error: 'Light not found' });
+    }
+    return res.json({ ok: true, light });
+  } catch (e) {
+    return res.status(500).json({ ok: false, error: e.message });
+  }
+});
+
+// POST /lights → create new light
+app.post('/lights', async (req, res) => {
+  try {
+    setApiCors(res);
+    const lightData = req.body || {};
+    
+    // Basic validation
+    if (!lightData.manufacturer || !lightData.model) {
+      return res.status(400).json({ 
+        ok: false, 
+        error: 'Missing required fields: manufacturer and model' 
+      });
+    }
+    
+    const newLight = await lightsDB.add(lightData);
+    return res.json({ ok: true, light: newLight });
+  } catch (e) {
+    return res.status(500).json({ ok: false, error: e.message });
+  }
+});
+
+// POST /lights/search → advanced search with criteria object
+app.post('/lights/search', async (req, res) => {
+  try {
+    setApiCors(res);
+    const criteria = req.body || {};
+    const lights = await lightsDB.search(criteria);
+    return res.json({ ok: true, lights, count: lights.length });
+  } catch (e) {
+    return res.status(500).json({ ok: false, error: e.message });
+  }
+});
+
+// PATCH /lights/:id → update existing light
+app.patch('/lights/:id', async (req, res) => {
+  try {
+    setApiCors(res);
+    const updates = req.body || {};
+    const updatedLight = await lightsDB.update(req.params.id, updates);
+    return res.json({ ok: true, light: updatedLight });
+  } catch (e) {
+    if (e.message.includes('not found')) {
+      return res.status(404).json({ ok: false, error: e.message });
+    }
+    return res.status(500).json({ ok: false, error: e.message });
+  }
+});
+
+// DELETE /lights/:id → delete light
+app.delete('/lights/:id', async (req, res) => {
+  try {
+    setApiCors(res);
+    await lightsDB.delete(req.params.id);
+    return res.json({ ok: true, deleted: true });
+  } catch (e) {
+    if (e.message.includes('not found')) {
+      return res.status(404).json({ ok: false, error: e.message });
+    }
+    return res.status(500).json({ ok: false, error: e.message });
+  }
+});
+
+// --- Lighting Recipes API ---
+const RECIPES_PATH = path.join(PUBLIC_DIR, 'data', 'lighting-recipes.json');
+let recipesCache = null;
+let recipesCacheTime = 0;
+const RECIPES_CACHE_TTL = 300_000; // 5 minutes
+
+function loadRecipes() {
+  const now = Date.now();
+  if (recipesCache && (now - recipesCacheTime) < RECIPES_CACHE_TTL) {
+    return recipesCache;
+  }
+  try {
+    const data = fs.readFileSync(RECIPES_PATH, 'utf8');
+    recipesCache = JSON.parse(data);
+    recipesCacheTime = now;
+    return recipesCache;
+  } catch (e) {
+    console.error('[recipes] Failed to load lighting-recipes.json:', e.message);
+    return { crops: {} };
+  }
+}
+
+// GET /recipes?search=tomato → search crop recipes by name
+app.get('/recipes', async (req, res) => {
+  try {
+    setApiCors(res);
+    const recipes = loadRecipes();
+    const search = (req.query.search || '').toLowerCase().trim();
+    let crops = Object.keys(recipes.crops || {});
+    
+    if (search) {
+      crops = crops.filter(name => name.toLowerCase().includes(search));
+    }
+    
+    // Limit to 6 results for display
+    const limit = parseInt(req.query.limit || '6', 10);
+    crops = crops.slice(0, limit);
+    
+    const results = {};
+    crops.forEach(crop => {
+      results[crop] = recipes.crops[crop];
+    });
+    
+    return res.json({ 
+      ok: true, 
+      crops: results, 
+      count: Object.keys(results).length,
+      total: Object.keys(recipes.crops || {}).length
+    });
+  } catch (e) {
+    return res.status(500).json({ ok: false, error: e.message });
+  }
+});
+
+// GET /recipes/:crop → get specific crop recipe
+app.get('/recipes/:crop', async (req, res) => {
+  try {
+    setApiCors(res);
+    const recipes = loadRecipes();
+    const cropName = decodeURIComponent(req.params.crop);
+    const crop = recipes.crops?.[cropName];
+    
+    if (!crop) {
+      return res.status(404).json({ ok: false, error: 'Crop not found' });
+    }
+    
+    return res.json({ ok: true, crop: cropName, days: crop });
+  } catch (e) {
+    return res.status(500).json({ ok: false, error: e.message });
+  }
+});
+
 // SwitchBot Real API Endpoints - MUST be before proxy middleware
+// Credentials now prefer farm.json integrations, falling back to env vars.
+// Use helper to read current values so updates via /farm are picked up without restart.
 const SWITCHBOT_TOKEN = process.env.SWITCHBOT_TOKEN || '';
 const SWITCHBOT_SECRET = process.env.SWITCHBOT_SECRET || '';
 const SWITCHBOT_REGION = process.env.SWITCHBOT_REGION || '';
@@ -4760,6 +5001,35 @@ const switchBotDevicesCache = {
 };
 
 const switchBotStatusCache = new Map();
+
+// Helper: read integrations from farm.json with env fallback
+function readFarmProfile() {
+  try {
+    if (fs.existsSync(FARM_PATH)) {
+      const raw = fs.readFileSync(FARM_PATH, 'utf8');
+      return JSON.parse(raw);
+    }
+  } catch {}
+  return null;
+}
+
+function getFarmIntegrations() {
+  const farm = readFarmProfile();
+  const integ = farm?.integrations || {};
+  const sb = integ.switchbot || {};
+  const kasa = integ.kasa || {};
+  return {
+    switchbot: {
+      token: sb.token || SWITCHBOT_TOKEN || '',
+      secret: sb.secret || SWITCHBOT_SECRET || '',
+      region: sb.region || SWITCHBOT_REGION || ''
+    },
+    kasa: {
+      email: kasa.email || process.env.KASA_EMAIL || '',
+      password: kasa.password || process.env.KASA_PASSWORD || ''
+    }
+  };
+}
 
 // Unified health endpoint with controller diagnostics that never 502s
 app.get('/healthz', async (req, res) => {
@@ -4826,12 +5096,13 @@ function getSwitchBotHeaders() {
   // Random nonce using crypto.randomUUID() or fallback to randomBytes
   const nonce = crypto.randomUUID ? crypto.randomUUID().replace(/-/g, '') : crypto.randomBytes(16).toString('hex');
   // String to sign: token + timestamp + nonce
-  const strToSign = SWITCHBOT_TOKEN + t + nonce;
+  const creds = getFarmIntegrations().switchbot;
+  const strToSign = creds.token + t + nonce;
   // HMAC-SHA256 with secret, then base64 encode (ensuring it's a string)
-  const sign = crypto.createHmac('sha256', SWITCHBOT_SECRET).update(strToSign, 'utf8').digest('base64');
+  const sign = crypto.createHmac('sha256', creds.secret).update(strToSign, 'utf8').digest('base64');
   
   return {
-    'Authorization': SWITCHBOT_TOKEN,
+    'Authorization': creds.token,
     't': t,
     'sign': sign,
     'nonce': nonce,
@@ -4841,7 +5112,8 @@ function getSwitchBotHeaders() {
 }
 
 function ensureSwitchBotConfigured() {
-  return Boolean(SWITCHBOT_TOKEN && SWITCHBOT_SECRET);
+  const creds = getFarmIntegrations().switchbot;
+  return Boolean(creds.token && creds.secret);
 }
 
 async function switchBotApiRequest(path, { method = 'GET', data = null } = {}) {
@@ -5398,7 +5670,8 @@ app.get("/api/kasa/devices", asyncHandler(async (req, res) => {
 // Kasa device control endpoint
 app.post("/api/kasa/devices/:deviceId/control", asyncHandler(async (req, res) => {
   try {
-    const { Client } = await import('tplink-smarthome-api');
+    const kasaModule = await import('tplink-smarthome-api');
+    const Client = kasaModule.default?.Client || kasaModule.Client;
     const client = new Client();
     const { deviceId } = req.params;
     const { action, value } = req.body;
@@ -5480,7 +5753,8 @@ app.post("/api/kasa/devices/:deviceId/control", asyncHandler(async (req, res) =>
 // Kasa device status endpoint
 app.get("/api/kasa/devices/:deviceId/status", asyncHandler(async (req, res) => {
   try {
-    const { Client } = await import('tplink-smarthome-api');
+    const kasaModule = await import('tplink-smarthome-api');
+    const Client = kasaModule.default?.Client || kasaModule.Client;
     const client = new Client();
     const { deviceId } = req.params;
     
@@ -6153,6 +6427,55 @@ app.use('/py', async (req, res) => {
   }
 });
 
+// ===== GROW3 (CODE3) CONTROLLER PROXY =====
+// IMPORTANT: This must come BEFORE the /api proxy middleware to avoid conflicts
+// Proxy all /api/grow3/* requests to http://192.168.2.80:3000
+const GROW3_TARGET = 'http://192.168.2.80:3000';
+
+app.all('/api/grow3/*', async (req, res) => {
+  try {
+    const grow3Path = req.path.replace('/api/grow3', '');
+    const targetUrl = `${GROW3_TARGET}${grow3Path}`;
+    
+    console.log(`[Grow3 Proxy] ${req.method} ${req.path} → ${targetUrl}`);
+    
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 10000); // 10 second timeout
+    
+    try {
+      const response = await fetch(targetUrl, {
+        method: req.method,
+        headers: {
+          'Content-Type': 'application/json',
+          ...req.headers
+        },
+        body: ['POST', 'PUT', 'PATCH'].includes(req.method) ? JSON.stringify(req.body) : undefined,
+        signal: controller.signal
+      });
+      
+      clearTimeout(timeout);
+      
+      const contentType = response.headers.get('content-type');
+      if (contentType && contentType.includes('application/json')) {
+        const data = await response.json();
+        res.status(response.status).json(data);
+      } else {
+        const text = await response.text();
+        res.status(response.status).type(contentType || 'text/plain').send(text);
+      }
+    } finally {
+      clearTimeout(timeout);
+    }
+  } catch (error) {
+    console.error('[Grow3 Proxy] Error:', error.message);
+    if (error.name === 'AbortError') {
+      res.status(504).json({ error: 'Gateway timeout', message: 'Grow3 controller did not respond in time' });
+    } else {
+      res.status(502).json({ error: 'Bad gateway', message: error.message });
+    }
+  }
+});
+
 app.use('/api', proxyCorsMiddleware, createProxyMiddleware({
   // Initial target is required; router() will be consulted per-request
   target: getController(),
@@ -6256,12 +6579,21 @@ app.get(['/', '/index.charlie.html'], (req, res, next) => {
   res.type('html').send(html);
 });
 
+// Route legacy /index.html to the live Charlie dashboard to prevent UI divergence
+app.get('/index.html', (req, res, next) => {
+  const html = loadIndexCharlieHtml();
+  if (!html) return next();
+  res.setHeader('Cache-Control', 'no-store, max-age=0');
+  res.type('html').send(html);
+});
+
 // Serve static files
 app.use(express.static(PUBLIC_DIR));
 
 // Allow direct access to JSON data files in /public/data with CORS headers
 app.use('/data', (req, res, next) => {
-  // Only allow .json files
+  // Only handle GET/OPTIONS for static JSON fetches; let POST fall through to /data/:name
+  if (req.method !== 'GET' && req.method !== 'OPTIONS') return next();
   if (!req.path.endsWith('.json')) return res.status(403).send('Forbidden');
   res.setHeader('Access-Control-Allow-Origin', '*');
   res.setHeader('Access-Control-Allow-Methods', 'GET,OPTIONS');
@@ -6782,6 +7114,35 @@ app.get('/farm', (req, res) => {
   }
 });
 
+// Lightweight status of integrations (no secrets in response)
+// Also expose a non-proxied variant to avoid /api proxy interception
+app.get('/integrations/status', (req, res) => {
+  try {
+    const integ = getFarmIntegrations();
+    res.json({
+      ok: true,
+      switchbot: { configured: Boolean(integ.switchbot.token && integ.switchbot.secret) },
+      kasa: { configured: Boolean(integ.kasa.email && integ.kasa.password) }
+    });
+  } catch (e) {
+    res.status(500).json({ ok: false, error: e.message });
+  }
+});
+
+// Legacy path kept for backward compatibility but may be proxied to FastAPI if proxy is mounted first
+app.get('/api/integrations/status', (req, res) => {
+  try {
+    const integ = getFarmIntegrations();
+    res.json({
+      ok: true,
+      switchbot: { configured: Boolean(integ.switchbot.token && integ.switchbot.secret) },
+      kasa: { configured: Boolean(integ.kasa.email && integ.kasa.password) }
+    });
+  } catch (e) {
+    res.status(500).json({ ok: false, error: e.message });
+  }
+});
+
 // Save farm
 app.post('/farm', (req, res) => {
   try {
@@ -6792,6 +7153,20 @@ app.post('/farm', (req, res) => {
     fs.writeFileSync(FARM_PATH, JSON.stringify(body, null, 2));
     // Reconfigure weather polling when farm coordinates change
     setupWeatherPolling();
+    // Clear SwitchBot caches so new credentials or devices take effect immediately
+    try {
+      switchBotDevicesCache.payload = null;
+      switchBotDevicesCache.fetchedAt = 0;
+      switchBotDevicesCache.inFlight = null;
+      switchBotDevicesCache.lastError = null;
+      for (const entry of switchBotStatusCache.values()) {
+        entry.payload = null;
+        entry.fetchedAt = 0;
+        entry.inFlight = null;
+        entry.lastError = null;
+      }
+      lastSwitchBotRequest = 0;
+    } catch {}
     res.json({ ok:true });
   } catch (e) {
     res.status(500).json({ ok:false, error: e.message });
@@ -7474,14 +7849,117 @@ app.get('/forwarder/network/wifi/scan', async (req, res) => {
   } catch (err) {
     console.warn('Controller Wi-Fi scan failed, falling back to farm networks', err.message);
   }
-  // Farm network scan results
-  res.json([
-    { ssid: 'greenreach', signal: -42, security: 'WPA2' },
-    { ssid: 'Farm-IoT', signal: -48, security: 'WPA2' },
-    { ssid: 'Greenhouse-Guest', signal: -62, security: 'WPA2' },
-    { ssid: 'BackOffice', signal: -74, security: 'WPA3' },
-    { ssid: 'Equipment-WiFi', signal: -55, security: 'WPA2' }
-  ]);
+  // Try local OS-level WiFi scan as a fallback (macOS, Linux)
+  try {
+    const { exec } = await import('node:child_process');
+    const platform = process.platform;
+
+    const execAsync = (cmd) => new Promise((resolve, reject) => {
+      exec(cmd, { timeout: 10000 }, (err, stdout, stderr) => {
+        if (err) return reject(err);
+        resolve(stdout || '');
+      });
+    });
+
+    let stdout = '';
+    if (platform === 'darwin') {
+      // macOS: try airport, then wdutil fallbacks
+      const airport = '/System/Library/PrivateFrameworks/Apple80211.framework/Versions/Current/Resources/airport';
+      stdout = await execAsync(`${airport} -s`).catch(() => '');
+      // If airport output looks valid, parse lines that contain a BSSID (MAC)
+      const lines = stdout.split('\n').filter(Boolean);
+      const hasHeader = /SSID\s+BSSID\s+RSSI/i.test(lines[0] || '');
+      const airportRows = (hasHeader ? lines.slice(1) : lines)
+        .filter(l => /([0-9A-Fa-f]{2}:){5}[0-9A-Fa-f]{2}/.test(l));
+      if (airportRows.length) {
+        const networks = airportRows.map((line) => {
+          // SSID may contain spaces; extract BSSID first, then split left/right
+          const bssidMatch = line.match(/([0-9A-Fa-f]{2}:){5}[0-9A-Fa-f]{2}/);
+          const left = line.slice(0, bssidMatch.index).trim();
+          const right = line.slice(bssidMatch.index + bssidMatch[0].length).trim();
+          // Right side contains RSSI and SECURITY at the end
+          const rssiMatch = right.match(/-?\d{1,3}/);
+          const secMatch = right.match(/(WPA3|WPA2|WPA|WEP|OPEN|NONE|\S+)\s*$/i);
+          const ssid = left.replace(/\s+$/, '');
+          const signal = rssiMatch ? parseInt(rssiMatch[0], 10) : -60;
+          const security = (secMatch?.[1] || 'OPEN').toUpperCase();
+          return { ssid, signal, security };
+        }).filter(n => n.ssid);
+        if (networks.length) return res.json(networks);
+      }
+      // If airport output suggested using Wireless Diagnostics, try wdutil
+      // Try JSON first
+      stdout = await execAsync('/usr/bin/wdutil scan -json').catch(() => '');
+      if (stdout && stdout.trim().startsWith('{')) {
+        try {
+          const obj = JSON.parse(stdout);
+          const nets = Array.isArray(obj?.Networks || obj?.networks) ? (obj.Networks || obj.networks) : [];
+          const networks = nets.map(n => ({ ssid: n.SSID || n.ssid || '', signal: n.RSSI || n.rssi || -60, security: (n.security || n.SECURITY || 'OPEN').toUpperCase() })).filter(n => n.ssid);
+          if (networks.length) return res.json(networks);
+        } catch {}
+      }
+      // Try plain text wdutil output
+      stdout = await execAsync('/usr/bin/wdutil scan').catch(() => '');
+      if (stdout) {
+        const blocks = stdout.split(/\n\s*\n/); // blank-line separated blocks
+        const networks = [];
+        for (const block of blocks) {
+          const ssidMatch = block.match(/SSID\s*:\s*(.+)/i);
+          if (!ssidMatch) continue;
+          const rssiMatch = block.match(/RSSI\s*:\s*(-?\d+)/i);
+          const secMatch = block.match(/SECURITY\s*:\s*([\w\-\+]+)/i);
+          networks.push({
+            ssid: ssidMatch[1].trim(),
+            signal: rssiMatch ? parseInt(rssiMatch[1], 10) : -60,
+            security: (secMatch?.[1] || 'OPEN').toUpperCase()
+          });
+        }
+        if (networks.length) return res.json(networks.filter(n => n.ssid));
+      }
+      // No macOS methods yielded networks; continue to Linux/return 503
+    } else if (platform === 'linux') {
+      // Linux: prefer nmcli, fallback to iwlist (requires sudo for some distros)
+      try {
+        stdout = await execAsync('nmcli -t -f SSID,SIGNAL,SECURITY dev wifi list');
+        const networks = stdout
+          .split('\n')
+          .filter(Boolean)
+          .map((line) => {
+            const [ssid, signal, security] = line.split(':');
+            return { ssid: ssid || '', signal: parseInt(signal || '-60', 10), security: (security || 'OPEN').toUpperCase() };
+          })
+          .filter(n => n.ssid);
+        return res.json(networks);
+      } catch (e) {
+        // Try iwlist as a last resort
+        stdout = await execAsync("/sbin/iwlist wlan0 scan | grep -E 'ESSID|Signal level|Quality' -A1");
+        const lines = stdout.split('\n');
+        const networks = [];
+        let current = {};
+        for (const raw of lines) {
+          const line = raw.trim();
+          const essidMatch = line.match(/ESSID:\"(.*)\"/);
+          if (essidMatch) {
+            if (current.ssid) networks.push(current);
+            current = { ssid: essidMatch[1], signal: -60, security: 'UNKNOWN' };
+          }
+          const signalMatch = line.match(/Signal level[=:-](-?\d+)/i);
+          if (signalMatch) current.signal = parseInt(signalMatch[1], 10);
+        }
+        if (current.ssid) networks.push(current);
+        return res.json(networks.filter(n => n.ssid));
+      }
+    }
+  } catch (localErr) {
+    console.warn('[WiFi Scan] Local OS-level scan failed:', localErr.message);
+  }
+
+  // If everything failed, return 503
+  console.error('[WiFi Scan] No controller and no local scan available');
+  return res.status(503).json({ 
+    error: 'WiFi scan unavailable', 
+    message: 'No controller endpoint and local scan failed or unsupported on this platform.'
+  });
 });
 
 app.post('/forwarder/network/test', async (req, res) => {
@@ -7510,14 +7988,11 @@ app.post('/forwarder/network/test', async (req, res) => {
       }
     }
   } catch (err) {
-    console.warn('Controller network test failed, falling back to sample result', err.message);
+    console.warn('Controller network test failed', err.message);
   }
-  res.json({
-    status: 'connected',
-    ip: '192.168.1.120',
-    gateway: '192.168.1.1',
-    subnet: '192.168.1.0/24',
-    latencyMs: 32,
+  return res.status(503).json({
+    error: 'Network test unavailable',
+    message: 'Controller endpoint not reachable or returned an error.',
     testedAt: now,
     ssid: payload?.wifi?.ssid || null
   });
@@ -7699,20 +8174,70 @@ app.get('/api/lights/status', asyncHandler(async (req, res) => {
 
 app.get('/discovery/devices', async (req, res) => {
   const startedAt = new Date().toISOString();
+  
+  // Helper function to fetch with timeout
+  async function fetchWithTimeout(url, timeoutMs = 30000) {
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), timeoutMs);
+    try {
+      const response = await fetch(url, { signal: controller.signal });
+      clearTimeout(timeout);
+      return response;
+    } catch (err) {
+      clearTimeout(timeout);
+      throw err;
+    }
+  }
+  
+  // First, try local Python backend (port 8000)
+  try {
+    console.log('[Discovery] Attempting local Python backend at http://localhost:8000/discovery/devices');
+    const localUrl = 'http://localhost:8000/discovery/devices';
+    const localResponse = await fetchWithTimeout(localUrl, 30000).catch(err => {
+      console.warn('[Discovery] Local backend fetch failed:', err.message);
+      return null;
+    });
+    
+    if (localResponse && localResponse.ok) {
+      const body = await localResponse.json();
+      console.log('[Discovery] Local backend returned:', body);
+      if (Array.isArray(body?.devices)) {
+        console.log(`[Discovery] ✅ Found ${body.devices.length} devices from local Python backend`);
+        return res.json({ 
+          startedAt, 
+          completedAt: new Date().toISOString(), 
+          devices: body.devices,
+          source: 'python-backend-local'
+        });
+      }
+    }
+  } catch (err) {
+    console.warn('[Discovery] Local Python backend failed:', err.message);
+  }
+  
+  // Second, try remote controller if configured
   try {
     const controller = getController();
-    if (controller) {
-      const url = `${controller.replace(/\/$/, '')}/api/discovery/devices`;
-      const response = await fetch(url).catch(() => null);
+    if (controller && controller !== 'http://localhost:8000') {
+      console.log(`[Discovery] Attempting remote controller at ${controller}/discovery/devices`);
+      const url = `${controller.replace(/\/$/, '')}/discovery/devices`;
+      const response = await fetchWithTimeout(url, 30000).catch(() => null);
+      
       if (response && response.ok) {
         const body = await response.json();
         if (Array.isArray(body?.devices)) {
-          return res.json({ startedAt, completedAt: new Date().toISOString(), devices: body.devices });
+          console.log(`[Discovery] ✅ Found ${body.devices.length} devices from remote controller`);
+          return res.json({ 
+            startedAt, 
+            completedAt: new Date().toISOString(), 
+            devices: body.devices,
+            source: 'controller-remote'
+          });
         }
       }
     }
   } catch (err) {
-    console.warn('Controller discovery failed, attempting live network scan', err.message);
+    console.warn('[Discovery] Controller discovery failed, attempting live network scan:', err.message);
   }
   
   // LIVE DEVICE DISCOVERY - Scan greenreach network for real devices
@@ -7722,7 +8247,7 @@ app.get('/discovery/devices', async (req, res) => {
     const discoveredDevices = [];
     
     // 1. Try to discover SwitchBot devices via API
-    if (process.env.SWITCHBOT_TOKEN && process.env.SWITCHBOT_SECRET) {
+    if (ensureSwitchBotConfigured()) {
       try {
         const switchbotResponse = await fetch('/api/switchbot/devices?refresh=1');
         if (switchbotResponse.ok) {
@@ -7858,7 +8383,8 @@ async function discoverNetworkDevices() {
     
     // Try direct Kasa device discovery using tplink-smarthome-api
     try {
-      const { Client } = await import('tplink-smarthome-api');
+      const kasaModule = await import('tplink-smarthome-api');
+      const Client = kasaModule.default?.Client || kasaModule.Client;
       const client = new Client();
       
       console.log('🔍 Scanning for Kasa devices on local network...');
@@ -8182,6 +8708,208 @@ function analyzeDiscoveredDevices(devices) {
       return priorityOrder[b.priority] - priorityOrder[a.priority];
     })
   };
+}
+
+// ===== UNIVERSAL DEVICE SCANNER =====
+// Simplified multi-protocol scan endpoint for Integrations panel
+app.post('/discovery/scan', async (req, res) => {
+  console.log('🔍 Universal device scan initiated');
+  const startedAt = new Date().toISOString();
+  
+  try {
+    const allDevices = [];
+    
+    // Leverage existing /discovery/devices logic via controller
+    try {
+      const controller = getController();
+      if (controller) {
+        const url = `${controller.replace(/\/$/, '')}/api/discovery/devices`;
+        const response = await fetch(url).catch(() => null);
+        if (response && response.ok) {
+          const body = await response.json();
+          if (Array.isArray(body?.devices)) {
+            allDevices.push(...body.devices.map(d => ({
+              ...d,
+              name: d.name || d.deviceName || 'Unknown Device',
+              brand: d.vendor || identifyDeviceBrand(d),
+              model: d.hints?.type || d.deviceType || 'Unknown',
+              ip: d.address || d.host || '—',
+              mac: d.mac || '—',
+              protocol: d.protocol || 'unknown',
+              confidence: d.confidence || 0.5,
+              category: categorizeDevice(d),
+              comm_type: d.protocol
+            })));
+          }
+        }
+      }
+    } catch (err) {
+      console.warn('Controller discovery failed:', err.message);
+    }
+    
+    // Direct SwitchBot Cloud discovery
+    if (ensureSwitchBotConfigured()) {
+      try {
+        const sbDevices = await fetchSwitchBotDevices();
+        if (sbDevices?.body?.deviceList) {
+          sbDevices.body.deviceList.forEach(device => {
+            allDevices.push({
+              name: device.deviceName || `SwitchBot ${device.deviceType}`,
+              brand: 'SwitchBot',
+              model: device.deviceType,
+              ip: '—',
+              mac: device.deviceId,
+              protocol: 'Cloud API',
+              confidence: 0.95,
+              category: categorizeSwitchBot(device.deviceType),
+              deviceId: device.deviceId,
+              deviceType: device.deviceType,
+              comm_type: 'switchbot-cloud'
+            });
+          });
+        }
+      } catch (e) {
+        console.warn('SwitchBot discovery failed:', e.message);
+      }
+    }
+    
+    // Direct Kasa discovery attempt
+    try {
+      const kasaDevices = await discoverKasaDevicesDirect();
+      allDevices.push(...kasaDevices.map(d => ({
+        name: d.alias || d.name || 'Kasa Device',
+        brand: 'TP-Link Kasa',
+        model: d.model || d.type || 'Smart Plug',
+        ip: d.host || d.address || '—',
+        mac: d.deviceId || d.mac || '—',
+        protocol: 'Kasa WiFi',
+        confidence: 0.9,
+        category: 'Smart Plug',
+        deviceId: d.deviceId,
+        comm_type: 'kasa'
+      })));
+    } catch (e) {
+      console.warn('Kasa direct discovery failed:', e.message);
+    }
+    
+    console.log(`✅ Universal scan complete: ${allDevices.length} devices found`);
+    
+    res.json({
+      status: 'success',
+      startedAt,
+      completedAt: new Date().toISOString(),
+      devices: allDevices,
+      count: allDevices.length
+    });
+    
+  } catch (error) {
+    console.error('❌ Universal scan failed:', error);
+    res.status(500).json({
+      status: 'error',
+      startedAt,
+      completedAt: new Date().toISOString(),
+      devices: [],
+      error: error.message
+    });
+  }
+});
+
+// Helper to identify device brand from various signals
+function identifyDeviceBrand(device) {
+  if (device.vendor) return device.vendor;
+  if (device.manufacturer) return device.manufacturer;
+  
+  const combined = `${device.name || ''} ${device.deviceType || ''} ${device.type || ''}`.toLowerCase();
+  
+  if (combined.includes('kasa') || combined.includes('tp-link')) return 'TP-Link Kasa';
+  if (combined.includes('switchbot')) return 'SwitchBot';
+  if (combined.includes('philips') || combined.includes('hue')) return 'Philips Hue';
+  if (combined.includes('google') || combined.includes('chromecast')) return 'Google';
+  if (combined.includes('roku')) return 'Roku';
+  if (combined.includes('sonos')) return 'Sonos';
+  if (combined.includes('homekit') || combined.includes('apple')) return 'Apple';
+  
+  return 'Unknown';
+}
+
+// Helper to categorize device type
+function categorizeDevice(device) {
+  const type = (device.hints?.type || device.deviceType || device.type || '').toLowerCase();
+  const name = (device.name || '').toLowerCase();
+  const combined = `${type} ${name}`;
+  
+  if (combined.includes('plug') || combined.includes('outlet')) return 'Smart Plug';
+  if (combined.includes('light') || combined.includes('bulb')) return 'Light';
+  if (combined.includes('switch')) return 'Switch';
+  if (combined.includes('sensor') || combined.includes('meter')) return 'Sensor';
+  if (combined.includes('hub') || combined.includes('bridge')) return 'Hub';
+  if (combined.includes('tv') || combined.includes('display')) return 'Media';
+  if (combined.includes('speaker') || combined.includes('audio')) return 'Audio';
+  if (combined.includes('thermostat') || combined.includes('hvac')) return 'Climate';
+  
+  return 'Device';
+}
+
+// Helper for SwitchBot device categorization
+function categorizeSwitchBot(deviceType) {
+  const type = (deviceType || '').toLowerCase();
+  if (type.includes('plug')) return 'Smart Plug';
+  if (type.includes('bot')) return 'Switch Bot';
+  if (type.includes('meter')) return 'Sensor';
+  if (type.includes('hub')) return 'Hub';
+  if (type.includes('curtain')) return 'Curtain';
+  if (type.includes('lock')) return 'Lock';
+  return 'Device';
+}
+
+// Direct Kasa discovery helper
+async function discoverKasaDevicesDirect() {
+  try {
+    const kasaModule = await import('tplink-smarthome-api');
+    const Client = kasaModule.default?.Client || kasaModule.Client;
+    
+    if (!Client || typeof Client !== 'function') {
+      console.warn('Kasa Client not available');
+      return [];
+    }
+    
+    const client = new Client();
+    const devices = [];
+    
+    return new Promise((resolve) => {
+      const timeout = setTimeout(() => {
+        client.stopDiscovery();
+        resolve(devices);
+      }, 5000);
+      
+      client.startDiscovery({
+        port: 9999,
+        broadcast: '255.255.255.255'
+      });
+      
+      client.on('device-new', async (device) => {
+        try {
+          const sysInfo = await device.getSysInfo();
+          devices.push({
+            deviceId: device.deviceId,
+            alias: device.alias,
+            name: sysInfo.alias,
+            host: device.host,
+            model: sysInfo.model,
+            type: sysInfo.type || 'IOT.SMARTPLUGSWITCH',
+            brand: 'TP-Link Kasa',
+            protocol: 'Kasa UDP',
+            comm_type: 'kasa'
+          });
+        } catch (e) {
+          console.warn('Failed to get Kasa device info:', e.message);
+        }
+      });
+    });
+  } catch (e) {
+    console.warn('Kasa client import failed:', e.message);
+    return [];
+  }
 }
 
 // Setup Wizard System - Device-specific configuration wizards
@@ -8587,7 +9315,8 @@ async function executeKasaWizardStep(stepId, data) {
       try {
         // If we have device info from discovery, use it to configure
         if (data.deviceId) {
-          const { Client } = await import('tplink-smarthome-api');
+          const kasaModule = await import('tplink-smarthome-api');
+          const Client = kasaModule.default?.Client || kasaModule.Client;
           const client = new Client();
           
           // Try to find the device

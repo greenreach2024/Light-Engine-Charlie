@@ -5,9 +5,23 @@
   <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover" />
   <title>Light Engine Charlie</title>
   <link rel="icon" href="./favicon.svg" type="image/svg+xml">
-  <link rel="stylesheet" href="./styles.charlie.css?v=charlie-0.5">
+  <link rel="stylesheet" href="./styles.charlie.css?v=charlie-0.8-clean">
+  <link rel="stylesheet" href="./styles/switchbot-manager.css?v=charlie-0.5">
+  <link rel="stylesheet" href="./styles/iot-manager.css?v=charlie-0.5">'
   <!-- Copilot: API base guardrail (C0) -->
   <script>
+    // Splash screen redirect - show splash on first visit or explicit request
+    (function() {
+      const urlParams = new URLSearchParams(window.location.search);
+      const skipSplash = urlParams.get('skip') === 'splash';
+      const fromSplash = sessionStorage.getItem('splashShown');
+      
+      if (!fromSplash && !skipSplash && !window.location.pathname.includes('splash')) {
+        sessionStorage.setItem('splashShown', 'true');
+        window.location.href = './splash.html';
+      }
+    })();
+    
     // Copilot: keep this minimal, no styling changes.
     (function () {
       const qs = new URLSearchParams(location.search);
@@ -23,7 +37,8 @@
   </script>
   <script>window.API_BASE = window.API_BASE || location.origin;</script>
   <script src="./js/net.guard.js?v=charlie-0.5" defer></script>
-  <script src="./app.charlie.js?v=charlie-0.5" defer></script>
+  <script src="./js/iot-manager.js?v=charlie-0.5" defer></script>
+  <script src="./app.charlie.js?v=charlie-0.7-unified" defer></script>
 </head>
 <body>
   <div class="dashboard-shell">
@@ -47,11 +62,20 @@
         <button type="button" class="sidebar-link" data-sidebar-link data-group="farm-setup" data-target="farm-registration">
           Farm Registration
         </button>
+        <button type="button" class="sidebar-link" data-sidebar-link data-group="farm-setup" data-target="iot-manager">
+          IoT Devices
+        </button>
         <button type="button" class="sidebar-link" data-sidebar-link data-group="farm-setup" data-target="grow-rooms">
           Grow Rooms
         </button>
         <button type="button" class="sidebar-link" data-sidebar-link data-group="farm-setup" data-target="light-setup">
           Light Setup
+        </button>
+        <button type="button" class="sidebar-link" data-sidebar-link data-group="farm-setup" data-target="integrations">
+          Integrations <span id="integrationsBadge" class="badge tiny" aria-live="polite" style="margin-left:6px"></span>
+        </button>
+        <button type="button" class="sidebar-link" data-sidebar-link data-group="farm-setup" data-target="equipment-overview">
+          Equipment Overview
         </button>
       </div>
     </div>
@@ -64,9 +88,6 @@
       <div class="sidebar-group__items" role="menu" hidden>
         <button type="button" class="sidebar-link" data-sidebar-link data-group="control-devices" data-target="iot-devices">
           IoT Devices
-        </button>
-        <button type="button" class="sidebar-link" data-sidebar-link data-group="control-devices" data-target="smart-plugs">
-          Smart Plugs
         </button>
         <button type="button" class="sidebar-link" data-sidebar-link data-group="control-devices" data-target="control-assignments">
           Control Assignments
@@ -110,7 +131,136 @@
 
     <main class="dashboard-main">
 
+      <!-- Merged Hero Card: Light Engine Charlie + AI Features -->
+      <section id="topCard" class="card card--hero hero-platform-card">
+        <div class="hero-platform__header">
+          <!-- Left: Farm Branding -->
+          <div class="hero-platform__branding">
+            <img id="farmLogo" src="" alt="Farm logo" class="hero-platform__logo" onerror="this.style.display='none'">
+            <div id="farmBrandingSection" class="hero-platform__farm-info">
+              <h1 id="farmName" class="hero-platform__farm-name"></h1>
+              <div id="farmTagline" class="hero-platform__farm-tagline"></div>
+            </div>
+          </div>
+
+          <!-- Center: Platform Title & Status -->
+          <div class="hero-platform__title-section">
+            <h1 id="lightEngineTitle" class="hero-platform__title">
+              <span class="hero-platform__title-icon">⚡</span>
+              Light Engine Charlie
+            </h1>
+            <div class="hero-platform__automation-status" id="automationIndicator" aria-live="polite">
+              <span class="automation-status__dot" id="automationStatusDot" aria-hidden="true"></span>
+              <span class="automation-status__text">
+                <span class="automation-status__label">Centralized Automation</span>
+                <span class="automation-status__state" id="automationIndicatorStatus">Idle</span>
+              </span>
+            </div>
+            <div id="communicationStatus" class="hero-platform__comm-status">System Online</div>
+          </div>
+        </div>
+
+        <!-- AI Features Showcase -->
+        <div class="hero-platform__features">
+          <div class="hero-platform__features-header">
+            <h2 class="hero-platform__features-title">Platform Capabilities</h2>
+            <span class="hero-platform__features-subtitle">Autonomous Growing Intelligence</span>
+          </div>
+
+          <div class="ai-features-showcase">
+            <!-- SpectraSync Feature -->
+            <div class="ai-showcase-card active" id="spectraSyncFeature" data-feature="spectrasync">
+              <div class="ai-showcase-card__icon spectrasync-icon">
+                <svg width="24" height="24" viewBox="0 0 24 24" fill="none">
+                  <path d="M3 12L6 8L9 14L12 6L15 12L18 4L21 12" stroke="url(#spectrumGradient)" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"/>
+                  <defs>
+                    <linearGradient id="spectrumGradient" x1="0%" y1="0%" x2="100%" y2="0%">
+                      <stop offset="0%" style="stop-color:#EF4444"/>
+                      <stop offset="33%" style="stop-color:#3B82F6"/>
+                      <stop offset="66%" style="stop-color:#E0F2FE"/>
+                      <stop offset="100%" style="stop-color:#FEF3C7"/>
+                    </linearGradient>
+                  </defs>
+                </svg>
+              </div>
+              <div class="ai-showcase-card__content">
+                <h3>SpectraSync®</h3>
+                <div class="ai-showcase-card__status on">ON</div>
+                <p class="ai-showcase-card__description">Real-time spectrum optimization synchronized with plant growth cycles</p>
+              </div>
+            </div>
+
+            <!-- E.V.I.E Feature -->
+            <div class="ai-showcase-card" id="evieFeature" data-feature="evie">
+              <div class="ai-showcase-card__icon evie-icon">
+                <svg width="24" height="24" viewBox="0 0 24 24" fill="none">
+                  <circle cx="12" cy="12" r="10" stroke="currentColor" stroke-width="1.5"/>
+                  <path d="M8 12L10 14L12 10L14 14L16 12" fill="currentColor" opacity="0.3"/>
+                  <circle cx="12" cy="12" r="3" fill="currentColor" opacity="0.6"/>
+                </svg>
+              </div>
+              <div class="ai-showcase-card__content">
+                <h3>E.V.I.E</h3>
+                <div class="ai-showcase-card__status off">OFF</div>
+                <p class="ai-showcase-card__description">Environmental Virtual Intelligence Engine for autonomous climate control</p>
+              </div>
+            </div>
+
+            <!-- IA In Training Feature -->
+            <div class="ai-showcase-card active" id="iaTrainingFeature" data-feature="ia-training">
+              <div class="ai-showcase-card__icon ia-training-icon">
+                <svg width="24" height="24" viewBox="0 0 24 24" fill="none">
+                  <polygon points="12,2 22,20 2,20" stroke="currentColor" stroke-width="1.5" fill="none"/>
+                  <path d="M12 8L12 14" stroke="currentColor" stroke-width="1.5"/>
+                  <circle cx="12" cy="16" r="1" fill="currentColor"/>
+                  <circle cx="8" cy="18" r="1" fill="currentColor" opacity="0.3"/>
+                  <circle cx="16" cy="18" r="1" fill="currentColor" opacity="0.3"/>
+                </svg>
+              </div>
+              <div class="ai-showcase-card__content">
+                <h3>IA In Training</h3>
+                <div class="ai-showcase-card__status always-on">ALWAYS ON</div>
+                <p class="ai-showcase-card__description">Intelligent Agent continuously learning from farm operations and outcomes</p>
+              </div>
+            </div>
+
+            <!-- IA Assist Feature -->
+            <div class="ai-showcase-card active" id="iaAssistFeature" data-feature="ia-assist">
+              <div class="ai-showcase-card__icon ia-assist-icon">
+                <svg width="24" height="24" viewBox="0 0 24 24" fill="none">
+                  <path d="M12 2L15 9L22 9L17 14L19 22L12 18L5 22L7 14L2 9L9 9L12 2Z" stroke="currentColor" stroke-width="1.5" fill="none"/>
+                  <path d="M12 8L12 14" stroke="currentColor" stroke-width="1.5"/>
+                </svg>
+              </div>
+              <div class="ai-showcase-card__content">
+                <h3>IA Assist</h3>
+                <div class="ai-showcase-card__status always-on">ALWAYS ON</div>
+                <p class="ai-showcase-card__description">AI-powered recommendations and automated decision support system</p>
+              </div>
+            </div>
+
+            <!-- Environmental Impact Index Feature -->
+            <div class="ai-showcase-card" id="eiiFeature" data-feature="eii">
+              <div class="ai-showcase-card__icon eii-icon">
+                <svg width="24" height="24" viewBox="0 0 24 24" fill="none">
+                  <circle cx="12" cy="12" r="10" stroke="currentColor" stroke-width="1.5"/>
+                  <path d="M8 12L10 10L12 14L16 8" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+                  <circle cx="12" cy="12" r="1" fill="currentColor"/>
+                </svg>
+              </div>
+              <div class="ai-showcase-card__content">
+                <h3>E.I²</h3>
+                <div class="ai-showcase-card__status dev">DEV</div>
+                <p class="ai-showcase-card__description">Environmental Impact Index measuring sustainability metrics and carbon footprint</p>
+              </div>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- Dashboard Panel: Overview -->
       <section class="dashboard-panel dashboard-panel--overview is-active" data-panel="overview">
+      
       <!-- Overview hero -->
       <section id="overview" class="overview" aria-labelledby="overviewTitle">
         <header class="overview__hdr">
@@ -134,127 +284,113 @@
         </header>
         <div id="overviewGrid" class="overview__grid" aria-live="polite"></div>
       </section>
+      
+      </section> <!-- End dashboard-panel--overview -->
 
-      <section id="topCard" class="card card--hero top-card">
-              <div class="row row--between row--center top-card__content">
-                <!-- Left side: Farm branding -->
-                <div class="row row--center row--gap-md flex-1">
-                  <img id="farmLogo" src="" alt="Farm logo" class="farm-logo" onerror="this.style.display='none'">
-                  <div id="farmBrandingSection" class="farm-branding">
-                    <h1 id="farmName" class="farm-name"></h1>
-                    <div id="farmTagline" class="tiny farm-tagline"></div>
-                  </div>
-                </div>
-
-                <!-- Right side: Light Engine Charlie and controls -->
-                <div class="row row--gap-lg row--center top-card__status">
-                  <div class="text-right">
-                    <h1 id="lightEngineTitle" class="top-card__title">Light Engine Charlie</h1>
-                    <div class="automation-indicator" id="automationIndicator" aria-live="polite">
-                      <span class="automation-indicator__dot" aria-hidden="true"></span>
-                      <span class="automation-indicator__label">Centralized Automation</span>
-                      <span class="automation-indicator__status" id="automationIndicatorStatus">Idle</span>
-                    </div>
-                    <div id="communicationStatus" class="tiny text-muted top-card__status-text">System Online</div>
-                  </div>
-                </div>
+      <!-- Settings: Integrations panel -->
+      <section id="integrationsPanel" class="card card--compact" data-panel="integrations">
+        <header class="panel-header">
+          <div>
+            <h2>Integrations</h2>
+            <span class="hint" tabindex="0" data-tip="Connect cloud and LAN ecosystems like SwitchBot and Kasa.">?</span>
+          </div>
+          <div class="row row--gap-xs">
+            <span id="integrationsStatus" class="tiny" aria-live="polite"></span>
+          </div>
+        </header>
+        <div class="panel-body">
+          <!-- Universal Device Scanner -->
+          <div style="margin-bottom: 24px; padding: 16px; background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); border-radius: 8px; color: white;">
+            <div style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 12px;">
+              <div>
+                <div style="font-size: 16px; font-weight: 600; margin-bottom: 4px;">🔍 Universal Device Scanner</div>
+                <div style="font-size: 12px; opacity: 0.9;">Multi-protocol discovery: BLE, mDNS, SSDP, Kasa UDP, SwitchBot Cloud</div>
               </div>
-            </section>
-      <section id="environmentalAiCard" class="card card--feature">
-              <div class="row row--between row--center mb-md">
-                <h2 class="section-title">Environmental & AI Features</h2>
-                <span class="tiny text-muted">Autonomous Growing Intelligence</span>
-              </div>
-
-              <div class="ai-features-horizontal">
-            <!-- SpectraSync Feature -->
-            <div class="ai-feature-card active" id="spectraSyncFeature" data-feature="spectrasync">
-              <div class="ai-feature-icon spectrasync-icon">
-                <svg width="20" height="20" viewBox="0 0 24 24" fill="none">
-                  <path d="M3 12L6 8L9 14L12 6L15 12L18 4L21 12" stroke="url(#spectrumGradient)" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"/>
-                  <defs>
-                    <linearGradient id="spectrumGradient" x1="0%" y1="0%" x2="100%" y2="0%">
-                      <stop offset="0%" style="stop-color:#EF4444"/>
-                      <stop offset="33%" style="stop-color:#3B82F6"/>
-                      <stop offset="66%" style="stop-color:#E0F2FE"/>
-                      <stop offset="100%" style="stop-color:#FEF3C7"/>
-                    </linearGradient>
-                  </defs>
-                </svg>
-              </div>
-              <div class="ai-feature-content">
-                <h3>SpectraSync®</h3>
-                <div class="ai-feature-status on">ON</div>
-                <div class="ai-feature-description">Real-time spectrum optimization synchronized with plant growth cycles</div>
-              </div>
+              <button id="btnUniversalScan" type="button" style="padding: 10px 20px; background: white; color: #667eea; border: none; border-radius: 6px; font-weight: 600; cursor: pointer; box-shadow: 0 2px 4px rgba(0,0,0,0.1);">
+                Start Scan
+              </button>
             </div>
-
-            <!-- E.V.I.E Feature -->
-            <div class="ai-feature-card" id="evieFeature" data-feature="evie">
-              <div class="ai-feature-icon evie-icon">
-                <svg width="20" height="20" viewBox="0 0 24 24" fill="none">
-                  <circle cx="12" cy="12" r="10" stroke="currentColor" stroke-width="1.5"/>
-                  <path d="M8 12L10 14L12 10L14 14L16 12" fill="currentColor" opacity="0.3"/>
-                  <circle cx="12" cy="12" r="3" fill="currentColor" opacity="0.6"/>
-                </svg>
+            <div id="universalScanProgress" style="display: none; margin-top: 12px;">
+              <div style="display: flex; gap: 8px; align-items: center; margin-bottom: 8px;">
+                <div style="width: 16px; height: 16px; border: 2px solid white; border-top-color: transparent; border-radius: 50%; animation: spin 1s linear infinite;"></div>
+                <span id="universalScanStatus" style="font-size: 13px;">Scanning networks...</span>
               </div>
-              <div class="ai-feature-content">
-                <h3>E.V.I.E</h3>
-                <div class="ai-feature-status off">OFF</div>
-                <div class="ai-feature-description">Environmental Virtual Intelligence Engine for autonomous climate control</div>
-              </div>
-            </div>
-
-            <!-- IA In Training Feature -->
-            <div class="ai-feature-card active" id="iaTrainingFeature" data-feature="ia-training">
-              <div class="ai-feature-icon ia-training-icon">
-                <svg width="20" height="20" viewBox="0 0 24 24" fill="none">
-                  <polygon points="12,2 22,20 2,20" stroke="currentColor" stroke-width="1.5" fill="none"/>
-                  <path d="M12 8L12 14" stroke="currentColor" stroke-width="1.5"/>
-                  <circle cx="12" cy="16" r="1" fill="currentColor"/>
-                  <circle cx="8" cy="18" r="1" fill="currentColor" opacity="0.3"/>
-                  <circle cx="16" cy="18" r="1" fill="currentColor" opacity="0.3"/>
-                </svg>
-              </div>
-              <div class="ai-feature-content">
-                <h3>IA In Training</h3>
-                <div class="ai-feature-status always-on">ALWAYS ON</div>
-                <div class="ai-feature-description">Intelligent Agent continuously learning from farm operations and outcomes</div>
-              </div>
-            </div>
-
-            <!-- IA Assist Feature -->
-            <div class="ai-feature-card active" id="iaAssistFeature" data-feature="ia-assist">
-              <div class="ai-feature-icon ia-assist-icon">
-                <svg width="20" height="20" viewBox="0 0 24 24" fill="none">
-                  <path d="M12 2L15 9L22 9L17 14L19 22L12 18L5 22L7 14L2 9L9 9L12 2Z" stroke="currentColor" stroke-width="1.5" fill="none"/>
-                  <path d="M12 8L12 14" stroke="currentColor" stroke-width="1.5"/>
-                </svg>
-              </div>
-              <div class="ai-feature-content">
-                <h3>IA Assist</h3>
-                <div class="ai-feature-status always-on">ALWAYS ON</div>
-                <div class="ai-feature-description">AI-powered recommendations and automated decision support system</div>
-              </div>
-            </div>
-
-            <!-- Environmental Impact Index Feature -->
-            <div class="ai-feature-card" id="eiiFeature" data-feature="eii">
-              <div class="ai-feature-icon eii-icon">
-                <svg width="20" height="20" viewBox="0 0 24 24" fill="none">
-                  <circle cx="12" cy="12" r="10" stroke="currentColor" stroke-width="1.5"/>
-                  <path d="M8 12L10 10L12 14L16 8" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
-                  <circle cx="12" cy="12" r="1" fill="currentColor"/>
-                </svg>
-              </div>
-              <div class="ai-feature-content">
-                <h3>E.I²</h3>
-                <div class="ai-feature-status dev">DEV</div>
-                <div class="ai-feature-description">Environmental Impact Index measuring sustainability metrics and carbon footprint</div>
+              <div style="background: rgba(255,255,255,0.2); border-radius: 4px; height: 6px; overflow: hidden;">
+                <div id="universalScanProgressBar" style="background: white; height: 100%; width: 0%; transition: width 0.3s ease;"></div>
               </div>
             </div>
           </div>
-        </section>
+          
+          <!-- Scan Results -->
+          <div id="universalScanResults" style="display: none; margin-bottom: 24px;">
+            <div style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 12px;">
+              <h3 style="margin: 0; font-size: 14px; font-weight: 600;">Discovered Devices</h3>
+              <span id="universalScanCount" style="font-size: 12px; color: #64748b;"></span>
+            </div>
+            <div id="universalScanResultsTable" style="max-height: 400px; overflow-y: auto; border: 1px solid #e2e8f0; border-radius: 6px;">
+              <!-- Results populated here -->
+            </div>
+          </div>
+
+          <div class="grid cols-2" style="gap:16px;align-items:flex-end">
+            <div>
+              <div class="tiny text-muted" style="margin-bottom:6px;font-weight:600">SwitchBot Cloud</div>
+              <label class="tiny" style="display:block;margin-bottom:8px;">
+                API Token
+                <input type="text" id="integSbToken" placeholder="SwitchBot API Token" style="width:100%">
+              </label>
+              <label class="tiny" style="display:block;margin-bottom:8px;">
+                API Secret
+                <input type="password" id="integSbSecret" placeholder="SwitchBot API Secret" style="width:100%">
+              </label>
+              <button id="btnTestSwitchBot" type="button" class="ghost">Test SwitchBot</button>
+            </div>
+            <div>
+              <div class="tiny text-muted" style="margin-bottom:6px;font-weight:600">TP-Link Kasa</div>
+              <label class="tiny" style="display:block;margin-bottom:8px;">
+                Email
+                <input type="email" id="integKasaEmail" placeholder="your@email.com" style="width:100%">
+              </label>
+              <label class="tiny" style="display:block;margin-bottom:8px;">
+                Password
+                <input type="password" id="integKasaPassword" placeholder="Password" style="width:100%">
+              </label>
+            </div>
+          </div>
+          <div class="row row--gap-sm" style="margin-top:12px;">
+            <button id="btnSaveIntegrations" type="button" class="primary">Save Integrations</button>
+          </div>
+        </div>
+      </section>
+
+      <!-- Equipment Overview panel -->
+      <section id="equipmentOverviewPanel" class="card card--compact" data-panel="equipment-overview">
+        <header class="panel-header">
+          <div>
+            <h2>Equipment Overview</h2>
+            <span class="hint" tabindex="0" data-tip="Roll-up of equipment captured across Grow Rooms.">?</span>
+          </div>
+          <div class="row row--gap-xs">
+            <span id="equipmentSummary" class="tiny" aria-live="polite"></span>
+          </div>
+        </header>
+        <div class="panel-body" style="overflow-x:auto;">
+          <table id="equipmentTable" style="width:100%;border-collapse:collapse;">
+            <thead>
+              <tr style="background:#f1f5f9">
+                <th>Category</th>
+                <th>Vendor</th>
+                <th>Model</th>
+                <th>Count</th>
+                <th>Room</th>
+                <th>Zone</th>
+                <th>Control</th>
+              </tr>
+            </thead>
+            <tbody></tbody>
+          </table>
+        </div>
+      </section>
 
       </section>
       <section id="farmPanel" class="card card--compact" data-panel="farm-registration">
@@ -347,15 +483,6 @@
                     <button id="btnOpenSwitchBotManager" type="button" class="ghost">SwitchBot Manager</button>
                   </div>
                 </div>
-<!-- Modal for SwitchBot Manager -->
-<div id="switchBotModal" class="modal" style="display:none;position:fixed;z-index:10000;left:0;top:0;width:100vw;height:100vh;background:rgba(0,0,0,0.4);align-items:center;justify-content:center;">
-  <div style="background:#fff;border-radius:10px;max-width:90vw;max-height:90vh;width:900px;box-shadow:0 8px 32px rgba(0,0,0,0.25);position:relative;display:flex;flex-direction:column;">
-    <button id="closeSwitchBotModal" style="position:absolute;top:10px;right:10px;background:none;border:none;font-size:1.5em;cursor:pointer;z-index:2;">&times;</button>
-    <div id="switchBotManagerContent" class="switchbot-manager-content" style="padding:24px;overflow-y:auto;max-height:80vh;">
-      <div class="tiny" style="color:#64748b;text-align:center;padding:32px 0;">Loading SwitchBot devices…</div>
-    </div>
-  </div>
-</div>
                 <div class="iot-action-group" role="group" aria-label="Device setup" style="display:flex;flex-direction:column;gap:4px;min-width:160px;">
                   <span class="tiny text-muted" style="letter-spacing:0.02em;text-transform:uppercase;font-weight:600;">Device setup</span>
                   <div class="row row--gap-xs">
@@ -363,61 +490,20 @@
                   </div>
                 </div>
               </div>
-              <div id="iotEcosystemCard" class="card" style="display:none;margin:16px 0 0 0;padding:20px 24px 16px 24px;background:#f8fafc;border:1px solid #e5e7eb;border-radius:12px;">
-                <div style="display:flex;flex-direction:column;gap:4px;margin-bottom:12px;">
-                  <span class="tiny text-muted" style="letter-spacing:0.02em;text-transform:uppercase;font-weight:600;">Device setup options</span>
-                  <p class="tiny" style="margin:0;color:#475569;">Choose an ecosystem to start configuration for new hardware integrations.</p>
-                </div>
-                <div class="row row--gap-xs" id="iotEcosystemButtons" style="flex-wrap:wrap;">
-                  <button class="ghost" id="btnMgrKasa">Kasa</button>
-                  <button class="ghost" id="btnMgrSonoff">Sonoff</button>
-                  <button class="ghost" id="btnMgrShelly">Shelly</button>
-                  <button class="ghost" id="btnMgrTuya">Tuya</button>
-                  <button class="ghost" id="btnMgrHue">Hue</button>
-                  <button class="ghost" id="btnMgrLIFX">LIFX</button>
-                  <button class="ghost" id="btnMgrMeross">Meross</button>
-                  <button class="ghost" id="btnMgrAqara">Aqara</button>
-                  <button class="ghost" id="btnMgrTasmota">Tasmota/ESPHome</button>
-                </div>
-              </div>
-              <!-- Generic IoT Ecosystem Modal -->
-              <div id="iotEcosystemModal" class="modal" style="display:none;position:fixed;z-index:10001;left:0;top:0;width:100vw;height:100vh;background:rgba(0,0,0,0.4);align-items:center;justify-content:center;">
-                <div id="iotEcosystemModalContent" style="background:#fff;border-radius:10px;max-width:90vw;max-height:90vh;width:420px;box-shadow:0 8px 32px rgba(0,0,0,0.25);position:relative;display:flex;flex-direction:column;padding:32px 24px 24px 24px;">
-                  <button id="closeIotEcosystemModal" style="position:absolute;top:10px;right:10px;background:none;border:none;font-size:1.5em;cursor:pointer;z-index:2;">&times;</button>
-                  <div id="iotEcosystemModalBody"></div>
-                </div>
-              </div>
-              </div>
-              <div id="iotScanBarContainer" style="margin:12px 0 0 0;display:none;">
-                <div id="iotScanBar" style="position:relative;width:100%;height:22px;background:#e0e7ef;border-radius:12px;overflow:hidden;box-shadow:0 1px 4px #0001;">
-                  <div id="iotScanBarFill" style="height:100%;width:0%;background:linear-gradient(90deg,#60a5fa,#34d399);transition:width 0.2s cubic-bezier(.4,2,.6,1);display:flex;align-items:center;justify-content:center;">
-                    <span id="iotScanBarPercent" style="position:absolute;width:100%;text-align:center;font-weight:bold;color:#222;letter-spacing:0.5px;">0%</span>
-                  </div>
-                </div>
-              </div>
             </div>
-            <p class="tiny" style="margin:8px 0 0;color:#475569">Configure and monitor your IoT devices including SwitchBot environmental sensors, Kasa smart plugs, Shelly relays, and GreenReach grow lights. Use "Discover" to find new GreenReach devices or "Open Device Manager" for full management interface.</p>
+            <p class="tiny" style="margin:8px 0 0;color:#475569">Configure and monitor your IoT devices including SwitchBot environmental sensors, Shelly relays, Kasa plugs, and GreenReach grow lights. Use "Scan for Devices" to discover new hardware. Unknown devices will appear in a table; assigning details will move them into the Device Manager section below.</p>
 
-            <div id="iotDevicesList" style="margin-top:12px">
-              <!-- Unknown Devices Table will be rendered here -->
-              <div id="unknownDevicesTable" style="margin-bottom:24px;"></div>
-              <!-- IoT device cards by manufacturer will be loaded here -->
-            </div>
-          </section>
-
-          <section id="smartPlugsPanel" class="card" data-panel="smart-plugs">
-            <div class="row row--between row--center">
-              <h2 style="margin:0">Smart Plugs</h2>
-              <div class="row row--gap-xs">
-                <button id="btnRefreshSmartPlugs" type="button" class="ghost">Refresh</button>
-                <button id="btnDiscoverSmartPlugs" type="button" class="primary">Discover</button>
+            <!-- IoT scan progress bar -->
+            <div id="iotScanBarContainer" style="margin:12px 0 0 0;display:none;">
+              <div id="iotScanBar" style="position:relative;width:100%;height:22px;background:#e0e7ef;border-radius:12px;overflow:hidden;box-shadow:0 1px 4px #0001;">
+                <div id="iotScanBarFill" style="height:100%;width:0%;background:linear-gradient(90deg,#60a5fa,#34d399);transition:width 0.2s cubic-bezier(.4,2,.6,1);display:flex;align-items:center;justify-content:center;">
+                  <span id="iotScanBarPercent" style="position:absolute;width:100%;text-align:center;font-weight:bold;color:#222;letter-spacing:0.5px;">0%</span>
+                </div>
               </div>
             </div>
-            <p class="tiny" style="margin:8px 0 16px;color:#475569;max-width:720px;">
-              Manage Shelly, Kasa, Tasmota, and SwitchBot plugs that control HVAC, dehumidifiers, and circulation fans. Toggle power, inspect live wattage, and attach rule guardrails per room scope.
-            </p>
-            <div id="smartPlugsAlert" class="alert" role="status" aria-live="polite" hidden></div>
-            <div class="table" id="smartPlugsTable" role="region" aria-live="polite"></div>
+
+            <!-- Unified IoT devices list (Unknown table + Device Manager cards) -->
+            <div id="iotDevicesList" style="margin-top:12px"></div>
           </section>
 
           <section id="controllerAssignmentsPanel" class="card card--panel" data-panel="control-assignments" style="margin-top:24px;">
@@ -440,19 +526,18 @@
       <section id="plansPanel" class="card" data-panel="plans">
             <div class="row row--between row--center">
               <h2 class="section-title">
-                Plans (Grow recipes)
-                <span class="hint" tabindex="0" data-tip="Create and manage grow recipes. Each plan defines a spectrum mix and a target DLI. Preview spectrum, see where used, and assign later to Groups. DLI = PPFD × 3600 × photoperiod ÷ 1e6.">?</span>
+                Plans (Grow Recipes)
+                <span class="hint" tabindex="0" data-tip="Search and browse daily lighting recipes for different crops. Each recipe provides spectrum and PPFD schedules optimized for each growth stage.">?</span>
               </h2>
               <span id="plansStatus" class="tiny" aria-live="polite"></span>
             </div>
             <div class="row row--gap-sm row--wrap mt-sm mb-sm">
-              <button id="btnAddPlan" type="button" class="ghost">Add Plan</button>
-              <button id="btnSavePlans" type="button" class="primary">Save Plans</button>
-              <button id="btnDownloadPlans" type="button" class="ghost">Download</button>
-              <button id="btnUploadPlans" type="button" class="ghost">Upload</button>
-              <input id="plansUpload" type="file" accept="application/json" class="sr-only" />
+              <input id="recipesSearchInput" type="text" placeholder="Search crops (e.g., tomato, lettuce, basil...)" style="flex:1;max-width:400px;padding:8px 12px;border:1px solid #d1d5db;border-radius:6px;">
+              <button id="btnSearchRecipes" type="button" class="primary">Search</button>
+              <button id="btnClearRecipes" type="button" class="ghost">Clear</button>
             </div>
-            <div id="plansList" class="grid cols-2 gap-sm" aria-live="polite"></div>
+            <div id="recipesResults" style="margin-top:16px;"></div>
+            <div id="recipesList" class="grid cols-3 gap-md" aria-live="polite" style="margin-top:16px;"></div>
           </section>
       <section id="schedulesPanel" class="card" data-panel="schedules">
             <div class="row row--between row--center">
@@ -917,43 +1002,26 @@
       
       <div class="fresh-light-modal__content">
         <div class="fresh-light-step" id="freshStep1" data-active>
-          <h3>Select Room and Zone</h3>
+          <h3>Select Room</h3>
           
           <div style="margin-bottom: 20px;">
             <label style="display: block; margin-bottom: 8px;">Room:</label>
             <select id="freshRoomSelect" style="width: 100%; padding: 8px; font-size: 14px;">
               <option value="">Select a room</option>
             </select>
+            <p class="tiny" style="margin: 8px 0 0 0; color: #64748b;">
+              Rooms are created in the <strong>Grow Rooms</strong> panel. Create a room there first.
+            </p>
           </div>
-          
-          <div style="margin-bottom: 20px;">
-            <label style="display: block; margin-bottom: 8px;">Zone:</label>
-            <select id="freshZoneSelect" style="width: 100%; padding: 8px; font-size: 14px;">
-              <option value="">Select a zone</option>
-            </select>
-          </div>
-          
-          <button id="freshCreateZone" type="button" style="padding: 8px 16px;">Create New Zone</button>
         </div>
         
         <div class="fresh-light-step" id="freshStep2">
           <h3>Select Fixtures</h3>
           
           <div style="margin-bottom: 20px;">
-            <div style="display: flex; gap: 12px; margin-bottom: 12px; flex-wrap: wrap;">
-              <label style="display: flex; align-items: center; gap: 6px;">
-                <span style="font-size: 13px;">Lights per controller:</span>
-                <input id="freshLightSeriesCount" type="number" min="0" value="1" style="width: 80px; padding: 4px;">
-              </label>
-              <label style="display: flex; align-items: center; gap: 6px;">
-                <span style="font-size: 13px;">Number of controllers:</span>
-                <input id="freshControllersCount" type="number" min="0" value="1" style="width: 80px; padding: 4px;">
-              </label>
-            </div>
-            
             <div style="margin-bottom: 12px;">
               <label style="display: block; margin-bottom: 8px; font-size: 13px;">Search fixtures:</label>
-              <input id="freshFixtureSearch" type="text" placeholder="Search models (e.g., Gavita 1700e)" 
+              <input id="freshFixtureSearch" type="text" placeholder="Search models (e.g., Gavita 1700e, GROW3, TopLight)" 
                      style="width: 100%; padding: 8px; font-size: 14px;">
             </div>
             
@@ -1450,6 +1518,27 @@
             </div>
           </section>
 
+          <section class="farm-step" data-step="integrations">
+            <p class="farm-question">Connect accounts for smart device ecosystems</p>
+            <div class="farm-step__stack">
+              <div class="tiny" style="color:#64748b;margin:4px 0 8px">Provide credentials to enable discovery and control for compatible devices. You can skip now and add later in Settings.</div>
+              <div style="display:grid;grid-template-columns:1fr;gap:12px">
+                <fieldset style="border:1px solid var(--gr-border);border-radius:8px;padding:12px">
+                  <legend style="font-weight:600;color:var(--dark)">SwitchBot Cloud</legend>
+                  <input id="sbToken" type="text" autocomplete="off" placeholder="API Token">
+                  <input id="sbSecret" type="password" autocomplete="new-password" placeholder="API Secret">
+                  <label class="tiny" style="display:flex;align-items:center;gap:6px"><input id="sbShowSecret" type="checkbox">Show secret</label>
+                </fieldset>
+                <fieldset style="border:1px solid var(--gr-border);border-radius:8px;padding:12px">
+                  <legend style="font-weight:600;color:var(--dark)">TP-Link Kasa</legend>
+                  <input id="kasaEmail" type="email" autocomplete="email" placeholder="Account email">
+                  <input id="kasaPassword" type="password" autocomplete="new-password" placeholder="Account password">
+                  <label class="tiny" style="display:flex;align-items:center;gap:6px"><input id="kasaShowPassword" type="checkbox">Show password</label>
+                </fieldset>
+              </div>
+            </div>
+          </section>
+
           <section class="farm-step" data-step="spaces">
             <p class="farm-question">Add your spaces—rooms first, then zones within each room.</p>
             <div class="farm-step__stack">
@@ -1508,5 +1597,6 @@
 </footer>
   <div id="root"></div>
   <div id="toasts" class="toast-container" aria-live="polite" aria-atomic="true"></div>
+  <script src="./js/switchbot-helpers.js?v=charlie-0.5"></script>
 </body>
 </html>

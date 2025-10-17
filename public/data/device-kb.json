@@ -1,5 +1,104 @@
 {
   "fixtures": [
-    
+    {
+      "id": "grow3-pro-640",
+      "vendor": "Light Engine",
+      "model": "GROW3 Pro 640",
+      "watts": 640,
+      "control": "Managed",
+      "ppfd": 2100,
+      "spectrum": "Full Spectrum",
+      "tags": ["grow3", "managed", "professional", "high-output"]
+    },
+    {
+      "id": "grow3-standard-320",
+      "vendor": "Light Engine",
+      "model": "GROW3 Standard 320",
+      "watts": 320,
+      "control": "Managed",
+      "ppfd": 1050,
+      "spectrum": "Full Spectrum",
+      "tags": ["grow3", "managed", "standard"]
+    },
+    {
+      "id": "h-0005005-vertimax-640",
+      "vendor": "P.L. Light Systems",
+      "model": "VertiMax 640W",
+      "watts": 643,
+      "control": "0-10V",
+      "ppfd": 1738,
+      "spectrum": "Blue/Green/Red/Far Red",
+      "tags": ["vertimax", "0-10v", "multi-channel", "dlc"]
+    },
+    {
+      "id": "h-00swyt-parfx-ultra",
+      "vendor": "ParFX",
+      "model": "ParFX Ultra Lite R37:W37:B18:FR8",
+      "watts": 613,
+      "control": "0-10V",
+      "ppfd": 1588,
+      "spectrum": "Red/White/Blue/FR",
+      "tags": ["parfx", "0-10v", "multi-channel", "dlc"]
+    },
+    {
+      "id": "h-0m33n6-md-600",
+      "vendor": "HortiBest",
+      "model": "MD-600 Grow Light",
+      "watts": 120,
+      "control": "0-10V",
+      "ppfd": 425,
+      "spectrum": "Blue/Green/Red/FR",
+      "tags": ["hortibest", "0-10v", "intra-canopy", "dlc"]
+    },
+    {
+      "id": "h-2btz61-luxgrow-800",
+      "vendor": "LUXGROW",
+      "model": "LPTCP800S-TT",
+      "watts": 813,
+      "control": "0-10V",
+      "ppfd": 2412,
+      "spectrum": "Blue/Green/Red/FR",
+      "tags": ["luxgrow", "0-10v", "high-output", "dlc"]
+    },
+    {
+      "id": "h-2zb684-jumplights-ets",
+      "vendor": "JumpLights",
+      "model": "ETS MaxP-7A",
+      "watts": 375,
+      "control": "0-10V DC",
+      "ppfd": 1304,
+      "spectrum": "Blue/Green/Red/FR",
+      "tags": ["jumplights", "dc", "0-10v", "dlc"]
+    },
+    {
+      "id": "gavita-1700e",
+      "vendor": "Gavita",
+      "model": "1700e LED",
+      "watts": 645,
+      "control": "0-10V",
+      "ppfd": 1700,
+      "spectrum": "Full Spectrum White",
+      "tags": ["gavita", "0-10v", "professional"]
+    },
+    {
+      "id": "fluence-spydr-2i",
+      "vendor": "Fluence",
+      "model": "SPYDR 2i",
+      "watts": 685,
+      "control": "0-10V",
+      "ppfd": 1700,
+      "spectrum": "PhysioSpec",
+      "tags": ["fluence", "spydr", "0-10v", "professional"]
+    },
+    {
+      "id": "toplight-compact-600",
+      "vendor": "TopLight",
+      "model": "Compact 600",
+      "watts": 600,
+      "control": "0-10V",
+      "ppfd": 1600,
+      "spectrum": "Full Spectrum",
+      "tags": ["toplight", "0-10v", "compact"]
+    }
   ]
 }

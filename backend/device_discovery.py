@@ -438,8 +438,12 @@ async def full_discovery_cycle(
     registry: DeviceRegistry,
     buffer: SensorEventBuffer,
     event_handler: Optional[Callable[[SensorEvent], Awaitable[None]]] = None,
+    logger: Optional[logging.Logger] = None,
 ) -> None:
     """Run discovery for all protocols with graceful error handling."""
+
+    # If a caller provides a logger, use it for local logging; otherwise fall back to module LOGGER
+    log = logger or LOGGER
 
     tasks: List[asyncio.Future] = []
     
@@ -473,7 +477,8 @@ async def full_discovery_cycle(
     results = await asyncio.gather(*tasks, return_exceptions=True)
     for result in results:
         if isinstance(result, Exception):
-            LOGGER.error("Discovery task raised error: %s", result)
+            # Prefer caller-supplied logger when available
+            log.error("Discovery task raised error: %s", result)
 
 
 __all__ = [

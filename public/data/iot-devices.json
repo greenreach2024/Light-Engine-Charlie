@@ -1,0 +1,1121 @@
+[
+  {
+    "id": "mdns|unknown|ledsmart server - green reach",
+    "deviceId": "mdns|unknown|ledsmart server - green reach",
+    "name": "Ledsmart Server - Green Reach",
+    "brand": "Unknown",
+    "vendor": "Unknown",
+    "protocol": "mdns",
+    "type": "mdns",
+    "category": null,
+    "ip": "mdns|unknown|ledsmart server - green reach",
+    "mac": null,
+    "address": "mdns|unknown|ledsmart server - green reach",
+    "model": null,
+    "location": null,
+    "trust": "trusted",
+    "credentials": null,
+    "lastSeen": null,
+    "telemetry": {
+      "name": "Ledsmart Server - Green Reach",
+      "brand": "Unknown",
+      "vendor": "Unknown",
+      "protocol": "mdns",
+      "type": "mdns",
+      "trust": "trusted"
+    },
+    "deviceData": {
+      "name": "Ledsmart Server - Green Reach",
+      "brand": "Unknown",
+      "vendor": "Unknown",
+      "protocol": "mdns",
+      "type": "mdns",
+      "trust": "trusted"
+    }
+  },
+  {
+    "id": "mdns|unknown|greenreach farms",
+    "deviceId": "mdns|unknown|greenreach farms",
+    "name": "GreenReach Farms",
+    "brand": "Unknown",
+    "vendor": "Unknown",
+    "protocol": "mdns",
+    "type": "mdns",
+    "category": null,
+    "ip": "mdns|unknown|greenreach farms",
+    "mac": null,
+    "address": "mdns|unknown|greenreach farms",
+    "model": null,
+    "location": null,
+    "trust": "trusted",
+    "credentials": null,
+    "lastSeen": null,
+    "telemetry": {
+      "name": "GreenReach Farms",
+      "brand": "Unknown",
+      "vendor": "Unknown",
+      "protocol": "mdns",
+      "type": "mdns",
+      "trust": "trusted"
+    },
+    "deviceData": {
+      "name": "GreenReach Farms",
+      "brand": "Unknown",
+      "vendor": "Unknown",
+      "protocol": "mdns",
+      "type": "mdns",
+      "trust": "trusted"
+    }
+  },
+  {
+    "id": "switchbot|unknown|strawberry ac",
+    "deviceId": "switchbot|unknown|strawberry ac",
+    "name": "Strawberry AC",
+    "brand": "Unknown",
+    "vendor": "Unknown",
+    "protocol": "switchbot",
+    "type": "switchbot",
+    "category": null,
+    "ip": "switchbot|unknown|strawberry ac",
+    "mac": null,
+    "address": "switchbot|unknown|strawberry ac",
+    "model": null,
+    "location": null,
+    "trust": "trusted",
+    "credentials": {
+      "token": "4e6fc805b4a0dd7ed693af1dcf89d9731113d4706b2d796759aafe09cf8f07ae1e858fa3fbf06139ddea004de7b04251",
+      "secret": "b9a4da66bb55d86299dc912ab16e4d44"
+    },
+    "lastSeen": null,
+    "telemetry": {
+      "name": "Strawberry AC",
+      "brand": "Unknown",
+      "vendor": "Unknown",
+      "protocol": "switchbot",
+      "type": "switchbot",
+      "trust": "trusted"
+    },
+    "deviceData": {
+      "name": "Strawberry AC",
+      "brand": "Unknown",
+      "vendor": "Unknown",
+      "protocol": "switchbot",
+      "type": "switchbot",
+      "trust": "trusted"
+    }
+  },
+  {
+    "id": "mdns:GreenReach Farms._airplay._tcp.local.",
+    "deviceId": "mdns:GreenReach Farms._airplay._tcp.local.",
+    "name": "GreenReach Farms",
+    "brand": "Unknown",
+    "vendor": "Unknown",
+    "protocol": "mdns",
+    "type": "network-service",
+    "category": "network-service",
+    "ip": "mdns:GreenReach Farms._airplay._tcp.local.",
+    "mac": null,
+    "address": "mdns:GreenReach Farms._airplay._tcp.local.",
+    "model": null,
+    "location": null,
+    "trust": "trusted",
+    "credentials": null,
+    "lastSeen": null,
+    "telemetry": {
+      "device_id": "mdns:GreenReach Farms._airplay._tcp.local.",
+      "name": "GreenReach Farms",
+      "category": "network-service",
+      "protocol": "mdns",
+      "online": true,
+      "trust": "trusted"
+    },
+    "deviceData": {
+      "device_id": "mdns:GreenReach Farms._airplay._tcp.local.",
+      "name": "GreenReach Farms",
+      "category": "network-service",
+      "protocol": "mdns",
+      "online": true,
+      "capabilities": {
+        "service_type": "_airplay._tcp.local.",
+        "port": 7000
+      },
+      "details": {
+        "addresses": [
+          "127.0.0.1",
+          "fe80::1",
+          "::1"
+        ],
+        "port": 7000,
+        "service_type": "_airplay._tcp.local.",
+        "properties": {
+          "act": "2",
+          "acl": "0",
+          "deviceid": "9A:9E:9E:EF:CF:28",
+          "fex": "1c9/Ss5PFzg2IQw",
+          "features": "0x4A7FCFD5,0x38174FCE",
+          "rsf": "0x8",
+          "flags": "0x204",
+          "gid": "E118362E-DDDC-490D-9FF4-3CA85963D5D8",
+          "igl": "0",
+          "gcgl": "0",
+          "model": "Mac15,13",
+          "at": "4",
+          "protovers": "1.1",
+          "pi": "200e4a79-a810-4833-8dd9-08f21bf138b1",
+          "psi": "9A9E9EEF-CF28-4D08-9876-3D8710015AAE",
+          "pk": "8e8398af9e83dfdf1a39b47a64c771f40dc525ad12caa7a4376e18daa486010f",
+          "srcvers": "870.14.1"
+        }
+      },
+      "trust": "trusted"
+    }
+  },
+  {
+    "id": "3C8427B1316E",
+    "deviceId": "3C8427B1316E",
+    "name": "Grow Room 1, West Fan",
+    "brand": "Unknown",
+    "vendor": "Unknown",
+    "protocol": "switchbot",
+    "type": "plug mini (us)",
+    "category": "Plug Mini (US)",
+    "ip": "3C8427B1316E",
+    "mac": null,
+    "address": "3C8427B1316E",
+    "model": null,
+    "location": null,
+    "trust": "trusted",
+    "credentials": {
+      "token": "4e6fc805b4a0dd7ed693af1dcf89d9731113d4706b2d796759aafe09cf8f07ae1e858fa3fbf06139ddea004de7b04251",
+      "secret": "b9a4da66bb55d86299dc912ab16e4d44"
+    },
+    "lastSeen": "2025-10-17T22:48:20.883Z",
+    "telemetry": {
+      "device_id": "3C8427B1316E",
+      "name": "Grow Room 1, West Fan",
+      "category": "Plug Mini (US)",
+      "protocol": "switchbot",
+      "online": true,
+      "trust": "trusted",
+      "version": "V2.0-2.0",
+      "power": "on",
+      "voltage": 119.4,
+      "weight": 112.5,
+      "electricityOfDay": 1276,
+      "electricCurrent": 942,
+      "deviceId": "3C8427B1316E",
+      "deviceType": "Plug Mini (US)",
+      "hubDeviceId": "3C8427B1316E",
+      "lastUpdate": "2025-10-17T22:48:20.883Z"
+    },
+    "deviceData": {
+      "device_id": "3C8427B1316E",
+      "name": "Grow Room 1, West Fan",
+      "category": "Plug Mini (US)",
+      "protocol": "switchbot",
+      "online": true,
+      "capabilities": {
+        "commands": []
+      },
+      "details": {
+        "hub": "000000000000"
+      },
+      "trust": "trusted",
+      "status": {
+        "version": "V2.0-2.0",
+        "power": "on",
+        "voltage": 119.4,
+        "weight": 112.5,
+        "electricityOfDay": 1276,
+        "electricCurrent": 942,
+        "deviceId": "3C8427B1316E",
+        "deviceType": "Plug Mini (US)",
+        "hubDeviceId": "3C8427B1316E",
+        "lastUpdate": "2025-10-17T22:48:20.883Z"
+      }
+    }
+  },
+  {
+    "id": "3C8427B1ECDA",
+    "deviceId": "3C8427B1ECDA",
+    "name": "Strawberry AC",
+    "brand": "Unknown",
+    "vendor": "Unknown",
+    "protocol": "switchbot",
+    "type": "plug mini (us)",
+    "category": "Plug Mini (US)",
+    "ip": "3C8427B1ECDA",
+    "mac": null,
+    "address": "3C8427B1ECDA",
+    "model": null,
+    "location": null,
+    "trust": "trusted",
+    "credentials": {
+      "token": "4e6fc805b4a0dd7ed693af1dcf89d9731113d4706b2d796759aafe09cf8f07ae1e858fa3fbf06139ddea004de7b04251",
+      "secret": "b9a4da66bb55d86299dc912ab16e4d44"
+    },
+    "lastSeen": "2025-10-17T22:48:26.864Z",
+    "telemetry": {
+      "device_id": "3C8427B1ECDA",
+      "name": "Strawberry AC",
+      "category": "Plug Mini (US)",
+      "protocol": "switchbot",
+      "online": true,
+      "trust": "trusted",
+      "version": "V2.0-2.0",
+      "power": "on",
+      "voltage": 0,
+      "weight": 0,
+      "electricityOfDay": 0,
+      "electricCurrent": 0,
+      "deviceId": "3C8427B1ECDA",
+      "deviceType": "Plug Mini (US)",
+      "hubDeviceId": "3C8427B1ECDA",
+      "lastUpdate": "2025-10-17T22:48:26.864Z"
+    },
+    "deviceData": {
+      "device_id": "3C8427B1ECDA",
+      "name": "Strawberry AC",
+      "category": "Plug Mini (US)",
+      "protocol": "switchbot",
+      "online": true,
+      "capabilities": {
+        "commands": []
+      },
+      "details": {
+        "hub": "000000000000"
+      },
+      "trust": "trusted",
+      "status": {
+        "version": "V2.0-2.0",
+        "power": "on",
+        "voltage": 0,
+        "weight": 0,
+        "electricityOfDay": 0,
+        "electricCurrent": 0,
+        "deviceId": "3C8427B1ECDA",
+        "deviceType": "Plug Mini (US)",
+        "hubDeviceId": "3C8427B1ECDA",
+        "lastUpdate": "2025-10-17T22:48:26.864Z"
+      }
+    }
+  },
+  {
+    "id": "3C8427B21F32",
+    "deviceId": "3C8427B21F32",
+    "name": "Research Rack Fan",
+    "brand": "Unknown",
+    "vendor": "Unknown",
+    "protocol": "switchbot",
+    "type": "plug mini (us)",
+    "category": "Plug Mini (US)",
+    "ip": "3C8427B21F32",
+    "mac": null,
+    "address": "3C8427B21F32",
+    "model": null,
+    "location": null,
+    "trust": "trusted",
+    "credentials": {
+      "token": "4e6fc805b4a0dd7ed693af1dcf89d9731113d4706b2d796759aafe09cf8f07ae1e858fa3fbf06139ddea004de7b04251",
+      "secret": "b9a4da66bb55d86299dc912ab16e4d44"
+    },
+    "lastSeen": "2025-10-17T22:48:32.866Z",
+    "telemetry": {
+      "device_id": "3C8427B21F32",
+      "name": "Research Rack Fan",
+      "category": "Plug Mini (US)",
+      "protocol": "switchbot",
+      "online": true,
+      "trust": "trusted",
+      "version": "V2.0-2.0",
+      "power": "off",
+      "voltage": 0,
+      "weight": 0,
+      "electricityOfDay": 0,
+      "electricCurrent": 0,
+      "deviceId": "3C8427B21F32",
+      "deviceType": "Plug Mini (US)",
+      "hubDeviceId": "3C8427B21F32",
+      "lastUpdate": "2025-10-17T22:48:32.866Z"
+    },
+    "deviceData": {
+      "device_id": "3C8427B21F32",
+      "name": "Research Rack Fan",
+      "category": "Plug Mini (US)",
+      "protocol": "switchbot",
+      "online": true,
+      "capabilities": {
+        "commands": []
+      },
+      "details": {
+        "hub": "000000000000"
+      },
+      "trust": "trusted",
+      "status": {
+        "version": "V2.0-2.0",
+        "power": "off",
+        "voltage": 0,
+        "weight": 0,
+        "electricityOfDay": 0,
+        "electricCurrent": 0,
+        "deviceId": "3C8427B21F32",
+        "deviceType": "Plug Mini (US)",
+        "hubDeviceId": "3C8427B21F32",
+        "lastUpdate": "2025-10-17T22:48:32.866Z"
+      }
+    }
+  },
+  {
+    "id": "68B6B3B3C15A",
+    "deviceId": "68B6B3B3C15A",
+    "name": "Grow Room 1, Lights Towers 1-4",
+    "brand": "Unknown",
+    "vendor": "Unknown",
+    "protocol": "switchbot",
+    "type": "plug mini (us)",
+    "category": "Plug Mini (US)",
+    "ip": "68B6B3B3C15A",
+    "mac": null,
+    "address": "68B6B3B3C15A",
+    "model": null,
+    "location": null,
+    "trust": "trusted",
+    "credentials": {
+      "token": "4e6fc805b4a0dd7ed693af1dcf89d9731113d4706b2d796759aafe09cf8f07ae1e858fa3fbf06139ddea004de7b04251",
+      "secret": "b9a4da66bb55d86299dc912ab16e4d44"
+    },
+    "lastSeen": "2025-10-17T22:48:38.910Z",
+    "telemetry": {
+      "device_id": "68B6B3B3C15A",
+      "name": "Grow Room 1, Lights Towers 1-4",
+      "category": "Plug Mini (US)",
+      "protocol": "switchbot",
+      "online": true,
+      "trust": "trusted",
+      "version": "V2.7-2.7",
+      "power": "off",
+      "voltage": 118.3,
+      "weight": 0,
+      "electricityOfDay": 841,
+      "electricCurrent": 0,
+      "deviceId": "68B6B3B3C15A",
+      "deviceType": "Plug Mini (US)",
+      "hubDeviceId": "68B6B3B3C15A",
+      "lastUpdate": "2025-10-17T22:48:38.910Z"
+    },
+    "deviceData": {
+      "device_id": "68B6B3B3C15A",
+      "name": "Grow Room 1, Lights Towers 1-4",
+      "category": "Plug Mini (US)",
+      "protocol": "switchbot",
+      "online": true,
+      "capabilities": {
+        "commands": []
+      },
+      "details": {
+        "hub": "000000000000"
+      },
+      "trust": "trusted",
+      "status": {
+        "version": "V2.7-2.7",
+        "power": "off",
+        "voltage": 118.3,
+        "weight": 0,
+        "electricityOfDay": 841,
+        "electricCurrent": 0,
+        "deviceId": "68B6B3B3C15A",
+        "deviceType": "Plug Mini (US)",
+        "hubDeviceId": "68B6B3B3C15A",
+        "lastUpdate": "2025-10-17T22:48:38.910Z"
+      }
+    }
+  },
+  {
+    "id": "68B6B3BAE00E",
+    "deviceId": "68B6B3BAE00E",
+    "name": "RO System",
+    "brand": "Unknown",
+    "vendor": "Unknown",
+    "protocol": "switchbot",
+    "type": "plug mini (us)",
+    "category": "Plug Mini (US)",
+    "ip": "68B6B3BAE00E",
+    "mac": null,
+    "address": "68B6B3BAE00E",
+    "model": null,
+    "location": null,
+    "trust": "trusted",
+    "credentials": {
+      "token": "4e6fc805b4a0dd7ed693af1dcf89d9731113d4706b2d796759aafe09cf8f07ae1e858fa3fbf06139ddea004de7b04251",
+      "secret": "b9a4da66bb55d86299dc912ab16e4d44"
+    },
+    "lastSeen": "2025-10-17T22:48:44.865Z",
+    "telemetry": {
+      "device_id": "68B6B3BAE00E",
+      "name": "RO System",
+      "category": "Plug Mini (US)",
+      "protocol": "switchbot",
+      "online": true,
+      "trust": "trusted",
+      "version": "V2.0-2.0",
+      "power": "off",
+      "voltage": 0,
+      "weight": 0,
+      "electricityOfDay": 0,
+      "electricCurrent": 0,
+      "deviceId": "68B6B3BAE00E",
+      "deviceType": "Plug Mini (US)",
+      "hubDeviceId": "68B6B3BAE00E",
+      "lastUpdate": "2025-10-17T22:48:44.865Z"
+    },
+    "deviceData": {
+      "device_id": "68B6B3BAE00E",
+      "name": "RO System",
+      "category": "Plug Mini (US)",
+      "protocol": "switchbot",
+      "online": true,
+      "capabilities": {
+        "commands": []
+      },
+      "details": {
+        "hub": "000000000000"
+      },
+      "trust": "trusted",
+      "status": {
+        "version": "V2.0-2.0",
+        "power": "off",
+        "voltage": 0,
+        "weight": 0,
+        "electricityOfDay": 0,
+        "electricCurrent": 0,
+        "deviceId": "68B6B3BAE00E",
+        "deviceType": "Plug Mini (US)",
+        "hubDeviceId": "68B6B3BAE00E",
+        "lastUpdate": "2025-10-17T22:48:44.865Z"
+      }
+    }
+  },
+  {
+    "id": "7C2C67C5467A",
+    "deviceId": "7C2C67C5467A",
+    "name": "strawberries",
+    "brand": "Unknown",
+    "vendor": "Unknown",
+    "protocol": "switchbot",
+    "type": "plug mini (us)",
+    "category": "Plug Mini (US)",
+    "ip": "7C2C67C5467A",
+    "mac": null,
+    "address": "7C2C67C5467A",
+    "model": null,
+    "location": null,
+    "trust": "trusted",
+    "credentials": {
+      "token": "4e6fc805b4a0dd7ed693af1dcf89d9731113d4706b2d796759aafe09cf8f07ae1e858fa3fbf06139ddea004de7b04251",
+      "secret": "b9a4da66bb55d86299dc912ab16e4d44"
+    },
+    "lastSeen": "2025-10-17T22:48:50.866Z",
+    "telemetry": {
+      "device_id": "7C2C67C5467A",
+      "name": "strawberries",
+      "category": "Plug Mini (US)",
+      "protocol": "switchbot",
+      "online": true,
+      "trust": "trusted",
+      "version": "V2.0-2.0",
+      "power": "on",
+      "voltage": 0,
+      "weight": 0,
+      "electricityOfDay": 0,
+      "electricCurrent": 0,
+      "deviceId": "7C2C67C5467A",
+      "deviceType": "Plug Mini (US)",
+      "hubDeviceId": "7C2C67C5467A",
+      "lastUpdate": "2025-10-17T22:48:50.866Z"
+    },
+    "deviceData": {
+      "device_id": "7C2C67C5467A",
+      "name": "strawberries",
+      "category": "Plug Mini (US)",
+      "protocol": "switchbot",
+      "online": true,
+      "capabilities": {
+        "commands": []
+      },
+      "details": {
+        "hub": "000000000000"
+      },
+      "trust": "trusted",
+      "status": {
+        "version": "V2.0-2.0",
+        "power": "on",
+        "voltage": 0,
+        "weight": 0,
+        "electricityOfDay": 0,
+        "electricCurrent": 0,
+        "deviceId": "7C2C67C5467A",
+        "deviceType": "Plug Mini (US)",
+        "hubDeviceId": "7C2C67C5467A",
+        "lastUpdate": "2025-10-17T22:48:50.866Z"
+      }
+    }
+  },
+  {
+    "id": "84FCE6F34A66",
+    "deviceId": "84FCE6F34A66",
+    "name": "Grow Room 1, East Fan",
+    "brand": "Unknown",
+    "vendor": "Unknown",
+    "protocol": "switchbot",
+    "type": "plug mini (us)",
+    "category": "Plug Mini (US)",
+    "ip": "84FCE6F34A66",
+    "mac": null,
+    "address": "84FCE6F34A66",
+    "model": null,
+    "location": null,
+    "trust": "trusted",
+    "credentials": {
+      "token": "4e6fc805b4a0dd7ed693af1dcf89d9731113d4706b2d796759aafe09cf8f07ae1e858fa3fbf06139ddea004de7b04251",
+      "secret": "b9a4da66bb55d86299dc912ab16e4d44"
+    },
+    "lastSeen": "2025-10-17T22:48:56.865Z",
+    "telemetry": {
+      "device_id": "84FCE6F34A66",
+      "name": "Grow Room 1, East Fan",
+      "category": "Plug Mini (US)",
+      "protocol": "switchbot",
+      "online": true,
+      "trust": "trusted",
+      "version": "V2.0-2.0",
+      "power": "on",
+      "voltage": 119.2,
+      "weight": 99.2,
+      "electricityOfDay": 1339,
+      "electricCurrent": 850,
+      "deviceId": "84FCE6F34A66",
+      "deviceType": "Plug Mini (US)",
+      "hubDeviceId": "84FCE6F34A66",
+      "lastUpdate": "2025-10-17T22:48:56.865Z"
+    },
+    "deviceData": {
+      "device_id": "84FCE6F34A66",
+      "name": "Grow Room 1, East Fan",
+      "category": "Plug Mini (US)",
+      "protocol": "switchbot",
+      "online": true,
+      "capabilities": {
+        "commands": []
+      },
+      "details": {
+        "hub": "000000000000"
+      },
+      "trust": "trusted",
+      "status": {
+        "version": "V2.0-2.0",
+        "power": "on",
+        "voltage": 119.2,
+        "weight": 99.2,
+        "electricityOfDay": 1339,
+        "electricCurrent": 850,
+        "deviceId": "84FCE6F34A66",
+        "deviceType": "Plug Mini (US)",
+        "hubDeviceId": "84FCE6F34A66",
+        "lastUpdate": "2025-10-17T22:48:56.865Z"
+      }
+    }
+  },
+  {
+    "id": "84FCE6F5B1B6",
+    "deviceId": "84FCE6F5B1B6",
+    "name": "Grow Room 3, Dehumifier",
+    "brand": "Unknown",
+    "vendor": "Unknown",
+    "protocol": "switchbot",
+    "type": "plug mini (us)",
+    "category": "Plug Mini (US)",
+    "ip": "84FCE6F5B1B6",
+    "mac": null,
+    "address": "84FCE6F5B1B6",
+    "model": null,
+    "location": null,
+    "trust": "trusted",
+    "credentials": {
+      "token": "4e6fc805b4a0dd7ed693af1dcf89d9731113d4706b2d796759aafe09cf8f07ae1e858fa3fbf06139ddea004de7b04251",
+      "secret": "b9a4da66bb55d86299dc912ab16e4d44"
+    },
+    "lastSeen": "2025-10-17T22:49:02.876Z",
+    "telemetry": {
+      "device_id": "84FCE6F5B1B6",
+      "name": "Grow Room 3, Dehumifier",
+      "category": "Plug Mini (US)",
+      "protocol": "switchbot",
+      "online": true,
+      "trust": "trusted",
+      "version": "V2.0-2.0",
+      "power": "off",
+      "voltage": 120,
+      "weight": 0,
+      "electricityOfDay": 120,
+      "electricCurrent": 0,
+      "deviceId": "84FCE6F5B1B6",
+      "deviceType": "Plug Mini (US)",
+      "hubDeviceId": "84FCE6F5B1B6",
+      "lastUpdate": "2025-10-17T22:49:02.876Z"
+    },
+    "deviceData": {
+      "device_id": "84FCE6F5B1B6",
+      "name": "Grow Room 3, Dehumifier",
+      "category": "Plug Mini (US)",
+      "protocol": "switchbot",
+      "online": true,
+      "capabilities": {
+        "commands": []
+      },
+      "details": {
+        "hub": "000000000000"
+      },
+      "trust": "trusted",
+      "status": {
+        "version": "V2.0-2.0",
+        "power": "off",
+        "voltage": 120,
+        "weight": 0,
+        "electricityOfDay": 120,
+        "electricCurrent": 0,
+        "deviceId": "84FCE6F5B1B6",
+        "deviceType": "Plug Mini (US)",
+        "hubDeviceId": "84FCE6F5B1B6",
+        "lastUpdate": "2025-10-17T22:49:02.876Z"
+      }
+    }
+  },
+  {
+    "id": "A0764E1FDB82",
+    "deviceId": "A0764E1FDB82",
+    "name": "Germ tent",
+    "brand": "Unknown",
+    "vendor": "Unknown",
+    "protocol": "switchbot",
+    "type": "plug mini (us)",
+    "category": "Plug Mini (US)",
+    "ip": "A0764E1FDB82",
+    "mac": null,
+    "address": "A0764E1FDB82",
+    "model": null,
+    "location": null,
+    "trust": "trusted",
+    "credentials": {
+      "token": "4e6fc805b4a0dd7ed693af1dcf89d9731113d4706b2d796759aafe09cf8f07ae1e858fa3fbf06139ddea004de7b04251",
+      "secret": "b9a4da66bb55d86299dc912ab16e4d44"
+    },
+    "lastSeen": "2025-10-17T22:49:08.871Z",
+    "telemetry": {
+      "device_id": "A0764E1FDB82",
+      "name": "Germ tent",
+      "category": "Plug Mini (US)",
+      "protocol": "switchbot",
+      "online": true,
+      "trust": "trusted",
+      "version": "V2.0-2.0",
+      "power": "on",
+      "voltage": 0,
+      "weight": 0,
+      "electricityOfDay": 0,
+      "electricCurrent": 0,
+      "deviceId": "A0764E1FDB82",
+      "deviceType": "Plug Mini (US)",
+      "hubDeviceId": "A0764E1FDB82",
+      "lastUpdate": "2025-10-17T22:49:08.871Z"
+    },
+    "deviceData": {
+      "device_id": "A0764E1FDB82",
+      "name": "Germ tent",
+      "category": "Plug Mini (US)",
+      "protocol": "switchbot",
+      "online": true,
+      "capabilities": {
+        "commands": []
+      },
+      "details": {
+        "hub": "000000000000"
+      },
+      "trust": "trusted",
+      "status": {
+        "version": "V2.0-2.0",
+        "power": "on",
+        "voltage": 0,
+        "weight": 0,
+        "electricityOfDay": 0,
+        "electricCurrent": 0,
+        "deviceId": "A0764E1FDB82",
+        "deviceType": "Plug Mini (US)",
+        "hubDeviceId": "A0764E1FDB82",
+        "lastUpdate": "2025-10-17T22:49:08.871Z"
+      }
+    }
+  },
+  {
+    "id": "C3343035702D",
+    "deviceId": "C3343035702D",
+    "name": "Strawberry Room",
+    "brand": "Unknown",
+    "vendor": "Unknown",
+    "protocol": "switchbot",
+    "type": "woiosensor",
+    "category": "WoIOSensor",
+    "ip": "C3343035702D",
+    "mac": null,
+    "address": "C3343035702D",
+    "model": null,
+    "location": null,
+    "trust": "trusted",
+    "credentials": {
+      "token": "4e6fc805b4a0dd7ed693af1dcf89d9731113d4706b2d796759aafe09cf8f07ae1e858fa3fbf06139ddea004de7b04251",
+      "secret": "b9a4da66bb55d86299dc912ab16e4d44"
+    },
+    "lastSeen": "2025-10-17T22:49:14.871Z",
+    "telemetry": {
+      "device_id": "C3343035702D",
+      "name": "Strawberry Room",
+      "category": "WoIOSensor",
+      "protocol": "switchbot",
+      "online": true,
+      "trust": "trusted",
+      "version": "V0.9",
+      "temperature": 18.6,
+      "battery": 60,
+      "humidity": 71,
+      "deviceId": "C3343035702D",
+      "deviceType": "WoIOSensor",
+      "hubDeviceId": "D3F85167A57E",
+      "lastUpdate": "2025-10-17T22:49:14.871Z"
+    },
+    "deviceData": {
+      "device_id": "C3343035702D",
+      "name": "Strawberry Room",
+      "category": "WoIOSensor",
+      "protocol": "switchbot",
+      "online": true,
+      "capabilities": {
+        "commands": []
+      },
+      "details": {
+        "hub": "D3F85167A57E"
+      },
+      "trust": "trusted",
+      "status": {
+        "version": "V0.9",
+        "temperature": 18.6,
+        "battery": 60,
+        "humidity": 71,
+        "deviceId": "C3343035702D",
+        "deviceType": "WoIOSensor",
+        "hubDeviceId": "D3F85167A57E",
+        "lastUpdate": "2025-10-17T22:49:14.871Z"
+      }
+    }
+  },
+  {
+    "id": "3C8427B1E392",
+    "deviceId": "3C8427B1E392",
+    "name": "Grow Room 1, Dehumidifier",
+    "brand": "Unknown",
+    "vendor": "Unknown",
+    "protocol": "switchbot",
+    "type": "plug mini (us)",
+    "category": "Plug Mini (US)",
+    "ip": "3C8427B1E392",
+    "mac": null,
+    "address": "3C8427B1E392",
+    "model": null,
+    "location": null,
+    "trust": "trusted",
+    "credentials": {
+      "token": "4e6fc805b4a0dd7ed693af1dcf89d9731113d4706b2d796759aafe09cf8f07ae1e858fa3fbf06139ddea004de7b04251",
+      "secret": "b9a4da66bb55d86299dc912ab16e4d44"
+    },
+    "lastSeen": "2025-10-17T22:49:20.904Z",
+    "telemetry": {
+      "device_id": "3C8427B1E392",
+      "name": "Grow Room 1, Dehumidifier",
+      "category": "Plug Mini (US)",
+      "protocol": "switchbot",
+      "online": true,
+      "trust": "trusted",
+      "version": "V2.0-2.0",
+      "power": "off",
+      "voltage": 120.1,
+      "weight": 0,
+      "electricityOfDay": 1153,
+      "electricCurrent": 0,
+      "deviceId": "3C8427B1E392",
+      "deviceType": "Plug Mini (US)",
+      "hubDeviceId": "3C8427B1E392",
+      "lastUpdate": "2025-10-17T22:49:20.904Z"
+    },
+    "deviceData": {
+      "device_id": "3C8427B1E392",
+      "name": "Grow Room 1, Dehumidifier",
+      "category": "Plug Mini (US)",
+      "protocol": "switchbot",
+      "online": true,
+      "capabilities": {
+        "commands": []
+      },
+      "details": {
+        "hub": "000000000000"
+      },
+      "trust": "trusted",
+      "status": {
+        "version": "V2.0-2.0",
+        "power": "off",
+        "voltage": 120.1,
+        "weight": 0,
+        "electricityOfDay": 1153,
+        "electricCurrent": 0,
+        "deviceId": "3C8427B1E392",
+        "deviceType": "Plug Mini (US)",
+        "hubDeviceId": "3C8427B1E392",
+        "lastUpdate": "2025-10-17T22:49:20.904Z"
+      }
+    }
+  },
+  {
+    "id": "CE2A82461382",
+    "deviceId": "CE2A82461382",
+    "name": "Grow Room 2, North Wall",
+    "brand": "Unknown",
+    "vendor": "Unknown",
+    "protocol": "switchbot",
+    "type": "woiosensor",
+    "category": "WoIOSensor",
+    "ip": "CE2A82461382",
+    "mac": null,
+    "address": "CE2A82461382",
+    "model": null,
+    "location": null,
+    "trust": "trusted",
+    "credentials": {
+      "token": "4e6fc805b4a0dd7ed693af1dcf89d9731113d4706b2d796759aafe09cf8f07ae1e858fa3fbf06139ddea004de7b04251",
+      "secret": "b9a4da66bb55d86299dc912ab16e4d44"
+    },
+    "lastSeen": "2025-10-17T22:49:26.882Z",
+    "telemetry": {
+      "device_id": "CE2A82461382",
+      "name": "Grow Room 2, North Wall",
+      "category": "WoIOSensor",
+      "protocol": "switchbot",
+      "online": true,
+      "trust": "trusted",
+      "version": "V0.9",
+      "temperature": 19.5,
+      "battery": 60,
+      "humidity": 72,
+      "deviceId": "CE2A82461382",
+      "deviceType": "WoIOSensor",
+      "hubDeviceId": "D3F85167A57E",
+      "lastUpdate": "2025-10-17T22:49:26.882Z"
+    },
+    "deviceData": {
+      "device_id": "CE2A82461382",
+      "name": "Grow Room 2, North Wall",
+      "category": "WoIOSensor",
+      "protocol": "switchbot",
+      "online": true,
+      "capabilities": {
+        "commands": []
+      },
+      "details": {
+        "hub": "D3F85167A57E"
+      },
+      "trust": "trusted",
+      "status": {
+        "version": "V0.9",
+        "temperature": 19.5,
+        "battery": 60,
+        "humidity": 72,
+        "deviceId": "CE2A82461382",
+        "deviceType": "WoIOSensor",
+        "hubDeviceId": "D3F85167A57E",
+        "lastUpdate": "2025-10-17T22:49:26.882Z"
+      }
+    }
+  },
+  {
+    "id": "CE2A83060A2C",
+    "deviceId": "CE2A83060A2C",
+    "name": "Outside. East facing",
+    "brand": "Unknown",
+    "vendor": "Unknown",
+    "protocol": "switchbot",
+    "type": "woiosensor",
+    "category": "WoIOSensor",
+    "ip": "CE2A83060A2C",
+    "mac": null,
+    "address": "CE2A83060A2C",
+    "model": null,
+    "location": null,
+    "trust": "trusted",
+    "credentials": {
+      "token": "4e6fc805b4a0dd7ed693af1dcf89d9731113d4706b2d796759aafe09cf8f07ae1e858fa3fbf06139ddea004de7b04251",
+      "secret": "b9a4da66bb55d86299dc912ab16e4d44"
+    },
+    "lastSeen": "2025-10-17T22:49:32.889Z",
+    "telemetry": {
+      "device_id": "CE2A83060A2C",
+      "name": "Outside. East facing",
+      "category": "WoIOSensor",
+      "protocol": "switchbot",
+      "online": true,
+      "trust": "trusted",
+      "version": "V0.9",
+      "temperature": 12.2,
+      "battery": 60,
+      "humidity": 61,
+      "deviceId": "CE2A83060A2C",
+      "deviceType": "WoIOSensor",
+      "hubDeviceId": "D3F85167A57E",
+      "lastUpdate": "2025-10-17T22:49:32.889Z"
+    },
+    "deviceData": {
+      "device_id": "CE2A83060A2C",
+      "name": "Outside. East facing",
+      "category": "WoIOSensor",
+      "protocol": "switchbot",
+      "online": true,
+      "capabilities": {
+        "commands": []
+      },
+      "details": {
+        "hub": "D3F85167A57E"
+      },
+      "trust": "trusted",
+      "status": {
+        "version": "V0.9",
+        "temperature": 12.2,
+        "battery": 60,
+        "humidity": 61,
+        "deviceId": "CE2A83060A2C",
+        "deviceType": "WoIOSensor",
+        "hubDeviceId": "D3F85167A57E",
+        "lastUpdate": "2025-10-17T22:49:32.889Z"
+      }
+    }
+  },
+  {
+    "id": "CE2A84062758",
+    "deviceId": "CE2A84062758",
+    "name": "Non-Growing, Mech Room",
+    "brand": "Unknown",
+    "vendor": "Unknown",
+    "protocol": "switchbot",
+    "type": "woiosensor",
+    "category": "WoIOSensor",
+    "ip": "CE2A84062758",
+    "mac": null,
+    "address": "CE2A84062758",
+    "model": null,
+    "location": null,
+    "trust": "trusted",
+    "credentials": {
+      "token": "4e6fc805b4a0dd7ed693af1dcf89d9731113d4706b2d796759aafe09cf8f07ae1e858fa3fbf06139ddea004de7b04251",
+      "secret": "b9a4da66bb55d86299dc912ab16e4d44"
+    },
+    "lastSeen": "2025-10-17T22:49:38.868Z",
+    "telemetry": {
+      "device_id": "CE2A84062758",
+      "name": "Non-Growing, Mech Room",
+      "category": "WoIOSensor",
+      "protocol": "switchbot",
+      "online": true,
+      "trust": "trusted",
+      "version": "V0.9",
+      "temperature": 21,
+      "battery": 60,
+      "humidity": 63,
+      "deviceId": "CE2A84062758",
+      "deviceType": "WoIOSensor",
+      "hubDeviceId": "D3F85167A57E",
+      "lastUpdate": "2025-10-17T22:49:38.868Z"
+    },
+    "deviceData": {
+      "device_id": "CE2A84062758",
+      "name": "Non-Growing, Mech Room",
+      "category": "WoIOSensor",
+      "protocol": "switchbot",
+      "online": true,
+      "capabilities": {
+        "commands": []
+      },
+      "details": {
+        "hub": "D3F85167A57E"
+      },
+      "trust": "trusted",
+      "status": {
+        "version": "V0.9",
+        "temperature": 21,
+        "battery": 60,
+        "humidity": 63,
+        "deviceId": "CE2A84062758",
+        "deviceType": "WoIOSensor",
+        "hubDeviceId": "D3F85167A57E",
+        "lastUpdate": "2025-10-17T22:49:38.868Z"
+      }
+    }
+  },
+  {
+    "id": "mdns:Ledsmart Server - Green Reach._http._tcp.local.",
+    "deviceId": "mdns:Ledsmart Server - Green Reach._http._tcp.local.",
+    "name": "Ledsmart Server - Green Reach",
+    "brand": "Unknown",
+    "vendor": "Unknown",
+    "protocol": "mdns",
+    "type": "network-service",
+    "category": "network-service",
+    "ip": "mdns:Ledsmart Server - Green Reach._http._tcp.local.",
+    "mac": null,
+    "address": "mdns:Ledsmart Server - Green Reach._http._tcp.local.",
+    "model": null,
+    "location": null,
+    "trust": "trusted",
+    "credentials": null,
+    "lastSeen": null,
+    "telemetry": {
+      "device_id": "mdns:Ledsmart Server - Green Reach._http._tcp.local.",
+      "name": "Ledsmart Server - Green Reach",
+      "category": "network-service",
+      "protocol": "mdns",
+      "online": true,
+      "trust": "trusted"
+    },
+    "deviceData": {
+      "device_id": "mdns:Ledsmart Server - Green Reach._http._tcp.local.",
+      "name": "Ledsmart Server - Green Reach",
+      "category": "network-service",
+      "protocol": "mdns",
+      "online": true,
+      "capabilities": {
+        "service_type": "_http._tcp.local.",
+        "port": 3000
+      },
+      "details": {
+        "addresses": [
+          "192.168.2.80",
+          "fe80::b46f:fac7:e825:223d",
+          "fd92:4a1e:e210:9e65:5546:5c31:b3e6:c02b",
+          "fd92:4a1e:e210:9e65:0:ff:fe00:1401",
+          "fd92:4a1e:e210:9e65:0:ff:fe00:fc10",
+          "fdef:77b6:80dc:1:4732:a348:82c:3c9a",
+          "fe80::66b5:cbe5:61d4:fed6"
+        ],
+        "port": 3000,
+        "service_type": "_http._tcp.local.",
+        "properties": {
+          "homeNode": ""
+        }
+      },
+      "trust": "trusted"
+    }
+  }
+]

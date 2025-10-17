@@ -1,5 +1,4 @@
-import ShellyPlugDriver from './drivers/shelly-driver.js';
-import KasaPlugDriver from './drivers/kasa-driver.js';
+import SwitchBotPlugDriver from './drivers/switchbot-driver.js';
 
 function normalizeAction(action) {
   if (!action) return null;
@@ -16,12 +15,31 @@ export default class PlugManager {
     this.logger = logger;
     this.drivers = new Map();
 
-    this.registerDriver(new ShellyPlugDriver());
-    this.registerDriver(new KasaPlugDriver());
+    // Only register SwitchBot driver at startup
+    this.registerDriver(new SwitchBotPlugDriver({
+      token: process.env.SWITCHBOT_TOKEN,
+      secret: process.env.SWITCHBOT_SECRET,
+      apiBase: process.env.SWITCHBOT_API_BASE || 'https://api.switch-bot.com/v1.1'
+    }));
 
     this.refreshManualAssignments();
   }
 
+  // Dynamically register Kasa driver when user initiates Kasa search
+  registerKasaDriver() {
+    if (!this.drivers.has('kasa')) {
+      const KasaPlugDriver = require('./drivers/kasa-driver.js').default;
+      this.registerDriver(new KasaPlugDriver());
+    }
+  }
+
+  // Dynamically register Shelly driver when user initiates Shelly search
+  registerShellyDriver() {
+    if (!this.drivers.has('shelly')) {
+      const ShellyPlugDriver = require('./drivers/shelly-driver.js').default;
+      this.registerDriver(new ShellyPlugDriver());
+    }
+  }
   registerDriver(driver) {
     if (!driver) return;
     this.drivers.set(driver.vendor(), driver);

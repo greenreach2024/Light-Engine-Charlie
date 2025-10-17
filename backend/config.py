@@ -79,6 +79,18 @@ class SwitchBotConfig:
 
 
 @dataclass(frozen=True)
+class KasaConfig:
+    """Simple configuration holder for TP-Link Kasa credentials (optional).
+
+    Currently used for parity with Node backend; LAN discovery does not
+    require credentials but some APIs may.
+    """
+
+    email: Optional[str] = None
+    password: Optional[str] = None
+
+
+@dataclass(frozen=True)
 class LightingFixture:
     """Represents a lighting fixture from the on-site inventory."""
 
@@ -108,6 +120,7 @@ class EnvironmentConfig:
     kasa_discovery_timeout: int = 10
     mqtt: Optional[MQTTConfig] = None
     switchbot: Optional[SwitchBotConfig] = None
+    kasa: Optional[KasaConfig] = None
     lighting_inventory: Optional[List[LightingFixture]] = None
     ai_assist: Optional[AIConfig] = None
 
@@ -177,31 +190,54 @@ def build_environment_config(env: Optional[str] = None) -> EnvironmentConfig:
             topics=os.getenv("MQTT_TOPICS", "sensors/#"),
         )
 
+    # Load farm.json for integrations (preferred), then environment variables
+    farm_path = BASE_DIR / "public" / "data" / "farm.json"
+    farm_data: Dict[str, any] = {}
+    if farm_path.exists():
+        try:
+            import json as _json
+            farm_data = _json.loads(farm_path.read_text(encoding="utf-8")) or {}
+        except Exception as exc:  # pylint: disable=broad-except
+            LOGGER.warning("Failed to read farm.json: %s", exc)
+
+    integrations = farm_data.get("integrations", {}) if isinstance(farm_data, dict) else {}
+    sb_from_file = integrations.get("switchbot") if isinstance(integrations, dict) else None
+    kasa_from_file = integrations.get("kasa") if isinstance(integrations, dict) else None
+
+    # SwitchBot precedence: env vars override farm.json
+    switchbot_token = os.getenv("SWITCHBOT_TOKEN") or (sb_from_file or {}).get("token")
+    switchbot_secret = os.getenv("SWITCHBOT_SECRET") or (sb_from_file or {}).get("secret")
+    switchbot_region = os.getenv("SWITCHBOT_REGION", "us")
     switchbot_config = None
-    if os.getenv("SWITCHBOT_TOKEN") and os.getenv("SWITCHBOT_SECRET"):
+    if switchbot_token and switchbot_secret:
         switchbot_config = SwitchBotConfig(
-            token=os.environ["SWITCHBOT_TOKEN"],
-            secret=os.environ["SWITCHBOT_SECRET"],
-            region=os.getenv("SWITCHBOT_REGION", "us"),
+            token=str(switchbot_token),
+            secret=str(switchbot_secret),
+            region=str(switchbot_region or "us"),
         )
+
+    # Kasa precedence: env vars override farm.json (if provided)
+    kasa_email = os.getenv("KASA_EMAIL") or (kasa_from_file or {}).get("email")
+    kasa_password = os.getenv("KASA_PASSWORD") or (kasa_from_file or {}).get("password")
+    kasa_config = None
+    if kasa_email or kasa_password:
+        kasa_config = KasaConfig(email=kasa_email, password=kasa_password)
 
     lighting_inventory = load_lighting_inventory()
 
     timeout = int(os.getenv("KASA_DISCOVERY_TIMEOUT", "10"))
 
-    ai_assist_config = None
-    raw_ai_enabled = os.getenv("AI_ASSIST_ENABLED", "").strip().lower()
-    if raw_ai_enabled in {"1", "true", "yes", "on"}:
-        ai_assist_config = AIConfig(
-            enabled=True,
-            provider=os.getenv("AI_ASSIST_PROVIDER", "heuristic"),
-            api_url=os.getenv("AI_ASSIST_API_URL"),
-        )
+    ai_assist_config = AIConfig(
+        enabled=True,
+        provider="gpt5-mini",  # Enable GPT-5 mini for all clients
+        api_url=os.getenv("AI_ASSIST_API_URL"),  # Keep existing API URL if configured
+    )
 
     return EnvironmentConfig(
         kasa_discovery_timeout=timeout,
         mqtt=mqtt_config,
         switchbot=switchbot_config,
+        kasa=kasa_config,
         lighting_inventory=lighting_inventory,
         ai_assist=ai_assist_config,
     )
@@ -210,6 +246,7 @@ def build_environment_config(env: Optional[str] = None) -> EnvironmentConfig:
 __all__ = [
     "MQTTConfig",
     "SwitchBotConfig",
+    "KasaConfig",
     "LightingFixture",
     "AIConfig",
     "EnvironmentConfig",
