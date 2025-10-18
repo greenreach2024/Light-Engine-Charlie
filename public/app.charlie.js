@@ -4147,8 +4147,8 @@ function initLightsStatusUI() {
   console.warn('[Stub] initLightsStatusUI called');
 }
 // Spectral rendering constants
-const HEX_CHANNEL_KEYS = ['cw', 'ww', 'bl', 'rd', 'fr', 'uv'];
-const DRIVER_CHANNEL_KEYS = ['cw', 'ww', 'bl', 'rd'];
+const HEX_CHANNEL_KEYS = ['cw', 'ww', 'bl', 'gn', 'rd', 'fr', 'uv'];
+const DRIVER_CHANNEL_KEYS = ['cw', 'ww', 'bl', 'gn', 'rd', 'fr'];
 
 const clampPercent = (value) => {
   const n = Number(value);
@@ -4162,7 +4162,7 @@ const percentToDriverByte = (value) => Math.round(clampPercent(value));
 const driverByteToPercent = (value) => clampPercent(value);
 
 function normalizeMixInput(input) {
-  const base = { cw: 0, ww: 0, bl: 0, rd: 0, fr: 0, uv: 0 };
+  const base = { cw: 0, ww: 0, bl: 0, gn: 0, rd: 0, fr: 0, uv: 0 };
   if (typeof input === 'number') {
     const pct = clampPercent(input);
     base.cw = pct;
