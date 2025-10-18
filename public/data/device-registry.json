@@ -1,0 +1,47 @@
+{
+  "description": "Device Registry - Maps light IDs to Grow3 controller device IDs",
+  "protocol": "grow3",
+  "controllerUrl": "http://192.168.2.80:3000",
+  "devices": {
+    "F00001": {
+      "controllerId": 2,
+      "name": "Fixture 1",
+      "protocol": "grow3",
+      "capabilities": ["spectrum", "dimming"],
+      "channels": ["CW", "WW", "BL", "RD"]
+    },
+    "F00002": {
+      "controllerId": 3,
+      "name": "Fixture 2",
+      "protocol": "grow3",
+      "capabilities": ["spectrum", "dimming"],
+      "channels": ["CW", "WW", "BL", "RD"]
+    },
+    "F00003": {
+      "controllerId": 4,
+      "name": "Fixture 3",
+      "protocol": "grow3",
+      "capabilities": ["spectrum", "dimming"],
+      "channels": ["CW", "WW", "BL", "RD"]
+    },
+    "F00004": {
+      "controllerId": 6,
+      "name": "Fixture 4",
+      "protocol": "grow3",
+      "capabilities": ["spectrum", "dimming"],
+      "channels": ["CW", "WW", "BL", "RD"]
+    },
+    "F00005": {
+      "controllerId": 5,
+      "name": "Fixture 5",
+      "protocol": "grow3",
+      "capabilities": ["spectrum", "dimming"],
+      "channels": ["CW", "WW", "BL", "RD"]
+    }
+  },
+  "notes": [
+    "Controller IDs are assigned by the Grow3 controller hardware",
+    "Light IDs (F00001, etc.) are used in the application and Groups V2",
+    "This mapping enables the schedule executor to send commands to the correct devices"
+  ]
+}

@@ -1672,7 +1672,9 @@ function sanitizeDevicePayload(rawDevice = {}, overrides = {}) {
     mac: merged.mac || merged.macAddress || merged.btAddress || merged.ieeeAddress || null,
     address: merged.address || merged.ip || merged.mac || key,
     model: merged.model || merged.deviceModel || merged.productModel || null,
-    location: merged.location || merged.room || merged.zone || merged.area || null,
+    location: merged.location || merged.room || merged.area || null,
+    zone: merged.zone !== undefined ? merged.zone : null,
+    automationControl: merged.automationControl !== undefined ? merged.automationControl : false,
     trust: overrides.trust || merged.trust || rawDevice.trust || 'unknown',
     credentials: overrides.credentials !== undefined ? overrides.credentials : (merged.credentials !== undefined ? merged.credentials : null),
     lastSeen: merged.lastSeen || merged.lastseen || merged.lastUpdate || merged.updateTime || merged.detectedAt || null,
@@ -2121,6 +2123,87 @@ function createDeviceEntryElement(device) {
     if (snapshot) info.appendChild(snapshot);
   }
 
+  // Add zone assignment dropdown for SwitchBot sensors
+  if (isSwitchbot && isWoiSensor) {
+    const zoneSection = document.createElement('div');
+    zoneSection.style.cssText = 'margin-top:10px;padding:8px;background:#f0f9ff;border:1px solid #bae6fd;border-radius:6px;';
+    
+    const zoneLabel = document.createElement('label');
+    zoneLabel.style.cssText = 'display:flex;align-items:center;gap:8px;font-size:12px;color:#0c4a6e;font-weight:600;';
+    
+    const labelText = document.createElement('span');
+    labelText.textContent = 'Zone:';
+    zoneLabel.appendChild(labelText);
+    
+    const zoneSelect = document.createElement('select');
+    zoneSelect.style.cssText = 'padding:4px 8px;border:1px solid #0ea5e9;border-radius:4px;background:white;color:#0f172a;font-size:12px;font-weight:500;cursor:pointer;';
+    zoneSelect.dataset.deviceId = device.id;
+    
+    // Add unassigned option
+    const unassignedOption = document.createElement('option');
+    unassignedOption.value = '';
+    unassignedOption.textContent = 'Unassigned';
+    zoneSelect.appendChild(unassignedOption);
+    
+    // Add zone options 1-9
+    for (let i = 1; i <= 9; i++) {
+      const option = document.createElement('option');
+      option.value = i;
+      option.textContent = `Zone ${i}`;
+      if (device.zone === i || device.zone === String(i)) {
+        option.selected = true;
+      }
+      zoneSelect.appendChild(option);
+    }
+    
+    // Set unassigned as selected if no zone
+    if (!device.zone) {
+      unassignedOption.selected = true;
+    }
+    
+    zoneSelect.addEventListener('change', (e) => {
+      const newZone = e.target.value ? parseInt(e.target.value) : null;
+      window.updateDeviceZone(device.id, newZone);
+    });
+    
+    zoneLabel.appendChild(zoneSelect);
+    zoneSection.appendChild(zoneLabel);
+    
+    // Add automation control toggle
+    const automationRow = document.createElement('div');
+    automationRow.style.cssText = 'display:flex;align-items:center;justify-content:space-between;margin-top:8px;padding-top:8px;border-top:1px solid #bae6fd;';
+    
+    const automationLabel = document.createElement('label');
+    automationLabel.style.cssText = 'display:flex;align-items:center;gap:8px;font-size:12px;color:#0c4a6e;font-weight:600;cursor:pointer;flex:1;';
+    
+    const automationCheckbox = document.createElement('input');
+    automationCheckbox.type = 'checkbox';
+    automationCheckbox.checked = device.automationControl === true;
+    automationCheckbox.style.cssText = 'width:16px;height:16px;cursor:pointer;accent-color:#0ea5e9;';
+    automationCheckbox.dataset.deviceId = device.id;
+    
+    automationCheckbox.addEventListener('change', (e) => {
+      window.updateDeviceAutomationControl(device.id, e.target.checked);
+    });
+    
+    const automationLabelText = document.createElement('span');
+    automationLabelText.textContent = 'Used for Automation Control';
+    
+    automationLabel.appendChild(automationCheckbox);
+    automationLabel.appendChild(automationLabelText);
+    
+    // Add status badge
+    const statusBadge = document.createElement('span');
+    statusBadge.style.cssText = `padding:2px 8px;border-radius:12px;font-size:10px;font-weight:600;${device.automationControl ? 'background:#dcfce7;color:#166534;' : 'background:#f3f4f6;color:#6b7280;'}`;
+    statusBadge.textContent = device.automationControl ? 'Active' : 'Monitor Only';
+    
+    automationRow.appendChild(automationLabel);
+    automationRow.appendChild(statusBadge);
+    zoneSection.appendChild(automationRow);
+    
+    info.appendChild(zoneSection);
+  }
+
   // Hide the verbose info grid by default to keep cards small.
 
   // Hide raw telemetry grid for SwitchBot WoIOSensor cards to keep them clean; keep snapshot above
@@ -2507,6 +2590,71 @@ window.renameIoTDevice = async function(deviceId) {
     showToast({ title: 'Device renamed', msg: `${current || 'Device'} → ${newName}`, kind: 'success', icon: '' });
   } catch (e) {
     showToast({ title: 'Rename failed', msg: e.message || 'Unable to update name', kind: 'error', icon: '' });
+  }
+};
+
+// Update device zone assignment
+window.updateDeviceZone = async function(deviceId, zone) {
+  const device = findDeviceRecord(deviceId);
+  if (!device) {
+    showToast({ title: 'Error', msg: 'Device not found', kind: 'error', icon: '' });
+    return;
+  }
+  
+  try {
+    const updated = sanitizeDevicePayload({ ...device, zone: zone });
+    updateDeviceRecord(updated, { persist: true });
+    
+    const zoneName = zone ? `Zone ${zone}` : 'Unassigned';
+    const deviceName = device.name || device.address || device.id;
+    
+    showToast({ 
+      title: 'Zone Updated', 
+      msg: `${deviceName} assigned to ${zoneName}`, 
+      kind: 'success', 
+      icon: '' 
+    });
+  } catch (e) {
+    showToast({ 
+      title: 'Zone update failed', 
+      msg: e.message || 'Unable to update zone', 
+      kind: 'error', 
+      icon: '' 
+    });
+  }
+};
+
+// Update device automation control flag
+window.updateDeviceAutomationControl = async function(deviceId, isEnabled) {
+  const device = findDeviceRecord(deviceId);
+  if (!device) {
+    showToast({ title: 'Error', msg: 'Device not found', kind: 'error', icon: '' });
+    return;
+  }
+  
+  try {
+    const updated = sanitizeDevicePayload({ ...device, automationControl: isEnabled });
+    updateDeviceRecord(updated, { persist: true });
+    
+    const deviceName = device.name || device.address || device.id;
+    const status = isEnabled ? 'enabled for automation control' : 'set to monitor only';
+    
+    showToast({ 
+      title: 'Automation Control Updated', 
+      msg: `${deviceName} ${status}`, 
+      kind: 'success', 
+      icon: '' 
+    });
+    
+    // Re-render to update the badge
+    renderIoTDeviceCards(window.LAST_IOT_SCAN);
+  } catch (e) {
+    showToast({ 
+      title: 'Update failed', 
+      msg: e.message || 'Unable to update automation control', 
+      kind: 'error', 
+      icon: '' 
+    });
   }
 };
 
@@ -11793,13 +11941,12 @@ function renderEquipmentOverview() {
                  placeholder="Equipment name" />
         </td>
         <td>
-          <input type="text" 
-                 value="${escapeHtml(category)}" 
-                 data-equipment-id="${id}"
-                 data-field="category"
-                 onblur="updateEquipmentField('${id}', 'category', this.value)"
-                 style="width:100%;border:1px solid #e2e8f0;padding:4px 8px;border-radius:4px;font-size:13px;"
-                 placeholder="Category" />
+          <select class="equipment-category-select" 
+                  data-equipment-id="${id}" 
+                  onchange="updateEquipmentCategory('${id}', this.value)" 
+                  style="width:100%;border:1px solid #e2e8f0;padding:4px 8px;border-radius:4px;font-size:13px;">
+            ${renderCategoryOptions(category)}
+          </select>
         </td>
         <td>
           <input type="text" 
@@ -11811,13 +11958,7 @@ function renderEquipmentOverview() {
                  placeholder="Vendor" />
         </td>
         <td>
-          <input type="text" 
-                 value="${escapeHtml(model)}" 
-                 data-equipment-id="${id}"
-                 data-field="model"
-                 onblur="updateEquipmentField('${id}', 'model', this.value)"
-                 style="width:100%;border:1px solid #e2e8f0;padding:4px 8px;border-radius:4px;font-size:13px;"
-                 placeholder="Model" />
+          ${renderModelField(id, category, vendor, model)}
         </td>
         <td>
           <select class="equipment-room-select" data-equipment-id="${id}" onchange="assignEquipmentRoom('${id}', this.value)" style="width:100%;border:1px solid #e2e8f0;padding:4px 8px;border-radius:4px;font-size:13px;">
@@ -11943,6 +12084,94 @@ function renderControlOptions(selectedControl) {
   return options.join('');
 }
 
+function renderCategoryOptions(selectedCategory) {
+  // Equipment categories from grow room wizard
+  const categories = [
+    'grow-lights',
+    'hvac',
+    'mini-split',
+    'dehumidifier',
+    'fans',
+    'vents',
+    'controllers',
+    'energy-monitor',
+    'other'
+  ];
+  
+  const options = ['<option value="">— Select Category —</option>'];
+  
+  categories.forEach(cat => {
+    const selected = cat === selectedCategory ? 'selected' : '';
+    const displayName = cat.split('-').map(word => 
+      word.charAt(0).toUpperCase() + word.slice(1)
+    ).join(' ');
+    options.push(`<option value="${cat}" ${selected}>${displayName}</option>`);
+  });
+  
+  return options.join('');
+}
+
+function renderModelField(equipmentId, category, vendor, model) {
+  // For mini-split and dehumidifier, render dropdown from equipment database
+  if (category === 'mini-split' || category === 'dehumidifier') {
+    return `
+      <select class="equipment-model-select" 
+              data-equipment-id="${equipmentId}" 
+              data-category="${category}"
+              onchange="updateEquipmentModel('${equipmentId}', this.value)" 
+              style="width:100%;border:1px solid #e2e8f0;padding:4px 8px;border-radius:4px;font-size:13px;">
+        ${renderModelOptions(category, vendor, model)}
+      </select>
+    `;
+  }
+  
+  // For other categories, use text input
+  return `
+    <input type="text" 
+           value="${escapeHtml(model)}" 
+           data-equipment-id="${equipmentId}"
+           data-field="model"
+           onblur="updateEquipmentField('${equipmentId}', 'model', this.value)"
+           style="width:100%;border:1px solid #e2e8f0;padding:4px 8px;border-radius:4px;font-size:13px;"
+           placeholder="Model" />
+  `;
+}
+
+function renderModelOptions(category, vendor, model) {
+  const equipmentKB = STATE.equipmentKB?.equipment || [];
+  
+  // Filter equipment by category
+  const filteredEquipment = equipmentKB.filter(eq => eq.category === category);
+  
+  const options = ['<option value="">— Select Model —</option>'];
+  
+  if (filteredEquipment.length === 0) {
+    options.push('<option disabled>No models in database</option>');
+  } else {
+    // Group by vendor
+    const byVendor = {};
+    filteredEquipment.forEach(eq => {
+      const v = eq.vendor || 'Unknown';
+      if (!byVendor[v]) byVendor[v] = [];
+      byVendor[v].push(eq);
+    });
+    
+    // Render options grouped by vendor
+    Object.keys(byVendor).sort().forEach(v => {
+      options.push(`<option disabled>━━━ ${v} ━━━</option>`);
+      byVendor[v].forEach(eq => {
+        const modelValue = `${eq.vendor}|${eq.model}`;
+        const currentValue = `${vendor}|${model}`;
+        const selected = modelValue === currentValue ? 'selected' : '';
+        const displayText = `${eq.model}${eq.capacity ? ' (' + eq.capacity + ')' : ''}`;
+        options.push(`<option value="${escapeHtml(modelValue)}" ${selected}>${escapeHtml(displayText)}</option>`);
+      });
+    });
+  }
+  
+  return options.join('');
+}
+
 function assignEquipmentRoom(equipmentId, roomId) {
   // Initialize equipment metadata storage if not exists
   if (!STATE.equipmentMetadata) {
@@ -12006,6 +12235,89 @@ function updateEquipmentField(equipmentId, fieldName, newValue) {
   showToast({
     title: 'Field Updated',
     msg: `${fieldName} updated successfully`,
+    kind: 'success',
+    icon: ''
+  }, 2000);
+}
+
+async function updateEquipmentCategory(equipmentId, newCategory) {
+  // Initialize equipment metadata storage if not exists
+  if (!STATE.equipmentMetadata) {
+    STATE.equipmentMetadata = {};
+  }
+  
+  if (!STATE.equipmentMetadata[equipmentId]) {
+    STATE.equipmentMetadata[equipmentId] = {};
+  }
+  
+  // Store category in metadata
+  STATE.equipmentMetadata[equipmentId].category = newCategory;
+  
+  // When category changes to mini-split or dehumidifier, clear existing model
+  // since it needs to be selected from database
+  if (newCategory === 'mini-split' || newCategory === 'dehumidifier') {
+    STATE.equipmentMetadata[equipmentId].model = '';
+    STATE.equipmentMetadata[equipmentId].vendor = '';
+  }
+  
+  // Save metadata
+  await saveEquipmentMetadata();
+  
+  // Re-render to update model field (dropdown vs text input)
+  renderEquipmentOverview();
+  
+  showToast({
+    title: 'Category Updated',
+    msg: `Category changed to ${newCategory}`,
+    kind: 'success',
+    icon: ''
+  }, 2000);
+}
+
+async function updateEquipmentModel(equipmentId, modelValue) {
+  // Initialize equipment metadata storage if not exists
+  if (!STATE.equipmentMetadata) {
+    STATE.equipmentMetadata = {};
+  }
+  
+  if (!STATE.equipmentMetadata[equipmentId]) {
+    STATE.equipmentMetadata[equipmentId] = {};
+  }
+  
+  // Model value format: "Vendor|Model"
+  if (modelValue && modelValue.includes('|')) {
+    const [vendor, model] = modelValue.split('|');
+    STATE.equipmentMetadata[equipmentId].vendor = vendor;
+    STATE.equipmentMetadata[equipmentId].model = model;
+    
+    // Also update capacity/power from equipment KB if available
+    const equipmentKB = STATE.equipmentKB?.equipment || [];
+    const equipment = equipmentKB.find(eq => 
+      eq.vendor === vendor && eq.model === model
+    );
+    
+    if (equipment) {
+      if (equipment.capacity) {
+        STATE.equipmentMetadata[equipmentId].capacity = equipment.capacity;
+      }
+      if (equipment.power) {
+        STATE.equipmentMetadata[equipmentId].power = equipment.power;
+      }
+      if (equipment.control) {
+        STATE.equipmentMetadata[equipmentId].control = equipment.control;
+      }
+    }
+  }
+  
+  // Save metadata
+  await saveEquipmentMetadata();
+  
+  // Re-render to update vendor field and other details
+  renderEquipmentOverview();
+  
+  showToast({
+    title: 'Model Updated',
+    msg: `Model updated from database`,
     kind: 'success',
     icon: ''
   }, 2000);

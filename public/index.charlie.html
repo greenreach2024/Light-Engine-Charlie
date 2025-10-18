@@ -68,6 +68,10 @@
         <button type="button" class="sidebar-link" data-sidebar-link data-group="control-devices" data-target="equipment-overview">
           Equipment Overview
         </button>
+
+        <button type="button" class="sidebar-link" onclick="window.open('./views/room-mapper.html', '_blank')" style="cursor: pointer;">
+          🗺️ Room Mapper
+        </button>
       </div>
     </div>
 
@@ -112,6 +116,16 @@
                       <span class="automation-indicator__status" id="automationIndicatorStatus">Idle</span>
                     </div>
                     <div id="communicationStatus" class="tiny text-muted top-card__status-text">System Online</div>
+                    
+                    <!-- Farm Summary Button -->
+                    <button 
+                      type="button" 
+                      class="btn btn--primary" 
+                      onclick="window.open('/views/farm-summary.html', '_blank', 'width=1920,height=1080')"
+                      style="margin-top: 0.75rem; font-size: 0.875rem; padding: 0.5rem 1rem;"
+                      title="Open full-screen farm room summary">
+                      🌱 Farm Summary
+                    </button>
                   </div>
                 </div>
               </div>

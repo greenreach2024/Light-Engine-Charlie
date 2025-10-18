@@ -1,0 +1,9 @@
+{
+  "roomId": "default",
+  "name": "Main Grow Room",
+  "gridSize": 20,
+  "cellSize": 40,
+  "devices": [],
+  "zones": [],
+  "lastUpdated": null
+}

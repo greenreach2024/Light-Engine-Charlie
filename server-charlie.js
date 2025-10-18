@@ -20,6 +20,7 @@ import {
 } from './server/wizards/index.js';
 import buyerRouter from './server/buyer/routes.js';
 import lightsDB from './lib/lights-database.js';
+import ScheduleExecutor from './lib/schedule-executor.js';
 
 const app = express();
 
@@ -131,6 +132,12 @@ const SAMPLE_PLAN_DOCUMENT = {
 };
 const CHANNEL_SCALE_PATH = path.resolve('./config/channel-scale.json');
 const MS_PER_DAY = 24 * 60 * 60 * 1000;
+
+// Schedule Executor - Enable automated plan/schedule execution
+const SCHEDULE_EXECUTOR_ENABLED = String(process.env.SCHEDULE_EXECUTOR_ENABLED || 'true').toLowerCase() === 'true';
+const SCHEDULE_EXECUTOR_INTERVAL = Number(process.env.SCHEDULE_EXECUTOR_INTERVAL) || 60000; // Default: 1 minute
+let scheduleExecutor = null;
+
 const UI_DATA_RESOURCES = new Map([
   ['farm', 'farm.json'],
   ['groups', 'groups.json'],
@@ -6082,7 +6089,140 @@ app.post('/api/automation/trigger/:ruleId', async (req, res) => {
       triggerData: mockData
     });
   } catch (error) {
-    console.error('Error manually triggering rule:', error);
+    res.status(500).json({
+      success: false,
+      error: error.message
+    });
+  }
+});
+
+// ===== SCHEDULE EXECUTOR API ENDPOINTS =====
+
+// Get schedule executor status
+app.get('/api/schedule-executor/status', (req, res) => {
+  try {
+    if (!scheduleExecutor) {
+      return res.json({
+        success: true,
+        enabled: false,
+        message: 'Schedule executor is not initialized'
+      });
+    }
+    
+    const status = scheduleExecutor.getStatus();
+    res.json({
+      success: true,
+      ...status
+    });
+  } catch (error) {
+    console.error('[ScheduleExecutor API] Error getting status:', error);
+    res.status(500).json({
+      success: false,
+      error: error.message
+    });
+  }
+});
+
+// Start schedule executor
+app.post('/api/schedule-executor/start', (req, res) => {
+  try {
+    if (!scheduleExecutor) {
+      return res.status(400).json({
+        success: false,
+        error: 'Schedule executor is not initialized'
+      });
+    }
+    
+    scheduleExecutor.start();
+    res.json({
+      success: true,
+      message: 'Schedule executor started'
+    });
+  } catch (error) {
+    console.error('[ScheduleExecutor API] Error starting:', error);
+    res.status(500).json({
+      success: false,
+      error: error.message
+    });
+  }
+});
+
+// Stop schedule executor
+app.post('/api/schedule-executor/stop', (req, res) => {
+  try {
+    if (!scheduleExecutor) {
+      return res.status(400).json({
+        success: false,
+        error: 'Schedule executor is not initialized'
+      });
+    }
+    
+    scheduleExecutor.stop();
+    res.json({
+      success: true,
+      message: 'Schedule executor stopped'
+    });
+  } catch (error) {
+    console.error('[ScheduleExecutor API] Error stopping:', error);
+    res.status(500).json({
+      success: false,
+      error: error.message
+    });
+  }
+});
+
+// Manually trigger executor tick (execute immediately)
+app.post('/api/schedule-executor/tick', async (req, res) => {
+  try {
+    if (!scheduleExecutor) {
+      return res.status(400).json({
+        success: false,
+        error: 'Schedule executor is not initialized'
+      });
+    }
+    
+    console.log('[ScheduleExecutor API] Manual tick requested');
+    const results = await scheduleExecutor.tick();
+    
+    res.json({
+      success: true,
+      message: 'Schedule executor tick completed',
+      results
+    });
+  } catch (error) {
+    console.error('[ScheduleExecutor API] Error executing tick:', error);
+    res.status(500).json({
+      success: false,
+      error: error.message
+    });
+  }
+});
+
+// Update device registry
+app.post('/api/schedule-executor/device-registry', (req, res) => {
+  try {
+    if (!scheduleExecutor) {
+      return res.status(400).json({
+        success: false,
+        error: 'Schedule executor is not initialized'
+      });
+    }
+    
+    const { registry } = req.body;
+    if (!registry || typeof registry !== 'object') {
+      return res.status(400).json({
+        success: false,
+        error: 'registry must be an object mapping light IDs to controller device IDs'
+      });
+    }
+    
+    scheduleExecutor.updateDeviceRegistry(registry);
+    res.json({
+      success: true,
+      message: 'Device registry updated'
+    });
+  } catch (error) {
+    console.error('[ScheduleExecutor API] Error updating device registry:', error);
     res.status(500).json({
       success: false,
       error: error.message
@@ -10677,6 +10817,48 @@ async function startServer() {
   server.on('listening', () => {
     console.log(`[charlie] running http://127.0.0.1:${PORT} → ${getController()}`);
     try { setupWeatherPolling(); } catch {}
+    
+    // Initialize Schedule Executor for automated plan/schedule application
+    if (SCHEDULE_EXECUTOR_ENABLED) {
+      try {
+        // Load device registry
+        const registryPath = path.join(PUBLIC_DIR, 'data', 'device-registry.json');
+        let deviceRegistry = {
+          'F00001': 2,
+          'F00002': 3,
+          'F00003': 4,
+          'F00004': 6,
+          'F00005': 5
+        };
+        
+        try {
+          const registryData = JSON.parse(fs.readFileSync(registryPath, 'utf8'));
+          if (registryData.devices) {
+            deviceRegistry = Object.entries(registryData.devices).reduce((acc, [id, device]) => {
+              acc[id] = device.controllerId;
+              return acc;
+            }, {});
+          }
+        } catch (error) {
+          console.warn('[ScheduleExecutor] Failed to load device-registry.json, using defaults:', error.message);
+        }
+        
+        scheduleExecutor = new ScheduleExecutor({
+          interval: SCHEDULE_EXECUTOR_INTERVAL,
+          baseUrl: `http://127.0.0.1:${PORT}`,
+          grow3Target: getController(),
+          enabled: true,
+          deviceRegistry
+        });
+        
+        scheduleExecutor.start();
+        console.log('[ScheduleExecutor] Started successfully');
+      } catch (error) {
+        console.error('[ScheduleExecutor] Failed to start:', error);
+      }
+    } else {
+      console.log('[ScheduleExecutor] Disabled (set SCHEDULE_EXECUTOR_ENABLED=true to enable)');
+    }
   });
 
   server.on('error', (error) => {

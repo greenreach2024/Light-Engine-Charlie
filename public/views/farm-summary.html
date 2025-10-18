@@ -1,0 +1,977 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Farm Room Summary - Light Engine Charlie</title>
+  <style>
+    * {
+      margin: 0;
+      padding: 0;
+      box-sizing: border-box;
+    }
+
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, sans-serif;
+      background: linear-gradient(135deg, #1a1a2e 0%, #16213e 100%);
+      color: #e4e4e7;
+      overflow: hidden;
+      height: 100vh;
+      display: flex;
+      flex-direction: column;
+    }
+
+    /* Header */
+    .header {
+      background: rgba(0, 0, 0, 0.3);
+      padding: 1.5rem 2rem;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      border-bottom: 2px solid #3b82f6;
+      backdrop-filter: blur(10px);
+    }
+
+    .header h1 {
+      font-size: 2rem;
+      font-weight: 700;
+      color: #60a5fa;
+      letter-spacing: -0.5px;
+    }
+
+    .header .timestamp {
+      font-size: 1.1rem;
+      color: #94a3b8;
+      font-weight: 500;
+    }
+
+    .close-btn {
+      background: rgba(239, 68, 68, 0.2);
+      border: 2px solid #ef4444;
+      color: #fca5a5;
+      padding: 0.75rem 1.5rem;
+      font-size: 1rem;
+      font-weight: 600;
+      border-radius: 8px;
+      cursor: pointer;
+      transition: all 0.3s ease;
+    }
+
+    .close-btn:hover {
+      background: rgba(239, 68, 68, 0.4);
+      transform: scale(1.05);
+    }
+
+    /* Main Grid */
+    .container {
+      flex: 1;
+      padding: 2rem;
+      display: grid;
+      grid-template-columns: 2fr 1fr;
+      grid-template-rows: 1fr 1fr;
+      gap: 1.5rem;
+      overflow: auto;
+    }
+
+    /* Card Styles */
+    .card {
+      background: rgba(30, 41, 59, 0.6);
+      border-radius: 16px;
+      padding: 2rem;
+      border: 1px solid rgba(59, 130, 246, 0.2);
+      backdrop-filter: blur(10px);
+      box-shadow: 0 8px 32px rgba(0, 0, 0, 0.3);
+      display: flex;
+      flex-direction: column;
+      position: relative;
+      overflow: hidden;
+    }
+
+    /* Holographic effect for schedule card */
+    .schedule-card::before {
+      content: '';
+      position: absolute;
+      top: -50%;
+      left: -50%;
+      width: 200%;
+      height: 200%;
+      background: linear-gradient(
+        45deg,
+        transparent 30%,
+        rgba(59, 130, 246, 0.1) 40%,
+        rgba(139, 92, 246, 0.1) 50%,
+        rgba(236, 72, 153, 0.1) 60%,
+        transparent 70%
+      );
+      animation: holographic 8s linear infinite;
+      pointer-events: none;
+    }
+
+    @keyframes holographic {
+      0% { transform: translate(-50%, -50%) rotate(0deg); }
+      100% { transform: translate(-50%, -50%) rotate(360deg); }
+    }
+
+    .schedule-card::after {
+      content: '';
+      position: absolute;
+      inset: 0;
+      border-radius: 16px;
+      padding: 2px;
+      background: linear-gradient(
+        90deg,
+        rgba(59, 130, 246, 0.3),
+        rgba(139, 92, 246, 0.3),
+        rgba(236, 72, 153, 0.3),
+        rgba(59, 130, 246, 0.3)
+      );
+      -webkit-mask: linear-gradient(#fff 0 0) content-box, linear-gradient(#fff 0 0);
+      -webkit-mask-composite: xor;
+      mask-composite: exclude;
+      animation: borderShift 4s linear infinite;
+      pointer-events: none;
+    }
+
+    @keyframes borderShift {
+      0% { background-position: 0% 50%; }
+      100% { background-position: 200% 50%; }
+    }
+
+    .card h2 {
+      font-size: 1.5rem;
+      margin-bottom: 1.5rem;
+      color: #60a5fa;
+      font-weight: 600;
+      border-bottom: 2px solid rgba(59, 130, 246, 0.3);
+      padding-bottom: 0.75rem;
+    }
+
+    /* Environmental Grid */
+    .env-grid {
+      display: grid;
+      grid-template-columns: repeat(3, 1fr);
+      gap: 1.5rem;
+      flex: 1;
+    }
+
+    .env-metric {
+      background: rgba(15, 23, 42, 0.6);
+      border-radius: 12px;
+      padding: 1.5rem;
+      text-align: center;
+      border: 1px solid rgba(148, 163, 184, 0.2);
+      transition: transform 0.2s ease;
+    }
+
+    .env-metric:hover {
+      transform: translateY(-4px);
+      border-color: rgba(59, 130, 246, 0.5);
+    }
+
+    .env-metric .label {
+      font-size: 0.875rem;
+      color: #94a3b8;
+      text-transform: uppercase;
+      letter-spacing: 1px;
+      margin-bottom: 0.5rem;
+      font-weight: 600;
+    }
+
+    .env-metric .value {
+      font-size: 3rem;
+      font-weight: 700;
+      color: #fff;
+      line-height: 1;
+      margin-bottom: 0.25rem;
+    }
+
+    .env-metric .unit {
+      font-size: 1rem;
+      color: #64748b;
+      font-weight: 500;
+    }
+
+    .env-metric .status {
+      margin-top: 0.5rem;
+      padding: 0.25rem 0.75rem;
+      border-radius: 12px;
+      font-size: 0.75rem;
+      font-weight: 600;
+      display: inline-block;
+    }
+
+    .status.optimal {
+      background: rgba(34, 197, 94, 0.2);
+      color: #86efac;
+      border: 1px solid #22c55e;
+    }
+
+    .status.warning {
+      background: rgba(251, 146, 60, 0.2);
+      color: #fdba74;
+      border: 1px solid #fb923c;
+    }
+
+    .status.critical {
+      background: rgba(239, 68, 68, 0.2);
+      color: #fca5a5;
+      border: 1px solid #ef4444;
+    }
+
+    /* Schedule Card */
+    .schedule-card {
+      grid-row: span 2;
+    }
+
+    .schedule-info {
+      display: flex;
+      flex-direction: column;
+      gap: 1.5rem;
+      flex: 1;
+    }
+
+    .info-block {
+      background: rgba(15, 23, 42, 0.6);
+      border-radius: 12px;
+      padding: 1.5rem;
+      border-left: 4px solid #3b82f6;
+    }
+
+    .info-block h3 {
+      font-size: 1.125rem;
+      color: #60a5fa;
+      margin-bottom: 1rem;
+      font-weight: 600;
+    }
+
+    .info-row {
+      display: flex;
+      justify-content: space-between;
+      margin-bottom: 0.75rem;
+      font-size: 1rem;
+    }
+
+    .info-row .key {
+      color: #94a3b8;
+      font-weight: 500;
+    }
+
+    .info-row .val {
+      color: #e4e4e7;
+      font-weight: 600;
+    }
+
+    .automation-status {
+      display: flex;
+      align-items: center;
+      gap: 0.75rem;
+      padding: 1rem;
+      background: rgba(15, 23, 42, 0.8);
+      border-radius: 8px;
+      margin-top: 1rem;
+    }
+
+    .status-indicator {
+      width: 16px;
+      height: 16px;
+      border-radius: 50%;
+      animation: pulse 2s ease-in-out infinite;
+    }
+
+    .status-indicator.running {
+      background: #22c55e;
+      box-shadow: 0 0 20px rgba(34, 197, 94, 0.6);
+    }
+
+    .status-indicator.stopped {
+      background: #ef4444;
+      box-shadow: 0 0 20px rgba(239, 68, 68, 0.6);
+    }
+
+    @keyframes pulse {
+      0%, 100% { opacity: 1; }
+      50% { opacity: 0.5; }
+    }
+
+    /* Trending Chart */
+    .chart-container {
+      flex: 1;
+      display: flex;
+      flex-direction: column;
+      gap: 1rem;
+      min-height: 0;
+    }
+
+    .chart-selector {
+      display: flex;
+      gap: 0.5rem;
+      flex-wrap: wrap;
+    }
+
+    .chart-selector button {
+      background: rgba(15, 23, 42, 0.6);
+      border: 1px solid rgba(148, 163, 184, 0.3);
+      color: #94a3b8;
+      padding: 0.5rem 1rem;
+      border-radius: 8px;
+      cursor: pointer;
+      font-size: 0.875rem;
+      font-weight: 600;
+      transition: all 0.2s ease;
+    }
+
+    .chart-selector button.active {
+      background: rgba(59, 130, 246, 0.3);
+      border-color: #3b82f6;
+      color: #60a5fa;
+    }
+
+    .chart-selector button:hover {
+      border-color: #3b82f6;
+      transform: translateY(-2px);
+    }
+
+    .chart {
+      flex: 1;
+      background: rgba(15, 23, 42, 0.6);
+      border-radius: 12px;
+      padding: 1.5rem;
+      position: relative;
+      min-height: 200px;
+    }
+
+    .chart canvas {
+      width: 100%;
+      height: 100%;
+    }
+
+    /* Loading State */
+    .loading {
+      display: flex;
+      justify-content: center;
+      align-items: center;
+      color: #64748b;
+      font-size: 1.125rem;
+      min-height: 100px;
+    }
+
+    .spinner {
+      border: 3px solid rgba(59, 130, 246, 0.3);
+      border-top: 3px solid #3b82f6;
+      border-radius: 50%;
+      width: 40px;
+      height: 40px;
+      animation: spin 1s linear infinite;
+      margin-right: 1rem;
+    }
+
+    @keyframes spin {
+      0% { transform: rotate(0deg); }
+      100% { transform: rotate(360deg); }
+    }
+
+    /* AI Features */
+    .ai-features {
+      display: flex;
+      gap: 0.75rem;
+      flex-wrap: wrap;
+      margin-top: 1rem;
+    }
+
+    .ai-badge {
+      display: flex;
+      align-items: center;
+      gap: 0.5rem;
+      background: rgba(15, 23, 42, 0.8);
+      border: 1px solid rgba(59, 130, 246, 0.3);
+      border-radius: 8px;
+      padding: 0.5rem 0.75rem;
+      font-size: 0.875rem;
+      transition: all 0.3s ease;
+    }
+
+    .ai-badge:hover {
+      border-color: rgba(59, 130, 246, 0.6);
+      transform: translateY(-2px);
+      box-shadow: 0 4px 12px rgba(59, 130, 246, 0.2);
+    }
+
+    .ai-badge svg {
+      width: 18px;
+      height: 18px;
+      flex-shrink: 0;
+    }
+
+    .ai-badge.active {
+      border-color: rgba(34, 197, 94, 0.5);
+      background: rgba(34, 197, 94, 0.1);
+    }
+
+    .ai-badge.inactive {
+      border-color: rgba(100, 116, 139, 0.3);
+      opacity: 0.7;
+    }
+
+    .ai-badge-label {
+      font-weight: 600;
+      color: #e4e4e7;
+    }
+
+    .ai-badge-status {
+      font-size: 0.75rem;
+      padding: 0.125rem 0.5rem;
+      border-radius: 4px;
+      font-weight: 600;
+    }
+
+    .ai-badge-status.on {
+      background: rgba(34, 197, 94, 0.2);
+      color: #86efac;
+    }
+
+    .ai-badge-status.off {
+      background: rgba(100, 116, 139, 0.2);
+      color: #94a3b8;
+    }
+
+    .ai-badge-status.always-on {
+      background: rgba(59, 130, 246, 0.2);
+      color: #60a5fa;
+    }
+
+    .ai-badge-status.dev {
+      background: rgba(251, 146, 60, 0.2);
+      color: #fdba74;
+    }
+
+    /* No Data State */
+    .no-data {
+      text-align: center;
+      color: #64748b;
+      padding: 2rem;
+      font-size: 1.125rem;
+    }
+
+    /* Responsive */
+    @media (max-width: 1400px) {
+      .container {
+        grid-template-columns: 1fr;
+        grid-template-rows: auto;
+      }
+
+      .schedule-card {
+        grid-row: auto;
+      }
+
+      .env-grid {
+        grid-template-columns: repeat(2, 1fr);
+      }
+    }
+
+    @media (max-width: 768px) {
+      .env-grid {
+        grid-template-columns: 1fr;
+      }
+
+      .header h1 {
+        font-size: 1.5rem;
+      }
+
+      .env-metric .value {
+        font-size: 2rem;
+      }
+    }
+  </style>
+</head>
+<body>
+  <div class="header">
+    <div>
+      <h1>🌱 Farm Room Summary</h1>
+      <div class="timestamp" id="timestamp">Loading...</div>
+    </div>
+    <button class="close-btn" onclick="closeFullScreen()">
+      ✕ Close (ESC)
+    </button>
+  </div>
+
+  <div class="container">
+    <!-- Environmental Conditions -->
+    <div class="card">
+      <h2>📊 Environmental Conditions</h2>
+      <div class="env-grid" id="envGrid">
+        <div class="loading">
+          <div class="spinner"></div>
+          Loading environmental data...
+        </div>
+      </div>
+    </div>
+
+    <!-- Schedule & Automation -->
+    <div class="card schedule-card">
+      <h2>⚙️ Schedule & Automation</h2>
+      <div class="schedule-info" id="scheduleInfo">
+        <div class="loading">
+          <div class="spinner"></div>
+          Loading schedule data...
+        </div>
+      </div>
+    </div>
+
+    <!-- Trending Data -->
+    <div class="card">
+      <h2>📈 Environmental Trends (2 Hours)</h2>
+      <div class="chart-container">
+        <div class="chart-selector">
+          <button class="active" onclick="selectMetric('temperature')">Temperature</button>
+          <button onclick="selectMetric('humidity')">Humidity</button>
+          <button onclick="selectMetric('co2')">CO₂</button>
+          <button onclick="selectMetric('vpd')">VPD</button>
+          <button onclick="selectMetric('ppfd')">PPFD</button>
+        </div>
+        <div class="chart" id="chartContainer">
+          <canvas id="trendChart"></canvas>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    // State
+    let currentMetric = 'temperature';
+    let envHistory = [];
+    let updateInterval = null;
+    let chartContext = null;
+
+    // Initialize
+    document.addEventListener('DOMContentLoaded', () => {
+      initChart();
+      loadData();
+      updateTimestamp();
+      
+      // Refresh every 30 seconds
+      updateInterval = setInterval(loadData, 30000);
+      setInterval(updateTimestamp, 1000);
+
+      // ESC key to close
+      document.addEventListener('keydown', (e) => {
+        if (e.key === 'Escape') closeFullScreen();
+      });
+    });
+
+    function closeFullScreen() {
+      window.close();
+      // Fallback if window.close() doesn't work
+      if (!window.closed) {
+        window.history.back();
+      }
+    }
+
+    function updateTimestamp() {
+      const now = new Date();
+      const formatted = now.toLocaleString('en-US', {
+        weekday: 'long',
+        year: 'numeric',
+        month: 'long',
+        day: 'numeric',
+        hour: '2-digit',
+        minute: '2-digit',
+        second: '2-digit'
+      });
+      document.getElementById('timestamp').textContent = formatted;
+    }
+
+    async function loadData() {
+      await Promise.all([
+        loadEnvironmental(),
+        loadSchedule(),
+        loadTrending()
+      ]);
+    }
+
+    async function loadEnvironmental() {
+      try {
+        const response = await fetch('/env');
+        const data = await response.json();
+        
+        if (data && data.zones && data.zones.length > 0) {
+          const zone = data.zones[0]; // Use first zone
+          const latest = {
+            temperature: zone.sensors.tempC?.current || null,
+            humidity: zone.sensors.rh?.current || null,
+            co2: zone.sensors.co2?.current || null,
+            vpd: zone.sensors.vpd?.current || null,
+            ppfd: zone.sensors.ppfd?.current || null,
+            dli: zone.sensors.dli?.current || null
+          };
+          renderEnvironmental(latest);
+        } else {
+          document.getElementById('envGrid').innerHTML = '<div class="no-data">No environmental data available</div>';
+        }
+      } catch (error) {
+        console.error('Failed to load environmental data:', error);
+        document.getElementById('envGrid').innerHTML = '<div class="no-data">Failed to load environmental data</div>';
+      }
+    }
+
+    function renderEnvironmental(data) {
+      const metrics = [
+        { key: 'temperature', label: 'Temperature', unit: '°F', format: (v) => v?.toFixed(1) || '--' },
+        { key: 'humidity', label: 'Humidity', unit: '%', format: (v) => v?.toFixed(0) || '--' },
+        { key: 'co2', label: 'CO₂', unit: 'ppm', format: (v) => v?.toFixed(0) || '--' },
+        { key: 'vpd', label: 'VPD', unit: 'kPa', format: (v) => v?.toFixed(2) || '--' },
+        { key: 'ppfd', label: 'PPFD', unit: 'μmol/m²/s', format: (v) => v?.toFixed(0) || '--' },
+        { key: 'dli', label: 'DLI', unit: 'mol/m²/d', format: (v) => v?.toFixed(1) || '--' }
+      ];
+
+      const html = metrics.map(m => {
+        const value = data[m.key];
+        const status = getStatus(m.key, value);
+        return `
+          <div class="env-metric">
+            <div class="label">${m.label}</div>
+            <div class="value">${m.format(value)}</div>
+            <div class="unit">${m.unit}</div>
+            <div class="status ${status.class}">${status.text}</div>
+          </div>
+        `;
+      }).join('');
+
+      document.getElementById('envGrid').innerHTML = html;
+    }
+
+    function getStatus(metric, value) {
+      if (value == null) return { class: 'warning', text: 'No Data' };
+
+      const ranges = {
+        temperature: { optimal: [68, 78], warning: [65, 82] },
+        humidity: { optimal: [50, 70], warning: [40, 80] },
+        co2: { optimal: [800, 1200], warning: [600, 1500] },
+        vpd: { optimal: [0.8, 1.2], warning: [0.6, 1.5] },
+        ppfd: { optimal: [400, 800], warning: [200, 1000] }
+      };
+
+      const range = ranges[metric];
+      if (!range) return { class: 'optimal', text: 'OK' };
+
+      if (value >= range.optimal[0] && value <= range.optimal[1]) {
+        return { class: 'optimal', text: 'Optimal' };
+      } else if (value >= range.warning[0] && value <= range.warning[1]) {
+        return { class: 'warning', text: 'Acceptable' };
+      } else {
+        return { class: 'critical', text: 'Alert' };
+      }
+    }
+
+    async function loadSchedule() {
+      try {
+        const [statusRes, groupsRes, plansRes, schedulesRes] = await Promise.all([
+          fetch('/api/schedule-executor/status'),
+          fetch('/data/groups.json'),
+          fetch('/data/plans.json'),
+          fetch('/data/schedules.json')
+        ]);
+
+        const status = await statusRes.json();
+        const groups = await groupsRes.json();
+        const plans = await plansRes.json();
+        const schedules = await schedulesRes.json();
+
+        renderSchedule(status, groups, plans, schedules);
+      } catch (error) {
+        console.error('Failed to load schedule data:', error);
+        document.getElementById('scheduleInfo').innerHTML = '<div class="no-data">Failed to load schedule data</div>';
+      }
+    }
+
+    function renderSchedule(status, groups, plans, schedules) {
+      const activeGroups = groups.filter(g => g.enabled && g.planId && g.scheduleId);
+      const activeGroup = activeGroups[0]; // Show first active group
+
+      let html = '';
+
+      // Automation Status
+      html += `
+        <div class="info-block">
+          <h3>Automation Status</h3>
+          <div class="automation-status">
+            <div class="status-indicator ${status.running ? 'running' : 'stopped'}"></div>
+            <div>
+              <div style="font-weight: 600; color: ${status.running ? '#86efac' : '#fca5a5'};">
+                ${status.running ? 'Running' : 'Stopped'}
+              </div>
+              <div style="font-size: 0.875rem; color: #64748b;">
+                ${status.executionCount} executions, ${status.errorCount} errors
+              </div>
+            </div>
+          </div>
+          <div class="info-row" style="margin-top: 1rem;">
+            <span class="key">Active Groups:</span>
+            <span class="val">${activeGroups.length}</span>
+          </div>
+          <div class="info-row">
+            <span class="key">Update Interval:</span>
+            <span class="val">${status.interval / 1000}s</span>
+          </div>
+        </div>
+      `;
+
+      if (activeGroup) {
+        const plan = plans.find(p => p.id === activeGroup.planId);
+        const schedule = schedules.find(s => s.id === activeGroup.scheduleId);
+
+        html += `
+          <div class="info-block">
+            <h3>Current Group: ${activeGroup.name}</h3>
+            <div class="info-row">
+              <span class="key">Lights:</span>
+              <span class="val">${activeGroup.lightIds?.length || 0} fixtures</span>
+            </div>
+            <div class="info-row">
+              <span class="key">Seed Date:</span>
+              <span class="val">${activeGroup.seedDate || 'Not set'}</span>
+            </div>
+          </div>
+        `;
+
+        if (plan) {
+          html += `
+            <div class="info-block">
+              <h3>📋 Plan: ${plan.name}</h3>
+              <div class="info-row">
+                <span class="key">Recipe:</span>
+                <span class="val">${plan.env?.recipe || 'Default'}</span>
+              </div>
+              <div class="info-row">
+                <span class="key">Duration:</span>
+                <span class="val">${plan.env?.days?.length || 0} days</span>
+              </div>
+            </div>
+          `;
+        }
+
+        if (schedule) {
+          html += `
+            <div class="info-block">
+              <h3>⏰ Schedule: ${schedule.name}</h3>
+              <div class="info-row">
+                <span class="key">Photoperiod:</span>
+                <span class="val">${schedule.cycles?.[0]?.on || '--'} to ${schedule.cycles?.[0]?.off || '--'}</span>
+              </div>
+              <div class="info-row">
+                <span class="key">Type:</span>
+                <span class="val">${schedule.type || 'Standard'}</span>
+              </div>
+            </div>
+          `;
+        }
+      } else {
+        html += `
+          <div class="no-data">
+            No active groups with schedules configured
+          </div>
+        `;
+      }
+
+      // AI Features
+      html += `
+        <div class="info-block">
+          <h3>🤖 AI Features</h3>
+          <div class="ai-features">
+            <div class="ai-badge active">
+              <svg width="18" height="18" viewBox="0 0 24 24" fill="none">
+                <path d="M3 12L6 8L9 14L12 6L15 12L18 4L21 12" stroke="url(#spectrumGradient)" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"/>
+                <defs>
+                  <linearGradient id="spectrumGradient" x1="0%" y1="0%" x2="100%" y2="0%">
+                    <stop offset="0%" style="stop-color:#EF4444"/>
+                    <stop offset="33%" style="stop-color:#3B82F6"/>
+                    <stop offset="66%" style="stop-color:#E0F2FE"/>
+                    <stop offset="100%" style="stop-color:#FEF3C7"/>
+                  </linearGradient>
+                </defs>
+              </svg>
+              <span class="ai-badge-label">SpectraSync®</span>
+              <span class="ai-badge-status on">ON</span>
+            </div>
+
+            <div class="ai-badge inactive">
+              <svg width="18" height="18" viewBox="0 0 24 24" fill="none">
+                <circle cx="12" cy="12" r="10" stroke="currentColor" stroke-width="1.5"/>
+                <path d="M8 12L10 14L12 10L14 14L16 12" fill="currentColor" opacity="0.3"/>
+                <circle cx="12" cy="12" r="3" fill="currentColor" opacity="0.6"/>
+              </svg>
+              <span class="ai-badge-label">E.V.I.E</span>
+              <span class="ai-badge-status off">OFF</span>
+            </div>
+
+            <div class="ai-badge active">
+              <svg width="18" height="18" viewBox="0 0 24 24" fill="none">
+                <polygon points="12,2 22,20 2,20" stroke="currentColor" stroke-width="1.5" fill="none"/>
+                <path d="M12 8L12 14" stroke="currentColor" stroke-width="1.5"/>
+                <circle cx="12" cy="16" r="1" fill="currentColor"/>
+                <circle cx="8" cy="18" r="1" fill="currentColor" opacity="0.3"/>
+                <circle cx="16" cy="18" r="1" fill="currentColor" opacity="0.3"/>
+              </svg>
+              <span class="ai-badge-label">IA Training</span>
+              <span class="ai-badge-status always-on">ALWAYS ON</span>
+            </div>
+
+            <div class="ai-badge active">
+              <svg width="18" height="18" viewBox="0 0 24 24" fill="none">
+                <path d="M12 2L15 9L22 9L17 14L19 22L12 18L5 22L7 14L2 9L9 9L12 2Z" stroke="currentColor" stroke-width="1.5" fill="none"/>
+                <path d="M12 8L12 14" stroke="currentColor" stroke-width="1.5"/>
+              </svg>
+              <span class="ai-badge-label">IA Assist</span>
+              <span class="ai-badge-status always-on">ALWAYS ON</span>
+            </div>
+
+            <div class="ai-badge inactive">
+              <svg width="18" height="18" viewBox="0 0 24 24" fill="none">
+                <circle cx="12" cy="12" r="10" stroke="currentColor" stroke-width="1.5"/>
+                <path d="M8 12L10 10L12 14L16 8" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+                <circle cx="12" cy="12" r="1" fill="currentColor"/>
+              </svg>
+              <span class="ai-badge-label">E.I²</span>
+              <span class="ai-badge-status dev">DEV</span>
+            </div>
+          </div>
+        </div>
+      `;
+
+      document.getElementById('scheduleInfo').innerHTML = html;
+    }
+
+    async function loadTrending() {
+      try {
+        const response = await fetch('/env');
+        const data = await response.json();
+        
+        if (data && data.zones && data.zones.length > 0) {
+          const zone = data.zones[0];
+          const sensors = zone.sensors;
+          
+          // Build history from sensor arrays
+          const historyLength = sensors.tempC?.history?.length || 0;
+          if (historyLength > 0) {
+            envHistory = [];
+            const now = Date.now();
+            const interval = 5 * 60 * 1000; // 5 minutes between readings
+            
+            for (let i = 0; i < historyLength; i++) {
+              envHistory.push({
+                timestamp: new Date(now - (historyLength - i) * interval).toISOString(),
+                temperature: sensors.tempC?.history?.[i] || null,
+                humidity: sensors.rh?.history?.[i] || null,
+                co2: sensors.co2?.history?.[i] || null,
+                vpd: sensors.vpd?.history?.[i] || null,
+                ppfd: sensors.ppfd?.history?.[i] || null
+              });
+            }
+          }
+          
+          updateChart();
+        }
+      } catch (error) {
+        console.error('Failed to load trending data:', error);
+      }
+    }
+
+    function selectMetric(metric) {
+      currentMetric = metric;
+      
+      // Update button states
+      document.querySelectorAll('.chart-selector button').forEach(btn => {
+        btn.classList.remove('active');
+      });
+      event.target.classList.add('active');
+      
+      updateChart();
+    }
+
+    function initChart() {
+      const canvas = document.getElementById('trendChart');
+      chartContext = canvas.getContext('2d');
+    }
+
+    function updateChart() {
+      if (!chartContext || envHistory.length === 0) {
+        document.getElementById('chartContainer').innerHTML = '<div class="no-data">No trending data available</div>';
+        return;
+      }
+
+      const canvas = chartContext.canvas;
+      const width = canvas.width = canvas.offsetWidth * 2; // Retina
+      const height = canvas.height = canvas.offsetHeight * 2;
+      chartContext.scale(2, 2);
+
+      const w = canvas.offsetWidth;
+      const h = canvas.offsetHeight;
+      const padding = 40;
+
+      // Clear
+      chartContext.clearRect(0, 0, w, h);
+
+      // Extract data
+      const data = envHistory.map(d => d[currentMetric]).filter(v => v != null);
+      if (data.length === 0) return;
+
+      const max = Math.max(...data);
+      const min = Math.min(...data);
+      const range = max - min || 1;
+
+      // Draw grid
+      chartContext.strokeStyle = 'rgba(148, 163, 184, 0.1)';
+      chartContext.lineWidth = 1;
+      for (let i = 0; i <= 4; i++) {
+        const y = padding + (h - 2 * padding) * i / 4;
+        chartContext.beginPath();
+        chartContext.moveTo(padding, y);
+        chartContext.lineTo(w - padding, y);
+        chartContext.stroke();
+      }
+
+      // Draw line
+      chartContext.strokeStyle = '#3b82f6';
+      chartContext.lineWidth = 3;
+      chartContext.beginPath();
+
+      data.forEach((value, i) => {
+        const x = padding + (w - 2 * padding) * i / (data.length - 1);
+        const y = h - padding - ((value - min) / range) * (h - 2 * padding);
+        
+        if (i === 0) {
+          chartContext.moveTo(x, y);
+        } else {
+          chartContext.lineTo(x, y);
+        }
+      });
+
+      chartContext.stroke();
+
+      // Draw labels
+      chartContext.fillStyle = '#94a3b8';
+      chartContext.font = '12px sans-serif';
+      chartContext.textAlign = 'right';
+      
+      // Y-axis labels
+      for (let i = 0; i <= 4; i++) {
+        const value = max - (range * i / 4);
+        const y = padding + (h - 2 * padding) * i / 4;
+        chartContext.fillText(value.toFixed(1), padding - 10, y + 4);
+      }
+
+      // X-axis labels (time)
+      chartContext.textAlign = 'center';
+      const firstTime = new Date(envHistory[0].timestamp);
+      const lastTime = new Date(envHistory[envHistory.length - 1].timestamp);
+      
+      chartContext.fillText(firstTime.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' }), padding, h - 10);
+      chartContext.fillText(lastTime.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' }), w - padding, h - 10);
+    }
+
+    // Cleanup
+    window.addEventListener('beforeunload', () => {
+      if (updateInterval) clearInterval(updateInterval);
+    });
+  </script>
+</body>
+</html>

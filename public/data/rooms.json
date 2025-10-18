@@ -5,10 +5,12 @@
       "name": "GreenReach",
       "location": "",
       "hardwareCats": [
-        "dehumidifier"
+        "dehumidifier",
+        "fans"
       ],
       "hardwareOrder": [
-        "dehumidifier"
+        "dehumidifier",
+        "fans"
       ],
       "layout": {
         "type": "",
@@ -56,14 +58,20 @@
               "model": "Quest Dual 155",
               "capacity": "155 pints/day",
               "control": "WiFi",
-              "count": 6
+              "count": 1
             }
           ],
           "wifi": false,
           "wired": false,
-          "count": 6,
+          "count": 1,
           "manufacturer": "Quest",
           "model": "Quest Dual 155"
+        },
+        "fans": {
+          "count": 2,
+          "manufacturer": "",
+          "wifi": false,
+          "wired": false
         }
       },
       "_categoryProgress": {
@@ -75,7 +83,7 @@
               "model": "Quest Dual 155",
               "capacity": "155 pints/day",
               "control": "WiFi",
-              "count": 6
+              "count": 1
             }
           ]
         }
@@ -89,7 +97,7 @@
               "model": "Quest Dual 155",
               "capacity": "155 pints/day",
               "control": "WiFi",
-              "count": 6
+              "count": 1
             }
           ]
         }
