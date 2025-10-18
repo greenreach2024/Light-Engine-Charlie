@@ -1,6 +1,29 @@
 {
   "plans": [
     {
+      "id": "DEMO-Lettuce-28Day",
+      "name": "DEMO: Lettuce 28-Day Grow Cycle",
+      "kind": "cropPlan",
+      "crop": "Lettuce",
+      "photoperiod": "18/6",
+      "ramp": {
+        "sunrise": 15,
+        "sunset": 15
+      },
+      "days": [
+        {"day": 1, "stage": "Germination", "cw": 30, "ww": 30, "bl": 50, "rd": 20, "ppfd": 150, "dli": 9.7, "tempC": 20},
+        {"day": 3, "stage": "Germination", "cw": 30, "ww": 30, "bl": 50, "rd": 20, "ppfd": 180, "dli": 11.7, "tempC": 20},
+        {"day": 5, "stage": "Seedling", "cw": 35, "ww": 30, "bl": 45, "rd": 25, "ppfd": 220, "dli": 14.3, "tempC": 21},
+        {"day": 7, "stage": "Seedling", "cw": 35, "ww": 30, "bl": 45, "rd": 25, "ppfd": 250, "dli": 16.2, "tempC": 21},
+        {"day": 10, "stage": "Vegetative", "cw": 40, "ww": 30, "bl": 40, "rd": 30, "ppfd": 300, "dli": 19.4, "tempC": 22},
+        {"day": 14, "stage": "Vegetative", "cw": 40, "ww": 30, "bl": 35, "rd": 35, "ppfd": 350, "dli": 22.7, "tempC": 22},
+        {"day": 18, "stage": "Growth", "cw": 40, "ww": 35, "bl": 30, "rd": 40, "ppfd": 380, "dli": 24.6, "tempC": 22},
+        {"day": 21, "stage": "Growth", "cw": 40, "ww": 35, "bl": 25, "rd": 45, "ppfd": 400, "dli": 25.9, "tempC": 22},
+        {"day": 25, "stage": "Finishing", "cw": 45, "ww": 35, "bl": 20, "rd": 50, "ppfd": 420, "dli": 27.2, "tempC": 21},
+        {"day": 28, "stage": "Harvest Ready", "cw": 45, "ww": 40, "bl": 15, "rd": 55, "ppfd": 400, "dli": 25.9, "tempC": 20}
+      ]
+    },
+    {
       "id": "GR-Propagation-BL55",
       "photoperiod": "16/8",
       "ramp": {

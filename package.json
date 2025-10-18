@@ -9,7 +9,8 @@
     "start": "node server-charlie.js",
     "start:local": "PORT=8091 node server-charlie.js",
     "smoke": "node scripts/smoke.js",
-    "test": "node --test --test-timeout=10000 \"tests/**/*.mjs\""
+    "test": "node --test --test-timeout=10000 \"tests/**/*.mjs\"",
+    "mock:heatmap": "node scripts/generate-mock-heatmap-data.cjs"
   },
   "dependencies": {
     "express": "^4.19.2",

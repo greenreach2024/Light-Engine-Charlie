@@ -1,0 +1,1269 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Environmental Heat Map - Light Engine Charlie</title>
+  <link rel="stylesheet" href="../styles.charlie.css">
+  <style>
+    * {
+      margin: 0;
+      padding: 0;
+      box-sizing: border-box;
+    }
+
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+      background: linear-gradient(135deg, #1a1a2e 0%, #16213e 100%);
+      color: #e4e4e7;
+      overflow: hidden;
+      height: 100vh;
+      display: flex;
+      flex-direction: column;
+    }
+
+    /* Header */
+    .header {
+      background: rgba(0, 0, 0, 0.4);
+      padding: 1rem 2rem;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      border-bottom: 2px solid #3b82f6;
+      backdrop-filter: blur(10px);
+      z-index: 100;
+    }
+
+    .header-left {
+      display: flex;
+      align-items: center;
+      gap: 1.5rem;
+    }
+
+    .header h1 {
+      font-size: 1.75rem;
+      font-weight: 700;
+      color: #60a5fa;
+      letter-spacing: -0.5px;
+    }
+
+    .room-selector {
+      display: flex;
+      align-items: center;
+      gap: 0.5rem;
+      background: rgba(30, 41, 59, 0.6);
+      padding: 0.5rem 1rem;
+      border-radius: 8px;
+      border: 1px solid rgba(59, 130, 246, 0.3);
+    }
+
+    .room-selector label {
+      font-size: 0.875rem;
+      color: #94a3b8;
+      font-weight: 500;
+    }
+
+    .room-selector select {
+      background: rgba(15, 23, 42, 0.8);
+      color: #e4e4e7;
+      border: 1px solid rgba(59, 130, 246, 0.4);
+      padding: 0.4rem 0.8rem;
+      border-radius: 6px;
+      font-size: 0.875rem;
+      cursor: pointer;
+      outline: none;
+    }
+
+    .header-actions {
+      display: flex;
+      gap: 1rem;
+      align-items: center;
+    }
+
+    .btn {
+      padding: 0.6rem 1.2rem;
+      border: none;
+      border-radius: 6px;
+      font-size: 0.875rem;
+      font-weight: 600;
+      cursor: pointer;
+      transition: all 0.2s;
+      display: flex;
+      align-items: center;
+      gap: 0.5rem;
+    }
+
+    .btn-primary {
+      background: rgba(59, 130, 246, 0.2);
+      border: 2px solid #3b82f6;
+      color: #93c5fd;
+    }
+
+    .btn-primary:hover {
+      background: rgba(59, 130, 246, 0.3);
+      transform: scale(1.05);
+    }
+
+    .btn-secondary {
+      background: rgba(100, 116, 139, 0.2);
+      border: 2px solid #64748b;
+      color: #cbd5e1;
+    }
+
+    .btn-secondary:hover {
+      background: rgba(100, 116, 139, 0.3);
+      transform: scale(1.05);
+    }
+
+    /* Status Bar */
+    .status-bar {
+      background: rgba(15, 23, 42, 0.8);
+      padding: 1rem 2rem;
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+      gap: 1rem;
+      border-bottom: 1px solid rgba(59, 130, 246, 0.2);
+    }
+
+    .status-metric {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      gap: 0.25rem;
+    }
+
+    .status-label {
+      font-size: 0.75rem;
+      color: #94a3b8;
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
+      font-weight: 600;
+    }
+
+    .status-value {
+      font-size: 1.5rem;
+      font-weight: 700;
+      color: #60a5fa;
+    }
+
+    .status-unit {
+      font-size: 0.875rem;
+      color: #cbd5e1;
+      font-weight: 500;
+    }
+
+    .status-range {
+      font-size: 0.7rem;
+      color: #64748b;
+      margin-top: 0.2rem;
+    }
+
+    /* Main Content */
+    .main-content {
+      flex: 1;
+      display: grid;
+      grid-template-columns: 1fr 300px;
+      gap: 1rem;
+      padding: 1rem;
+      overflow: hidden;
+    }
+
+    /* Heat Map Panel */
+    .heatmap-panel {
+      display: flex;
+      flex-direction: column;
+      gap: 1rem;
+    }
+
+    .map-container {
+      background: rgba(30, 41, 59, 0.6);
+      border-radius: 12px;
+      padding: 1.5rem;
+      border: 1px solid rgba(59, 130, 246, 0.2);
+      backdrop-filter: blur(10px);
+      flex: 1;
+      display: flex;
+      flex-direction: column;
+      overflow: hidden;
+    }
+
+    .map-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      margin-bottom: 1rem;
+      padding-bottom: 0.75rem;
+      border-bottom: 1px solid rgba(59, 130, 246, 0.2);
+    }
+
+    .map-header h2 {
+      font-size: 1.25rem;
+      color: #60a5fa;
+      font-weight: 600;
+    }
+
+    .map-controls {
+      display: flex;
+      gap: 0.75rem;
+      align-items: center;
+    }
+
+    .metric-toggle {
+      display: flex;
+      gap: 0.5rem;
+      background: rgba(15, 23, 42, 0.6);
+      padding: 0.25rem;
+      border-radius: 6px;
+    }
+
+    .metric-toggle button {
+      padding: 0.4rem 0.8rem;
+      background: transparent;
+      border: none;
+      color: #94a3b8;
+      font-size: 0.75rem;
+      font-weight: 600;
+      border-radius: 4px;
+      cursor: pointer;
+      transition: all 0.2s;
+    }
+
+    .metric-toggle button.active {
+      background: #3b82f6;
+      color: white;
+    }
+
+    .canvas-wrapper {
+      flex: 1;
+      position: relative;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      min-height: 400px;
+    }
+
+    #heatmapCanvas {
+      border-radius: 8px;
+      box-shadow: 0 4px 20px rgba(0, 0, 0, 0.3);
+      max-width: 100%;
+      max-height: 100%;
+    }
+
+    /* Timeline Controls */
+    .timeline-panel {
+      background: rgba(30, 41, 59, 0.6);
+      border-radius: 12px;
+      padding: 1rem;
+      border: 1px solid rgba(59, 130, 246, 0.2);
+      backdrop-filter: blur(10px);
+      display: flex;
+      flex-direction: column;
+      gap: 1rem;
+    }
+
+    .timeline-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+    }
+
+    .timeline-header h3 {
+      font-size: 1rem;
+      color: #60a5fa;
+      font-weight: 600;
+    }
+
+    .playback-controls {
+      display: flex;
+      gap: 0.5rem;
+    }
+
+    .playback-controls button {
+      padding: 0.5rem;
+      background: rgba(59, 130, 246, 0.2);
+      border: 1px solid #3b82f6;
+      color: #93c5fd;
+      border-radius: 6px;
+      cursor: pointer;
+      font-size: 1rem;
+      transition: all 0.2s;
+    }
+
+    .playback-controls button:hover {
+      background: rgba(59, 130, 246, 0.3);
+    }
+
+    .playback-controls button.active {
+      background: #3b82f6;
+      color: white;
+    }
+
+    .timeline-slider {
+      width: 100%;
+    }
+
+    .timeline-slider input {
+      width: 100%;
+      height: 6px;
+      border-radius: 3px;
+      background: rgba(59, 130, 246, 0.2);
+      outline: none;
+      -webkit-appearance: none;
+    }
+
+    .timeline-slider input::-webkit-slider-thumb {
+      -webkit-appearance: none;
+      appearance: none;
+      width: 16px;
+      height: 16px;
+      border-radius: 50%;
+      background: #3b82f6;
+      cursor: pointer;
+      box-shadow: 0 2px 6px rgba(59, 130, 246, 0.5);
+    }
+
+    .timeline-slider input::-moz-range-thumb {
+      width: 16px;
+      height: 16px;
+      border-radius: 50%;
+      background: #3b82f6;
+      cursor: pointer;
+      box-shadow: 0 2px 6px rgba(59, 130, 246, 0.5);
+    }
+
+    .time-display {
+      text-align: center;
+      font-size: 1.25rem;
+      font-weight: 700;
+      color: #60a5fa;
+      padding: 0.5rem;
+      background: rgba(15, 23, 42, 0.6);
+      border-radius: 6px;
+    }
+
+    /* Sidebar */
+    .sidebar {
+      display: flex;
+      flex-direction: column;
+      gap: 1rem;
+      overflow-y: auto;
+    }
+
+    .sidebar-card {
+      background: rgba(30, 41, 59, 0.6);
+      border-radius: 12px;
+      padding: 1.25rem;
+      border: 1px solid rgba(59, 130, 246, 0.2);
+      backdrop-filter: blur(10px);
+    }
+
+    .sidebar-card h3 {
+      font-size: 1rem;
+      color: #60a5fa;
+      font-weight: 600;
+      margin-bottom: 1rem;
+      padding-bottom: 0.5rem;
+      border-bottom: 1px solid rgba(59, 130, 246, 0.2);
+    }
+
+    /* Legend */
+    .legend-gradient {
+      height: 100px;
+      border-radius: 6px;
+      background: linear-gradient(
+        to bottom,
+        #ef4444,
+        #f97316,
+        #f59e0b,
+        #fbbf24,
+        #84cc16,
+        #22c55e,
+        #10b981,
+        #14b8a6,
+        #06b6d4,
+        #3b82f6
+      );
+      position: relative;
+      margin-bottom: 0.5rem;
+    }
+
+    .legend-labels {
+      display: flex;
+      justify-content: space-between;
+      font-size: 0.75rem;
+      color: #94a3b8;
+      font-weight: 600;
+    }
+
+    /* Sensor List */
+    .sensor-list {
+      display: flex;
+      flex-direction: column;
+      gap: 0.5rem;
+    }
+
+    .sensor-item {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 0.75rem;
+      background: rgba(15, 23, 42, 0.6);
+      border-radius: 6px;
+      border-left: 3px solid #3b82f6;
+    }
+
+    .sensor-info {
+      flex: 1;
+    }
+
+    .sensor-name {
+      font-size: 0.875rem;
+      font-weight: 600;
+      color: #e4e4e7;
+      margin-bottom: 0.2rem;
+    }
+
+    .sensor-location {
+      font-size: 0.7rem;
+      color: #64748b;
+    }
+
+    .sensor-reading {
+      text-align: right;
+      font-size: 1rem;
+      font-weight: 700;
+      color: #60a5fa;
+    }
+
+    /* Equipment List */
+    .equipment-list {
+      display: flex;
+      flex-direction: column;
+      gap: 0.5rem;
+    }
+
+    .equipment-item {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 0.75rem;
+      background: rgba(15, 23, 42, 0.6);
+      border-radius: 6px;
+    }
+
+    .equipment-name {
+      font-size: 0.875rem;
+      font-weight: 600;
+      color: #e4e4e7;
+    }
+
+    .equipment-status {
+      padding: 0.25rem 0.5rem;
+      border-radius: 4px;
+      font-size: 0.7rem;
+      font-weight: 600;
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
+    }
+
+    .equipment-status.online {
+      background: rgba(34, 197, 94, 0.2);
+      color: #86efac;
+      border: 1px solid #22c55e;
+    }
+
+    .equipment-status.offline {
+      background: rgba(100, 116, 139, 0.2);
+      color: #cbd5e1;
+      border: 1px solid #64748b;
+    }
+
+    /* Loading State */
+    .loading {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      height: 100%;
+      color: #94a3b8;
+      gap: 1rem;
+    }
+
+    .spinner {
+      width: 40px;
+      height: 40px;
+      border: 4px solid rgba(59, 130, 246, 0.2);
+      border-top-color: #3b82f6;
+      border-radius: 50%;
+      animation: spin 1s linear infinite;
+    }
+
+    @keyframes spin {
+      to { transform: rotate(360deg); }
+    }
+
+    /* Scrollbar Styles */
+    ::-webkit-scrollbar {
+      width: 8px;
+      height: 8px;
+    }
+
+    ::-webkit-scrollbar-track {
+      background: rgba(15, 23, 42, 0.6);
+      border-radius: 4px;
+    }
+
+    ::-webkit-scrollbar-thumb {
+      background: rgba(59, 130, 246, 0.4);
+      border-radius: 4px;
+    }
+
+    ::-webkit-scrollbar-thumb:hover {
+      background: rgba(59, 130, 246, 0.6);
+    }
+
+    /* Responsive */
+    @media (max-width: 1200px) {
+      .main-content {
+        grid-template-columns: 1fr;
+      }
+
+      .sidebar {
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
+      }
+    }
+  </style>
+</head>
+<body>
+  <!-- Header -->
+  <div class="header">
+        <div class="header-left">
+      <h1>Environmental Heat Map</h1>
+      <div class="room-selector">
+        <label>Room:</label>
+        <select id="roomSelect">
+          <option value="mock-grow-room">Mock Grow Room</option>
+        </select>
+      </div>
+    </div>
+    <div class="header-actions">
+      <button class="btn btn-primary" onclick="window.location.href='room-mapper.html'">
+        Edit Layout
+      </button>
+  </div>
+
+  <!-- Current Status Bar -->
+  <div class="status-bar" id="statusBar">
+    <div class="status-metric">
+      <div class="status-label">Temperature</div>
+      <div>
+        <span class="status-value" id="currentTemp">--</span>
+        <span class="status-unit">°F</span>
+      </div>
+      <div class="status-range" id="tempRange">Range: -- to --</div>
+    </div>
+    <div class="status-metric">
+      <div class="status-label">Humidity</div>
+      <div>
+        <span class="status-value" id="currentHumidity">--</span>
+        <span class="status-unit">%</span>
+      </div>
+      <div class="status-range" id="humidityRange">Range: -- to --</div>
+    </div>
+    <div class="status-metric">
+      <div class="status-label">VPD</div>
+      <div>
+        <span class="status-value" id="currentVpd">--</span>
+        <span class="status-unit">kPa</span>
+      </div>
+      <div class="status-range" id="vpdRange">Range: -- to --</div>
+    </div>
+    <div class="status-metric">
+      <div class="status-label">Active Sensors</div>
+      <div>
+        <span class="status-value" id="sensorCount">0</span>
+      </div>
+    </div>
+    <div class="status-metric">
+      <div class="status-label">Equipment Online</div>
+      <div>
+        <span class="status-value" id="equipmentCount">0</span>
+      </div>
+    </div>
+  </div>
+
+  <!-- Main Content -->
+  <div class="main-content">
+    <!-- Heat Map -->
+    <div class="heatmap-panel">
+      <div class="map-container">
+        <div class="map-header">
+          <h2>Spatial Distribution</h2>
+          <div class="map-controls">
+            <div class="metric-toggle" id="metricToggle">
+              <button class="active" data-metric="temperature">Temperature</button>
+              <button data-metric="humidity">Humidity</button>
+              <button data-metric="vpd">VPD</button>
+            </div>
+          </div>
+        </div>
+        <div class="canvas-wrapper" id="canvasWrapper">
+          <canvas id="heatmapCanvas"></canvas>
+        </div>
+      </div>
+
+      <!-- Timeline Controls -->
+      <div class="timeline-panel">
+        <div class="timeline-header">
+          <h3>24-Hour Playback</h3>
+          <div class="playback-controls">
+            <button id="playBtn" title="Play">▶</button>
+            <button id="pauseBtn" title="Pause" style="display: none;">⏸</button>
+            <button id="resetBtn" title="Reset">⏮</button>
+          </div>
+        </div>
+        <div class="time-display" id="timeDisplay">
+          Now
+        </div>
+        <div class="timeline-slider">
+          <input type="range" id="timeSlider" min="0" max="287" value="287" step="1">
+        </div>
+        <div style="display: flex; justify-content: space-between; font-size: 0.7rem; color: #64748b; padding: 0 0.25rem;">
+          <span>24 hours ago</span>
+          <span>Now</span>
+        </div>
+      </div>
+    </div>
+
+    <!-- Sidebar -->
+    <div class="sidebar">
+      <!-- Legend -->
+      <div class="sidebar-card">
+        <h3>Heat Map Legend</h3>
+        <div class="legend-gradient"></div>
+        <div class="legend-labels">
+          <span id="legendMin">Min</span>
+          <span id="legendMax">Max</span>
+        </div>
+      </div>
+
+      <!-- Sensors -->
+      <div class="sidebar-card">
+        <h3>Active Sensors</h3>
+        <div class="sensor-list" id="sensorList">
+          <div class="loading">
+            <div class="spinner"></div>
+            <div>Loading sensors...</div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Equipment -->
+      <div class="sidebar-card">
+        <h3>Equipment Status</h3>
+        <div class="equipment-list" id="equipmentList">
+          <div class="loading">
+            <div class="spinner"></div>
+            <div>Loading equipment...</div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <script src="../app.charlie.js"></script>
+  <script>
+    // Global State
+    const STATE = {
+      canvas: null,
+      ctx: null,
+      roomMap: null,
+      envData: null,
+      iotDevices: [],
+      currentMetric: 'temperature',
+      currentTimeIndex: 287, // Start at "now" (last data point, 24hr * 12 = 288 points @ 5min intervals)
+      isPlaying: false,
+      playInterval: null,
+      sensors: [],
+      equipment: []
+    };
+
+    // Metric Configuration
+    const METRICS = {
+      temperature: {
+        label: 'Temperature',
+        unit: '°F',
+        colors: [
+          { value: 0, color: [59, 130, 246] },    // Blue (cold)
+          { value: 0.2, color: [6, 182, 212] },   // Cyan
+          { value: 0.4, color: [20, 184, 166] },  // Teal
+          { value: 0.5, color: [34, 197, 94] },   // Green
+          { value: 0.6, color: [132, 204, 22] },  // Lime
+          { value: 0.7, color: [251, 191, 36] },  // Yellow
+          { value: 0.85, color: [249, 115, 22] }, // Orange
+          { value: 1, color: [239, 68, 68] }      // Red (hot)
+        ]
+      },
+      humidity: {
+        label: 'Humidity',
+        unit: '%',
+        colors: [
+          { value: 0, color: [239, 68, 68] },     // Red (dry)
+          { value: 0.3, color: [251, 191, 36] },  // Yellow
+          { value: 0.5, color: [34, 197, 94] },   // Green (ideal)
+          { value: 0.7, color: [6, 182, 212] },   // Cyan
+          { value: 1, color: [59, 130, 246] }     // Blue (humid)
+        ]
+      },
+      vpd: {
+        label: 'VPD',
+        unit: 'kPa',
+        colors: [
+          { value: 0, color: [59, 130, 246] },    // Blue (low)
+          { value: 0.4, color: [34, 197, 94] },   // Green (ideal)
+          { value: 0.7, color: [251, 191, 36] },  // Yellow
+          { value: 1, color: [239, 68, 68] }      // Red (high)
+        ]
+      }
+    };
+
+    // Initialize
+    window.addEventListener('DOMContentLoaded', async () => {
+      STATE.canvas = document.getElementById('heatmapCanvas');
+      STATE.ctx = STATE.canvas.getContext('2d');
+      
+      setupEventListeners();
+      await loadData();
+      renderHeatMap();
+      updateStatusBar();
+      updateTimeDisplay();
+    });
+
+    function setupEventListeners() {
+      // Metric toggle
+      document.querySelectorAll('#metricToggle button').forEach(btn => {
+        btn.addEventListener('click', () => {
+          document.querySelectorAll('#metricToggle button').forEach(b => b.classList.remove('active'));
+          btn.classList.add('active');
+          STATE.currentMetric = btn.dataset.metric;
+          renderHeatMap();
+          updateStatusBar();
+        });
+      });
+
+      // Timeline controls
+      document.getElementById('playBtn').addEventListener('click', startPlayback);
+      document.getElementById('pauseBtn').addEventListener('click', pausePlayback);
+      document.getElementById('resetBtn').addEventListener('click', resetPlayback);
+      document.getElementById('timeSlider').addEventListener('input', (e) => {
+        STATE.currentTimeIndex = parseInt(e.target.value);
+        renderHeatMap();
+        updateTimeDisplay();
+      });
+
+      // Room selector
+      document.getElementById('roomSelect').addEventListener('change', async (e) => {
+        await loadData();
+        renderHeatMap();
+        updateStatusBar();
+      });
+    }
+
+    async function loadData() {
+      try {
+        console.log('[Heat Map] Loading data files...');
+        
+        // Load room map
+        const mapResponse = await fetch('/data/room-map.json');
+        if (!mapResponse.ok) throw new Error(`Failed to load room-map.json: ${mapResponse.status}`);
+        STATE.roomMap = await mapResponse.json();
+        console.log('[Heat Map] Loaded room map:', STATE.roomMap);
+
+        // Load environmental data
+        const envResponse = await fetch('/data/env.json');
+        if (!envResponse.ok) throw new Error(`Failed to load env.json: ${envResponse.status}`);
+        STATE.envData = await envResponse.json();
+        console.log('[Heat Map] Loaded env data:', STATE.envData?.zones?.length, 'zones');
+
+        // Load IoT devices
+        const devicesResponse = await fetch('/data/iot-devices.json');
+        if (!devicesResponse.ok) throw new Error(`Failed to load iot-devices.json: ${devicesResponse.status}`);
+        STATE.iotDevices = await devicesResponse.json();
+        console.log('[Heat Map] Loaded IoT devices:', STATE.iotDevices?.length, 'devices');
+
+        // Extract sensors (devices with telemetry.temperature or telemetry.humidity)
+        STATE.sensors = STATE.iotDevices.filter(d => {
+          const tel = d.telemetry || {};
+          return tel.temperature != null || tel.humidity != null;
+        });
+
+        // Extract equipment (plugs, lights, HVAC)
+        STATE.equipment = STATE.iotDevices.filter(d => {
+          const type = (d.type || '').toLowerCase();
+          const category = (d.category || '').toLowerCase();
+          return type.includes('plug') || type.includes('light') || 
+                 type.includes('hvac') || category.includes('equipment');
+        });
+
+        // Map sensors to placed devices
+        if (STATE.roomMap.devices) {
+          STATE.sensors = STATE.sensors.map(sensor => {
+            const placement = STATE.roomMap.devices.find(d => d.deviceId === sensor.id);
+            if (placement) {
+              sensor.x = placement.x;
+              sensor.y = placement.y;
+            }
+            return sensor;
+          });
+        }
+
+        console.log('[Heat Map] Processing complete - Sensors:', STATE.sensors.length, 'Equipment:', STATE.equipment.length);
+        
+        renderSensorList();
+        renderEquipmentList();
+        updateStatusBar();
+
+      } catch (error) {
+        console.error('[Heat Map] Failed to load data:', error);
+        // Show error message on canvas
+        if (STATE.canvas && STATE.ctx) {
+          const ctx = STATE.ctx;
+          STATE.canvas.width = 800;
+          STATE.canvas.height = 600;
+          ctx.fillStyle = 'rgba(239, 68, 68, 0.2)';
+          ctx.fillRect(0, 0, 800, 600);
+          ctx.fillStyle = '#ef4444';
+          ctx.font = '20px sans-serif';
+          ctx.textAlign = 'center';
+          ctx.fillText('Failed to load heat map data', 400, 280);
+          ctx.font = '14px sans-serif';
+          ctx.fillStyle = '#fca5a5';
+          ctx.fillText(error.message || 'Unknown error', 400, 310);
+        }
+      }
+    }
+
+    function renderSensorList() {
+      const list = document.getElementById('sensorList');
+      if (!STATE.sensors.length) {
+        list.innerHTML = '<div style="text-align: center; color: #64748b; padding: 1rem;">No sensors found</div>';
+        return;
+      }
+
+      list.innerHTML = '';
+      STATE.sensors.forEach(sensor => {
+        const tel = sensor.telemetry || {};
+        const temp = tel.temperature;
+        const humidity = tel.humidity;
+        
+        let reading = '--';
+        if (STATE.currentMetric === 'temperature' && temp != null) {
+          reading = `${temp.toFixed(1)}°F`;
+        } else if (STATE.currentMetric === 'humidity' && humidity != null) {
+          reading = `${humidity.toFixed(1)}%`;
+        } else if (STATE.currentMetric === 'vpd' && tel.vpd != null) {
+          reading = `${tel.vpd.toFixed(2)} kPa`;
+        }
+
+        const item = document.createElement('div');
+        item.className = 'sensor-item';
+        item.innerHTML = `
+          <div class="sensor-info">
+            <div class="sensor-name">${sensor.name || 'Unknown Sensor'}</div>
+            <div class="sensor-location">
+              ${sensor.zone ? `Zone ${sensor.zone}` : 'Unassigned'}
+              ${sensor.x != null && sensor.y != null ? ` • (${sensor.x}, ${sensor.y})` : ''}
+            </div>
+          </div>
+          <div class="sensor-reading">${reading}</div>
+        `;
+        list.appendChild(item);
+      });
+    }
+
+    function renderEquipmentList() {
+      const list = document.getElementById('equipmentList');
+      if (!STATE.equipment.length) {
+        list.innerHTML = '<div style="text-align: center; color: #64748b; padding: 1rem;">No equipment found</div>';
+        return;
+      }
+
+      list.innerHTML = '';
+      STATE.equipment.forEach(equip => {
+        const tel = equip.telemetry || {};
+        const isOnline = tel.online !== false;
+
+        const item = document.createElement('div');
+        item.className = 'equipment-item';
+        item.innerHTML = `
+          <div class="equipment-name">${equip.name || 'Unknown Equipment'}</div>
+          <div class="equipment-status ${isOnline ? 'online' : 'offline'}">
+            ${isOnline ? '● Online' : '○ Offline'}
+          </div>
+        `;
+        list.appendChild(item);
+      });
+    }
+
+    function updateStatusBar() {
+      if (!STATE.envData || !STATE.envData.zones || !STATE.envData.zones.length) {
+        return;
+      }
+
+      const zone = STATE.envData.zones[0]; // Use first zone for now
+      const sensors = zone.sensors || {};
+
+      // Temperature
+      const tempData = sensors.tempC || sensors.temperature;
+      if (tempData) {
+        const current = tempData.current || 0;
+        const history = tempData.history || [];
+        const min = Math.min(...history);
+        const max = Math.max(...history);
+        
+        document.getElementById('currentTemp').textContent = current.toFixed(1);
+        document.getElementById('tempRange').textContent = `Range: ${min.toFixed(1)} to ${max.toFixed(1)}`;
+      }
+
+      // Humidity
+      const humidityData = sensors.rh || sensors.humidity;
+      if (humidityData) {
+        const current = humidityData.current || 0;
+        const history = humidityData.history || [];
+        const min = Math.min(...history);
+        const max = Math.max(...history);
+        
+        document.getElementById('currentHumidity').textContent = current.toFixed(1);
+        document.getElementById('humidityRange').textContent = `Range: ${min.toFixed(1)} to ${max.toFixed(1)}`;
+      }
+
+      // VPD
+      const vpdData = sensors.vpd;
+      if (vpdData) {
+        const current = vpdData.current || 0;
+        const history = vpdData.history || [];
+        const min = Math.min(...history);
+        const max = Math.max(...history);
+        
+        document.getElementById('currentVpd').textContent = current.toFixed(2);
+        document.getElementById('vpdRange').textContent = `Range: ${min.toFixed(2)} to ${max.toFixed(2)}`;
+      }
+
+      // Counts
+      document.getElementById('sensorCount').textContent = STATE.sensors.length;
+      const onlineEquipment = STATE.equipment.filter(e => (e.telemetry?.online !== false)).length;
+      document.getElementById('equipmentCount').textContent = `${onlineEquipment}/${STATE.equipment.length}`;
+
+      // Update legend
+      updateLegend();
+    }
+
+    function updateLegend() {
+      const metric = METRICS[STATE.currentMetric];
+      if (!STATE.envData || !STATE.envData.zones || !STATE.envData.zones.length) {
+        document.getElementById('legendMin').textContent = 'Min';
+        document.getElementById('legendMax').textContent = 'Max';
+        return;
+      }
+
+      const zone = STATE.envData.zones[0];
+      const sensors = zone.sensors || {};
+      let data;
+
+      if (STATE.currentMetric === 'temperature') {
+        data = sensors.tempC || sensors.temperature;
+      } else if (STATE.currentMetric === 'humidity') {
+        data = sensors.rh || sensors.humidity;
+      } else if (STATE.currentMetric === 'vpd') {
+        data = sensors.vpd;
+      }
+
+      if (data && data.history) {
+        const min = Math.min(...data.history);
+        const max = Math.max(...data.history);
+        document.getElementById('legendMin').textContent = `${min.toFixed(1)}${metric.unit}`;
+        document.getElementById('legendMax').textContent = `${max.toFixed(1)}${metric.unit}`;
+      }
+    }
+
+    function renderHeatMap() {
+      console.log('[Heat Map] renderHeatMap called - roomMap:', !!STATE.roomMap, 'envData:', !!STATE.envData);
+      
+      if (!STATE.roomMap || !STATE.envData) {
+        console.warn('[Heat Map] Missing required data for rendering');
+        return;
+      }
+
+      const gridSize = STATE.roomMap.gridSize || 20;
+      const cellSize = 40; // Fixed cell size for heat map
+      const width = gridSize * cellSize;
+      const height = Math.floor(gridSize * 0.75) * cellSize;
+
+      console.log('[Heat Map] Canvas dimensions:', width, 'x', height);
+
+      STATE.canvas.width = width;
+      STATE.canvas.height = height;
+
+      const ctx = STATE.ctx;
+      ctx.clearRect(0, 0, width, height);
+
+      // Get historical data point based on timeline
+      // Use zone 1 (index 1) which corresponds to "Grow Room 2, North Wall" with live sensor
+      const zone = STATE.envData.zones[1];
+      console.log('[Heat Map] Using zone:', zone?.name || zone?.id);
+      if (!zone || !zone.sensors) {
+        console.warn('[Heat Map] No zone or sensors data available');
+        return;
+      }
+
+      const sensors = zone.sensors;
+      let data;
+      let metricKey;
+
+      if (STATE.currentMetric === 'temperature') {
+        data = sensors.tempC || sensors.temperature;
+        metricKey = 'temperature';
+      } else if (STATE.currentMetric === 'humidity') {
+        data = sensors.rh || sensors.humidity;
+        metricKey = 'humidity';
+      } else if (STATE.currentMetric === 'vpd') {
+        data = sensors.vpd;
+        metricKey = 'vpd';
+      }
+
+      if (!data || !data.history || data.history.length === 0) {
+        ctx.fillStyle = 'rgba(100, 116, 139, 0.3)';
+        ctx.fillRect(0, 0, width, height);
+        ctx.fillStyle = '#94a3b8';
+        ctx.font = '16px sans-serif';
+        ctx.textAlign = 'center';
+        ctx.fillText('No environmental data available', width / 2, height / 2);
+        return;
+      }
+
+      const history = data.history;
+      const value = history[STATE.currentTimeIndex] || data.current;
+      const min = Math.min(...history);
+      const max = Math.max(...history);
+
+      // Draw heat map gradient (simulated - in production, use actual sensor positions)
+      drawHeatMapGradient(ctx, width, height, value, min, max);
+
+      // Draw zones (if defined)
+      if (STATE.roomMap.zones) {
+        STATE.roomMap.zones.forEach(zone => {
+          ctx.strokeStyle = zone.color || '#3b82f6';
+          ctx.lineWidth = 2;
+          ctx.setLineDash([5, 5]);
+          
+          const x = zone.x1 * cellSize;
+          const y = zone.y1 * cellSize;
+          const w = (zone.x2 - zone.x1 + 1) * cellSize;
+          const h = (zone.y2 - zone.y1 + 1) * cellSize;
+          
+          ctx.strokeRect(x, y, w, h);
+          ctx.setLineDash([]);
+          
+          // Zone label
+          ctx.fillStyle = zone.color || '#3b82f6';
+          ctx.font = 'bold 12px sans-serif';
+          ctx.fillText(zone.name, x + 10, y + 20);
+        });
+      }
+
+      // Draw sensor positions
+      STATE.sensors.forEach(sensor => {
+        if (sensor.x != null && sensor.y != null) {
+          const x = sensor.x * cellSize + cellSize / 2;
+          const y = sensor.y * cellSize + cellSize / 2;
+          
+          // Sensor marker
+          ctx.fillStyle = 'rgba(59, 130, 246, 0.8)';
+          ctx.beginPath();
+          ctx.arc(x, y, 8, 0, Math.PI * 2);
+          ctx.fill();
+          
+          ctx.strokeStyle = 'white';
+          ctx.lineWidth = 2;
+          ctx.stroke();
+          
+          // Sensor value
+          const tel = sensor.telemetry || {};
+          let reading = '';
+          if (metricKey === 'temperature' && tel.temperature != null) {
+            reading = tel.temperature.toFixed(1);
+          } else if (metricKey === 'humidity' && tel.humidity != null) {
+            reading = tel.humidity.toFixed(1);
+          } else if (metricKey === 'vpd' && tel.vpd != null) {
+            reading = tel.vpd.toFixed(2);
+          }
+          
+          if (reading) {
+            ctx.fillStyle = 'white';
+            ctx.font = 'bold 10px sans-serif';
+            ctx.textAlign = 'center';
+            ctx.fillText(reading, x, y - 15);
+          }
+        }
+      });
+
+      // Draw equipment positions
+      if (STATE.roomMap.devices) {
+        STATE.roomMap.devices.forEach(placement => {
+          const device = STATE.iotDevices.find(d => d.id === placement.deviceId);
+          const snapshot = placement.snapshot || placement.metadata || null;
+          const deviceType = (device?.type || snapshot?.type || '').toLowerCase();
+          const deviceCategory = (device?.category || snapshot?.category || '').toLowerCase();
+          const isEquipment =
+            deviceType.includes('plug') ||
+            deviceType.includes('light') ||
+            deviceType.includes('hvac') ||
+            deviceCategory.includes('equipment') ||
+            deviceCategory.includes('light');
+
+          if (isEquipment) {
+            const x = placement.x * cellSize + cellSize / 2;
+            const y = placement.y * cellSize + cellSize / 2;
+
+            // Equipment icon
+            ctx.font = '24px sans-serif';
+            ctx.textAlign = 'center';
+            ctx.textBaseline = 'middle';
+            ctx.fillStyle = '#f8fafc';
+
+            const icon = snapshot?.icon || '●';
+            ctx.fillText(icon, x, y);
+
+            // Status indicator (default to online if no telemetry)
+            const isOnline = device ? device.telemetry?.online !== false : true;
+            ctx.fillStyle = isOnline ? '#22c55e' : '#64748b';
+            ctx.beginPath();
+            ctx.arc(x + 12, y - 12, 4, 0, Math.PI * 2);
+            ctx.fill();
+          }
+        });
+      }
+    }
+
+    function drawHeatMapGradient(ctx, width, height, value, min, max) {
+      const metric = METRICS[STATE.currentMetric];
+      
+      // Normalize value to 0-1 range
+      const normalizedValue = (value - min) / (max - min);
+      
+      // Create radial gradient from center (simulating uniform distribution)
+      const gradient = ctx.createRadialGradient(
+        width / 2, height / 2, 0,
+        width / 2, height / 2, Math.max(width, height) / 2
+      );
+      
+      // Get color for current value
+      const color = getColorForValue(normalizedValue, metric.colors);
+      
+      // Add gradient stops (simulate slight variation)
+      gradient.addColorStop(0, `rgba(${color.join(',')}, 0.8)`);
+      gradient.addColorStop(0.5, `rgba(${color.join(',')}, 0.6)`);
+      gradient.addColorStop(1, `rgba(${color.join(',')}, 0.4)`);
+      
+      ctx.fillStyle = gradient;
+      ctx.fillRect(0, 0, width, height);
+      
+      // Add slight noise/texture for more realistic heat map
+      for (let i = 0; i < 100; i++) {
+        const x = Math.random() * width;
+        const y = Math.random() * height;
+        const variation = (Math.random() - 0.5) * 0.2; // ±10% variation
+        const variedValue = Math.max(0, Math.min(1, normalizedValue + variation));
+        const variedColor = getColorForValue(variedValue, metric.colors);
+        
+        ctx.fillStyle = `rgba(${variedColor.join(',')}, 0.3)`;
+        ctx.beginPath();
+        ctx.arc(x, y, 30, 0, Math.PI * 2);
+        ctx.fill();
+      }
+    }
+
+    function getColorForValue(value, colorStops) {
+      // Find the two color stops to interpolate between
+      let lowerStop = colorStops[0];
+      let upperStop = colorStops[colorStops.length - 1];
+      
+      for (let i = 0; i < colorStops.length - 1; i++) {
+        if (value >= colorStops[i].value && value <= colorStops[i + 1].value) {
+          lowerStop = colorStops[i];
+          upperStop = colorStops[i + 1];
+          break;
+        }
+      }
+      
+      // Interpolate between the two colors
+      const range = upperStop.value - lowerStop.value;
+      const factor = range === 0 ? 0 : (value - lowerStop.value) / range;
+      
+      const r = Math.round(lowerStop.color[0] + (upperStop.color[0] - lowerStop.color[0]) * factor);
+      const g = Math.round(lowerStop.color[1] + (upperStop.color[1] - lowerStop.color[1]) * factor);
+      const b = Math.round(lowerStop.color[2] + (upperStop.color[2] - lowerStop.color[2]) * factor);
+      
+      return [r, g, b];
+    }
+
+    function updateTimeDisplay() {
+      const totalPoints = 288; // 24 hours * 12 (5-minute intervals)
+      const minutesAgo = (totalPoints - 1 - STATE.currentTimeIndex) * 5;
+      
+      if (minutesAgo === 0) {
+        document.getElementById('timeDisplay').textContent = 'Now';
+      } else if (minutesAgo < 60) {
+        document.getElementById('timeDisplay').textContent = `${minutesAgo} min ago`;
+      } else {
+        const hoursAgo = Math.floor(minutesAgo / 60);
+        const remainingMinutes = minutesAgo % 60;
+        if (remainingMinutes === 0) {
+          document.getElementById('timeDisplay').textContent = `${hoursAgo}h ago`;
+        } else {
+          document.getElementById('timeDisplay').textContent = `${hoursAgo}h ${remainingMinutes}m ago`;
+        }
+      }
+    }
+
+    function startPlayback() {
+      if (STATE.isPlaying) return;
+      
+      STATE.isPlaying = true;
+      document.getElementById('playBtn').style.display = 'none';
+      document.getElementById('pauseBtn').style.display = 'block';
+      
+      STATE.playInterval = setInterval(() => {
+        STATE.currentTimeIndex++;
+        if (STATE.currentTimeIndex > 287) {
+          STATE.currentTimeIndex = 0; // Loop back to start
+        }
+        
+        document.getElementById('timeSlider').value = STATE.currentTimeIndex;
+        renderHeatMap();
+        updateTimeDisplay();
+      }, 200); // Update every 200ms (faster than real-time for visualization)
+    }
+
+    function pausePlayback() {
+      STATE.isPlaying = false;
+      document.getElementById('playBtn').style.display = 'block';
+      document.getElementById('pauseBtn').style.display = 'none';
+      
+      if (STATE.playInterval) {
+        clearInterval(STATE.playInterval);
+        STATE.playInterval = null;
+      }
+    }
+
+    function resetPlayback() {
+      pausePlayback();
+      STATE.currentTimeIndex = 287; // Back to "now"
+      document.getElementById('timeSlider').value = 287;
+      renderHeatMap();
+      updateTimeDisplay();
+    }
+  </script>
+</body>
+</html>

@@ -3,6 +3,194 @@ function toNumberOrNull(val) {
   return isNaN(n) ? null : n;
 }
 
+// Lightweight helpers used by Groups V2; define here if not already present on the page
+if (typeof window.firstNonEmpty !== 'function') {
+  window.firstNonEmpty = function firstNonEmpty() {
+    for (let i = 0; i < arguments.length; i++) {
+      const v = arguments[i];
+      if (v === undefined || v === null) continue;
+      if (typeof v === 'string' && v.trim() === '') continue;
+      return v;
+    }
+    return null;
+  };
+}
+
+if (typeof window.readPhotoperiodHours !== 'function') {
+  window.readPhotoperiodHours = function readPhotoperiodHours(v) {
+    if (v == null) return null;
+    if (typeof v === 'number' && isFinite(v)) return v;
+    if (typeof v === 'string') {
+      const s = v.trim();
+      if (!s) return null;
+      // Accept formats like "18", "18h", "18 H", "18/6", "12-12" (pick first number)
+      const slash = s.match(/^\s*(\d+(?:\.\d+)?)\s*\/\s*(\d+(?:\.\d+)?)/);
+      if (slash) return Number(slash[1]);
+      const dash = s.match(/^\s*(\d+(?:\.\d+)?)\s*-\s*(\d+(?:\.\d+)?)/);
+      if (dash) return Number(dash[1]);
+      const num = s.match(/\d+(?:\.\d+)?/);
+      if (num) return Number(num[0]);
+      return null;
+    }
+    return null;
+  };
+}
+
+// Derive normalized runtime hints from a plan; tolerant to various shapes
+if (typeof window.derivePlanRuntime !== 'function') {
+  window.derivePlanRuntime = function derivePlanRuntime(plan) {
+    const out = { lightDays: [], photoperiod: null, photoperiodHours: null, ppfd: null, dli: null, spectrum: null };
+    if (!plan || typeof plan !== 'object') return out;
+    // Check both plan.light.days (recipe format) and plan.days (flat format)
+    const daysSrc = (plan.light && Array.isArray(plan.light.days)) ? plan.light.days 
+                  : Array.isArray(plan.days) ? plan.days 
+                  : [];
+    const lightDays = daysSrc.map((row) => {
+      const day = toNumberOrNull(row?.day ?? row?.d);
+      const ppfd = toNumberOrNull(row?.ppfd);
+      const dli = toNumberOrNull(row?.dli);
+      const stage = typeof row?.stage === 'string' ? row.stage : '';
+      const photoperiod = readPhotoperiodHours(row?.photoperiod);
+      // Support either "mix" or flat cw/ww/bl/rd keys
+      const mixRow = (row && typeof row === 'object' && row.mix && typeof row.mix === 'object') ? row.mix : row;
+      
+      // DEBUG: Log raw values before creating mix
+      if (day <= 3) {
+        console.log(`[derivePlanRuntime] Day ${day} RAW:`, {
+          rawCw: mixRow?.cw,
+          rawWw: mixRow?.ww,
+          rawBl: mixRow?.bl,
+          rawGn: mixRow?.gn,
+          rawRd: mixRow?.rd,
+          rawFr: mixRow?.fr
+        });
+      }
+      
+      const mix = {
+        cw: toNumberOrNull(mixRow?.cw) ?? 0,
+        ww: toNumberOrNull(mixRow?.ww) ?? 0,
+        bl: toNumberOrNull(mixRow?.bl ?? mixRow?.blue) ?? 0,
+        gn: toNumberOrNull(mixRow?.gn ?? mixRow?.green) ?? 0,
+        rd: toNumberOrNull(mixRow?.rd ?? mixRow?.red) ?? 0,
+        fr: toNumberOrNull(mixRow?.fr ?? mixRow?.far_red) ?? 0,
+      };
+      
+      // DEBUG: Log created mix
+      if (day <= 3) {
+        console.log(`[derivePlanRuntime] Day ${day} CREATED MIX:`, mix);
+      }
+      
+      return { day, ppfd, dli, stage, photoperiod, mix };
+    }).filter(Boolean);
+    out.lightDays = lightDays;
+    // Compute defaults/summary
+    const defaultPhotoperiod = readPhotoperiodHours(window.firstNonEmpty(plan.photoperiod, plan.defaults?.photoperiod));
+    out.photoperiod = defaultPhotoperiod;
+    out.photoperiodHours = defaultPhotoperiod;
+    out.ppfd = toNumberOrNull(plan.ppfd);
+    out.dli = toNumberOrNull(plan.dli);
+    // Spectrum: prefer plan.spectrum; else average mix over defined days; else plan.light?.mix
+    if (plan.spectrum && typeof plan.spectrum === 'object') out.spectrum = plan.spectrum;
+    else if (lightDays.length) {
+      let cw = 0, ww = 0, bl = 0, gn = 0, rd = 0, fr = 0, c = 0;
+      lightDays.forEach((d) => { 
+        cw += d.mix.cw || 0; 
+        ww += d.mix.ww || 0; 
+        bl += d.mix.bl || 0; 
+        gn += d.mix.gn || 0; 
+        rd += d.mix.rd || 0; 
+        fr += d.mix.fr || 0; 
+        c++; 
+      });
+      if (c > 0) out.spectrum = { 
+        cw: cw / c, 
+        ww: ww / c, 
+        bl: bl / c, 
+        gn: gn / c, 
+        rd: rd / c, 
+        fr: fr / c 
+      };
+    } else if (plan.light && plan.light.mix) {
+      out.spectrum = {
+        cw: toNumberOrNull(plan.light.mix.cw) ?? 0,
+        ww: toNumberOrNull(plan.light.mix.ww) ?? 0,
+        bl: toNumberOrNull(plan.light.mix.bl) ?? 0,
+        gn: toNumberOrNull(plan.light.mix.gn) ?? 0,
+        rd: toNumberOrNull(plan.light.mix.rd) ?? 0,
+        fr: toNumberOrNull(plan.light.mix.fr) ?? 0,
+      };
+    }
+    return out;
+  };
+}
+
+// Convenience getters used by Plan Card
+if (typeof window.getPlanPhotoperiodHours !== 'function') {
+  window.getPlanPhotoperiodHours = function getPlanPhotoperiodHours(plan) {
+    const derived = plan?._derived || derivePlanRuntime(plan);
+    const fromPlan = readPhotoperiodHours(window.firstNonEmpty(plan?.photoperiod, plan?.defaults?.photoperiod));
+    if (fromPlan != null) return fromPlan;
+    // Try first defined photoperiod on day entries
+    const d = (derived.lightDays || []).find((it) => it.photoperiod != null);
+    return d ? d.photoperiod : (derived?.photoperiodHours ?? null);
+  };
+}
+
+if (typeof window.getPlanPPFD !== 'function') {
+  window.getPlanPPFD = function getPlanPPFD(plan) {
+    // Use today’s target if available
+    try {
+      const dayNumber = (function() {
+        const seedInput = document.getElementById('groupsV2SeedDate');
+        const dpsInput = document.getElementById('groupsV2Dps');
+        // Basic day calc mirroring getGroupsV2DayNumber
+        if (dpsInput && !dpsInput.disabled) {
+          const d = toNumberOrNull(dpsInput.value);
+          if (d != null) return Math.max(0, Math.round(d));
+        }
+        const seed = (seedInput && seedInput.value) ? new Date(seedInput.value) : null;
+        if (seed && isFinite(seed.getTime())) {
+          seed.setHours(0,0,0,0);
+          const now = new Date(); now.setHours(0,0,0,0);
+          const diff = Math.floor((now.getTime() - seed.getTime()) / (24*60*60*1000));
+          return diff < 0 ? 0 : diff + 1;
+        }
+        return 1;
+      })();
+      const t = resolvePlanTargetsForDay(plan, dayNumber);
+      if (t && t.ppfd != null) return t.ppfd;
+    } catch {}
+    const derived = plan?._derived || derivePlanRuntime(plan);
+    return toNumberOrNull(window.firstNonEmpty(plan?.ppfd, derived?.ppfd));
+  };
+}
+
+if (typeof window.getPlanDli !== 'function') {
+  window.getPlanDli = function getPlanDli(plan) {
+    try {
+      const dayNumber = 1;
+      const t = resolvePlanTargetsForDay(plan, dayNumber);
+      if (t && t.dli != null) return t.dli;
+      // If DLI not explicitly set, compute from PPFD and photoperiod
+      const ppfd = window.getPlanPPFD(plan);
+      const hours = window.getPlanPhotoperiodHours(plan);
+      if (ppfd != null && hours != null) {
+        return (ppfd * 3600 * hours) / 1e6;
+      }
+    } catch {}
+    const derived = plan?._derived || derivePlanRuntime(plan);
+    return toNumberOrNull(window.firstNonEmpty(plan?.dli, derived?.dli));
+  };
+}
+
+if (typeof window.formatPlanPhotoperiodDisplay !== 'function') {
+  window.formatPlanPhotoperiodDisplay = function formatPlanPhotoperiodDisplay(v) {
+    if (v == null) return '—';
+    const hours = readPhotoperiodHours(v);
+    return (hours != null && isFinite(hours)) ? `${hours} h` : String(v);
+  };
+}
+
 window.addEventListener('lightSetupsChanged', () => {
   if (!window.STATE) window.STATE = {};
   if (!Array.isArray(window.STATE.lights)) window.STATE.lights = [];
@@ -997,6 +1185,10 @@ function updateGroupsV2ScheduleUI() {
     const c2End = document.getElementById('groupsV2Cycle2End');
     if (c2End) c2End.textContent = `End: ${c2.off || '--:--'}`;
   }
+  const addCycleBtn = document.getElementById('groupsV2AddCycle2Btn');
+  if (addCycleBtn) {
+    addCycleBtn.style.display = mode === 'two' ? 'none' : 'inline-block';
+  }
   const summaryEl = document.getElementById('groupsV2ScheduleSummary');
   if (summaryEl) {
     const summaryConfig = buildGroupsV2ScheduleConfig();
@@ -1079,23 +1271,43 @@ function getGroupsV2SelectedPlan() {
   const plans = getGroupsV2Plans();
   const id = groupsV2FormState.planId || '';
   if (!id) return null;
-  return plans.find((plan) => (plan.id || plan.name) === id) || null;
+  return plans.find((plan) => (plan.id === id) || (plan.key === id) || (plan.name === id)) || null;
 }
 
 function updateGroupsV2AnchorInputs() {
   const seedInput = document.getElementById('groupsV2SeedDate');
   const dpsInput = document.getElementById('groupsV2Dps');
+  const seedWrapper = document.getElementById('groupsV2SeedWrapper');
+  const dpsWrapper = document.getElementById('groupsV2DpsWrapper');
+  const seedButton = document.getElementById('groupsV2SeedDateBtn');
+  const dpsButton = document.getElementById('groupsV2DpsBtn');
   const isSeed = groupsV2FormState.anchorMode !== 'dps';
+  
+  // Update seed input state
   if (seedInput) {
     seedInput.disabled = !isSeed;
-    if (!isSeed) seedInput.setAttribute('aria-disabled', 'true');
-    else seedInput.removeAttribute('aria-disabled');
+    seedInput.setAttribute('aria-disabled', !isSeed ? 'true' : 'false');
   }
+  
+  // Update DPS input state
   if (dpsInput) {
     dpsInput.disabled = isSeed;
-    if (isSeed) dpsInput.setAttribute('aria-disabled', 'true');
-    else dpsInput.removeAttribute('aria-disabled');
+    dpsInput.setAttribute('aria-disabled', isSeed ? 'true' : 'false');
+    // If DPS mode is active, focus the input
+    if (!isSeed && dpsInput !== document.activeElement) {
+      dpsInput.focus();
+    }
   }
+  
+  // Update wrapper visibility
+  if (seedWrapper) seedWrapper.style.display = isSeed ? 'flex' : 'none';
+  if (dpsWrapper) dpsWrapper.style.display = isSeed ? 'none' : 'flex';
+  
+  // Update button states
+  if (seedButton) seedButton.setAttribute('aria-pressed', isSeed ? 'true' : 'false');
+  if (dpsButton) dpsButton.setAttribute('aria-pressed', isSeed ? 'false' : 'true');
+  
+  console.log('[Groups V2] Updated anchor inputs - mode:', groupsV2FormState.anchorMode, 'isSeed:', isSeed);
 }
 
 function applyGroupsV2StateToInputs() {
@@ -1311,7 +1523,10 @@ function updateGroupsV2TargetTemp() {
   const currentDay = preview?.day || 1;
   
   // Find the temperature for the current day (or closest day)
-  const envDays = plan.env.days.sort((a, b) => a.d - b.d);
+  const envDays = plan.env.days
+    .map((row) => ({ d: toNumberOrNull(row?.d ?? row?.day), tempC: toNumberOrNull(row?.tempC ?? row?.temp_c ?? row?.temp) }))
+    .filter((r) => r.d != null && r.tempC != null)
+    .sort((a, b) => a.d - b.d);
   let targetTemp = null;
   
   for (const envDay of envDays) {
@@ -1354,7 +1569,24 @@ function buildGroupsV2PlanConfig(planOverride) {
     config.targetHumidity = targetHumidity;
   }
   
-  if (preview) config.preview = { ...preview, updatedAt };
+  if (preview) {
+    // Seed environmental target summaries for automation (e.g., tempC today)
+    const envTarget = (() => {
+      if (!plan.env || !Array.isArray(plan.env.days)) return null;
+      const currentDay = preview?.day || 1;
+      const envDays = plan.env.days
+        .map((row) => ({ d: toNumberOrNull(row?.d ?? row?.day), tempC: toNumberOrNull(row?.tempC ?? row?.temp_c ?? row?.temp) }))
+        .filter((r) => r.d != null)
+        .sort((a, b) => a.d - b.d);
+      let targetTemp = null;
+      for (const envDay of envDays) {
+        if (envDay.d <= currentDay && envDay.tempC != null) targetTemp = envDay.tempC;
+        else if (envDay.d > currentDay) break;
+      }
+      return targetTemp != null ? { tempC: targetTemp } : null;
+    })();
+    config.preview = { ...preview, updatedAt, ...(envTarget ? { env: envTarget } : {}) };
+  }
   return config;
 }
 
@@ -1378,10 +1610,12 @@ function initializeGroupsV2Form() {
   }
   const dpsInput = document.getElementById('groupsV2Dps');
   if (dpsInput) {
-    dpsInput.addEventListener('input', (event) => {
+    const handleDpsChange = (event) => {
       groupsV2FormState.dps = toNumberOrNull(event.target.value);
       updateGroupsV2Preview();
-    });
+    };
+    dpsInput.addEventListener('input', handleDpsChange);
+    dpsInput.addEventListener('change', handleDpsChange);
   }
   const scheduleModeRadios = document.querySelectorAll('input[name="groupsV2ScheduleMode"]');
   scheduleModeRadios.forEach((radio) => {
@@ -1517,6 +1751,13 @@ function initializeGroupsV2Form() {
 function populateGroupsV2PlanSearchDropdown() {
   const select = document.getElementById('groupsV2PlanSearch');
   if (!select) return;
+  
+  // Don't repopulate if user is actively interacting with the dropdown
+  if (document.activeElement === select) {
+    console.log('[Groups V2] Skipping plan search dropdown repopulation - user is interacting with it');
+    return;
+  }
+  
   const currentRaw = groupsV2FormState.planSearch || '';
   const current = currentRaw.trim();
   const plans = getGroupsV2Plans();
@@ -1590,6 +1831,13 @@ function populateGroupsV2PlanSearchDropdown() {
 function populateGroupsV2PlanDropdown(filterQuery) {
   const select = document.getElementById('groupsV2PlanSelect');
   if (!select) return;
+  
+  // Don't repopulate if user is actively interacting with the dropdown
+  if (document.activeElement === select) {
+    console.log('[Groups V2] Skipping plan dropdown repopulation - user is interacting with it');
+    return;
+  }
+  
   const query = typeof filterQuery === 'string'
     ? filterQuery.trim().toLowerCase()
     : (groupsV2FormState.planSearch || '').trim().toLowerCase();
@@ -1605,13 +1853,16 @@ function populateGroupsV2PlanDropdown(filterQuery) {
   } else {
     filtered.forEach((plan) => {
       const opt = document.createElement('option');
-      opt.value = plan.id || plan.name || '';
+      const value = plan.id || plan.key || plan.name || '';
+      opt.value = value;
+      opt.dataset.id = plan.id || '';
+      opt.dataset.key = plan.key || '';
       opt.textContent = plan.name || plan.label || plan.id || '(unnamed plan)';
       select.appendChild(opt);
     });
   }
   const current = groupsV2FormState.planId;
-  const hasMatch = filtered.some((plan) => (plan.id || plan.name || '') === current);
+  const hasMatch = filtered.some((plan) => (plan.id === current) || (plan.key === current) || (plan.name === current));
   if (hasMatch) {
     select.value = current;
   } else {
@@ -1619,15 +1870,24 @@ function populateGroupsV2PlanDropdown(filterQuery) {
     if (current) groupsV2FormState.planId = '';
   }
   if (!select.value && filtered.length === 1) {
-    const fallback = filtered[0].id || filtered[0].name || '';
+    const fallback = filtered[0].id || filtered[0].key || filtered[0].name || '';
     select.value = fallback;
   }
   if (!select._planListenerAttached) {
     select.addEventListener('change', () => {
-      groupsV2FormState.planId = select.value || '';
+      const opt = select.selectedOptions && select.selectedOptions[0];
+      const raw = select.value || '';
+      const chosenId = (opt && (opt.dataset.id || opt.dataset.key)) || raw;
+      groupsV2FormState.planId = chosenId || raw || '';
       const plan = getGroupsV2SelectedPlan();
       renderGroupsV2PlanCard(plan);
       updateGroupsV2Preview();
+      // If a group is currently active, auto-apply and persist the plan selection
+      try {
+        applyPlanSelectionToCurrentGroup(plan);
+      } catch (e) {
+        console.warn('[Groups V2] Failed to auto-apply plan to group:', e);
+      }
     });
     select._planListenerAttached = true;
   }
@@ -1637,8 +1897,193 @@ function populateGroupsV2PlanDropdown(filterQuery) {
   updateGroupsV2Preview();
 }
 
+// Apply current plan selection to the active group and persist
+function applyPlanSelectionToCurrentGroup(planOverride) {
+  const plan = planOverride || getGroupsV2SelectedPlan();
+  if (!plan) return;
+  if (!window.STATE || !Array.isArray(window.STATE.groups) || !window.STATE.groups.length) return;
+  // Determine active group: prefer selection from 'Load Group' dropdown, else last group
+  const loadSelect = document.getElementById('groupsV2LoadGroup');
+  let group = null;
+  if (loadSelect && loadSelect.value) {
+    const id = loadSelect.value;
+    group = window.STATE.groups.find((g) => g && (g.id === id));
+  }
+  if (!group) group = window.STATE.groups[window.STATE.groups.length - 1];
+  if (!group) return;
+  const targetPlanId = plan.id || plan.key || plan.name || groupsV2FormState.planId || '';
+  if (!targetPlanId) return;
+  group.plan = String(targetPlanId);
+  const cfg = buildGroupsV2PlanConfig(plan);
+  if (cfg) group.planConfig = cfg; else delete group.planConfig;
+  // Persist to server via app's saveGroups helper
+  if (typeof window.saveGroups === 'function') {
+    window.saveGroups();
+  }
+  // Notify UX
+  try { document.dispatchEvent(new Event('groups-updated')); } catch {}
+  if (typeof window.showToast === 'function') {
+    const label = plan.name || plan.id || 'plan';
+    window.showToast({ title: 'Plan Saved', msg: `Applied ${label} to group ${group.name || group.id}`, kind: 'success', icon: '✅' }, 1500);
+  }
+}
+
+// Calculate color percentages from SPD data
+function calculateSpectrumColorPercentages(spd) {
+  if (!spd || !Array.isArray(spd.wavelengths) || !Array.isArray(spd.display)) {
+    return { blue: 0, green: 0, red: 0, deepRed: 0 };
+  }
+  
+  const wavelengths = spd.wavelengths;
+  const display = spd.display;
+  
+  let blueSum = 0, greenSum = 0, redSum = 0, deepRedSum = 0, total = 0;
+  
+  for (let i = 0; i < wavelengths.length; i++) {
+    const wl = wavelengths[i];
+    const val = display[i] || 0;
+    
+    if (wl >= 400 && wl < 500) {
+      blueSum += val;
+    } else if (wl >= 500 && wl < 600) {
+      greenSum += val;
+    } else if (wl >= 600 && wl < 680) {
+      redSum += val;
+    } else if (wl >= 680 && wl < 750) {
+      deepRedSum += val;
+    }
+    total += val;
+  }
+  
+  if (total === 0) {
+    return { blue: 0, green: 0, red: 0, deepRed: 0 };
+  }
+  
+  return {
+    blue: (blueSum / total * 100).toFixed(1),
+    green: (greenSum / total * 100).toFixed(1),
+    red: (redSum / total * 100).toFixed(1),
+    deepRed: (deepRedSum / total * 100).toFixed(1)
+  };
+}
+
+// Get plan data for a specific day
+function getPlanDayData(plan, dayNumber) {
+  if (!plan) return null;
+  
+  const derived = plan._derived || derivePlanRuntime(plan);
+  
+  // Check multiple locations for days data
+  let days = [];
+  if (Array.isArray(plan.days) && plan.days.length > 0) {
+    days = plan.days;
+  } else if (Array.isArray(derived?.days) && derived.days.length > 0) {
+    days = derived.days;
+  } else if (Array.isArray(derived?.lightDays) && derived.lightDays.length > 0) {
+    days = derived.lightDays;
+  } else if (plan.light && Array.isArray(plan.light.days) && plan.light.days.length > 0) {
+    days = plan.light.days;
+  }
+  
+  // Find the specific day or interpolate to nearest
+  let dayData = days.find(d => (d.day === dayNumber || d.d === dayNumber));
+  
+  if (!dayData && days.length > 0) {
+    // Find the closest day <= requested day
+    const sortedDays = days
+      .map(d => ({ ...d, dayNum: d.day || d.d || 0 }))
+      .sort((a, b) => a.dayNum - b.dayNum);
+    
+    const closestDay = sortedDays.reduce((prev, curr) => {
+      if (curr.dayNum <= dayNumber) return curr;
+      return prev;
+    }, sortedDays[0]);
+    
+    dayData = closestDay;
+  }
+  
+  if (!dayData) {
+    // Fallback to plan defaults
+    return {
+      spectrum: plan.spectrum || derived?.spectrum || { cw: 45, ww: 45, bl: 0, rd: 0 },
+      ppfd: plan.ppfd || derived?.ppfd || 0,
+      dli: plan.dli || derived?.dli || 0,
+      photoperiod: plan.photoperiod || derived?.photoperiod || 0,
+      tempC: plan.tempC || (plan.env && plan.env.tempC) || 22
+    };
+  }
+  
+  // Extract day-specific data
+  // Check for spectrum in multiple formats: mix, spectrum, or flat keys (cw/ww/bl/rd)
+  let spectrum;
+  if (dayData.mix && typeof dayData.mix === 'object') {
+    console.log('[getPlanDayData] Using dayData.mix:', dayData.mix);
+    spectrum = dayData.mix;
+  } else if (dayData.spectrum && typeof dayData.spectrum === 'object') {
+    console.log('[getPlanDayData] Using dayData.spectrum:', dayData.spectrum);
+    spectrum = dayData.spectrum;
+  } else if (typeof dayData.cw !== 'undefined' || typeof dayData.ww !== 'undefined') {
+    // Flat format: cw, ww, bl, rd at top level of dayData
+    console.log('[getPlanDayData] Using flat format. dayData:', { cw: dayData.cw, ww: dayData.ww, bl: dayData.bl, rd: dayData.rd, blue: dayData.blue, red: dayData.red });
+    spectrum = {
+      cw: dayData.cw || 0,
+      ww: dayData.ww || 0,
+      bl: dayData.bl || dayData.blue || 0,
+      rd: dayData.rd || dayData.red || 0
+    };
+    console.log('[getPlanDayData] Created spectrum:', spectrum);
+  } else {
+    console.log('[getPlanDayData] Using fallback spectrum');
+    spectrum = plan.spectrum || derived?.spectrum || { cw: 45, ww: 45, bl: 0, rd: 0 };
+  }
+  
+  const ppfd = dayData.ppfd || dayData.intensity || 0;
+  const photoperiodHours = dayData.hours || dayData.photoperiod || plan.photoperiod || derived?.photoperiod || 0;
+  const dli = dayData.dli || ((ppfd && photoperiodHours) ? (ppfd * photoperiodHours * 3600 / 1000000) : 0);
+  const tempC = dayData.tempC || dayData.temp || (plan.env && plan.env.tempC) || 22;
+  
+  return {
+    spectrum,
+    ppfd,
+    dli,
+    photoperiod: typeof photoperiodHours === 'string' ? photoperiodHours : photoperiodHours,
+    tempC,
+    day: dayNumber
+  };
+}
+
+// Get total number of days in a plan
+function getPlanTotalDays(plan) {
+  if (!plan) return 1;
+  
+  const derived = plan._derived || derivePlanRuntime(plan);
+  
+  // Check multiple locations for days data
+  let days = [];
+  if (Array.isArray(plan.days) && plan.days.length > 0) {
+    days = plan.days;
+  } else if (Array.isArray(derived?.days) && derived.days.length > 0) {
+    days = derived.days;
+  } else if (Array.isArray(derived?.lightDays) && derived.lightDays.length > 0) {
+    days = derived.lightDays;
+  } else if (plan.light && Array.isArray(plan.light.days) && plan.light.days.length > 0) {
+    days = plan.light.days;
+  }
+  
+  if (days.length === 0) return 1;
+  
+  // Find the maximum day number
+  let maxDay = 0;
+  days.forEach(d => {
+    const dayNum = d.day || d.d || 0;
+    if (dayNum > maxDay) maxDay = dayNum;
+  });
+  
+  return maxDay || days.length || 1;
+}
+
 // Render the plan card for Group V2 Setup
-function renderGroupsV2PlanCard(plan) {
+function renderGroupsV2PlanCard(plan, dayNumber) {
   let card = document.getElementById('groupsV2PlanCard');
   if (!card) {
     const planControls = document.getElementById('groupsV2PlanControls');
@@ -1657,18 +2102,36 @@ function renderGroupsV2PlanCard(plan) {
     card.innerHTML = '<div class="tiny text-muted">Select a plan to view spectrum, DLI, and PPFD targets.</div>';
     return;
   }
-  // Prepare spectrum, DLI, PPFD
-  const derived = plan._derived || derivePlanRuntime(plan);
-  const spectrum = plan.spectrum || derived?.spectrum || { cw: 45, ww: 45, bl: 0, rd: 0 };
-  const ppfd = getPlanPPFD(plan);
-  const photoperiod = getPlanPhotoperiodHours(plan);
-  const dli = getPlanDli(plan);
+  
+  // Determine current day
+  const totalDays = getPlanTotalDays(plan);
+  const currentDay = Number.isFinite(dayNumber) ? Math.max(1, Math.min(dayNumber, totalDays)) : 1;
+  
+  // Get day-specific data
+  const dayData = getPlanDayData(plan, currentDay);
+  const spectrum = dayData.spectrum;
+  const ppfd = dayData.ppfd;
+  const dli = dayData.dli;
+  const photoperiod = dayData.photoperiod;
+  const tempC = dayData.tempC;
+  
   const hasPpfd = Number.isFinite(ppfd) && ppfd > 0;
   const hasDli = Number.isFinite(dli) && dli > 0;
-  const ppfdLabel = hasPpfd ? `${ppfd.toFixed(0)} µmol·m⁻²·s⁻¹` : '—';
-  const dliLabel = hasDli ? `${dli.toFixed(2)} mol·m⁻²·d⁻¹` : '—';
-  const photoperiodLabel = Number.isFinite(photoperiod) && photoperiod > 0 ? `${photoperiod.toFixed(1)} h` : formatPlanPhotoperiodDisplay(firstNonEmpty(plan.photoperiod, derived?.photoperiod, plan.defaults?.photoperiod));
-  const description = plan.description || (derived?.notes?.length ? derived.notes.join(' • ') : 'Spectrum and targets for this plan.');
+  const hasTemp = Number.isFinite(tempC);
+  
+  const ppfdLabel = hasPpfd ? `${Number(ppfd).toFixed(0)} µmol·m⁻²·s⁻¹` : '—';
+  const dliLabel = hasDli ? `${Number(dli).toFixed(2)} mol·m⁻²·d⁻¹` : '—';
+  const photoperiodLabel = Number.isFinite(photoperiod) && photoperiod > 0 ? `${Number(photoperiod).toFixed(1)} h` : '—';
+  const tempLabel = hasTemp ? `${Number(tempC).toFixed(1)}°C` : '—';
+  
+  const description = plan.description || 'Spectrum and targets for this plan.';
+  
+  // Get spectrum weighting percentages
+  const cwPct = Number(spectrum.cw || 0);
+  const wwPct = Number(spectrum.ww || 0);
+  const blPct = Number(spectrum.bl || 0);
+  const rdPct = Number(spectrum.rd || 0);
+  
   // Card HTML
   card.innerHTML = `
     <header class="group-info-card__header">
@@ -1677,27 +2140,208 @@ function renderGroupsV2PlanCard(plan) {
         <p class="tiny text-muted">${escapeHtml(description)}</p>
       </div>
     </header>
-    <div class="group-info-card__body">
-      <canvas id="groupsV2PlanSpectrumCanvas" class="group-info-card__canvas" width="320" height="100" role="img" aria-label="Plan spectrum preview"></canvas>
-      <dl class="group-info-card__metrics">
-        <dt>PPFD</dt><dd>${ppfdLabel}</dd>
-        <dt>DLI</dt><dd>${dliLabel}</dd>
-        <dt>Photoperiod</dt><dd>${photoperiodLabel && photoperiodLabel !== '—' ? escapeHtml(photoperiodLabel) : '—'}</dd>
-      </dl>
+    <div class="group-info-card__body" style="flex-direction: row; align-items: flex-start; gap: 12px;">
+      <div style="display: flex; flex-direction: column; gap: 8px; width: 50%;">
+        <canvas id="groupsV2PlanSpectrumCanvas" class="group-info-card__canvas" width="280" height="100" role="img" aria-label="Plan spectrum preview" style="width: 100%;"></canvas>
+        <div style="background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 6px; padding: 8px;">
+          <div class="tiny" style="font-weight: 600; margin-bottom: 6px; color: #475569;">Channel Mix</div>
+          <dl class="group-info-card__metrics" style="width: 100%; grid-template-columns: repeat(2, 1fr); gap: 4px 8px; font-size: 0.75rem;">
+            <dt style="font-size: 0.65rem;">Cool White</dt><dd id="groupsV2PlanCw">${cwPct.toFixed(1)}%</dd>
+            <dt style="font-size: 0.65rem;">Warm White</dt><dd id="groupsV2PlanWw">${wwPct.toFixed(1)}%</dd>
+            <dt style="font-size: 0.65rem;">Blue</dt><dd id="groupsV2PlanBl">${blPct.toFixed(1)}%</dd>
+            <dt style="font-size: 0.65rem;">Red</dt><dd id="groupsV2PlanRd">${rdPct.toFixed(1)}%</dd>
+          </dl>
+        </div>
+        <div id="groupsV2PlanColorBreakdown" style="background: #f0f9ff; border: 1px solid #bae6fd; border-radius: 6px; padding: 8px; display: none;">
+          <div class="tiny" style="font-weight: 600; margin-bottom: 6px; color: #0369a1;">Color Distribution</div>
+          <dl class="group-info-card__metrics" style="width: 100%; grid-template-columns: repeat(2, 1fr); gap: 4px 8px; font-size: 0.75rem;">
+            <dt style="font-size: 0.65rem;">Blue (400-500nm)</dt><dd id="groupsV2PlanBlue">—</dd>
+            <dt style="font-size: 0.65rem;">Green (500-600nm)</dt><dd id="groupsV2PlanGreen">—</dd>
+            <dt style="font-size: 0.65rem;">Red (600-680nm)</dt><dd id="groupsV2PlanRed">—</dd>
+            <dt style="font-size: 0.65rem;">Deep Red (680-750nm)</dt><dd id="groupsV2PlanDeepRed">—</dd>
+          </dl>
+        </div>
+      </div>
+      <div style="display: flex; flex-direction: column; gap: 10px; width: 50%;">
+        <div style="background: #f0fdf4; border: 1px solid #bbf7d0; border-radius: 6px; padding: 10px;">
+          <div class="tiny" style="font-weight: 600; margin-bottom: 6px; color: #166534;">Plan Day Targets</div>
+          <dl class="group-info-card__metrics" style="width: 100%; gap: 6px 8px;">
+            <dt>Target PPFD</dt><dd id="groupsV2PlanPpfd">${ppfdLabel}</dd>
+            <dt>Target DLI</dt><dd id="groupsV2PlanDli">${dliLabel}</dd>
+            <dt>Photoperiod</dt><dd id="groupsV2PlanPhotoperiod">${photoperiodLabel}</dd>
+            <dt>Temperature</dt><dd id="groupsV2PlanTemp">${tempLabel}</dd>
+          </dl>
+        </div>
+      </div>
+    </div>
+    <div style="background: #fefce8; border: 1px solid #fde047; border-radius: 6px; padding: 12px; margin-top: 12px;">
+      <div style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 8px;">
+        <label for="groupsV2PlanDaySlider" class="tiny" style="font-weight: 600; color: #854d0e;">Day Timeline</label>
+        <span id="groupsV2PlanDayLabel" class="tiny" style="font-weight: 600; color: #854d0e;">Day ${currentDay} of ${totalDays}</span>
+      </div>
+      ${totalDays > 1 ? `
+      <input 
+        type="range" 
+        id="groupsV2PlanDaySlider" 
+        min="1" 
+        max="${totalDays}" 
+        value="${currentDay}" 
+        step="1"
+      >
+      <div style="display: flex; justify-content: space-between; margin-top: 4px;">
+        <span class="tiny text-muted">Day 1</span>
+        <span class="tiny text-muted">Day ${totalDays}</span>
+      </div>
+      ` : `
+      <div class="tiny text-muted" style="text-align: center; padding: 8px; background: #fef9c3; border-radius: 4px;">
+        This plan has only one day. Multi-day plans will show an interactive timeline here.
+      </div>
+      `}
     </div>
   `;
+  
+  // Store plan reference for slider updates
+  card._currentPlan = plan;
+  
   // Render spectrum graph if function available
   const canvas = document.getElementById('groupsV2PlanSpectrumCanvas');
-  if (canvas && typeof renderSpectrumCanvas === 'function') {
-    const mix = { cw: Number(spectrum.cw || 0), ww: Number(spectrum.ww || 0), bl: Number(spectrum.bl || 0), rd: Number(spectrum.rd || 0) };
+  if (canvas && typeof renderSpectrumCanvas === 'function' && typeof computeWeightedSPD === 'function') {
+    const mix = { cw: cwPct, ww: wwPct, bl: blPct, rd: rdPct };
     const spd = computeWeightedSPD(mix);
     renderSpectrumCanvas(canvas, spd, { width: canvas.width, height: canvas.height });
+    
+    // Calculate and display color percentages from SPD
+    const colorPcts = calculateSpectrumColorPercentages(spd);
+    const colorBreakdownDiv = document.getElementById('groupsV2PlanColorBreakdown');
+    if (colorBreakdownDiv) {
+      colorBreakdownDiv.style.display = 'block';
+      document.getElementById('groupsV2PlanBlue').textContent = `${colorPcts.blue}%`;
+      document.getElementById('groupsV2PlanGreen').textContent = `${colorPcts.green}%`;
+      document.getElementById('groupsV2PlanRed').textContent = `${colorPcts.red}%`;
+      document.getElementById('groupsV2PlanDeepRed').textContent = `${colorPcts.deepRed}%`;
+    }
+  }
+  
+  // Attach slider event handler (must happen after innerHTML is set, and only if slider exists for multi-day plans)
+  setTimeout(() => {
+    const slider = document.getElementById('groupsV2PlanDaySlider');
+    if (slider && !slider._listenerAttached) {
+      let rafId = null;
+      
+      // Use 'input' for real-time updates with throttling via requestAnimationFrame
+      slider.addEventListener('input', (e) => {
+        const newDay = parseInt(e.target.value, 10);
+        
+        // Cancel any pending animation frame
+        if (rafId) {
+          cancelAnimationFrame(rafId);
+        }
+        
+        // Schedule update on next animation frame (throttles to 60fps)
+        rafId = requestAnimationFrame(() => {
+          updatePlanCardForDay(card._currentPlan, newDay);
+          rafId = null;
+        });
+      });
+      
+      // Use 'change' for final value logging
+      slider.addEventListener('change', (e) => {
+        const newDay = parseInt(e.target.value, 10);
+        console.log('[Groups V2] Day changed to:', newDay);
+        updatePlanCardForDay(card._currentPlan, newDay);
+      });
+      
+      slider._listenerAttached = true;
+    } else if (totalDays === 1) {
+      console.log('[Groups V2] Plan has only 1 day - slider not rendered');
+    }
+  }, 0);
+}
+
+// Update plan card data for a specific day without full re-render
+function updatePlanCardForDay(plan, dayNumber) {
+  if (!plan) return;
+  
+  const totalDays = getPlanTotalDays(plan);
+  const currentDay = Math.max(1, Math.min(dayNumber, totalDays));
+  const dayData = getPlanDayData(plan, currentDay);
+  
+  // Update day label
+  const dayLabel = document.getElementById('groupsV2PlanDayLabel');
+  if (dayLabel) dayLabel.textContent = `Day ${currentDay} of ${totalDays}`;
+  
+  // Update spectrum values
+  const spectrum = dayData.spectrum;
+  console.log(`[updatePlanCardForDay] Day ${currentDay} spectrum:`, spectrum);
+  const cwPct = Number(spectrum.cw || 0);
+  const wwPct = Number(spectrum.ww || 0);
+  const blPct = Number(spectrum.bl || 0);
+  const gnPct = Number(spectrum.gn || 0);
+  const rdPct = Number(spectrum.rd || 0);
+  const frPct = Number(spectrum.fr || 0);
+  console.log(`[updatePlanCardForDay] Extracted: CW=${cwPct}, WW=${wwPct}, BL=${blPct}, GN=${gnPct}, RD=${rdPct}, FR=${frPct}`);
+  
+  const cwEl = document.getElementById('groupsV2PlanCw');
+  const wwEl = document.getElementById('groupsV2PlanWw');
+  const blEl = document.getElementById('groupsV2PlanBl');
+  const gnEl = document.getElementById('groupsV2PlanGn');
+  const rdEl = document.getElementById('groupsV2PlanRd');
+  const frEl = document.getElementById('groupsV2PlanFr');
+  
+  if (cwEl) cwEl.textContent = `${cwPct.toFixed(1)}%`;
+  if (wwEl) wwEl.textContent = `${wwPct.toFixed(1)}%`;
+  if (blEl) blEl.textContent = `${blPct.toFixed(1)}%`;
+  if (gnEl) gnEl.textContent = `${gnPct.toFixed(1)}%`;
+  if (rdEl) rdEl.textContent = `${rdPct.toFixed(1)}%`;
+  if (frEl) frEl.textContent = `${frPct.toFixed(1)}%`;
+  
+  // Update targets
+  const ppfd = dayData.ppfd;
+  const dli = dayData.dli;
+  const photoperiod = dayData.photoperiod;
+  const tempC = dayData.tempC;
+  
+  const ppfdEl = document.getElementById('groupsV2PlanPpfd');
+  const dliEl = document.getElementById('groupsV2PlanDli');
+  const photoperiodEl = document.getElementById('groupsV2PlanPhotoperiod');
+  const tempEl = document.getElementById('groupsV2PlanTemp');
+  
+  if (ppfdEl) ppfdEl.textContent = Number.isFinite(ppfd) && ppfd > 0 ? `${Number(ppfd).toFixed(0)} µmol·m⁻²·s⁻¹` : '—';
+  if (dliEl) dliEl.textContent = Number.isFinite(dli) && dli > 0 ? `${Number(dli).toFixed(2)} mol·m⁻²·d⁻¹` : '—';
+  if (photoperiodEl) photoperiodEl.textContent = Number.isFinite(photoperiod) && photoperiod > 0 ? `${Number(photoperiod).toFixed(1)} h` : '—';
+  if (tempEl) tempEl.textContent = Number.isFinite(tempC) ? `${Number(tempC).toFixed(1)}°C` : '—';
+  
+  // Re-render spectrum canvas
+  const canvas = document.getElementById('groupsV2PlanSpectrumCanvas');
+  if (canvas && typeof renderSpectrumCanvas === 'function' && typeof computeWeightedSPD === 'function') {
+    const mix = { cw: cwPct, ww: wwPct, bl: blPct, gn: gnPct, rd: rdPct, fr: frPct };
+    console.log('[updatePlanCardForDay] Computing SPD with mix:', mix);
+    const spd = computeWeightedSPD(mix);
+    console.log('[updatePlanCardForDay] SPD weights:', spd.weights);
+    console.log('[updatePlanCardForDay] SPD display sample count:', spd.display?.length);
+    console.log('[updatePlanCardForDay] SPD display first 10 values:', spd.display?.slice(0, 10));
+    renderSpectrumCanvas(canvas, spd, { width: canvas.width, height: canvas.height });
+    
+    // Update color distribution
+    const colorPcts = calculateSpectrumColorPercentages(spd);
+    console.log('[updatePlanCardForDay] Color percentages:', colorPcts);
+    document.getElementById('groupsV2PlanBlue').textContent = `${colorPcts.blue}%`;
+    document.getElementById('groupsV2PlanGreen').textContent = `${colorPcts.green}%`;
+    document.getElementById('groupsV2PlanRed').textContent = `${colorPcts.red}%`;
+    document.getElementById('groupsV2PlanDeepRed').textContent = `${colorPcts.deepRed}%`;
   }
 }
 
 function populateGroupsV2ScheduleDropdown() {
   const select = document.getElementById('groupsV2ScheduleSelect');
   if (!select) return;
+  
+  // Don't repopulate if user is actively interacting with the dropdown
+  if (document.activeElement === select) {
+    console.log('[Groups V2] Skipping schedule dropdown repopulation - user is interacting with it');
+    return;
+  }
+  
   while (select.options.length > 1) select.remove(1);
   const schedules = (window.STATE && Array.isArray(window.STATE.schedules)) ? window.STATE.schedules : [];
   schedules.forEach(sched => {
@@ -1711,17 +2355,36 @@ function populateGroupsV2ScheduleDropdown() {
 document.addEventListener('DOMContentLoaded', () => {
   // ...existing code...
   initializeGroupsV2Form();
+  // Initial population (may be empty if data not yet loaded)
   populateGroupsV2PlanSearchDropdown();
   populateGroupsV2PlanDropdown(groupsV2FormState.planSearch);
   populateGroupsV2ScheduleDropdown();
+  
+  // Listen for plan/schedule updates
   document.addEventListener('plans-updated', () => {
+    console.log('[Groups V2] plans-updated event received');
     populateGroupsV2PlanSearchDropdown();
     populateGroupsV2PlanDropdown(groupsV2FormState.planSearch);
   });
-  document.addEventListener('schedules-updated', populateGroupsV2ScheduleDropdown);
+  document.addEventListener('schedules-updated', () => {
+    console.log('[Groups V2] schedules-updated event received');
+    populateGroupsV2ScheduleDropdown();
+  });
 
   updateGroupsV2Preview();
 });
+
+// Listen for farmDataChanged event (attach once)
+if (!window._groupsV2FarmDataListenerAttached) {
+  window.addEventListener('farmDataChanged', () => {
+    console.log('[Groups V2] farmDataChanged event received - repopulating dropdowns');
+    populateGroupsV2PlanSearchDropdown();
+    populateGroupsV2PlanDropdown(groupsV2FormState.planSearch);
+    populateGroupsV2ScheduleDropdown();
+    updateGroupsV2Preview();
+  });
+  window._groupsV2FarmDataListenerAttached = true;
+}
 
 document.addEventListener('DOMContentLoaded', () => {
   const select = document.getElementById('groupsV2LoadGroup');
@@ -1857,6 +2520,7 @@ document.addEventListener('DOMContentLoaded', () => {
   if (dpsBtn) {
     dpsBtn.addEventListener('click', () => {
       const isPressed = dpsBtn.getAttribute('aria-pressed') === 'true';
+      console.log('[Groups V2] DPS button clicked - current aria-pressed:', isPressed);
       if (!isPressed) {
         groupsV2FormState.anchorMode = 'dps';
         dpsBtn.setAttribute('aria-pressed', 'true');
@@ -1864,7 +2528,16 @@ document.addEventListener('DOMContentLoaded', () => {
         const seedDateBtn = document.getElementById('groupsV2SeedDateBtn');
         if (seedDateBtn) seedDateBtn.setAttribute('aria-pressed', 'false');
         updateGroupsV2AnchorInputs();
+        // Force focus to DPS input after a micro-delay to ensure it's enabled
+        setTimeout(() => {
+          const dpsInput = document.getElementById('groupsV2Dps');
+          if (dpsInput && !dpsInput.disabled) {
+            dpsInput.focus();
+            console.log('[Groups V2] DPS input focused');
+          }
+        }, 0);
         updateGroupsV2Preview();
+        console.log('[Groups V2] DPS mode activated');
       }
     });
   }
@@ -1876,22 +2549,24 @@ document.addEventListener('DOMContentLoaded', () => {
   const cycle2Container = document.getElementById('groupsV2Cycle2Container');
   if (addCycle2Btn && cycle2Container) {
     addCycle2Btn.addEventListener('click', () => {
-      // Show cycle 2 container
+      console.log('[Groups V2] Add Cycle 2 button clicked');
+      const schedule = ensureGroupsV2ScheduleState();
+      const baselineHours = Number.isFinite(schedule.photoperiodHours) && schedule.photoperiodHours > 0
+        ? schedule.photoperiodHours
+        : GROUPS_V2_DEFAULTS.schedule.photoperiodHours;
+      const updated = normalizeGroupsV2Schedule({
+        ...schedule,
+        mode: 'two',
+        photoperiodHours: baselineHours,
+      });
+      groupsV2FormState.schedule = updated;
+      console.log('[Groups V2] Updated schedule to two-cycle mode:', updated);
+      // Manually set the container display BEFORE updateGroupsV2ScheduleUI
       cycle2Container.style.display = 'flex';
-      // Hide the add button
       addCycle2Btn.style.display = 'none';
-      // Initialize cycle 2 in form state if not exists
-      if (!groupsV2FormState.schedule.cycle2) {
-        groupsV2FormState.schedule.cycle2 = {
-          enabled: true,
-          onHour: 20,
-          onMinute: 0,
-          hours: 12
-        };
-      } else {
-        groupsV2FormState.schedule.cycle2.enabled = true;
-      }
+      updateGroupsV2ScheduleUI();
       updateGroupsV2Preview();
+      console.log('[Groups V2] Add Cycle 2 complete - container visible:', cycle2Container.style.display);
     });
   }
 });
@@ -1903,14 +2578,15 @@ document.addEventListener('DOMContentLoaded', () => {
   const addCycle2Btn = document.getElementById('groupsV2AddCycle2Btn');
   if (removeCycle2Btn && cycle2Container && addCycle2Btn) {
     removeCycle2Btn.addEventListener('click', () => {
-      // Hide cycle 2 container
+      const schedule = ensureGroupsV2ScheduleState();
+      const updated = normalizeGroupsV2Schedule({
+        ...schedule,
+        mode: 'one',
+      });
+      groupsV2FormState.schedule = updated;
       cycle2Container.style.display = 'none';
-      // Show the add button again
       addCycle2Btn.style.display = 'inline-block';
-      // Disable cycle 2 in form state
-      if (groupsV2FormState.schedule.cycle2) {
-        groupsV2FormState.schedule.cycle2.enabled = false;
-      }
+      updateGroupsV2ScheduleUI();
       updateGroupsV2Preview();
     });
   }

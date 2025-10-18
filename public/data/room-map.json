@@ -1,9 +1,256 @@
 {
-  "roomId": "default",
-  "name": "Main Grow Room",
+  "roomId": "mock-grow-room",
+  "name": "Mock Grow Room",
+  "version": 2,
   "gridSize": 20,
   "cellSize": 40,
-  "devices": [],
-  "zones": [],
-  "lastUpdated": null
+  "zones": [
+    {
+      "zone": 1,
+      "name": "Zone 1 (Mini-Split)",
+      "color": "#3b82f6",
+      "x1": 1,
+      "y1": 1,
+      "x2": 9,
+      "y2": 6
+    },
+    {
+      "zone": 2,
+      "name": "Zone 2 (Mini-Split)",
+      "color": "#10b981",
+      "x1": 11,
+      "y1": 1,
+      "x2": 19,
+      "y2": 6
+    },
+    {
+      "zone": 3,
+      "name": "Zone 3 (Fans)",
+      "color": "#f59e0b",
+      "x1": 1,
+      "y1": 8,
+      "x2": 9,
+      "y2": 13
+    },
+    {
+      "zone": 4,
+      "name": "Zone 4 (Fans)",
+      "color": "#ef4444",
+      "x1": 11,
+      "y1": 8,
+      "x2": 19,
+      "y2": 13
+    }
+  ],
+  "devices": [
+    {
+      "deviceId": "sensor-zone-1",
+      "x": 5,
+      "y": 3,
+      "snapshot": {
+        "name": "Sensor Zone 1",
+        "type": "WoIOSensor",
+        "protocol": "switchbot",
+        "category": "sensor",
+        "zone": 1,
+        "icon": "🌡️"
+      }
+    },
+    {
+      "deviceId": "minisplit-zone-1",
+      "x": 2,
+      "y": 2,
+      "snapshot": {
+        "name": "Mini-Split Zone 1",
+        "type": "HVAC",
+        "protocol": "switchbot",
+        "category": "equipment",
+        "zone": 1,
+        "icon": "🌀"
+      }
+    },
+    {
+      "deviceId": "light-line-1-zone-1",
+      "x": 4,
+      "y": 4,
+      "snapshot": {
+        "name": "Grow Light Line 1",
+        "type": "light",
+        "protocol": "switchbot",
+        "category": "light",
+        "zone": 1,
+        "icon": "💡"
+      }
+    },
+    {
+      "deviceId": "light-line-2-zone-1",
+      "x": 7,
+      "y": 4,
+      "snapshot": {
+        "name": "Grow Light Line 2",
+        "type": "light",
+        "protocol": "switchbot",
+        "category": "light",
+        "zone": 1,
+        "icon": "💡"
+      }
+    },
+    {
+      "deviceId": "sensor-zone-2",
+      "x": 15,
+      "y": 3,
+      "snapshot": {
+        "name": "Sensor Zone 2",
+        "type": "WoIOSensor",
+        "protocol": "switchbot",
+        "category": "sensor",
+        "zone": 2,
+        "icon": "🌡️"
+      }
+    },
+    {
+      "deviceId": "minisplit-zone-2",
+      "x": 12,
+      "y": 2,
+      "snapshot": {
+        "name": "Mini-Split Zone 2",
+        "type": "HVAC",
+        "protocol": "switchbot",
+        "category": "equipment",
+        "zone": 2,
+        "icon": "🌀"
+      }
+    },
+    {
+      "deviceId": "light-line-1-zone-2",
+      "x": 14,
+      "y": 4,
+      "snapshot": {
+        "name": "Grow Light Line 1",
+        "type": "light",
+        "protocol": "switchbot",
+        "category": "light",
+        "zone": 2,
+        "icon": "💡"
+      }
+    },
+    {
+      "deviceId": "light-line-2-zone-2",
+      "x": 17,
+      "y": 4,
+      "snapshot": {
+        "name": "Grow Light Line 2",
+        "type": "light",
+        "protocol": "switchbot",
+        "category": "light",
+        "zone": 2,
+        "icon": "💡"
+      }
+    },
+    {
+      "deviceId": "sensor-zone-3",
+      "x": 5,
+      "y": 10,
+      "snapshot": {
+        "name": "Sensor Zone 3",
+        "type": "WoIOSensor",
+        "protocol": "switchbot",
+        "category": "sensor",
+        "zone": 3,
+        "icon": "🌡️"
+      }
+    },
+    {
+      "deviceId": "fan-zone-3",
+      "x": 2,
+      "y": 9,
+      "snapshot": {
+        "name": "Circulation Fan Zone 3",
+        "type": "plug",
+        "protocol": "switchbot",
+        "category": "equipment",
+        "zone": 3,
+        "icon": "🔌"
+      }
+    },
+    {
+      "deviceId": "light-line-1-zone-3",
+      "x": 4,
+      "y": 11,
+      "snapshot": {
+        "name": "Grow Light Line 1",
+        "type": "light",
+        "protocol": "switchbot",
+        "category": "light",
+        "zone": 3,
+        "icon": "💡"
+      }
+    },
+    {
+      "deviceId": "light-line-2-zone-3",
+      "x": 7,
+      "y": 11,
+      "snapshot": {
+        "name": "Grow Light Line 2",
+        "type": "light",
+        "protocol": "switchbot",
+        "category": "light",
+        "zone": 3,
+        "icon": "💡"
+      }
+    },
+    {
+      "deviceId": "sensor-zone-4",
+      "x": 15,
+      "y": 10,
+      "snapshot": {
+        "name": "Sensor Zone 4",
+        "type": "WoIOSensor",
+        "protocol": "switchbot",
+        "category": "sensor",
+        "zone": 4,
+        "icon": "🌡️"
+      }
+    },
+    {
+      "deviceId": "fan-zone-4",
+      "x": 12,
+      "y": 9,
+      "snapshot": {
+        "name": "Circulation Fan Zone 4",
+        "type": "plug",
+        "protocol": "switchbot",
+        "category": "equipment",
+        "zone": 4,
+        "icon": "🔌"
+      }
+    },
+    {
+      "deviceId": "light-line-1-zone-4",
+      "x": 14,
+      "y": 11,
+      "snapshot": {
+        "name": "Grow Light Line 1",
+        "type": "light",
+        "protocol": "switchbot",
+        "category": "light",
+        "zone": 4,
+        "icon": "💡"
+      }
+    },
+    {
+      "deviceId": "light-line-2-zone-4",
+      "x": 17,
+      "y": 11,
+      "snapshot": {
+        "name": "Grow Light Line 2",
+        "type": "light",
+        "protocol": "switchbot",
+        "category": "light",
+        "zone": 4,
+        "icon": "💡"
+      }
+    }
+  ],
+  "lastUpdated": "2025-10-18T13:21:13.390Z"
 }

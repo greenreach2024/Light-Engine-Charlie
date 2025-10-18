@@ -11,14 +11,14 @@
     }
   ],
   "zones": [],
-  "address": "King Street East",
-  "city": "Gananoque",
+  "address": "St Lawrence Avenue",
+  "city": "Kingston",
   "state": "Ontario",
-  "postalCode": "K7G 2Y5",
+  "postalCode": "K7L 4V1",
   "timezone": "America/Toronto",
   "coordinates": {
-    "lat": 44.32789763561765,
-    "lng": -76.16362561978208
+    "lat": 44.25867743174618,
+    "lng": -76.37264056824161
   },
   "contact": {
     "name": "Peter",
@@ -29,25 +29,25 @@
   "connection": {
     "type": "wifi",
     "wifi": {
-      "ssid": "Greenreach",
+      "ssid": "redbrick",
       "reuseDiscovery": true,
       "tested": true,
       "testResult": {
         "status": "connected",
-        "ip": "192.168.2.37",
+        "ip": "192.168.2.172",
         "gateway": "192.168.2.1",
-        "subnet": "192.168.2.37/24",
-        "latencyMs": 29.381,
-        "testedAt": "2025-10-17T15:29:41.610Z",
-        "ssid": "Greenreach"
+        "subnet": "192.168.2.172/24",
+        "latencyMs": 17.664,
+        "testedAt": "2025-10-18T15:53:26.320Z",
+        "ssid": "redbrick"
       }
     }
   },
   "discovery": {
-    "subnet": "192.168.2.37/24",
+    "subnet": "192.168.2.172/24",
     "gateway": "192.168.2.1",
     "reuseNetwork": true,
-    "ssid": "Greenreach"
+    "ssid": "redbrick"
   },
   "locations": [
     "GreenReach"

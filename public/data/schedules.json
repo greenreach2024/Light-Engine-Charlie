@@ -2,15 +2,128 @@
   "schedules": [
     {
       "id": "group:PropagationBay:PropagationNorth:Demo",
-      "period": "1d",
-      "photoperiod": [
-        "16/8"
+      "groupId": "PropagationBay",
+      "name": "Schedule for PropagationBay",
+      "mode": "one",
+      "timezone": null,
+      "photoperiodHours": 16,
+      "ramp": {
+        "up": 10,
+        "down": 10
+      },
+      "cycles": [
+        {
+          "start": "06:00",
+          "off": "22:00",
+          "photo": 16,
+          "ramp": {
+            "up": 10,
+            "down": 10
+          },
+          "spectrum": null
+        }
       ],
-      "start": "06:00",
-      "durationHours": 16,
-      "rampUpMin": 10,
-      "rampDownMin": 10,
-      "planKey": "GR-Propagation-BL55"
+      "updatedAt": "2025-10-18T15:34:01.270Z"
+    },
+    {
+      "id": "group:GreenReach:1:test",
+      "groupId": "GreenReach:1:test",
+      "name": "test Schedule",
+      "mode": "one",
+      "timezone": "America/Toronto",
+      "photoperiodHours": 12,
+      "ramp": {
+        "up": 10,
+        "down": 10
+      },
+      "cycles": [
+        {
+          "start": "08:00",
+          "off": "20:00",
+          "photo": 12,
+          "ramp": {
+            "up": 10,
+            "down": 10
+          },
+          "spectrum": null
+        }
+      ],
+      "updatedAt": "2025-10-18T15:34:01.270Z"
+    },
+    {
+      "id": "group:GreenReach:1:Test Group 1",
+      "groupId": "GreenReach:1:Test Group 1",
+      "name": "Test Group 1 Schedule",
+      "mode": "one",
+      "timezone": "America/Toronto",
+      "photoperiodHours": 12,
+      "ramp": {
+        "up": 10,
+        "down": 10
+      },
+      "cycles": [
+        {
+          "start": "08:00",
+          "off": "20:00",
+          "photo": 12,
+          "ramp": {
+            "up": 10,
+            "down": 10
+          },
+          "spectrum": null
+        }
+      ],
+      "updatedAt": "2025-10-18T16:09:12.231Z"
+    },
+    {
+      "id": "group:GreenReach:2:Testing",
+      "groupId": "GreenReach:2:Testing",
+      "name": "Testing Schedule",
+      "mode": "one",
+      "timezone": "America/Toronto",
+      "photoperiodHours": 12,
+      "ramp": {
+        "up": 10,
+        "down": 10
+      },
+      "cycles": [
+        {
+          "start": "08:00",
+          "off": "20:00",
+          "photo": 12,
+          "ramp": {
+            "up": 10,
+            "down": 10
+          },
+          "spectrum": null
+        }
+      ],
+      "updatedAt": "2025-10-18T17:59:59.251Z"
+    },
+    {
+      "id": "group:GreenReach:1:t",
+      "groupId": "GreenReach:1:t",
+      "name": "t Schedule",
+      "mode": "one",
+      "timezone": "America/Toronto",
+      "photoperiodHours": 12,
+      "ramp": {
+        "up": 10,
+        "down": 10
+      },
+      "cycles": [
+        {
+          "start": "08:00",
+          "off": "20:00",
+          "photo": 12,
+          "ramp": {
+            "up": 10,
+            "down": 10
+          },
+          "spectrum": null
+        }
+      ],
+      "updatedAt": "2025-10-18T18:14:29.333Z"
     }
   ]
 }

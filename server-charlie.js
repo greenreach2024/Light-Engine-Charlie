@@ -7845,8 +7845,102 @@ app.get('/plans', (req, res) => {
     const doc = loadPlansDocument();
     const plans = Array.isArray(doc.plans) ? doc.plans : [];
     const envelope = sanitizePlansEnvelope(doc);
+
+    // Helper to synthesize plan objects from lighting-recipes.json
+    function synthesizePlansFromRecipes(recipes) {
+      if (!recipes || typeof recipes !== 'object') return [];
+      const crops = recipes.crops && typeof recipes.crops === 'object' ? recipes.crops : {};
+      const toNumber = (v) => {
+        const n = Number(v);
+        return Number.isFinite(n) ? n : null;
+      };
+      const slugify = (str) => String(str || '')
+        .toLowerCase()
+        .replace(/[^a-z0-9]+/g, '-')
+        .replace(/^-+|-+$/g, '');
+      const out = [];
+      for (const [cropName, days] of Object.entries(crops)) {
+        if (!Array.isArray(days) || !days.length) continue;
+        const id = `crop-${slugify(cropName)}`;
+        const lightDays = days.map((row) => ({
+          day: toNumber(row.day),
+          stage: typeof row.stage === 'string' ? row.stage : '',
+          ppfd: toNumber(row.ppfd),
+          // No explicit photoperiod provided in recipes DB; leave undefined
+          mix: {
+            cw: toNumber(row.cool_white) ?? 0,
+            ww: toNumber(row.warm_white) ?? 0,
+            bl: toNumber(row.blue) ?? 0,
+            gn: toNumber(row.green) ?? 0,
+            rd: toNumber(row.red) ?? 0,
+            fr: toNumber(row.far_red) ?? 0,
+          },
+        })).filter(Boolean);
+        const envDays = days.map((row) => ({
+          day: toNumber(row.day),
+          tempC: toNumber(row.temperature),
+        })).filter((d) => d.tempC != null);
+        const plan = {
+          id,
+          key: id,
+          name: String(cropName),
+          crop: String(cropName),
+          kind: 'recipe',
+          description: `Imported from lighting-recipes.json for ${cropName}.`,
+          light: { days: lightDays },
+          ...(envDays.length ? { env: { days: envDays } } : {}),
+          meta: {
+            source: 'recipes',
+            appliesTo: { category: ['Crop'], varieties: [] },
+          },
+          // Provide a conservative default photoperiod for display math if needed
+          defaults: { photoperiod: 12 },
+        };
+        out.push(plan);
+      }
+      return out;
+    }
+
+    // Decide whether to include synthesized plans from the lighting-recipes database
+  let includeRecipes = false;
+    try {
+      // Explicit overrides via query or env
+      if (req.query && (req.query.recipes === '1' || req.query.includeRecipes === '1')) includeRecipes = true;
+      if (process.env.USE_LIGHTING_RECIPES_FOR_PLANS && ['1', 'true', 'yes'].includes(String(process.env.USE_LIGHTING_RECIPES_FOR_PLANS).toLowerCase())) {
+        includeRecipes = true;
+      }
+      // Auto-include if recipes file exists (treat recipes DB as authoritative superset)
+      if (fs.existsSync(RECIPES_PATH)) {
+        includeRecipes = true;
+      }
+    } catch (e) {
+      // Non-fatal
+      console.warn('[plans] Failed to compare recipes/plans timestamps:', e.message);
+    }
+
+    // Normalize existing plans
     const normalized = plans.map((plan) => normalizePlanEntry(plan, plan?.id)).filter(Boolean);
-    res.json({ ok: true, ...envelope, plans: normalized });
+
+    // Optionally merge in synthesized plans from recipes
+    let merged = normalized.slice();
+    if (includeRecipes) {
+      try {
+        const recipes = loadRecipes();
+        const synthetic = synthesizePlansFromRecipes(recipes).map((p) => normalizePlanEntry(p, p?.id)).filter(Boolean);
+        // Deduplicate by id; prefer explicit plans over synthesized
+        const seen = new Set(merged.map((p) => p.id));
+        for (const entry of synthetic) {
+          if (!entry || !entry.id) continue;
+          if (seen.has(entry.id)) continue;
+          merged.push(entry);
+          seen.add(entry.id);
+        }
+      } catch (e) {
+        console.warn('[plans] Failed to synthesize plans from recipes:', e.message);
+      }
+    }
+
+    res.json({ ok: true, ...envelope, plans: merged });
   } catch (err) {
     res.status(500).json({ ok: false, error: err.message });
   }
@@ -10799,6 +10893,211 @@ async function resolveAvailablePort(initialPort) {
   throw error;
 }
 
+// Sync live sensor data from iot-devices.json to env.json zones
+function setupLiveSensorSync() {
+  const IOT_DEVICES_PATH = path.join(PUBLIC_DIR, 'data', 'iot-devices.json');
+  const SYNC_INTERVAL = 30000; // 30 seconds
+  
+  function syncSensorData() {
+    try {
+      // Read iot-devices.json for live sensor data
+      if (!fs.existsSync(IOT_DEVICES_PATH)) {
+        console.log('[sensor-sync] iot-devices.json not found, skipping sync');
+        return;
+      }
+      
+      const iotDevices = JSON.parse(fs.readFileSync(IOT_DEVICES_PATH, 'utf8'));
+      if (!Array.isArray(iotDevices)) return;
+      
+      // Read current env.json
+      let envData = { zones: [] };
+      try {
+        if (fs.existsSync(ENV_PATH)) {
+          envData = JSON.parse(fs.readFileSync(ENV_PATH, 'utf8'));
+        }
+      } catch {}
+      
+      envData.zones = envData.zones || [];
+      let updated = false;
+      
+      // Find sensor devices and update their zones
+      iotDevices.forEach((device) => {
+        const telemetry = device.telemetry || {};
+        const hasTemp = typeof telemetry.temperature === 'number';
+        const hasHumidity = typeof telemetry.humidity === 'number';
+        
+        // Only process devices with temperature or humidity readings
+        if (!hasTemp && !hasHumidity) return;
+        
+        // Determine zone for this device
+        const zoneId = device.zone ? `zone-${device.zone}` : `zone-${device.id}`;
+        const zoneName = device.location || device.name || zoneId;
+        
+        // Find or create zone
+        let zone = envData.zones.find(z => z.id === zoneId);
+        if (!zone) {
+          zone = {
+            id: zoneId,
+            name: zoneName,
+            location: zoneName,
+            sensors: {}
+          };
+          envData.zones.push(zone);
+        }
+        
+        // Update zone name with device name for better identification
+        // Prefer device.name over device.location for descriptive names
+        const previousName = zone.name;
+        if (device.name && device.name !== zone.id) {
+          zone.name = device.name;
+          zone.location = device.name;
+          if (previousName !== device.name) {
+            updated = true; // Name changed, mark for update
+          }
+        } else if (device.location && device.location !== zone.id) {
+          zone.name = device.location;
+          zone.location = device.location;
+          if (previousName !== device.location) {
+            updated = true; // Name changed, mark for update
+          }
+        }
+        
+        // Ensure meta object
+        zone.meta = zone.meta || {};
+        zone.meta.source = 'live-sync';
+        zone.meta.deviceId = device.id;
+        zone.meta.lastSync = new Date().toISOString();
+        
+        if (typeof telemetry.battery === 'number') {
+          zone.meta.battery = telemetry.battery;
+        }
+        
+        // Update temperature (keep in Celsius)
+        if (hasTemp) {
+          zone.sensors.tempC = zone.sensors.tempC || {
+            current: null,
+            setpoint: { min: 20, max: 24 },
+            history: []
+          };
+          
+          const tempC = Number(telemetry.temperature.toFixed(1));
+          const previousTemp = zone.sensors.tempC.current;
+          
+          // Check if setpoint is in Fahrenheit (> 40°C) and reset to Celsius
+          const setpoint = zone.sensors.tempC.setpoint;
+          if (setpoint && (setpoint.min > 40 || setpoint.max > 40)) {
+            console.log(`[Sensor Sync] Detected Fahrenheit setpoint in ${zone.name}, resetting to Celsius`);
+            zone.sensors.tempC.setpoint = { min: 20, max: 24 };
+            updated = true;
+          }
+          
+          // Check if history contains Fahrenheit values (detect values > 40°C which is unrealistic for indoor farming)
+          const history = zone.sensors.tempC.history || [];
+          const hasFahrenheitValues = history.some(val => val > 40);
+          
+          if (hasFahrenheitValues) {
+            console.log(`[Sensor Sync] Detected Fahrenheit values in ${zone.name} history, resetting to Celsius`);
+            // Reset history with current Celsius value repeated
+            zone.sensors.tempC.history = Array(288).fill(tempC);
+            zone.sensors.tempC.current = tempC;
+            updated = true;
+          } else if (previousTemp !== tempC) {
+            zone.sensors.tempC.current = tempC;
+            
+            // Update history (keep last 288 = 24 hours at 5min intervals)
+            zone.sensors.tempC.history = zone.sensors.tempC.history || [];
+            zone.sensors.tempC.history.unshift(zone.sensors.tempC.current);
+            zone.sensors.tempC.history = zone.sensors.tempC.history.slice(0, 288);
+            
+            updated = true;
+          }
+        }
+        
+        // Update humidity
+        if (hasHumidity) {
+          zone.sensors.rh = zone.sensors.rh || {
+            current: null,
+            setpoint: { min: 58, max: 65 },
+            history: []
+          };
+          
+          // Check if setpoint needs updating to new target range
+          const rhSetpoint = zone.sensors.rh.setpoint;
+          if (rhSetpoint && (rhSetpoint.min !== 58 || rhSetpoint.max !== 65)) {
+            console.log(`[Sensor Sync] Updating humidity setpoint in ${zone.name} to 58-65%`);
+            zone.sensors.rh.setpoint = { min: 58, max: 65 };
+            updated = true;
+          }
+          
+          const previousRh = zone.sensors.rh.current;
+          const currentRh = Number(telemetry.humidity.toFixed(1));
+          
+          if (previousRh !== currentRh) {
+            zone.sensors.rh.current = currentRh;
+            
+            // Update history
+            zone.sensors.rh.history = zone.sensors.rh.history || [];
+            zone.sensors.rh.history.unshift(zone.sensors.rh.current);
+            zone.sensors.rh.history = zone.sensors.rh.history.slice(0, 288);
+            
+            updated = true;
+          }
+        }
+        
+        // Calculate and update VPD if we have both temp and humidity
+        if (hasTemp && hasHumidity) {
+          const tempC = telemetry.temperature;
+          const rh = telemetry.humidity;
+          const vpd = computeVPDkPa(tempC, rh);
+          
+          zone.sensors.vpd = zone.sensors.vpd || {
+            current: null,
+            setpoint: { min: 0.90, max: 1.05 },
+            history: []
+          };
+          
+          // Check if setpoint needs updating to new target range
+          const vpdSetpoint = zone.sensors.vpd.setpoint;
+          if (vpdSetpoint && (vpdSetpoint.min !== 0.90 || vpdSetpoint.max !== 1.05)) {
+            console.log(`[Sensor Sync] Updating VPD setpoint in ${zone.name} to 0.90-1.05 kPa`);
+            zone.sensors.vpd.setpoint = { min: 0.90, max: 1.05 };
+            updated = true;
+          }
+          
+          const previousVpd = zone.sensors.vpd.current;
+          const currentVpd = Number(vpd.toFixed(2));
+          
+          if (previousVpd !== currentVpd) {
+            zone.sensors.vpd.current = currentVpd;
+            
+            // Update history
+            zone.sensors.vpd.history = zone.sensors.vpd.history || [];
+            zone.sensors.vpd.history.unshift(zone.sensors.vpd.current);
+            zone.sensors.vpd.history = zone.sensors.vpd.history.slice(0, 288);
+            
+            updated = true;
+          }
+        }
+      });
+      
+      // Write updated data if anything changed
+      if (updated) {
+        fs.writeFileSync(ENV_PATH, JSON.stringify(envData, null, 2));
+        console.log('[sensor-sync] Updated env.json with live sensor data');
+      }
+    } catch (error) {
+      console.warn('[sensor-sync] Error syncing sensor data:', error?.message || error);
+    }
+  }
+  
+  // Run immediately on startup
+  syncSensorData();
+  
+  // Then run periodically
+  setInterval(syncSensorData, SYNC_INTERVAL);
+  console.log(`[sensor-sync] Live sensor sync enabled (interval: ${SYNC_INTERVAL}ms)`);
+}
+
 async function startServer() {
   try {
     const resolvedPort = await resolveAvailablePort(PORT);
@@ -10817,6 +11116,11 @@ async function startServer() {
   server.on('listening', () => {
     console.log(`[charlie] running http://127.0.0.1:${PORT} → ${getController()}`);
     try { setupWeatherPolling(); } catch {}
+    
+    // Start syncing live sensor data from iot-devices.json to env.json zones
+    try { setupLiveSensorSync(); } catch (error) {
+      console.warn('[sensor-sync] Failed to start:', error?.message || error);
+    }
     
     // Initialize Schedule Executor for automated plan/schedule application
     if (SCHEDULE_EXECUTOR_ENABLED) {

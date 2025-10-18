@@ -22,6 +22,8 @@
   <script>window.API_BASE = window.API_BASE || location.origin;</script>
   <script src="/js/net.guard.js?v={{BUILD_TIME}}" defer></script>
   <script src="/app.charlie.js?v={{BUILD_TIME}}" defer></script>
+  <!-- Groups V2 module: handles plan dropdown, anchor toggle, and schedule UI -->
+  <script src="/groups-v2.js?v={{BUILD_TIME}}" defer></script>
 </head>
 <body>
   <div class="dashboard-shell">
@@ -70,7 +72,7 @@
         </button>
 
         <button type="button" class="sidebar-link" onclick="window.open('./views/room-mapper.html', '_blank')" style="cursor: pointer;">
-          🗺️ Room Mapper
+          Room Mapper
         </button>
       </div>
     </div>
@@ -432,6 +434,12 @@
                 Search plans
                 <select id="groupsV2PlanSearch" size="1" style="margin-top:4px;min-height:32px;max-height:300px;overflow-y:auto;border-radius:6px;border:1px solid #cbd5e1;">
                   <option value="">All plans</option>
+                </select>
+              </label>
+              <label class="tiny" style="display:flex;flex-direction:column;min-width:220px;">
+                Plan
+                <select id="groupsV2PlanSelect" style="margin-top:4px;min-height:32px;border-radius:6px;border:1px solid #cbd5e1;">
+                  <option value="">(select plan)</option>
                 </select>
               </label>
               <button id="applyPlanToGroupBtn" type="button" class="primary">Apply to Current Plan</button>

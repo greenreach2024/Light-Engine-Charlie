@@ -37,7 +37,7 @@
   }
 </style>
 <script>
-  // Auto-redirect to main dashboard after video ends or max 10 seconds
+  // Auto-redirect to main dashboard after video ends (full video length)
   window.addEventListener('DOMContentLoaded', () => {
     const video = document.querySelector('video');
     let redirected = false;
@@ -59,9 +59,6 @@
         setTimeout(performRedirect, 3000);
       });
     }
-    
-    // Fallback: redirect after max 10 seconds regardless
-    setTimeout(performRedirect, 10000);
     
     // Skip on click anywhere
     document.addEventListener('click', performRedirect, { once: true });
@@ -143,13 +140,6 @@
         <animate attributeName="opacity" from="0" to="1" dur="0.3s" begin="3.0s" fill="freeze"/>
       </rect>
     </svg>
-
-    <div class="title">
-      <h1><span class="glint">THE LIGHT ENGINE</span></h1>
-      <p>From White Light to Life</p>
-    </div>
-    
-    <div class="skip-hint">Click anywhere to skip ⏩</div>
   </div>
 </div>
 </body>

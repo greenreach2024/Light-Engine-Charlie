@@ -45,6 +45,12 @@
       font-weight: 500;
     }
 
+    .header-actions {
+      display: flex;
+      gap: 1rem;
+      align-items: center;
+    }
+
     .close-btn {
       background: rgba(239, 68, 68, 0.2);
       border: 2px solid #ef4444;
@@ -62,6 +68,16 @@
       transform: scale(1.05);
     }
 
+    .close-btn.secondary {
+      background: rgba(59, 130, 246, 0.2);
+      border-color: #3b82f6;
+      color: #93c5fd;
+    }
+
+    .close-btn.secondary:hover {
+      background: rgba(59, 130, 246, 0.35);
+    }
+
     /* Main Grid */
     .container {
       flex: 1;
@@ -69,8 +85,24 @@
       display: grid;
       grid-template-columns: 2fr 1fr;
       grid-template-rows: 1fr 1fr;
+      grid-template-areas:
+        "environmental schedule"
+        "trending schedule";
       gap: 1.5rem;
       overflow: auto;
+    }
+
+    /* Explicit grid area assignments to prevent overlap */
+    .card:nth-child(1) {
+      grid-area: environmental;
+    }
+
+    .card:nth-child(2) {
+      grid-area: schedule;
+    }
+
+    .card:nth-child(3) {
+      grid-area: trending;
     }
 
     /* Card Styles */
@@ -125,6 +157,7 @@
         rgba(236, 72, 153, 0.3),
         rgba(59, 130, 246, 0.3)
       );
+      mask: linear-gradient(#fff 0 0) content-box, linear-gradient(#fff 0 0);
       -webkit-mask: linear-gradient(#fff 0 0) content-box, linear-gradient(#fff 0 0);
       -webkit-mask-composite: xor;
       mask-composite: exclude;
@@ -149,8 +182,8 @@
     /* Environmental Grid */
     .env-grid {
       display: grid;
-      grid-template-columns: repeat(3, 1fr);
-      gap: 1.5rem;
+      grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+      gap: 1.25rem;
       flex: 1;
     }
 
@@ -188,6 +221,13 @@
     .env-metric .unit {
       font-size: 1rem;
       color: #64748b;
+      font-weight: 500;
+    }
+
+    .env-metric .target {
+      margin-top: 0.25rem;
+      font-size: 0.875rem;
+      color: #60a5fa;
       font-weight: 500;
     }
 
@@ -345,6 +385,24 @@
       height: 100%;
     }
 
+    .chart-empty {
+      position: absolute;
+      inset: 0;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      background: rgba(15, 23, 42, 0.85);
+      color: #94a3b8;
+      font-size: 1.125rem;
+      font-weight: 500;
+      text-align: center;
+      padding: 1.5rem;
+    }
+
+    .chart-empty[hidden] {
+      display: none;
+    }
+
     /* Loading State */
     .loading {
       display: flex;
@@ -457,10 +515,26 @@
       .container {
         grid-template-columns: 1fr;
         grid-template-rows: auto;
+        grid-template-areas:
+          "environmental"
+          "schedule"
+          "trending";
       }
 
       .schedule-card {
         grid-row: auto;
+      }
+      
+      .card:nth-child(1) {
+        grid-area: environmental;
+      }
+
+      .card:nth-child(2) {
+        grid-area: schedule;
+      }
+
+      .card:nth-child(3) {
+        grid-area: trending;
       }
 
       .env-grid {
@@ -486,18 +560,24 @@
 <body>
   <div class="header">
     <div>
-      <h1>🌱 Farm Room Summary</h1>
+      <h1>Farm Room Summary</h1>
       <div class="timestamp" id="timestamp">Loading...</div>
+      <div class="timestamp" id="zoneIndicator">Detecting zone…</div>
     </div>
-    <button class="close-btn" onclick="closeFullScreen()">
-      ✕ Close (ESC)
-    </button>
+    <div class="header-actions">
+      <button class="close-btn secondary" onclick="window.location.href='room-heatmap.html'">
+        Heat Map
+      </button>
+      <button class="close-btn" onclick="closeFullScreen()">
+        ✕ Close (ESC)
+      </button>
+    </div>
   </div>
 
   <div class="container">
     <!-- Environmental Conditions -->
     <div class="card">
-      <h2>📊 Environmental Conditions</h2>
+      <h2>Environmental Conditions</h2>
       <div class="env-grid" id="envGrid">
         <div class="loading">
           <div class="spinner"></div>
@@ -508,7 +588,7 @@
 
     <!-- Schedule & Automation -->
     <div class="card schedule-card">
-      <h2>⚙️ Schedule & Automation</h2>
+      <h2>Schedule & Automation</h2>
       <div class="schedule-info" id="scheduleInfo">
         <div class="loading">
           <div class="spinner"></div>
@@ -519,48 +599,64 @@
 
     <!-- Trending Data -->
     <div class="card">
-      <h2>📈 Environmental Trends (2 Hours)</h2>
+      <h2>Environmental Trends (2 Hours)</h2>
       <div class="chart-container">
-        <div class="chart-selector">
-          <button class="active" onclick="selectMetric('temperature')">Temperature</button>
-          <button onclick="selectMetric('humidity')">Humidity</button>
-          <button onclick="selectMetric('co2')">CO₂</button>
-          <button onclick="selectMetric('vpd')">VPD</button>
-          <button onclick="selectMetric('ppfd')">PPFD</button>
+        <div class="chart-legend" style="display: flex; justify-content: center; gap: 2rem; margin-bottom: 1rem; font-size: 0.875rem;">
+          <div style="display: flex; align-items: center; gap: 0.5rem;">
+            <div style="width: 16px; height: 3px; background: #3b82f6; border-radius: 2px;"></div>
+            <span style="color: #94a3b8;">Temperature (°C)</span>
+          </div>
+          <div style="display: flex; align-items: center; gap: 0.5rem;">
+            <div style="width: 16px; height: 3px; background: #10b981; border-radius: 2px;"></div>
+            <span style="color: #94a3b8;">Humidity (%)</span>
+          </div>
+          <div style="display: flex; align-items: center; gap: 0.5rem;">
+            <div style="width: 16px; height: 3px; background: #f59e0b; border-radius: 2px;"></div>
+            <span style="color: #94a3b8;">VPD (kPa)</span>
+          </div>
         </div>
         <div class="chart" id="chartContainer">
           <canvas id="trendChart"></canvas>
+          <div class="chart-empty" id="chartEmptyState" hidden>No trending data available</div>
         </div>
       </div>
     </div>
   </div>
 
   <script>
-    // State
-    let currentMetric = 'temperature';
+    const queryParams = new URLSearchParams(window.location.search);
+    const requestedZoneToken = (queryParams.get('zone') || queryParams.get('scope') || queryParams.get('room') || '').trim();
+    const requestedSensorToken = (queryParams.get('sensor') || queryParams.get('device') || '').trim();
+
     let envHistory = [];
     let updateInterval = null;
     let chartContext = null;
+    let activeZoneContext = null;
 
-    // Initialize
     document.addEventListener('DOMContentLoaded', () => {
-      initChart();
+      ensureChartCanvas();
       loadData();
       updateTimestamp();
-      
-      // Refresh every 30 seconds
+
       updateInterval = setInterval(loadData, 30000);
       setInterval(updateTimestamp, 1000);
 
-      // ESC key to close
-      document.addEventListener('keydown', (e) => {
-        if (e.key === 'Escape') closeFullScreen();
+      document.addEventListener('keydown', (event) => {
+        if (event.key === 'Escape') closeFullScreen();
       });
     });
 
+    function ensureChartCanvas() {
+      const canvas = document.getElementById('trendChart');
+      if (!canvas) {
+        chartContext = null;
+        return;
+      }
+      chartContext = canvas.getContext('2d');
+    }
+
     function closeFullScreen() {
       window.close();
-      // Fallback if window.close() doesn't work
       if (!window.closed) {
         window.history.back();
       }
@@ -577,77 +673,292 @@
         minute: '2-digit',
         second: '2-digit'
       });
-      document.getElementById('timestamp').textContent = formatted;
+      const timestampEl = document.getElementById('timestamp');
+      if (timestampEl) timestampEl.textContent = formatted;
     }
 
     async function loadData() {
-      await Promise.all([
-        loadEnvironmental(),
-        loadSchedule(),
-        loadTrending()
-      ]);
-    }
-
-    async function loadEnvironmental() {
       try {
-        const response = await fetch('/env');
-        const data = await response.json();
-        
-        if (data && data.zones && data.zones.length > 0) {
-          const zone = data.zones[0]; // Use first zone
-          const latest = {
-            temperature: zone.sensors.tempC?.current || null,
-            humidity: zone.sensors.rh?.current || null,
-            co2: zone.sensors.co2?.current || null,
-            vpd: zone.sensors.vpd?.current || null,
-            ppfd: zone.sensors.ppfd?.current || null,
-            dli: zone.sensors.dli?.current || null
-          };
-          renderEnvironmental(latest);
-        } else {
-          document.getElementById('envGrid').innerHTML = '<div class="no-data">No environmental data available</div>';
+        const envData = await fetchEnvData();
+        let selectedZone = null;
+        if (envData) {
+          selectedZone = loadEnvironmentalFromData(envData);
         }
+        const tasks = [loadSchedule()];
+        if (envData) {
+          tasks.push(loadTrending(envData, selectedZone));
+        } else {
+          envHistory = [];
+          updateChart();
+        }
+        await Promise.all(tasks);
       } catch (error) {
-        console.error('Failed to load environmental data:', error);
-        document.getElementById('envGrid').innerHTML = '<div class="no-data">Failed to load environmental data</div>';
+        console.error('Failed to refresh farm summary:', error);
       }
     }
 
-    function renderEnvironmental(data) {
+    async function fetchEnvData() {
+      try {
+        const response = await fetch('/env');
+        if (!response.ok) throw new Error(`HTTP ${response.status}`);
+        return await response.json();
+      } catch (error) {
+        console.error('Failed to load environmental data:', error);
+        const grid = document.getElementById('envGrid');
+        if (grid) {
+          grid.innerHTML = '<div class="no-data">Failed to load environmental data</div>';
+        }
+        updateZoneIndicator(null, { error: true });
+        return null;
+      }
+    }
+
+    function loadEnvironmentalFromData(data) {
+      if (!data || !Array.isArray(data.zones) || data.zones.length === 0) {
+        const grid = document.getElementById('envGrid');
+        if (grid) {
+          grid.innerHTML = '<div class="no-data">No environmental data available</div>';
+        }
+        updateZoneIndicator(null, { empty: true });
+        return null;
+      }
+      const selection = selectPreferredZone(data.zones);
+      const zone = selection.zone;
+      storeZoneContext(zone, selection);
+      updateZoneIndicator(zone, selection);
+      renderEnvironmental(zone);
+      return zone;
+    }
+
+    function normalizeToken(value) {
+      return typeof value === 'string' ? value.trim().toLowerCase() : '';
+    }
+
+    function matchesZoneToken(zone, token) {
+      const normalized = normalizeToken(token);
+      if (!normalized || !zone) return false;
+      const candidates = [
+        zone.id,
+        zone.name,
+        zone.location,
+        zone.scopeId,
+        zone.label,
+        zone.meta?.alias,
+        zone.meta?.scopeId
+      ];
+      return candidates.some((candidate) => normalizeToken(candidate) === normalized);
+    }
+
+    function findZoneBySensorToken(zones, token) {
+      const normalized = normalizeToken(token);
+      if (!normalized) return null;
+      return zones.find((zone) => {
+        const zoneMatch = [zone.name, zone.location, zone.id]
+          .some((value) => normalizeToken(value).includes(normalized));
+        if (zoneMatch) return true;
+        return Object.values(zone.sensors || {}).some((sensor) => {
+          if (!sensor || typeof sensor !== 'object') return false;
+          const sensorTokens = [
+            sensor.label,
+            sensor.name,
+            sensor.sensorId,
+            sensor.meta?.sensorId,
+            sensor.meta?.name,
+            sensor.meta?.deviceId
+          ];
+          return sensorTokens.some((value) => normalizeToken(value).includes(normalized));
+        });
+      }) || null;
+    }
+
+    function selectPreferredZone(zones) {
+      const list = Array.isArray(zones) ? zones : [];
+      if (!list.length) return { zone: null, fallback: false, reason: 'none' };
+
+      if (activeZoneContext) {
+        const reuse = list.find((zone) =>
+          matchesZoneToken(zone, activeZoneContext.zoneId) ||
+          matchesZoneToken(zone, activeZoneContext.zoneName)
+        );
+        if (reuse) return { zone: reuse, fallback: false, reason: 'active' };
+      }
+
+      if (requestedZoneToken) {
+        const match = list.find((zone) => matchesZoneToken(zone, requestedZoneToken));
+        if (match) return { zone: match, fallback: false, reason: 'query-zone' };
+      }
+
+      if (requestedSensorToken) {
+        const matchBySensor = findZoneBySensorToken(list, requestedSensorToken);
+        if (matchBySensor) return { zone: matchBySensor, fallback: false, reason: 'sensor-query' };
+      }
+
+      // Default preference: Look for "Grow Room 2, North Wall" sensor or zone-2
+      // This is the primary production sensor for farm summary
+      const defaultZonePreference = list.find((zone) => 
+        matchesZoneToken(zone, 'zone-2') || 
+        matchesZoneToken(zone, 'grow room 2')
+      );
+      
+      if (defaultZonePreference && !requestedZoneToken && !requestedSensorToken) {
+        return {
+          zone: defaultZonePreference,
+          fallback: false,
+          reason: 'default-preference'
+        };
+      }
+
+      return {
+        zone: list[0],
+        fallback: Boolean(requestedZoneToken || requestedSensorToken),
+        reason: 'fallback-first'
+      };
+    }
+
+    function storeZoneContext(zone, selection) {
+      activeZoneContext = {
+        zoneId: zone?.id || null,
+        zoneName: zone?.name || null,
+        fallback: Boolean(selection?.fallback)
+      };
+    }
+
+    function updateZoneIndicator(zone, selection = {}) {
+      const indicator = document.getElementById('zoneIndicator');
+      if (!indicator) return;
+      if (!zone) {
+        if (selection.error) {
+          indicator.textContent = 'Zone: unavailable (failed to load data)';
+        } else if (selection.empty) {
+          indicator.textContent = 'Zone: no zones reported';
+        } else {
+          indicator.textContent = 'Zone: not selected';
+        }
+        return;
+      }
+      const label = zone.name || zone.location || zone.id || 'Unnamed zone';
+      let suffix = '';
+      if (selection.fallback && requestedZoneToken) {
+        suffix = ` • requested "${requestedZoneToken}" not found`;
+      } else if (selection.fallback && requestedSensorToken) {
+        suffix = ` • sensor "${requestedSensorToken}" not found`;
+      }
+      indicator.textContent = `Zone: ${label}${suffix}`;
+    }
+
+    function renderEnvironmental(zone) {
+      if (!zone) return;
       const metrics = [
-        { key: 'temperature', label: 'Temperature', unit: '°F', format: (v) => v?.toFixed(1) || '--' },
-        { key: 'humidity', label: 'Humidity', unit: '%', format: (v) => v?.toFixed(0) || '--' },
-        { key: 'co2', label: 'CO₂', unit: 'ppm', format: (v) => v?.toFixed(0) || '--' },
-        { key: 'vpd', label: 'VPD', unit: 'kPa', format: (v) => v?.toFixed(2) || '--' },
-        { key: 'ppfd', label: 'PPFD', unit: 'μmol/m²/s', format: (v) => v?.toFixed(0) || '--' },
-        { key: 'dli', label: 'DLI', unit: 'mol/m²/d', format: (v) => v?.toFixed(1) || '--' }
+        {
+          key: 'temperature',
+          label: 'Temperature',
+          unit: '°C',
+          sensorKey: 'tempC',
+          valueFormatter: (value) => formatNumber(value, 1),
+          targetFormatter: (value) => `${formatNumber(value, 1)}°C`
+        },
+        {
+          key: 'humidity',
+          label: 'Humidity',
+          unit: '%',
+          sensorKey: 'rh',
+          valueFormatter: (value) => formatNumber(value, 0),
+          targetFormatter: (value) => `${formatNumber(value, 0)}%`
+        },
+        {
+          key: 'vpd',
+          label: 'VPD',
+          unit: 'kPa',
+          sensorKey: 'vpd',
+          valueFormatter: (value) => formatNumber(value, 2),
+          targetFormatter: (value) => `${formatNumber(value, 2)} kPa`
+        },
+        {
+          key: 'ppfd',
+          label: 'PPFD',
+          unit: 'μmol/m²/s',
+          sensorKey: 'ppfd',
+          valueFormatter: (value) => formatNumber(value, 0),
+          targetFormatter: (value) => `${formatNumber(value, 0)} μmol/m²/s`
+        },
+        {
+          key: 'dli',
+          label: 'DLI',
+          unit: 'mol/m²/d',
+          sensorKey: 'dli',
+          valueFormatter: (value) => formatNumber(value, 1),
+          targetFormatter: (value) => `${formatNumber(value, 1)} mol/m²/d`
+        }
       ];
 
-      const html = metrics.map(m => {
-        const value = data[m.key];
-        const status = getStatus(m.key, value);
+      const html = metrics.map((metric) => {
+        const sensor = zone.sensors?.[metric.sensorKey] || {};
+        const currentValue = Number.isFinite(sensor.current) ? Number(sensor.current) : null;
+        const status = getStatus(metric.key, currentValue);
+        const targetSummary = buildTargetSummary(sensor.setpoint, metric);
         return `
           <div class="env-metric">
-            <div class="label">${m.label}</div>
-            <div class="value">${m.format(value)}</div>
-            <div class="unit">${m.unit}</div>
+            <div class="label">${metric.label}</div>
+            <div class="value">${metric.valueFormatter(currentValue)}</div>
+            <div class="unit">${metric.unit}</div>
+            ${targetSummary ? `<div class="target">${targetSummary}</div>` : ''}
             <div class="status ${status.class}">${status.text}</div>
           </div>
         `;
       }).join('');
 
-      document.getElementById('envGrid').innerHTML = html;
+      const grid = document.getElementById('envGrid');
+      if (grid) grid.innerHTML = html;
+    }
+
+    function formatNumber(value, fractionDigits) {
+      if (value == null || !Number.isFinite(Number(value))) return '--';
+      return Number(value).toFixed(fractionDigits ?? 0);
+    }
+
+    function parseSetpoint(setpoint) {
+      if (setpoint == null) return null;
+      if (typeof setpoint === 'number') {
+        return { type: 'single', value: setpoint };
+      }
+      if (Array.isArray(setpoint)) {
+        const values = setpoint.map((entry) => Number(entry)).filter((entry) => Number.isFinite(entry));
+        if (values.length === 2) return { type: 'range', min: values[0], max: values[1] };
+        if (values.length === 1) return { type: 'single', value: values[0] };
+      }
+      if (typeof setpoint === 'object') {
+        const min = Number(setpoint.min);
+        const max = Number(setpoint.max);
+        const value = Number(setpoint.value);
+        if (Number.isFinite(min) && Number.isFinite(max) && min !== max) {
+          return { type: 'range', min, max };
+        }
+        if (Number.isFinite(min)) return { type: 'single', value: min };
+        if (Number.isFinite(max)) return { type: 'single', value: max };
+        if (Number.isFinite(value)) return { type: 'single', value };
+      }
+      return null;
+    }
+
+    function buildTargetSummary(setpoint, metric) {
+      const parsed = parseSetpoint(setpoint);
+      if (!parsed) return '';
+      const formatter = metric.targetFormatter || ((value) => formatNumber(value, 1));
+      if (parsed.type === 'range') {
+        return `Target: ${formatter(parsed.min)} – ${formatter(parsed.max)}`;
+      }
+      return `Target: ${formatter(parsed.value)}`;
     }
 
     function getStatus(metric, value) {
       if (value == null) return { class: 'warning', text: 'No Data' };
 
       const ranges = {
-        temperature: { optimal: [68, 78], warning: [65, 82] },
+        temperature: { optimal: [18, 24], warning: [15, 28] },
         humidity: { optimal: [50, 70], warning: [40, 80] },
-        co2: { optimal: [800, 1200], warning: [600, 1500] },
         vpd: { optimal: [0.8, 1.2], warning: [0.6, 1.5] },
-        ppfd: { optimal: [400, 800], warning: [200, 1000] }
+        ppfd: { optimal: [400, 800], warning: [200, 1000] },
+        dli: { optimal: [20, 40], warning: [15, 50] }
       };
 
       const range = ranges[metric];
@@ -655,11 +966,11 @@
 
       if (value >= range.optimal[0] && value <= range.optimal[1]) {
         return { class: 'optimal', text: 'Optimal' };
-      } else if (value >= range.warning[0] && value <= range.warning[1]) {
-        return { class: 'warning', text: 'Acceptable' };
-      } else {
-        return { class: 'critical', text: 'Alert' };
       }
+      if (value >= range.warning[0] && value <= range.warning[1]) {
+        return { class: 'warning', text: 'Acceptable' };
+      }
+      return { class: 'critical', text: 'Alert' };
     }
 
     async function loadSchedule() {
@@ -671,91 +982,219 @@
           fetch('/data/schedules.json')
         ]);
 
-        const status = await statusRes.json();
-        const groups = await groupsRes.json();
-        const plans = await plansRes.json();
-        const schedules = await schedulesRes.json();
+        if (!statusRes.ok) throw new Error(`status HTTP ${statusRes.status}`);
+        if (!groupsRes.ok) throw new Error(`groups HTTP ${groupsRes.status}`);
+        if (!plansRes.ok) throw new Error(`plans HTTP ${plansRes.status}`);
+        if (!schedulesRes.ok) throw new Error(`schedules HTTP ${schedulesRes.status}`);
 
-        renderSchedule(status, groups, plans, schedules);
+        const status = await statusRes.json();
+        const groupsPayload = await groupsRes.json();
+        const plansPayload = await plansRes.json();
+        const schedulesPayload = await schedulesRes.json();
+
+        renderSchedule(status, groupsPayload, plansPayload, schedulesPayload);
       } catch (error) {
         console.error('Failed to load schedule data:', error);
-        document.getElementById('scheduleInfo').innerHTML = '<div class="no-data">Failed to load schedule data</div>';
+        const scheduleInfo = document.getElementById('scheduleInfo');
+        if (scheduleInfo) {
+          scheduleInfo.innerHTML = '<div class="no-data">Failed to load schedule data</div>';
+        }
       }
     }
 
-    function renderSchedule(status, groups, plans, schedules) {
-      const activeGroups = groups.filter(g => g.enabled && g.planId && g.scheduleId);
-      const activeGroup = activeGroups[0]; // Show first active group
+    function normaliseGroupsPayload(payload) {
+      if (Array.isArray(payload)) return payload;
+      if (payload && Array.isArray(payload.groups)) return payload.groups;
+      return [];
+    }
 
-      let html = '';
+    function normalisePlansPayload(payload) {
+      if (Array.isArray(payload)) return payload;
+      if (payload && Array.isArray(payload.plans)) return payload.plans;
+      return [];
+    }
 
-      // Automation Status
-      html += `
+    function normaliseSchedulesPayload(payload) {
+      if (Array.isArray(payload)) return payload;
+      if (payload && Array.isArray(payload.schedules)) return payload.schedules;
+      return [];
+    }
+
+    function normalizeGroupRecord(group) {
+      const record = { ...group };
+      const planConfig = typeof record.planConfig === 'object' && record.planConfig ? record.planConfig : {};
+      const planTokens = [
+        record.planId,
+        record.plan,
+        record.planKey,
+        record.plan_id,
+        planConfig.planId,
+        planConfig.preview?.planId,
+        planConfig.preview?.planKey,
+        planConfig.preview?.plan
+      ];
+      const scheduleTokens = [
+        record.scheduleId,
+        record.schedule,
+        record.schedule_id,
+        planConfig.schedule?.id
+      ];
+      record.planConfig = planConfig;
+      record.planId = planTokens.find((value) => typeof value === 'string' && value.trim()) || null;
+      record.scheduleId = scheduleTokens.find((value) => typeof value === 'string' && value.trim()) || null;
+      record.enabled = record.enabled !== false;
+      record.lightCount = Array.isArray(record.lightIds) ? record.lightIds.length
+        : Array.isArray(record.lights) ? record.lights.length
+        : 0;
+      return record;
+    }
+
+    function matchesActiveZone(group) {
+      if (!activeZoneContext) return false;
+      const groupTokens = [
+        group.zone,
+        group.zoneId,
+        group.scope,
+        group.scopeId,
+        group.room,
+        group.roomId,
+        group.id,
+        group.name
+      ];
+      return groupTokens.some((token) =>
+        matchesZoneToken({ id: token, name: token, location: token }, activeZoneContext.zoneId) ||
+        matchesZoneToken({ id: token, name: token, location: token }, activeZoneContext.zoneName)
+      );
+    }
+
+    function choosePreferredGroup(groups) {
+      if (!groups.length) return null;
+      const zoneMatch = groups.find(matchesActiveZone);
+      if (zoneMatch) return zoneMatch;
+      return groups[0];
+    }
+
+    function findPlanById(plans, planId) {
+      if (!planId) return null;
+      const normalized = normalizeToken(planId);
+      return plans.find((plan) => {
+        const tokens = [plan.id, plan.planId, plan.name];
+        return tokens.some((token) => normalizeToken(token) === normalized);
+      }) || null;
+    }
+
+    function findScheduleById(schedules, scheduleId) {
+      if (!scheduleId) return null;
+      const normalized = normalizeToken(scheduleId);
+      return schedules.find((schedule) => {
+        const tokens = [schedule.id, schedule.scheduleId, schedule.name];
+        return tokens.some((token) => normalizeToken(token) === normalized);
+      }) || null;
+    }
+
+    function renderSchedule(status, groupsPayload, plansPayload, schedulesPayload) {
+      const safeStatus = status || {};
+      const groups = normaliseGroupsPayload(groupsPayload).map(normalizeGroupRecord);
+      const plans = normalisePlansPayload(plansPayload);
+      const schedules = normaliseSchedulesPayload(schedulesPayload);
+
+      const activeGroups = groups.filter((group) => group.enabled && group.planId);
+      const preferredGroup = choosePreferredGroup(activeGroups.length ? activeGroups : groups);
+
+      let html = `
         <div class="info-block">
           <h3>Automation Status</h3>
           <div class="automation-status">
-            <div class="status-indicator ${status.running ? 'running' : 'stopped'}"></div>
+            <div class="status-indicator ${safeStatus.running ? 'running' : 'stopped'}"></div>
             <div>
-              <div style="font-weight: 600; color: ${status.running ? '#86efac' : '#fca5a5'};">
-                ${status.running ? 'Running' : 'Stopped'}
+              <div style="font-weight: 600; color: ${safeStatus.running ? '#86efac' : '#fca5a5'};">
+                ${safeStatus.running ? 'Running' : 'Stopped'}
               </div>
               <div style="font-size: 0.875rem; color: #64748b;">
-                ${status.executionCount} executions, ${status.errorCount} errors
+                ${safeStatus.executionCount ?? 0} executions, ${safeStatus.errorCount ?? 0} errors
               </div>
             </div>
           </div>
           <div class="info-row" style="margin-top: 1rem;">
             <span class="key">Active Groups:</span>
-            <span class="val">${activeGroups.length}</span>
+            <span class="val">${activeGroups.length || groups.length}</span>
           </div>
           <div class="info-row">
             <span class="key">Update Interval:</span>
-            <span class="val">${status.interval / 1000}s</span>
+            <span class="val">${safeStatus.interval ? Math.round(safeStatus.interval / 1000) + 's' : '—'}</span>
           </div>
         </div>
       `;
 
-      if (activeGroup) {
-        const plan = plans.find(p => p.id === activeGroup.planId);
-        const schedule = schedules.find(s => s.id === activeGroup.scheduleId);
+      if (preferredGroup) {
+        const plan = findPlanById(plans, preferredGroup.planId);
+        const schedule = findScheduleById(schedules, preferredGroup.scheduleId);
+        const preview = preferredGroup.planConfig?.preview || {};
+        const manualRh = Number(preferredGroup.planConfig?.targetHumidity);
+        const stageInfo = preview.stage ? `${preview.stage} (Day ${preview.day ?? '—'})` : 'Not set';
 
         html += `
           <div class="info-block">
-            <h3>Current Group: ${activeGroup.name}</h3>
+            <h3>Current Group: ${preferredGroup.name || preferredGroup.id || 'Unnamed group'}</h3>
+            <div class="info-row">
+              <span class="key">Room / Zone:</span>
+              <span class="val">${preferredGroup.room || '—'}${preferredGroup.zone ? ` • Zone ${preferredGroup.zone}` : ''}</span>
+            </div>
             <div class="info-row">
               <span class="key">Lights:</span>
-              <span class="val">${activeGroup.lightIds?.length || 0} fixtures</span>
+              <span class="val">${preferredGroup.lightCount} fixtures</span>
             </div>
             <div class="info-row">
-              <span class="key">Seed Date:</span>
-              <span class="val">${activeGroup.seedDate || 'Not set'}</span>
+              <span class="key">Stage Today:</span>
+              <span class="val">${stageInfo}</span>
             </div>
+            ${Number.isFinite(preview.ppfd) ? `
+              <div class="info-row">
+                <span class="key">PPFD:</span>
+                <span class="val">${Math.round(preview.ppfd)} μmol/m²/s</span>
+              </div>` : ''}
+            ${Number.isFinite(preview.photoperiodHours) ? `
+              <div class="info-row">
+                <span class="key">Photoperiod:</span>
+                <span class="val">${formatNumber(preview.photoperiodHours, 1)} h</span>
+              </div>` : ''}
+            ${Number.isFinite(preview.rh) ? `
+              <div class="info-row">
+                <span class="key">Target RH:</span>
+                <span class="val">${Math.round(preview.rh)}%</span>
+              </div>` : ''}
+            ${Number.isFinite(manualRh) ? `
+              <div class="info-row">
+                <span class="key">Manual RH Override:</span>
+                <span class="val">${Math.round(manualRh)}%</span>
+              </div>` : ''}
           </div>
         `;
 
         if (plan) {
           html += `
             <div class="info-block">
-              <h3>📋 Plan: ${plan.name}</h3>
+              <h3>Plan: ${plan.name || plan.planName || plan.id}</h3>
               <div class="info-row">
                 <span class="key">Recipe:</span>
-                <span class="val">${plan.env?.recipe || 'Default'}</span>
+                <span class="val">${plan.env?.recipe || plan.recipe || 'Default'}</span>
               </div>
               <div class="info-row">
                 <span class="key">Duration:</span>
-                <span class="val">${plan.env?.days?.length || 0} days</span>
+                <span class="val">${Array.isArray(plan.env?.days) ? plan.env.days.length : plan.duration || 0} days</span>
               </div>
             </div>
           `;
         }
 
         if (schedule) {
+          const firstCycle = Array.isArray(schedule.cycles) ? schedule.cycles[0] : null;
           html += `
             <div class="info-block">
-              <h3>⏰ Schedule: ${schedule.name}</h3>
+              <h3>⏰ Schedule: ${schedule.name || schedule.id}</h3>
               <div class="info-row">
                 <span class="key">Photoperiod:</span>
-                <span class="val">${schedule.cycles?.[0]?.on || '--'} to ${schedule.cycles?.[0]?.off || '--'}</span>
+                <span class="val">${firstCycle?.on || '--'} to ${firstCycle?.off || '--'}</span>
               </div>
               <div class="info-row">
                 <span class="key">Type:</span>
@@ -772,203 +1211,205 @@
         `;
       }
 
-      // AI Features
-      html += `
-        <div class="info-block">
-          <h3>🤖 AI Features</h3>
-          <div class="ai-features">
-            <div class="ai-badge active">
-              <svg width="18" height="18" viewBox="0 0 24 24" fill="none">
-                <path d="M3 12L6 8L9 14L12 6L15 12L18 4L21 12" stroke="url(#spectrumGradient)" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"/>
-                <defs>
-                  <linearGradient id="spectrumGradient" x1="0%" y1="0%" x2="100%" y2="0%">
-                    <stop offset="0%" style="stop-color:#EF4444"/>
-                    <stop offset="33%" style="stop-color:#3B82F6"/>
-                    <stop offset="66%" style="stop-color:#E0F2FE"/>
-                    <stop offset="100%" style="stop-color:#FEF3C7"/>
-                  </linearGradient>
-                </defs>
-              </svg>
-              <span class="ai-badge-label">SpectraSync®</span>
-              <span class="ai-badge-status on">ON</span>
-            </div>
-
-            <div class="ai-badge inactive">
-              <svg width="18" height="18" viewBox="0 0 24 24" fill="none">
-                <circle cx="12" cy="12" r="10" stroke="currentColor" stroke-width="1.5"/>
-                <path d="M8 12L10 14L12 10L14 14L16 12" fill="currentColor" opacity="0.3"/>
-                <circle cx="12" cy="12" r="3" fill="currentColor" opacity="0.6"/>
-              </svg>
-              <span class="ai-badge-label">E.V.I.E</span>
-              <span class="ai-badge-status off">OFF</span>
-            </div>
-
-            <div class="ai-badge active">
-              <svg width="18" height="18" viewBox="0 0 24 24" fill="none">
-                <polygon points="12,2 22,20 2,20" stroke="currentColor" stroke-width="1.5" fill="none"/>
-                <path d="M12 8L12 14" stroke="currentColor" stroke-width="1.5"/>
-                <circle cx="12" cy="16" r="1" fill="currentColor"/>
-                <circle cx="8" cy="18" r="1" fill="currentColor" opacity="0.3"/>
-                <circle cx="16" cy="18" r="1" fill="currentColor" opacity="0.3"/>
-              </svg>
-              <span class="ai-badge-label">IA Training</span>
-              <span class="ai-badge-status always-on">ALWAYS ON</span>
-            </div>
-
-            <div class="ai-badge active">
-              <svg width="18" height="18" viewBox="0 0 24 24" fill="none">
-                <path d="M12 2L15 9L22 9L17 14L19 22L12 18L5 22L7 14L2 9L9 9L12 2Z" stroke="currentColor" stroke-width="1.5" fill="none"/>
-                <path d="M12 8L12 14" stroke="currentColor" stroke-width="1.5"/>
-              </svg>
-              <span class="ai-badge-label">IA Assist</span>
-              <span class="ai-badge-status always-on">ALWAYS ON</span>
-            </div>
-
-            <div class="ai-badge inactive">
-              <svg width="18" height="18" viewBox="0 0 24 24" fill="none">
-                <circle cx="12" cy="12" r="10" stroke="currentColor" stroke-width="1.5"/>
-                <path d="M8 12L10 10L12 14L16 8" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
-                <circle cx="12" cy="12" r="1" fill="currentColor"/>
-              </svg>
-              <span class="ai-badge-label">E.I²</span>
-              <span class="ai-badge-status dev">DEV</span>
-            </div>
-          </div>
-        </div>
-      `;
-
-      document.getElementById('scheduleInfo').innerHTML = html;
+      const scheduleInfo = document.getElementById('scheduleInfo');
+      if (scheduleInfo) scheduleInfo.innerHTML = html;
     }
 
-    async function loadTrending() {
+    async function loadTrending(envData, zoneOverride) {
       try {
-        const response = await fetch('/env');
-        const data = await response.json();
-        
-        if (data && data.zones && data.zones.length > 0) {
-          const zone = data.zones[0];
-          const sensors = zone.sensors;
-          
-          // Build history from sensor arrays
-          const historyLength = sensors.tempC?.history?.length || 0;
-          if (historyLength > 0) {
-            envHistory = [];
-            const now = Date.now();
-            const interval = 5 * 60 * 1000; // 5 minutes between readings
-            
-            for (let i = 0; i < historyLength; i++) {
-              envHistory.push({
-                timestamp: new Date(now - (historyLength - i) * interval).toISOString(),
-                temperature: sensors.tempC?.history?.[i] || null,
-                humidity: sensors.rh?.history?.[i] || null,
-                co2: sensors.co2?.history?.[i] || null,
-                vpd: sensors.vpd?.history?.[i] || null,
-                ppfd: sensors.ppfd?.history?.[i] || null
-              });
-            }
-          }
-          
+        const data = envData || await fetchEnvData();
+        if (!data || !Array.isArray(data.zones) || !data.zones.length) {
+          envHistory = [];
           updateChart();
+          return;
         }
+        const selection = zoneOverride ? { zone: zoneOverride, fallback: false } : selectPreferredZone(data.zones);
+        const zone = selection.zone;
+        if (!zone) {
+          envHistory = [];
+          updateChart();
+          return;
+        }
+        envHistory = buildHistoryFromZone(zone);
+        updateChart();
       } catch (error) {
         console.error('Failed to load trending data:', error);
       }
     }
 
-    function selectMetric(metric) {
-      currentMetric = metric;
-      
-      // Update button states
-      document.querySelectorAll('.chart-selector button').forEach(btn => {
-        btn.classList.remove('active');
-      });
-      event.target.classList.add('active');
-      
-      updateChart();
+    function buildHistoryFromZone(zone) {
+      const sensors = zone?.sensors || {};
+      const histories = [
+        sensors.tempC?.history,
+        sensors.rh?.history,
+        sensors.co2?.history,
+        sensors.vpd?.history,
+        sensors.ppfd?.history,
+        sensors.dli?.history
+      ];
+      const historyLength = histories.reduce((length, history) => {
+        const size = Array.isArray(history) ? history.length : 0;
+        return Math.max(length, size);
+      }, 0);
+
+      if (!historyLength) {
+        const now = new Date().toISOString();
+        return [{
+          timestamp: now,
+          temperature: Number.isFinite(sensors.tempC?.current) ? Number(sensors.tempC.current) : null,
+          humidity: Number.isFinite(sensors.rh?.current) ? Number(sensors.rh.current) : null,
+          co2: Number.isFinite(sensors.co2?.current) ? Number(sensors.co2.current) : null,
+          vpd: Number.isFinite(sensors.vpd?.current) ? Number(sensors.vpd.current) : null,
+          ppfd: Number.isFinite(sensors.ppfd?.current) ? Number(sensors.ppfd.current) : null,
+          dli: Number.isFinite(sensors.dli?.current) ? Number(sensors.dli.current) : null
+        }];
+      }
+
+      const interval = 5 * 60 * 1000;
+      const now = Date.now();
+      const series = [];
+
+      for (let index = 0; index < historyLength; index += 1) {
+        const timestamp = new Date(now - ((historyLength - 1 - index) * interval)).toISOString();
+        series.push({
+          timestamp,
+          temperature: getHistoryValue(sensors.tempC, index),
+          humidity: getHistoryValue(sensors.rh, index),
+          co2: getHistoryValue(sensors.co2, index),
+          vpd: getHistoryValue(sensors.vpd, index),
+          ppfd: getHistoryValue(sensors.ppfd, index),
+          dli: getHistoryValue(sensors.dli, index)
+        });
+      }
+
+      return series;
     }
 
-    function initChart() {
-      const canvas = document.getElementById('trendChart');
-      chartContext = canvas.getContext('2d');
+    function getHistoryValue(sensor, index) {
+      if (!sensor) return null;
+      const history = Array.isArray(sensor.history) ? sensor.history : [];
+      const value = history[index];
+      return Number.isFinite(Number(value)) ? Number(value) : null;
     }
 
     function updateChart() {
+      if (!chartContext) ensureChartCanvas();
+      const emptyStateEl = document.getElementById('chartEmptyState');
       if (!chartContext || envHistory.length === 0) {
-        document.getElementById('chartContainer').innerHTML = '<div class="no-data">No trending data available</div>';
+        if (emptyStateEl) emptyStateEl.hidden = false;
+        if (chartContext) {
+          const canvas = chartContext.canvas;
+          chartContext.clearRect(0, 0, canvas.width, canvas.height);
+        }
         return;
       }
 
+      // Prepare data series for all three metrics
+      const metrics = [
+        { key: 'temperature', color: '#3b82f6', scale: { min: 15, max: 30 }, label: 'Temp' },
+        { key: 'humidity', color: '#10b981', scale: { min: 40, max: 80 }, label: 'RH' },
+        { key: 'vpd', color: '#f59e0b', scale: { min: 0, max: 2 }, label: 'VPD' }
+      ];
+
+      const series = metrics.map(metric => ({
+        ...metric,
+        values: envHistory
+          .map((entry) => Number.isFinite(entry[metric.key]) ? Number(entry[metric.key]) : null)
+      }));
+
+      // Check if we have any data
+      const hasData = series.some(s => s.values.some(v => v != null));
+      if (!hasData) {
+        if (emptyStateEl) emptyStateEl.hidden = false;
+        const canvas = chartContext.canvas;
+        chartContext.clearRect(0, 0, canvas.width, canvas.height);
+        return;
+      }
+
+      if (emptyStateEl) emptyStateEl.hidden = true;
+
       const canvas = chartContext.canvas;
-      const width = canvas.width = canvas.offsetWidth * 2; // Retina
-      const height = canvas.height = canvas.offsetHeight * 2;
-      chartContext.scale(2, 2);
+      const ratio = window.devicePixelRatio || 1;
+      const width = canvas.width = canvas.offsetWidth * ratio;
+      const height = canvas.height = canvas.offsetHeight * ratio;
+
+      if (chartContext.setTransform) {
+        chartContext.setTransform(1, 0, 0, 1, 0, 0);
+      }
+      chartContext.clearRect(0, 0, width, height);
+      chartContext.scale(ratio, ratio);
 
       const w = canvas.offsetWidth;
       const h = canvas.offsetHeight;
-      const padding = 40;
+      const padding = 50;
 
-      // Clear
-      chartContext.clearRect(0, 0, w, h);
-
-      // Extract data
-      const data = envHistory.map(d => d[currentMetric]).filter(v => v != null);
-      if (data.length === 0) return;
-
-      const max = Math.max(...data);
-      const min = Math.min(...data);
-      const range = max - min || 1;
-
-      // Draw grid
+      // Draw grid lines
       chartContext.strokeStyle = 'rgba(148, 163, 184, 0.1)';
       chartContext.lineWidth = 1;
-      for (let i = 0; i <= 4; i++) {
-        const y = padding + (h - 2 * padding) * i / 4;
+      for (let i = 0; i <= 4; i += 1) {
+        const y = padding + ((h - (2 * padding)) * i) / 4;
         chartContext.beginPath();
         chartContext.moveTo(padding, y);
         chartContext.lineTo(w - padding, y);
         chartContext.stroke();
       }
 
-      // Draw line
-      chartContext.strokeStyle = '#3b82f6';
-      chartContext.lineWidth = 3;
-      chartContext.beginPath();
+      const denominator = envHistory.length > 1 ? envHistory.length - 1 : 1;
 
-      data.forEach((value, i) => {
-        const x = padding + (w - 2 * padding) * i / (data.length - 1);
-        const y = h - padding - ((value - min) / range) * (h - 2 * padding);
-        
-        if (i === 0) {
-          chartContext.moveTo(x, y);
-        } else {
-          chartContext.lineTo(x, y);
-        }
+      // Draw each metric line
+      series.forEach((metric) => {
+        const validValues = metric.values.filter(v => v != null);
+        if (validValues.length === 0) return;
+
+        const range = metric.scale.max - metric.scale.min;
+
+        chartContext.strokeStyle = metric.color;
+        chartContext.lineWidth = 2;
+        chartContext.beginPath();
+
+        let firstPoint = true;
+        metric.values.forEach((value, index) => {
+          if (value == null) return;
+          
+          const x = padding + ((w - (2 * padding)) * index) / denominator;
+          // Normalize to scale
+          const normalizedValue = Math.max(metric.scale.min, Math.min(metric.scale.max, value));
+          const y = h - padding - (((normalizedValue - metric.scale.min) / range) * (h - (2 * padding)));
+          
+          if (firstPoint) {
+            chartContext.moveTo(x, y);
+            firstPoint = false;
+          } else {
+            chartContext.lineTo(x, y);
+          }
+        });
+
+        chartContext.stroke();
+
+        // Draw points
+        chartContext.fillStyle = metric.color;
+        metric.values.forEach((value, index) => {
+          if (value == null) return;
+          const x = padding + ((w - (2 * padding)) * index) / denominator;
+          const normalizedValue = Math.max(metric.scale.min, Math.min(metric.scale.max, value));
+          const y = h - padding - (((normalizedValue - metric.scale.min) / range) * (h - (2 * padding)));
+          
+          chartContext.beginPath();
+          chartContext.arc(x, y, 3, 0, Math.PI * 2);
+          chartContext.fill();
+        });
       });
 
-      chartContext.stroke();
-
-      // Draw labels
+      // Draw time labels
       chartContext.fillStyle = '#94a3b8';
-      chartContext.font = '12px sans-serif';
-      chartContext.textAlign = 'right';
-      
-      // Y-axis labels
-      for (let i = 0; i <= 4; i++) {
-        const value = max - (range * i / 4);
-        const y = padding + (h - 2 * padding) * i / 4;
-        chartContext.fillText(value.toFixed(1), padding - 10, y + 4);
-      }
-
-      // X-axis labels (time)
+      chartContext.font = '11px sans-serif';
       chartContext.textAlign = 'center';
       const firstTime = new Date(envHistory[0].timestamp);
       const lastTime = new Date(envHistory[envHistory.length - 1].timestamp);
-      
       chartContext.fillText(firstTime.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' }), padding, h - 10);
       chartContext.fillText(lastTime.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' }), w - padding, h - 10);
     }
 
-    // Cleanup
     window.addEventListener('beforeunload', () => {
       if (updateInterval) clearInterval(updateInterval);
     });

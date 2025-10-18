@@ -6,148 +6,178 @@
   <title>Room Mapper - Light Engine Charlie</title>
   <link rel="stylesheet" href="../styles.charlie.css">
   <style>
-    body {
+    * {
       margin: 0;
       padding: 0;
-      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
-      background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-      color: #1e293b;
+      box-sizing: border-box;
+    }
+
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, sans-serif;
+      background: linear-gradient(135deg, #1a1a2e 0%, #16213e 100%);
+      color: #e4e4e7;
+      overflow: hidden;
+      height: 100vh;
+      display: flex;
+      flex-direction: column;
     }
 
     .mapper-container {
-      max-width: 1400px;
-      margin: 20px auto;
-      padding: 20px;
+      flex: 1;
+      display: flex;
+      flex-direction: column;
+      overflow: hidden;
     }
 
     .header {
-      background: white;
-      border-radius: 12px;
-      padding: 20px 30px;
-      margin-bottom: 20px;
-      box-shadow: 0 4px 6px rgba(0,0,0,0.1);
+      background: rgba(0, 0, 0, 0.3);
+      padding: 1.5rem 2rem;
       display: flex;
       justify-content: space-between;
       align-items: center;
+      border-bottom: 2px solid #3b82f6;
+      backdrop-filter: blur(10px);
+      z-index: 100;
     }
 
     .header h1 {
-      margin: 0;
-      font-size: 28px;
-      color: #1e293b;
+      font-size: 2rem;
+      font-weight: 700;
+      color: #60a5fa;
+      letter-spacing: -0.5px;
     }
 
     .header-actions {
       display: flex;
-      gap: 10px;
+      gap: 1rem;
     }
 
     .btn {
-      padding: 10px 20px;
-      border: none;
-      border-radius: 6px;
-      font-size: 14px;
+      padding: 0.75rem 1.5rem;
+      border: 2px solid;
+      border-radius: 8px;
+      font-size: 0.875rem;
       font-weight: 600;
       cursor: pointer;
-      transition: all 0.2s;
+      transition: all 0.3s ease;
+      display: flex;
+      align-items: center;
+      gap: 0.5rem;
     }
 
     .btn-primary {
-      background: #3b82f6;
-      color: white;
+      background: rgba(59, 130, 246, 0.2);
+      border-color: #3b82f6;
+      color: #93c5fd;
     }
 
     .btn-primary:hover {
-      background: #2563eb;
+      background: rgba(59, 130, 246, 0.35);
+      transform: scale(1.05);
     }
 
     .btn-secondary {
-      background: #64748b;
-      color: white;
+      background: rgba(100, 116, 139, 0.2);
+      border-color: #64748b;
+      color: #cbd5e1;
     }
 
     .btn-secondary:hover {
-      background: #475569;
+      background: rgba(100, 116, 139, 0.3);
+      transform: scale(1.05);
     }
 
     .btn-success {
-      background: #10b981;
-      color: white;
+      background: rgba(16, 185, 129, 0.2);
+      border-color: #10b981;
+      color: #6ee7b7;
     }
 
     .btn-success:hover {
-      background: #059669;
+      background: rgba(16, 185, 129, 0.35);
+      transform: scale(1.05);
     }
 
     .btn-danger {
-      background: #ef4444;
-      color: white;
+      background: rgba(239, 68, 68, 0.2);
+      border-color: #ef4444;
+      color: #fca5a5;
     }
 
     .btn-danger:hover {
-      background: #dc2626;
+      background: rgba(239, 68, 68, 0.35);
+      transform: scale(1.05);
     }
 
     .main-content {
       display: grid;
-      grid-template-columns: 250px 1fr 300px;
-      gap: 20px;
+      grid-template-columns: 280px 1fr 320px;
+      gap: 1.5rem;
+      padding: 1.5rem;
+      flex: 1;
+      overflow: hidden;
     }
 
     .sidebar, .details-panel {
-      background: white;
+      background: rgba(30, 41, 59, 0.6);
       border-radius: 12px;
-      padding: 20px;
-      box-shadow: 0 4px 6px rgba(0,0,0,0.1);
+      padding: 1.5rem;
+      border: 1px solid rgba(59, 130, 246, 0.2);
+      backdrop-filter: blur(10px);
+      box-shadow: 0 8px 32px rgba(0, 0, 0, 0.3);
+      overflow-y: auto;
     }
 
     .sidebar h2, .details-panel h2 {
-      margin: 0 0 15px 0;
-      font-size: 18px;
-      color: #1e293b;
-      border-bottom: 2px solid #e2e8f0;
-      padding-bottom: 10px;
+      margin: 0 0 1.5rem 0;
+      font-size: 1.25rem;
+      color: #60a5fa;
+      border-bottom: 2px solid rgba(59, 130, 246, 0.3);
+      padding-bottom: 0.75rem;
+      font-weight: 700;
     }
 
     .tool-section {
-      margin-bottom: 20px;
+      margin-bottom: 1.5rem;
     }
 
     .tool-section h3 {
-      font-size: 14px;
-      color: #64748b;
-      margin: 0 0 10px 0;
+      font-size: 0.875rem;
+      color: #94a3b8;
+      margin: 0 0 0.75rem 0;
       text-transform: uppercase;
       letter-spacing: 0.05em;
+      font-weight: 600;
     }
 
     .tool-palette {
       display: grid;
       grid-template-columns: 1fr 1fr;
-      gap: 8px;
+      gap: 0.75rem;
     }
 
     .tool-item {
-      padding: 12px;
-      background: #f8fafc;
-      border: 2px solid #e2e8f0;
+      padding: 1rem;
+      background: rgba(15, 23, 42, 0.6);
+      border: 2px solid rgba(59, 130, 246, 0.3);
       border-radius: 8px;
       text-align: center;
       cursor: grab;
       transition: all 0.2s;
       user-select: none;
+      color: #e4e4e7;
     }
 
     .tool-item:hover {
-      background: #e0e7ff;
+      background: rgba(59, 130, 246, 0.2);
       border-color: #3b82f6;
       transform: scale(1.05);
     }
 
     .tool-item.active {
-      background: #dbeafe;
+      background: rgba(59, 130, 246, 0.3);
       border-color: #3b82f6;
-      box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.1);
+      box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.2);
     }
 
     .tool-item:active {
@@ -155,66 +185,76 @@
     }
 
     .tool-icon {
-      font-size: 28px;
-      margin-bottom: 4px;
+      font-size: 1.5rem;
+      margin-bottom: 0.25rem;
     }
 
     .tool-label {
-      font-size: 11px;
+      font-size: 0.75rem;
       font-weight: 600;
-      color: #475569;
+      color: #cbd5e1;
     }
 
     .canvas-wrapper {
-      background: white;
+      background: rgba(30, 41, 59, 0.6);
       border-radius: 12px;
-      padding: 20px;
-      box-shadow: 0 4px 6px rgba(0,0,0,0.1);
+      padding: 1.5rem;
+      border: 1px solid rgba(59, 130, 246, 0.2);
+      backdrop-filter: blur(10px);
+      box-shadow: 0 8px 32px rgba(0, 0, 0, 0.3);
+      display: flex;
+      flex-direction: column;
+      overflow: hidden;
     }
 
     .canvas-header {
       display: flex;
       justify-content: space-between;
       align-items: center;
-      margin-bottom: 15px;
+      margin-bottom: 1rem;
     }
 
     .canvas-header h2 {
       margin: 0;
-      font-size: 18px;
-      color: #1e293b;
+      font-size: 1.25rem;
+      color: #60a5fa;
+      font-weight: 700;
     }
 
     .canvas-controls {
       display: flex;
-      gap: 10px;
+      gap: 1rem;
       align-items: center;
     }
 
     .canvas-controls label {
-      font-size: 12px;
-      color: #64748b;
+      font-size: 0.875rem;
+      color: #94a3b8;
       display: flex;
       align-items: center;
-      gap: 6px;
+      gap: 0.5rem;
+      font-weight: 500;
     }
 
     .canvas-controls input[type="number"] {
       width: 60px;
-      padding: 4px 8px;
-      border: 1px solid #e2e8f0;
-      border-radius: 4px;
+      padding: 0.375rem 0.5rem;
+      border: 1px solid rgba(59, 130, 246, 0.3);
+      border-radius: 6px;
+      background: rgba(15, 23, 42, 0.8);
+      color: #e4e4e7;
+      font-size: 0.875rem;
     }
 
     #mapCanvas {
-      border: 2px solid #e2e8f0;
+      border: 2px solid rgba(59, 130, 246, 0.3);
       border-radius: 8px;
       cursor: crosshair;
       display: block;
-      background: #fafafa;
+      background: rgba(15, 23, 42, 0.6);
       background-image: 
-        linear-gradient(rgba(0,0,0,0.03) 1px, transparent 1px),
-        linear-gradient(90deg, rgba(0,0,0,0.03) 1px, transparent 1px);
+        linear-gradient(rgba(59, 130, 246, 0.1) 1px, transparent 1px),
+        linear-gradient(90deg, rgba(59, 130, 246, 0.1) 1px, transparent 1px);
       background-size: 40px 40px;
     }
 
@@ -224,20 +264,21 @@
     }
 
     .device-item {
-      padding: 10px;
-      background: #f8fafc;
-      border: 1px solid #e2e8f0;
-      border-radius: 6px;
-      margin-bottom: 8px;
+      padding: 0.75rem;
+      background: rgba(15, 23, 42, 0.6);
+      border: 1px solid rgba(59, 130, 246, 0.3);
+      border-radius: 8px;
+      margin-bottom: 0.5rem;
       display: flex;
       justify-content: space-between;
       align-items: center;
       cursor: pointer;
       transition: all 0.2s;
+      color: #e4e4e7;
     }
 
     .device-item:hover {
-      background: #e0e7ff;
+      background: rgba(59, 130, 246, 0.2);
       border-color: #3b82f6;
     }
 
@@ -250,142 +291,154 @@
     }
 
     .device-name {
-      font-size: 13px;
+      font-size: 0.875rem;
       font-weight: 600;
-      color: #1e293b;
-      margin-bottom: 2px;
+      color: #e4e4e7;
+      margin-bottom: 0.125rem;
     }
 
     .device-type {
-      font-size: 11px;
-      color: #64748b;
+      font-size: 0.75rem;
+      color: #94a3b8;
     }
 
     .device-icon-small {
-      font-size: 20px;
-      margin-right: 8px;
+      font-size: 1.25rem;
+      margin-right: 0.5rem;
     }
 
     .zone-list {
       display: flex;
       flex-direction: column;
-      gap: 8px;
+      gap: 0.5rem;
     }
 
     .zone-item {
-      padding: 10px;
-      border-radius: 6px;
+      padding: 0.75rem;
+      border-radius: 8px;
       display: flex;
       justify-content: space-between;
       align-items: center;
-      font-size: 13px;
+      font-size: 0.875rem;
       font-weight: 600;
+      background: rgba(15, 23, 42, 0.4);
+      border: 1px solid rgba(59, 130, 246, 0.2);
     }
 
     .details-empty {
       text-align: center;
       color: #94a3b8;
-      padding: 40px 20px;
-      font-size: 14px;
+      padding: 2.5rem 1.5rem;
+      font-size: 0.875rem;
     }
 
     .details-content {
-      font-size: 13px;
+      font-size: 0.875rem;
     }
 
     .detail-row {
       display: flex;
       justify-content: space-between;
-      padding: 8px 0;
-      border-bottom: 1px solid #f1f5f9;
+      padding: 0.5rem 0;
+      border-bottom: 1px solid rgba(59, 130, 246, 0.2);
     }
 
     .detail-label {
-      color: #64748b;
+      color: #94a3b8;
       font-weight: 500;
     }
 
     .detail-value {
-      color: #1e293b;
+      color: #e4e4e7;
       font-weight: 600;
     }
 
     .telemetry-grid {
       display: grid;
       grid-template-columns: 1fr 1fr;
-      gap: 10px;
-      margin-top: 15px;
+      gap: 0.75rem;
+      margin-top: 1rem;
     }
 
     .telemetry-card {
-      background: #f8fafc;
-      padding: 10px;
-      border-radius: 6px;
+      background: rgba(15, 23, 42, 0.6);
+      padding: 0.75rem;
+      border-radius: 8px;
       text-align: center;
+      border: 1px solid rgba(59, 130, 246, 0.2);
     }
 
     .telemetry-label {
-      font-size: 11px;
-      color: #64748b;
-      margin-bottom: 4px;
+      font-size: 0.75rem;
+      color: #94a3b8;
+      margin-bottom: 0.25rem;
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
     }
 
     .telemetry-value {
-      font-size: 18px;
+      font-size: 1.25rem;
       font-weight: 700;
-      color: #1e293b;
+      color: #60a5fa;
     }
 
     .action-buttons {
       display: flex;
-      gap: 8px;
-      margin-top: 20px;
+      gap: 0.5rem;
+      margin-top: 1.25rem;
     }
 
     .action-buttons button {
       flex: 1;
-      padding: 8px;
-      font-size: 12px;
+      padding: 0.5rem;
+      font-size: 0.75rem;
     }
 
     .stats-bar {
-      background: #f8fafc;
-      padding: 12px;
-      border-radius: 6px;
-      margin-top: 15px;
-      font-size: 12px;
-      color: #64748b;
+      background: rgba(15, 23, 42, 0.6);
+      padding: 0.75rem;
+      border-radius: 8px;
+      margin-top: 1rem;
+      font-size: 0.875rem;
+      color: #94a3b8;
+      border: 1px solid rgba(59, 130, 246, 0.2);
     }
 
     .stats-bar strong {
-      color: #1e293b;
+      color: #e4e4e7;
     }
 
     .legend {
-      margin-top: 20px;
-      padding: 12px;
-      background: #f8fafc;
-      border-radius: 6px;
+      margin-top: 1.5rem;
+      padding: 1rem;
+      background: rgba(15, 23, 42, 0.4);
+      border-radius: 8px;
+      border: 1px solid rgba(59, 130, 246, 0.2);
     }
 
     .legend-title {
-      font-size: 12px;
+      font-size: 0.875rem;
       font-weight: 600;
-      color: #1e293b;
-      margin-bottom: 8px;
+      color: #60a5fa;
+      margin-bottom: 0.75rem;
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
     }
 
     .legend-item {
       display: flex;
       align-items: center;
-      gap: 8px;
-      margin-bottom: 6px;
-      font-size: 11px;
-      color: #64748b;
+      gap: 0.75rem;
+      margin-bottom: 0.5rem;
+      font-size: 0.875rem;
+      color: #cbd5e1;
     }
 
     .legend-icon {
-      font-size: 16px;
+      font-size: 1.25rem;
+      color: #60a5fa;
+      width: 24px;
+      text-align: center;
     }
 
     @media (max-width: 1200px) {
@@ -404,14 +457,14 @@
     <!-- Header -->
     <div class="header">
       <div>
-        <h1>🗺️ Room Mapper</h1>
-        <p style="margin: 5px 0 0 0; color: #64748b; font-size: 14px;">Visual layout of sensors, lights, and zones</p>
+        <h1>Room Mapper</h1>
+        <p style="margin: 5px 0 0 0; color: #94a3b8; font-size: 0.875rem;">Visual layout of sensors, lights, and zones</p>
       </div>
       <div class="header-actions">
         <button class="btn btn-secondary" onclick="window.location.href='../index.charlie.html'">← Back to Dashboard</button>
-        <button class="btn btn-success" onclick="saveMap()">💾 Save Map</button>
-        <button class="btn btn-primary" onclick="loadMap()">📂 Load Map</button>
-        <button class="btn btn-danger" onclick="clearMap()">🗑️ Clear</button>
+        <button class="btn btn-success" onclick="saveMap()">Save Map</button>
+        <button class="btn btn-primary" onclick="loadMap()">Load Map</button>
+        <button class="btn btn-danger" onclick="clearMap()">Clear</button>
       </div>
     </div>
 
@@ -426,11 +479,11 @@
           <h3>Drawing Tools</h3>
           <div class="tool-palette">
             <div class="tool-item active" data-tool="select" onclick="selectTool('select')">
-              <div class="tool-icon">👆</div>
+              <div class="tool-icon">⌘</div>
               <div class="tool-label">Select</div>
             </div>
             <div class="tool-item" data-tool="zone" onclick="selectTool('zone')">
-              <div class="tool-icon">📐</div>
+              <div class="tool-icon">▢</div>
               <div class="tool-label">Draw Zone</div>
             </div>
           </div>
@@ -458,19 +511,19 @@
         <div class="legend">
           <div class="legend-title">Legend</div>
           <div class="legend-item">
-            <span class="legend-icon">🌡️</span>
+            <span class="legend-icon">◉</span>
             <span>Temperature/Humidity Sensor</span>
           </div>
           <div class="legend-item">
-            <span class="legend-icon">💡</span>
+            <span class="legend-icon">◆</span>
             <span>Grow Light / Fixture</span>
           </div>
           <div class="legend-item">
-            <span class="legend-icon">🌀</span>
+            <span class="legend-icon">◈</span>
             <span>Equipment (HVAC, Dehumidifier)</span>
           </div>
           <div class="legend-item">
-            <span class="legend-icon">🔌</span>
+            <span class="legend-icon">●</span>
             <span>Smart Plug / Controller</span>
           </div>
         </div>
@@ -528,15 +581,15 @@
       zoneStart: null
     };
 
-    // Device type icons
+    // Device type icons (using simple text symbols instead of emojis)
     const DEVICE_ICONS = {
-      sensor: '🌡️',
-      woiosensor: '🌡️',
-      light: '💡',
-      plug: '🔌',
-      equipment: '🌀',
-      switch: '🔌',
-      default: '📍'
+      sensor: '◉',
+      woiosensor: '◉',
+      light: '◆',
+      plug: '●',
+      equipment: '◈',
+      switch: '●',
+      default: '○'
     };
 
     // Zone colors
@@ -766,7 +819,7 @@
         ctx.strokeRect(x, y, width, height);
         
         // Draw zone label
-        ctx.fillStyle = zone.color;
+        ctx.fillStyle = '#e2e8f0';
         ctx.font = 'bold 14px sans-serif';
         ctx.fillText(zone.name, x + 10, y + 25);
       });
@@ -780,16 +833,17 @@
         ctx.font = '32px sans-serif';
         ctx.textAlign = 'center';
         ctx.textBaseline = 'middle';
+        ctx.fillStyle = '#f8fafc';
         ctx.fillText(device.icon, x, y);
         
         // Draw device name below
         ctx.font = 'bold 10px sans-serif';
-        ctx.fillStyle = '#1e293b';
+        ctx.fillStyle = '#cbd5e1';
         ctx.fillText(device.device.name || 'Unknown', x, y + 25);
         
         // Draw zone indicator if assigned
         if (device.device.zone) {
-          ctx.fillStyle = '#3b82f6';
+          ctx.fillStyle = '#38bdf8';
           ctx.font = 'bold 9px sans-serif';
           ctx.fillText(`Z${device.device.zone}`, x, y - 20);
         }
@@ -807,7 +861,7 @@
         
         let html = `
           <div class="details-content">
-            <div style="text-align: center; font-size: 32px; margin-bottom: 10px;">${item.icon}</div>
+            <div style="text-align: center; font-size: 32px; margin-bottom: 10px; color: #60a5fa;">${item.icon}</div>
             <div class="detail-row">
               <span class="detail-label">Name</span>
               <span class="detail-value">${device.name || 'Unknown'}</span>
@@ -983,13 +1037,13 @@
         });
         
         if (response.ok) {
-          alert('✅ Map saved successfully!');
+          alert('Map saved successfully!');
         } else {
           throw new Error('Save failed');
         }
       } catch (error) {
         console.error('Failed to save map:', error);
-        alert('❌ Failed to save map. See console for details.');
+        alert('Failed to save map. See console for details.');
       }
     }
 
@@ -1000,7 +1054,7 @@
         
         const mapData = await response.json();
         await loadExistingMapData(mapData);
-        alert('✅ Map loaded successfully!');
+        alert('Map loaded successfully!');
       } catch (error) {
         console.error('Failed to load map:', error);
         alert('No saved map found or error loading map.');
