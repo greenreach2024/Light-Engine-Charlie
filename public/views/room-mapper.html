@@ -546,13 +546,13 @@
     ];
 
     // Initialize
-    window.addEventListener('DOMContentLoaded', () => {
+    window.addEventListener('DOMContentLoaded', async () => {
       STATE.canvas = document.getElementById('mapCanvas');
       STATE.ctx = STATE.canvas.getContext('2d');
       
       setupCanvas();
-      loadIoTDevices();
-      loadExistingMap();
+      await loadIoTDevices();
+      await loadExistingMap();
       setupEventListeners();
       draw();
     });
@@ -864,7 +864,7 @@
         content.innerHTML = html;
       } else if (item.zone) {
         // Zone details
-        html = `
+        const html = `
           <div class="details-content">
             <div style="width: 100%; height: 60px; background: ${item.color}; border-radius: 8px; margin-bottom: 15px;"></div>
             <div class="detail-row">
@@ -957,10 +957,19 @@
         name: 'Main Grow Room',
         gridSize: STATE.gridSize,
         cellSize: STATE.cellSize,
+        version: 2,
         devices: STATE.placedDevices.map(d => ({
           deviceId: d.deviceId,
           x: d.x,
-          y: d.y
+          y: d.y,
+          snapshot: {
+            name: d.device?.name || null,
+            type: d.device?.type || null,
+            protocol: d.device?.protocol || null,
+            category: d.device?.category || null,
+            zone: d.device?.zone ?? null,
+            icon: d.icon || null
+          }
         })),
         zones: STATE.zones,
         lastUpdated: new Date().toISOString()
@@ -1011,6 +1020,10 @@
     }
 
     async function loadExistingMapData(mapData) {
+      if (!STATE.iotDevices.length) {
+        await loadIoTDevices();
+      }
+
       STATE.gridSize = mapData.gridSize || 20;
       STATE.cellSize = mapData.cellSize || 40;
       STATE.zones = mapData.zones || [];
@@ -1024,16 +1037,40 @@
       STATE.placedDevices = [];
       if (mapData.devices) {
         for (const devicePos of mapData.devices) {
-          const device = STATE.iotDevices.find(d => d.id === devicePos.deviceId);
-          if (device) {
-            STATE.placedDevices.push({
-              deviceId: device.id,
-              device: device,
-              x: devicePos.x,
-              y: devicePos.y,
-              icon: getDeviceIcon(device)
-            });
+          const snapshot = devicePos.snapshot || devicePos.metadata || null;
+          let device = STATE.iotDevices.find(d => d.id === devicePos.deviceId);
+
+          if (!device && snapshot) {
+            device = {
+              id: devicePos.deviceId,
+              name: snapshot.name || 'Unknown Device',
+              type: snapshot.type || 'Unknown',
+              protocol: snapshot.protocol || 'Unknown',
+              category: snapshot.category || null,
+              zone: snapshot.zone ?? null
+            };
           }
+
+          const devicePayload = {
+            deviceId: devicePos.deviceId,
+            device: device || {
+              id: devicePos.deviceId,
+              name: snapshot?.name || 'Unregistered Device',
+              type: snapshot?.type || 'Unknown',
+              protocol: snapshot?.protocol || 'Unknown',
+              category: snapshot?.category || null,
+              zone: snapshot?.zone ?? null
+            },
+            x: devicePos.x,
+            y: devicePos.y,
+            icon: snapshot?.icon || (device ? getDeviceIcon(device) : DEVICE_ICONS.default)
+          };
+
+          if (!devicePayload.icon) {
+            devicePayload.icon = DEVICE_ICONS.default;
+          }
+
+          STATE.placedDevices.push(devicePayload);
         }
       }
       
