@@ -7850,67 +7850,43 @@ app.get('/plans', (req, res) => {
     // Recipes contain spectral targets (blue, red, green, far_red)
     // But hardware only has 4 drivers (CW, WW, BL, RD)
     // Green is computed from CW/WW mixing, so we distribute it into white channels
-    function convertSpectralTargetsToDrivers(row) {
+    function extractRecipeChannelMix(row) {
       const toNumber = (v) => {
         const n = Number(v);
         return Number.isFinite(n) ? n : null;
       };
       const clamp = (v, min = 0, max = 100) => Math.max(min, Math.min(max, Number(v) || 0));
       
-      // Extract spectral targets from recipe (if present)
-      const blue = toNumber(row.blue) ?? toNumber(row.bl);
-      const red = toNumber(row.red) ?? toNumber(row.rd);
-      const green = toNumber(row.green) ?? toNumber(row.gn);
-      const far_red = toNumber(row.far_red) ?? toNumber(row.fr);
+      // Recipes contain channel mix control values (not spectral targets):
+      // - blue: BL channel power %
+      // - red: RD channel power %
+      // - green: Mid-band enhancement control % (applied to CW/WW)
+      // - far_red: FR channel power %
+      // - cw/ww: Optional explicit white channel values
       
-      // Extract existing driver values (if recipe already has them)
-      const cw_raw = toNumber(row.cool_white) ?? toNumber(row.cw);
-      const ww_raw = toNumber(row.warm_white) ?? toNumber(row.ww);
+      const bl = clamp(toNumber(row.blue) ?? toNumber(row.bl) ?? 0);
+      const rd = clamp(toNumber(row.red) ?? toNumber(row.rd) ?? 0);
+      const gn = clamp(toNumber(row.green) ?? toNumber(row.gn) ?? 0);
+      const fr = clamp(toNumber(row.far_red) ?? toNumber(row.fr) ?? 0);
       
-      // If blue, red, green, far_red exist in recipe, treat them as spectral targets
-      // and convert to driver commands
-      if (blue != null || red != null || green != null || far_red != null) {
-        // Blue target directly drives BL channel
-        const bl = clamp(blue ?? 0);
-        // Red target directly drives RD channel
-        const rd = clamp(red ?? 0);
-        
-        // Green target must be split between CW and WW
-        // (green 500-600nm is produced by white light, not a separate driver)
-        let cw = cw_raw ?? 0;
-        let ww = ww_raw ?? 0;
-        
-        if (green != null && green > 0) {
-          const greenVal = clamp(green);
-          // Distribute green into white channels
-          if (cw_raw == null && ww_raw == null) {
-            // No white drivers specified: split green 50/50
-            cw = greenVal / 2;
-            ww = greenVal / 2;
-          } else if (cw_raw == null) {
-            // WW exists, add half of green to it
-            ww = clamp((ww_raw ?? 0) + greenVal / 2);
-          } else if (ww_raw == null) {
-            // CW exists, add half of green to it
-            cw = clamp((cw_raw ?? 0) + greenVal / 2);
-          }
-          // If both CW and WW exist, green is ignored (already accounted for)
-        } else if (cw_raw != null || ww_raw != null) {
-          // Green is 0 or missing, but white drivers exist
-          cw = clamp(cw_raw ?? 0);
-          ww = clamp(ww_raw ?? 0);
+      // White channels: use explicit values or derive from remaining spectrum
+      let cw = clamp(toNumber(row.cool_white) ?? toNumber(row.cw) ?? 0);
+      let ww = clamp(toNumber(row.warm_white) ?? toNumber(row.ww) ?? 0);
+      
+      // If white channels not specified, allocate remaining spectrum
+      // Total: CW + WW + BL + RD + GN + FR = ~100%
+      // But GN is typically applied by redistributing CW/WW, not as separate allocation
+      if (cw === 0 && ww === 0) {
+        // Allocate remaining spectrum to whites after BL, RD, FR
+        const remaining = Math.max(0, 100 - bl - rd - fr - gn);
+        if (remaining > 0) {
+          // Split remaining between CW/WW (typically 50/50, but could be adjusted)
+          cw = remaining / 2;
+          ww = remaining / 2;
         }
-        
-        return { cw, ww, bl, rd };
       }
       
-      // Fallback: recipe has driver commands directly (cw, ww, bl, rd)
-      return {
-        cw: clamp(cw_raw ?? 0),
-        ww: clamp(ww_raw ?? 0),
-        bl: clamp(toNumber(row.blue) ?? toNumber(row.bl) ?? 0),
-        rd: clamp(toNumber(row.red) ?? toNumber(row.rd) ?? 0),
-      };
+      return { cw, ww, bl, gn, rd, fr };
     }
 
     // Helper to synthesize plan objects from lighting-recipes.json
@@ -7930,18 +7906,20 @@ app.get('/plans', (req, res) => {
         if (!Array.isArray(days) || !days.length) continue;
         const id = `crop-${slugify(cropName)}`;
         const lightDays = days.map((row) => {
-          // Convert spectral targets to driver commands
-          const driverMix = convertSpectralTargetsToDrivers(row);
+          // Extract channel mix from recipe (blue, red, green, far_red are control knobs)
+          const mix = extractRecipeChannelMix(row);
           return {
             day: toNumber(row.day),
             stage: typeof row.stage === 'string' ? row.stage : '',
             ppfd: toNumber(row.ppfd),
             // No explicit photoperiod provided in recipes DB; leave undefined
             mix: {
-              cw: driverMix.cw,
-              ww: driverMix.ww,
-              bl: driverMix.bl,
-              rd: driverMix.rd,
+              cw: mix.cw,
+              ww: mix.ww,
+              bl: mix.bl,
+              gn: mix.gn,
+              rd: mix.rd,
+              fr: mix.fr,
             },
           };
         }).filter(Boolean);
