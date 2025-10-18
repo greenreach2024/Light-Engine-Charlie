@@ -7846,6 +7846,73 @@ app.get('/plans', (req, res) => {
     const plans = Array.isArray(doc.plans) ? doc.plans : [];
     const envelope = sanitizePlansEnvelope(doc);
 
+    // Helper to convert spectral targets to driver commands
+    // Recipes contain spectral targets (blue, red, green, far_red)
+    // But hardware only has 4 drivers (CW, WW, BL, RD)
+    // Green is computed from CW/WW mixing, so we distribute it into white channels
+    function convertSpectralTargetsToDrivers(row) {
+      const toNumber = (v) => {
+        const n = Number(v);
+        return Number.isFinite(n) ? n : null;
+      };
+      const clamp = (v, min = 0, max = 100) => Math.max(min, Math.min(max, Number(v) || 0));
+      
+      // Extract spectral targets from recipe (if present)
+      const blue = toNumber(row.blue) ?? toNumber(row.bl);
+      const red = toNumber(row.red) ?? toNumber(row.rd);
+      const green = toNumber(row.green) ?? toNumber(row.gn);
+      const far_red = toNumber(row.far_red) ?? toNumber(row.fr);
+      
+      // Extract existing driver values (if recipe already has them)
+      const cw_raw = toNumber(row.cool_white) ?? toNumber(row.cw);
+      const ww_raw = toNumber(row.warm_white) ?? toNumber(row.ww);
+      
+      // If blue, red, green, far_red exist in recipe, treat them as spectral targets
+      // and convert to driver commands
+      if (blue != null || red != null || green != null || far_red != null) {
+        // Blue target directly drives BL channel
+        const bl = clamp(blue ?? 0);
+        // Red target directly drives RD channel
+        const rd = clamp(red ?? 0);
+        
+        // Green target must be split between CW and WW
+        // (green 500-600nm is produced by white light, not a separate driver)
+        let cw = cw_raw ?? 0;
+        let ww = ww_raw ?? 0;
+        
+        if (green != null && green > 0) {
+          const greenVal = clamp(green);
+          // Distribute green into white channels
+          if (cw_raw == null && ww_raw == null) {
+            // No white drivers specified: split green 50/50
+            cw = greenVal / 2;
+            ww = greenVal / 2;
+          } else if (cw_raw == null) {
+            // WW exists, add half of green to it
+            ww = clamp((ww_raw ?? 0) + greenVal / 2);
+          } else if (ww_raw == null) {
+            // CW exists, add half of green to it
+            cw = clamp((cw_raw ?? 0) + greenVal / 2);
+          }
+          // If both CW and WW exist, green is ignored (already accounted for)
+        } else if (cw_raw != null || ww_raw != null) {
+          // Green is 0 or missing, but white drivers exist
+          cw = clamp(cw_raw ?? 0);
+          ww = clamp(ww_raw ?? 0);
+        }
+        
+        return { cw, ww, bl, rd };
+      }
+      
+      // Fallback: recipe has driver commands directly (cw, ww, bl, rd)
+      return {
+        cw: clamp(cw_raw ?? 0),
+        ww: clamp(ww_raw ?? 0),
+        bl: clamp(toNumber(row.blue) ?? toNumber(row.bl) ?? 0),
+        rd: clamp(toNumber(row.red) ?? toNumber(row.rd) ?? 0),
+      };
+    }
+
     // Helper to synthesize plan objects from lighting-recipes.json
     function synthesizePlansFromRecipes(recipes) {
       if (!recipes || typeof recipes !== 'object') return [];
@@ -7862,20 +7929,22 @@ app.get('/plans', (req, res) => {
       for (const [cropName, days] of Object.entries(crops)) {
         if (!Array.isArray(days) || !days.length) continue;
         const id = `crop-${slugify(cropName)}`;
-        const lightDays = days.map((row) => ({
-          day: toNumber(row.day),
-          stage: typeof row.stage === 'string' ? row.stage : '',
-          ppfd: toNumber(row.ppfd),
-          // No explicit photoperiod provided in recipes DB; leave undefined
-          mix: {
-            cw: toNumber(row.cool_white) ?? 0,
-            ww: toNumber(row.warm_white) ?? 0,
-            bl: toNumber(row.blue) ?? 0,
-            gn: toNumber(row.green) ?? 0,
-            rd: toNumber(row.red) ?? 0,
-            fr: toNumber(row.far_red) ?? 0,
-          },
-        })).filter(Boolean);
+        const lightDays = days.map((row) => {
+          // Convert spectral targets to driver commands
+          const driverMix = convertSpectralTargetsToDrivers(row);
+          return {
+            day: toNumber(row.day),
+            stage: typeof row.stage === 'string' ? row.stage : '',
+            ppfd: toNumber(row.ppfd),
+            // No explicit photoperiod provided in recipes DB; leave undefined
+            mix: {
+              cw: driverMix.cw,
+              ww: driverMix.ww,
+              bl: driverMix.bl,
+              rd: driverMix.rd,
+            },
+          };
+        }).filter(Boolean);
         const envDays = days.map((row) => ({
           day: toNumber(row.day),
           tempC: toNumber(row.temperature),
