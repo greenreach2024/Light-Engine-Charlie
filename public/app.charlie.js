@@ -4147,8 +4147,10 @@ function initLightsStatusUI() {
   console.warn('[Stub] initLightsStatusUI called');
 }
 // Spectral rendering constants
+// DRIVER_CHANNEL_KEYS = physical light drivers only (4 channels)
+const DRIVER_CHANNEL_KEYS = ['cw', 'ww', 'bl', 'rd'];
+// HEX_CHANNEL_KEYS includes all channels for UI/storage (7 channels: 4 drivers + 3 extras)
 const HEX_CHANNEL_KEYS = ['cw', 'ww', 'bl', 'gn', 'rd', 'fr', 'uv'];
-const DRIVER_CHANNEL_KEYS = ['cw', 'ww', 'bl', 'gn', 'rd', 'fr'];
 
 const clampPercent = (value) => {
   const n = Number(value);
