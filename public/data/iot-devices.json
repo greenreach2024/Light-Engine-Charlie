@@ -199,7 +199,7 @@
       "token": "4e6fc805b4a0dd7ed693af1dcf89d9731113d4706b2d796759aafe09cf8f07ae1e858fa3fbf06139ddea004de7b04251",
       "secret": "b9a4da66bb55d86299dc912ab16e4d44"
     },
-    "lastSeen": "2025-10-18T21:15:27.136Z",
+    "lastSeen": "2025-10-18T21:25:27.155Z",
     "telemetry": {
       "device_id": "3C8427B1316E",
       "name": "Grow Room 1, West Fan",
@@ -216,7 +216,7 @@
       "deviceId": "3C8427B1316E",
       "deviceType": "Plug Mini (US)",
       "hubDeviceId": "3C8427B1316E",
-      "lastUpdate": "2025-10-18T21:15:27.136Z"
+      "lastUpdate": "2025-10-18T21:25:27.155Z"
     },
     "deviceData": {
       "device_id": "3C8427B1316E",
@@ -241,7 +241,7 @@
         "deviceId": "3C8427B1316E",
         "deviceType": "Plug Mini (US)",
         "hubDeviceId": "3C8427B1316E",
-        "lastUpdate": "2025-10-18T21:15:27.136Z"
+        "lastUpdate": "2025-10-18T21:25:27.155Z"
       }
     }
   },
@@ -266,7 +266,7 @@
       "token": "4e6fc805b4a0dd7ed693af1dcf89d9731113d4706b2d796759aafe09cf8f07ae1e858fa3fbf06139ddea004de7b04251",
       "secret": "b9a4da66bb55d86299dc912ab16e4d44"
     },
-    "lastSeen": "2025-10-18T21:15:33.165Z",
+    "lastSeen": "2025-10-18T21:25:33.177Z",
     "telemetry": {
       "device_id": "3C8427B1ECDA",
       "name": "Strawberry AC",
@@ -283,7 +283,7 @@
       "deviceId": "3C8427B1ECDA",
       "deviceType": "Plug Mini (US)",
       "hubDeviceId": "3C8427B1ECDA",
-      "lastUpdate": "2025-10-18T21:15:33.165Z"
+      "lastUpdate": "2025-10-18T21:25:33.177Z"
     },
     "deviceData": {
       "device_id": "3C8427B1ECDA",
@@ -308,7 +308,7 @@
         "deviceId": "3C8427B1ECDA",
         "deviceType": "Plug Mini (US)",
         "hubDeviceId": "3C8427B1ECDA",
-        "lastUpdate": "2025-10-18T21:15:33.165Z"
+        "lastUpdate": "2025-10-18T21:25:33.177Z"
       }
     }
   },
@@ -333,7 +333,7 @@
       "token": "4e6fc805b4a0dd7ed693af1dcf89d9731113d4706b2d796759aafe09cf8f07ae1e858fa3fbf06139ddea004de7b04251",
       "secret": "b9a4da66bb55d86299dc912ab16e4d44"
     },
-    "lastSeen": "2025-10-18T21:15:39.144Z",
+    "lastSeen": "2025-10-18T21:25:39.149Z",
     "telemetry": {
       "device_id": "3C8427B21F32",
       "name": "Research Rack Fan",
@@ -350,7 +350,7 @@
       "deviceId": "3C8427B21F32",
       "deviceType": "Plug Mini (US)",
       "hubDeviceId": "3C8427B21F32",
-      "lastUpdate": "2025-10-18T21:15:39.144Z"
+      "lastUpdate": "2025-10-18T21:25:39.149Z"
     },
     "deviceData": {
       "device_id": "3C8427B21F32",
@@ -375,7 +375,7 @@
         "deviceId": "3C8427B21F32",
         "deviceType": "Plug Mini (US)",
         "hubDeviceId": "3C8427B21F32",
-        "lastUpdate": "2025-10-18T21:15:39.144Z"
+        "lastUpdate": "2025-10-18T21:25:39.149Z"
       }
     }
   },
@@ -400,7 +400,7 @@
       "token": "4e6fc805b4a0dd7ed693af1dcf89d9731113d4706b2d796759aafe09cf8f07ae1e858fa3fbf06139ddea004de7b04251",
       "secret": "b9a4da66bb55d86299dc912ab16e4d44"
     },
-    "lastSeen": "2025-10-18T21:15:45.170Z",
+    "lastSeen": "2025-10-18T21:25:45.182Z",
     "telemetry": {
       "device_id": "68B6B3B3C15A",
       "name": "Grow Room 1, Lights Towers 1-4",
@@ -417,7 +417,7 @@
       "deviceId": "68B6B3B3C15A",
       "deviceType": "Plug Mini (US)",
       "hubDeviceId": "68B6B3B3C15A",
-      "lastUpdate": "2025-10-18T21:15:45.170Z"
+      "lastUpdate": "2025-10-18T21:25:45.182Z"
     },
     "deviceData": {
       "device_id": "68B6B3B3C15A",
@@ -442,7 +442,7 @@
         "deviceId": "68B6B3B3C15A",
         "deviceType": "Plug Mini (US)",
         "hubDeviceId": "68B6B3B3C15A",
-        "lastUpdate": "2025-10-18T21:15:45.170Z"
+        "lastUpdate": "2025-10-18T21:25:45.182Z"
       }
     }
   },
@@ -467,7 +467,7 @@
       "token": "4e6fc805b4a0dd7ed693af1dcf89d9731113d4706b2d796759aafe09cf8f07ae1e858fa3fbf06139ddea004de7b04251",
       "secret": "b9a4da66bb55d86299dc912ab16e4d44"
     },
-    "lastSeen": "2025-10-18T21:15:51.150Z",
+    "lastSeen": "2025-10-18T21:25:51.159Z",
     "telemetry": {
       "device_id": "68B6B3BAE00E",
       "name": "RO System",
@@ -484,7 +484,7 @@
       "deviceId": "68B6B3BAE00E",
       "deviceType": "Plug Mini (US)",
       "hubDeviceId": "68B6B3BAE00E",
-      "lastUpdate": "2025-10-18T21:15:51.150Z"
+      "lastUpdate": "2025-10-18T21:25:51.159Z"
     },
     "deviceData": {
       "device_id": "68B6B3BAE00E",
@@ -509,7 +509,7 @@
         "deviceId": "68B6B3BAE00E",
         "deviceType": "Plug Mini (US)",
         "hubDeviceId": "68B6B3BAE00E",
-        "lastUpdate": "2025-10-18T21:15:51.150Z"
+        "lastUpdate": "2025-10-18T21:25:51.159Z"
       }
     }
   },
@@ -534,7 +534,7 @@
       "token": "4e6fc805b4a0dd7ed693af1dcf89d9731113d4706b2d796759aafe09cf8f07ae1e858fa3fbf06139ddea004de7b04251",
       "secret": "b9a4da66bb55d86299dc912ab16e4d44"
     },
-    "lastSeen": "2025-10-18T21:15:57.145Z",
+    "lastSeen": "2025-10-18T21:25:57.158Z",
     "telemetry": {
       "device_id": "7C2C67C5467A",
       "name": "strawberries",
@@ -551,7 +551,7 @@
       "deviceId": "7C2C67C5467A",
       "deviceType": "Plug Mini (US)",
       "hubDeviceId": "7C2C67C5467A",
-      "lastUpdate": "2025-10-18T21:15:57.145Z"
+      "lastUpdate": "2025-10-18T21:25:57.158Z"
     },
     "deviceData": {
       "device_id": "7C2C67C5467A",
@@ -576,7 +576,7 @@
         "deviceId": "7C2C67C5467A",
         "deviceType": "Plug Mini (US)",
         "hubDeviceId": "7C2C67C5467A",
-        "lastUpdate": "2025-10-18T21:15:57.145Z"
+        "lastUpdate": "2025-10-18T21:25:57.158Z"
       }
     }
   },
@@ -601,7 +601,7 @@
       "token": "4e6fc805b4a0dd7ed693af1dcf89d9731113d4706b2d796759aafe09cf8f07ae1e858fa3fbf06139ddea004de7b04251",
       "secret": "b9a4da66bb55d86299dc912ab16e4d44"
     },
-    "lastSeen": "2025-10-18T21:16:03.171Z",
+    "lastSeen": "2025-10-18T21:26:03.158Z",
     "telemetry": {
       "device_id": "84FCE6F34A66",
       "name": "Grow Room 1, East Fan",
@@ -618,7 +618,7 @@
       "deviceId": "84FCE6F34A66",
       "deviceType": "Plug Mini (US)",
       "hubDeviceId": "84FCE6F34A66",
-      "lastUpdate": "2025-10-18T21:16:03.171Z"
+      "lastUpdate": "2025-10-18T21:26:03.158Z"
     },
     "deviceData": {
       "device_id": "84FCE6F34A66",
@@ -643,7 +643,7 @@
         "deviceId": "84FCE6F34A66",
         "deviceType": "Plug Mini (US)",
         "hubDeviceId": "84FCE6F34A66",
-        "lastUpdate": "2025-10-18T21:16:03.171Z"
+        "lastUpdate": "2025-10-18T21:26:03.158Z"
       }
     }
   },
@@ -668,7 +668,7 @@
       "token": "4e6fc805b4a0dd7ed693af1dcf89d9731113d4706b2d796759aafe09cf8f07ae1e858fa3fbf06139ddea004de7b04251",
       "secret": "b9a4da66bb55d86299dc912ab16e4d44"
     },
-    "lastSeen": "2025-10-18T21:16:09.930Z",
+    "lastSeen": "2025-10-18T21:26:09.172Z",
     "telemetry": {
       "device_id": "84FCE6F5B1B6",
       "name": "Grow Room 3, Dehumifier",
@@ -685,7 +685,7 @@
       "deviceId": "84FCE6F5B1B6",
       "deviceType": "Plug Mini (US)",
       "hubDeviceId": "84FCE6F5B1B6",
-      "lastUpdate": "2025-10-18T21:16:09.930Z"
+      "lastUpdate": "2025-10-18T21:26:09.172Z"
     },
     "deviceData": {
       "device_id": "84FCE6F5B1B6",
@@ -710,7 +710,7 @@
         "deviceId": "84FCE6F5B1B6",
         "deviceType": "Plug Mini (US)",
         "hubDeviceId": "84FCE6F5B1B6",
-        "lastUpdate": "2025-10-18T21:16:09.930Z"
+        "lastUpdate": "2025-10-18T21:26:09.172Z"
       }
     }
   },
@@ -735,7 +735,7 @@
       "token": "4e6fc805b4a0dd7ed693af1dcf89d9731113d4706b2d796759aafe09cf8f07ae1e858fa3fbf06139ddea004de7b04251",
       "secret": "b9a4da66bb55d86299dc912ab16e4d44"
     },
-    "lastSeen": "2025-10-18T21:16:15.155Z",
+    "lastSeen": "2025-10-18T21:26:15.151Z",
     "telemetry": {
       "device_id": "A0764E1FDB82",
       "name": "Germ tent",
@@ -752,7 +752,7 @@
       "deviceId": "A0764E1FDB82",
       "deviceType": "Plug Mini (US)",
       "hubDeviceId": "A0764E1FDB82",
-      "lastUpdate": "2025-10-18T21:16:15.155Z"
+      "lastUpdate": "2025-10-18T21:26:15.151Z"
     },
     "deviceData": {
       "device_id": "A0764E1FDB82",
@@ -777,7 +777,7 @@
         "deviceId": "A0764E1FDB82",
         "deviceType": "Plug Mini (US)",
         "hubDeviceId": "A0764E1FDB82",
-        "lastUpdate": "2025-10-18T21:16:15.155Z"
+        "lastUpdate": "2025-10-18T21:26:15.151Z"
       }
     }
   },
@@ -802,7 +802,7 @@
       "token": "4e6fc805b4a0dd7ed693af1dcf89d9731113d4706b2d796759aafe09cf8f07ae1e858fa3fbf06139ddea004de7b04251",
       "secret": "b9a4da66bb55d86299dc912ab16e4d44"
     },
-    "lastSeen": "2025-10-18T21:16:21.164Z",
+    "lastSeen": "2025-10-18T21:26:21.172Z",
     "telemetry": {
       "device_id": "C3343035702D",
       "name": "Strawberry Room",
@@ -817,7 +817,7 @@
       "deviceId": "C3343035702D",
       "deviceType": "WoIOSensor",
       "hubDeviceId": "D3F85167A57E",
-      "lastUpdate": "2025-10-18T21:16:21.164Z"
+      "lastUpdate": "2025-10-18T21:26:21.172Z"
     },
     "deviceData": {
       "device_id": "C3343035702D",
@@ -840,7 +840,7 @@
         "deviceId": "C3343035702D",
         "deviceType": "WoIOSensor",
         "hubDeviceId": "D3F85167A57E",
-        "lastUpdate": "2025-10-18T21:16:21.164Z"
+        "lastUpdate": "2025-10-18T21:26:21.172Z"
       }
     }
   },
@@ -865,7 +865,7 @@
       "token": "4e6fc805b4a0dd7ed693af1dcf89d9731113d4706b2d796759aafe09cf8f07ae1e858fa3fbf06139ddea004de7b04251",
       "secret": "b9a4da66bb55d86299dc912ab16e4d44"
     },
-    "lastSeen": "2025-10-18T21:16:27.147Z",
+    "lastSeen": "2025-10-18T21:26:27.178Z",
     "telemetry": {
       "device_id": "3C8427B1E392",
       "name": "Grow Room 1, Dehumidifier",
@@ -882,7 +882,7 @@
       "deviceId": "3C8427B1E392",
       "deviceType": "Plug Mini (US)",
       "hubDeviceId": "3C8427B1E392",
-      "lastUpdate": "2025-10-18T21:16:27.147Z"
+      "lastUpdate": "2025-10-18T21:26:27.178Z"
     },
     "deviceData": {
       "device_id": "3C8427B1E392",
@@ -907,7 +907,7 @@
         "deviceId": "3C8427B1E392",
         "deviceType": "Plug Mini (US)",
         "hubDeviceId": "3C8427B1E392",
-        "lastUpdate": "2025-10-18T21:16:27.147Z"
+        "lastUpdate": "2025-10-18T21:26:27.178Z"
       }
     }
   },
@@ -932,7 +932,7 @@
       "token": "4e6fc805b4a0dd7ed693af1dcf89d9731113d4706b2d796759aafe09cf8f07ae1e858fa3fbf06139ddea004de7b04251",
       "secret": "b9a4da66bb55d86299dc912ab16e4d44"
     },
-    "lastSeen": "2025-10-18T21:16:33.196Z",
+    "lastSeen": "2025-10-18T21:26:33.165Z",
     "telemetry": {
       "device_id": "CE2A82461382",
       "name": "Grow Room 2, North Wall",
@@ -941,13 +941,13 @@
       "online": true,
       "trust": "trusted",
       "version": "V0.9",
-      "temperature": 19.8,
+      "temperature": 19.6,
       "battery": 60,
-      "humidity": 62,
+      "humidity": 63,
       "deviceId": "CE2A82461382",
       "deviceType": "WoIOSensor",
       "hubDeviceId": "D3F85167A57E",
-      "lastUpdate": "2025-10-18T21:16:33.196Z"
+      "lastUpdate": "2025-10-18T21:26:33.165Z"
     },
     "deviceData": {
       "device_id": "CE2A82461382",
@@ -964,13 +964,13 @@
       "trust": "trusted",
       "status": {
         "version": "V0.9",
-        "temperature": 19.8,
+        "temperature": 19.6,
         "battery": 60,
-        "humidity": 62,
+        "humidity": 63,
         "deviceId": "CE2A82461382",
         "deviceType": "WoIOSensor",
         "hubDeviceId": "D3F85167A57E",
-        "lastUpdate": "2025-10-18T21:16:33.196Z"
+        "lastUpdate": "2025-10-18T21:26:33.165Z"
       }
     }
   },
@@ -995,7 +995,7 @@
       "token": "4e6fc805b4a0dd7ed693af1dcf89d9731113d4706b2d796759aafe09cf8f07ae1e858fa3fbf06139ddea004de7b04251",
       "secret": "b9a4da66bb55d86299dc912ab16e4d44"
     },
-    "lastSeen": "2025-10-18T21:16:39.164Z",
+    "lastSeen": "2025-10-18T21:26:39.158Z",
     "telemetry": {
       "device_id": "CE2A83060A2C",
       "name": "Outside. East facing",
@@ -1010,7 +1010,7 @@
       "deviceId": "CE2A83060A2C",
       "deviceType": "WoIOSensor",
       "hubDeviceId": "D3F85167A57E",
-      "lastUpdate": "2025-10-18T21:16:39.164Z"
+      "lastUpdate": "2025-10-18T21:26:39.158Z"
     },
     "deviceData": {
       "device_id": "CE2A83060A2C",
@@ -1033,7 +1033,7 @@
         "deviceId": "CE2A83060A2C",
         "deviceType": "WoIOSensor",
         "hubDeviceId": "D3F85167A57E",
-        "lastUpdate": "2025-10-18T21:16:39.164Z"
+        "lastUpdate": "2025-10-18T21:26:39.158Z"
       }
     }
   },
@@ -1058,7 +1058,7 @@
       "token": "4e6fc805b4a0dd7ed693af1dcf89d9731113d4706b2d796759aafe09cf8f07ae1e858fa3fbf06139ddea004de7b04251",
       "secret": "b9a4da66bb55d86299dc912ab16e4d44"
     },
-    "lastSeen": "2025-10-18T21:16:45.163Z",
+    "lastSeen": "2025-10-18T21:26:45.184Z",
     "telemetry": {
       "device_id": "CE2A84062758",
       "name": "Non-Growing, Mech Room",
@@ -1073,7 +1073,7 @@
       "deviceId": "CE2A84062758",
       "deviceType": "WoIOSensor",
       "hubDeviceId": "D3F85167A57E",
-      "lastUpdate": "2025-10-18T21:16:45.163Z"
+      "lastUpdate": "2025-10-18T21:26:45.184Z"
     },
     "deviceData": {
       "device_id": "CE2A84062758",
@@ -1096,7 +1096,7 @@
         "deviceId": "CE2A84062758",
         "deviceType": "WoIOSensor",
         "hubDeviceId": "D3F85167A57E",
-        "lastUpdate": "2025-10-18T21:16:45.163Z"
+        "lastUpdate": "2025-10-18T21:26:45.184Z"
       }
     }
   },

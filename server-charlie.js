@@ -7850,43 +7850,85 @@ app.get('/plans', (req, res) => {
     // Recipes contain spectral targets (blue, red, green, far_red)
     // But hardware only has 4 drivers (CW, WW, BL, RD)
     // Green is computed from CW/WW mixing, so we distribute it into white channels
-    function extractRecipeChannelMix(row) {
+    function convertRecipeToChannelMix(row, opts = {}) {
+      // Proper algorithm for converting R/B/G recipe to 4-channel (CW/WW/BL/RD) mix
+      // See: CHANNEL_MIX_ARCHITECTURE_FIXED.md for detailed explanation
+      
       const toNumber = (v) => {
         const n = Number(v);
         return Number.isFinite(n) ? n : null;
       };
       const clamp = (v, min = 0, max = 100) => Math.max(min, Math.min(max, Number(v) || 0));
       
-      // Recipes contain channel mix control values (not spectral targets):
-      // - blue: BL channel power %
-      // - red: RD channel power %
-      // - green: Mid-band enhancement control % (applied to CW/WW)
-      // - far_red: FR channel power %
-      // - cw/ww: Optional explicit white channel values
+      // Step 1: Normalize recipe inputs (R, B, G don't need to sum to 100)
+      const r_in = toNumber(row.red) ?? toNumber(row.rd) ?? 0;
+      const b_in = toNumber(row.blue) ?? toNumber(row.bl) ?? 0;
+      const g_in = toNumber(row.green) ?? toNumber(row.gn) ?? 0;
       
-      const bl = clamp(toNumber(row.blue) ?? toNumber(row.bl) ?? 0);
-      const rd = clamp(toNumber(row.red) ?? toNumber(row.rd) ?? 0);
-      const gn = clamp(toNumber(row.green) ?? toNumber(row.gn) ?? 0);
-      const fr = clamp(toNumber(row.far_red) ?? toNumber(row.fr) ?? 0);
-      
-      // White channels: use explicit values or derive from remaining spectrum
-      let cw = clamp(toNumber(row.cool_white) ?? toNumber(row.cw) ?? 0);
-      let ww = clamp(toNumber(row.warm_white) ?? toNumber(row.ww) ?? 0);
-      
-      // If white channels not specified, allocate remaining spectrum
-      // Total: CW + WW + BL + RD + GN + FR = ~100%
-      // But GN is typically applied by redistributing CW/WW, not as separate allocation
-      if (cw === 0 && ww === 0) {
-        // Allocate remaining spectrum to whites after BL, RD, FR
-        const remaining = Math.max(0, 100 - bl - rd - fr - gn);
-        if (remaining > 0) {
-          // Split remaining between CW/WW (typically 50/50, but could be adjusted)
-          cw = remaining / 2;
-          ww = remaining / 2;
-        }
+      const total = r_in + b_in + g_in;
+      if (total === 0) {
+        // No R/B/G specified; return zeros (or fall back to explicit CW/WW if present)
+        return {
+          cw: clamp(toNumber(row.cool_white) ?? toNumber(row.cw) ?? 0),
+          ww: clamp(toNumber(row.warm_white) ?? toNumber(row.ww) ?? 0),
+          bl: 0,
+          gn: 0,
+          rd: 0,
+          fr: 0,
+        };
       }
       
-      return { cw, ww, bl, gn, rd, fr };
+      // Normalize to 0..1 range
+      const r = r_in / total;
+      const b = b_in / total;
+      const g = g_in / total;
+      
+      // Step 2: Split "Green" into WW and CW using warm_bias
+      // warm_bias default: 0.50 (even split)
+      // > 0.50 = warmer (more WW)
+      // < 0.50 = cooler (more CW)
+      const warmBias = opts.warmBias ?? 0.50;
+      const ww_norm = g * warmBias;
+      const cw_norm = g * (1 - warmBias);
+      
+      // Step 3: Preserve Red and Blue directly
+      const red_norm = r;
+      const blue_norm = b;
+      
+      // Step 4: Apply intensity scaling
+      // If PPFD target given, calculate scale factor; otherwise use brightness
+      let scale = 1.0;
+      if (opts.ppfd != null && opts.ppfdEfficiency != null) {
+        // ppfdEfficiency = { cw: η_cw, ww: η_ww, bl: η_bl, rd: η_rd }
+        // Example: { cw: 1.2, ww: 1.1, bl: 1.8, rd: 1.6 } µmol/s per % power
+        const eff = opts.ppfdEfficiency;
+        const totalEfficiency = (cw_norm * (eff.cw ?? 1)) + 
+                                (ww_norm * (eff.ww ?? 1)) + 
+                                (blue_norm * (eff.bl ?? 1)) + 
+                                (red_norm * (eff.rd ?? 1));
+        if (totalEfficiency > 0) {
+          scale = opts.ppfd / (totalEfficiency * 100); // Normalize to 0..1
+          scale = Math.min(1.0, scale); // Can't exceed 100%
+        }
+      } else if (opts.brightness != null) {
+        scale = opts.brightness;
+      }
+      
+      // Step 5: Compute final output values (as percentages)
+      const cw_out = clamp(cw_norm * scale * 100);
+      const ww_out = clamp(ww_norm * scale * 100);
+      const bl_out = clamp(blue_norm * scale * 100);
+      const rd_out = clamp(red_norm * scale * 100);
+      
+      // Step 6: Return all 6 values (gn and fr preserved from recipe for reference)
+      return {
+        cw: cw_out,
+        ww: ww_out,
+        bl: bl_out,
+        gn: clamp(toNumber(row.green) ?? 0),  // Original green control (for reference)
+        rd: rd_out,
+        fr: clamp(toNumber(row.far_red) ?? toNumber(row.fr) ?? 0),  // Original far_red (for reference)
+      };
     }
 
     // Helper to synthesize plan objects from lighting-recipes.json
@@ -7906,12 +7948,31 @@ app.get('/plans', (req, res) => {
         if (!Array.isArray(days) || !days.length) continue;
         const id = `crop-${slugify(cropName)}`;
         const lightDays = days.map((row) => {
-          // Extract channel mix from recipe (blue, red, green, far_red are control knobs)
-          const mix = extractRecipeChannelMix(row);
+          // Convert recipe (R/B/G format) to driver mix (CW/WW/BL/RD format)
+          // Using proper normalization + scaling algorithm
+          const ppfdTarget = toNumber(row.ppfd);
+          const mix = convertRecipeToChannelMix(row, {
+            // If PPFD target is specified, use PPFD-based scaling
+            ...(ppfdTarget != null ? {
+              ppfd: ppfdTarget,
+              // Default PPFD efficiencies (µmol/s per 1% power) - adjust based on light spec
+              ppfdEfficiency: {
+                cw: 1.2,   // Cool white efficiency
+                ww: 1.1,   // Warm white efficiency
+                bl: 1.8,   // Blue efficiency (narrow-band, more photons)
+                rd: 1.6,   // Red efficiency (narrow-band, more photons)
+              },
+            } : {
+              // Otherwise scale to 100% (full brightness)
+              brightness: 1.0,
+            }),
+            // Warm bias: 0.50 = even split between WW/CW
+            warmBias: 0.50,
+          });
           return {
             day: toNumber(row.day),
             stage: typeof row.stage === 'string' ? row.stage : '',
-            ppfd: toNumber(row.ppfd),
+            ppfd: ppfdTarget,
             // No explicit photoperiod provided in recipes DB; leave undefined
             mix: {
               cw: mix.cw,
