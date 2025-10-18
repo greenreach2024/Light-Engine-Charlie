@@ -2005,7 +2005,7 @@ function getPlanDayData(plan, dayNumber) {
   if (!dayData) {
     // Fallback to plan defaults
     return {
-      spectrum: plan.spectrum || derived?.spectrum || { cw: 45, ww: 45, bl: 0, rd: 0 },
+      spectrum: plan.spectrum || derived?.spectrum || { cw: 45, ww: 45, bl: 0, gn: 0, rd: 0, fr: 0 },
       ppfd: plan.ppfd || derived?.ppfd || 0,
       dli: plan.dli || derived?.dli || 0,
       photoperiod: plan.photoperiod || derived?.photoperiod || 0,
@@ -2014,7 +2014,7 @@ function getPlanDayData(plan, dayNumber) {
   }
   
   // Extract day-specific data
-  // Check for spectrum in multiple formats: mix, spectrum, or flat keys (cw/ww/bl/rd)
+  // Check for spectrum in multiple formats: mix, spectrum, or flat keys (cw/ww/bl/gn/rd/fr)
   let spectrum;
   if (dayData.mix && typeof dayData.mix === 'object') {
     console.log('[getPlanDayData] Using dayData.mix:', dayData.mix);
@@ -2022,19 +2022,21 @@ function getPlanDayData(plan, dayNumber) {
   } else if (dayData.spectrum && typeof dayData.spectrum === 'object') {
     console.log('[getPlanDayData] Using dayData.spectrum:', dayData.spectrum);
     spectrum = dayData.spectrum;
-  } else if (typeof dayData.cw !== 'undefined' || typeof dayData.ww !== 'undefined') {
-    // Flat format: cw, ww, bl, rd at top level of dayData
-    console.log('[getPlanDayData] Using flat format. dayData:', { cw: dayData.cw, ww: dayData.ww, bl: dayData.bl, rd: dayData.rd, blue: dayData.blue, red: dayData.red });
+  } else if (typeof dayData.cw !== 'undefined' || typeof dayData.ww !== 'undefined' || typeof dayData.bl !== 'undefined' || typeof dayData.gn !== 'undefined' || typeof dayData.rd !== 'undefined' || typeof dayData.fr !== 'undefined') {
+    // Flat format: cw, ww, bl, gn, rd, fr at top level of dayData (or blue, green, red, far_red aliases)
+    console.log('[getPlanDayData] Using flat format. dayData:', { cw: dayData.cw, ww: dayData.ww, bl: dayData.bl, gn: dayData.gn, rd: dayData.rd, fr: dayData.fr, blue: dayData.blue, green: dayData.green, red: dayData.red, far_red: dayData.far_red });
     spectrum = {
       cw: dayData.cw || 0,
       ww: dayData.ww || 0,
       bl: dayData.bl || dayData.blue || 0,
-      rd: dayData.rd || dayData.red || 0
+      gn: dayData.gn || dayData.green || 0,
+      rd: dayData.rd || dayData.red || 0,
+      fr: dayData.fr || dayData.far_red || 0
     };
     console.log('[getPlanDayData] Created spectrum:', spectrum);
   } else {
     console.log('[getPlanDayData] Using fallback spectrum');
-    spectrum = plan.spectrum || derived?.spectrum || { cw: 45, ww: 45, bl: 0, rd: 0 };
+    spectrum = plan.spectrum || derived?.spectrum || { cw: 45, ww: 45, bl: 0, gn: 0, rd: 0, fr: 0 };
   }
   
   const ppfd = dayData.ppfd || dayData.intensity || 0;
@@ -2126,11 +2128,13 @@ function renderGroupsV2PlanCard(plan, dayNumber) {
   
   const description = plan.description || 'Spectrum and targets for this plan.';
   
-  // Get spectrum weighting percentages
+  // Get spectrum weighting percentages (all 6 channels)
   const cwPct = Number(spectrum.cw || 0);
   const wwPct = Number(spectrum.ww || 0);
   const blPct = Number(spectrum.bl || 0);
+  const gnPct = Number(spectrum.gn || 0);
   const rdPct = Number(spectrum.rd || 0);
+  const frPct = Number(spectrum.fr || 0);
   
   // Card HTML
   card.innerHTML = `
@@ -2145,11 +2149,13 @@ function renderGroupsV2PlanCard(plan, dayNumber) {
         <canvas id="groupsV2PlanSpectrumCanvas" class="group-info-card__canvas" width="280" height="100" role="img" aria-label="Plan spectrum preview" style="width: 100%;"></canvas>
         <div style="background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 6px; padding: 8px;">
           <div class="tiny" style="font-weight: 600; margin-bottom: 6px; color: #475569;">Channel Mix</div>
-          <dl class="group-info-card__metrics" style="width: 100%; grid-template-columns: repeat(2, 1fr); gap: 4px 8px; font-size: 0.75rem;">
+          <dl class="group-info-card__metrics" style="width: 100%; grid-template-columns: repeat(3, 1fr); gap: 4px 8px; font-size: 0.75rem;">
             <dt style="font-size: 0.65rem;">Cool White</dt><dd id="groupsV2PlanCw">${cwPct.toFixed(1)}%</dd>
             <dt style="font-size: 0.65rem;">Warm White</dt><dd id="groupsV2PlanWw">${wwPct.toFixed(1)}%</dd>
             <dt style="font-size: 0.65rem;">Blue</dt><dd id="groupsV2PlanBl">${blPct.toFixed(1)}%</dd>
+            <dt style="font-size: 0.65rem;">Green</dt><dd id="groupsV2PlanGn">${gnPct.toFixed(1)}%</dd>
             <dt style="font-size: 0.65rem;">Red</dt><dd id="groupsV2PlanRd">${rdPct.toFixed(1)}%</dd>
+            <dt style="font-size: 0.65rem;">Far Red</dt><dd id="groupsV2PlanFr">${frPct.toFixed(1)}%</dd>
           </dl>
         </div>
         <div id="groupsV2PlanColorBreakdown" style="background: #f0f9ff; border: 1px solid #bae6fd; border-radius: 6px; padding: 8px; display: none;">
